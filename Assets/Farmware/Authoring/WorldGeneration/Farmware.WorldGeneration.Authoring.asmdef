@@ -1,0 +1,11 @@
+{
+  "name": "Farmware.WorldGeneration.Authoring",
+  "rootNamespace": "Farmware.WorldGeneration.Authoring",
+  "references": [
+    "Farmware.WorldGeneration.Runtime",
+    "Unity.Collections",
+    "Unity.Entities",
+    "Unity.Entities.Hybrid"
+  ],
+  "autoReferenced": true
+}

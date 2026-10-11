@@ -1,0 +1,19 @@
+{
+  "name": "Farmware.WorldGeneration.Editor",
+  "rootNamespace": "Farmware.WorldGeneration.Editor",
+  "references": [
+    "Farmware.WorldGeneration.Runtime",
+    "Farmware.WorldGeneration.Authoring",
+    "Farmware.WorldGeneration.Presentation",
+    "Unity.Collections",
+    "Unity.Entities",
+    "Unity.Entities.Hybrid",
+    "Unity.Scenes",
+    "Unity.RenderPipelines.Universal.Runtime",
+    "Unity.RenderPipelines.Universal.2D.Runtime"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "autoReferenced": false
+}

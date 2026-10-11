@@ -1,0 +1,17 @@
+{
+  "name": "Farmware.WorldGeneration.Tests",
+  "rootNamespace": "Farmware.WorldGeneration.Tests",
+  "references": [
+    "Farmware.WorldGeneration.Runtime",
+    "Unity.Collections",
+    "Unity.Entities",
+    "Unity.Mathematics"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ],
+  "autoReferenced": false
+}

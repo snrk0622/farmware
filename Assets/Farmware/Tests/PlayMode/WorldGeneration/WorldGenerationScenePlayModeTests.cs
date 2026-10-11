@@ -1,0 +1,458 @@
+// このファイルは、SampleSceneを実際に再生し、SubSceneのBakeからECS生成、Tilemap表示までの縦切りを検証します。
+// F3/F4デバッグ表示を含め、純粋計算では確認できないGameObject・SubScene・Presentation間の参照切れを検出します。
+
+using System.Collections;
+using Farmware.WorldGeneration.Presentation;
+using NUnit.Framework;
+using Unity.Collections;
+using Unity.Entities;
+using UnityEngine;
+using UnityEngine.SceneManagement;
+using UnityEngine.Rendering.Universal;
+using UnityEngine.TestTools;
+using UnityEngine.Tilemaps;
+
+namespace Farmware.WorldGeneration.PlayModeTests
+{
+    /// <summary>
+    /// SampleSceneの起動後にデバッグ表示、生成設定Singleton、チャンクEntity、表示Tileが正しく連携することを保証します。
+    /// Unity Test RunnerのPlayModeテストから実行されます。
+    /// </summary>
+    public sealed class WorldGenerationScenePlayModeTests
+    {
+        /// <summary>SubSceneの非同期Bake・ロードと初回チャンク生成を待つ最大描画フレーム数です。</summary>
+        private const int MaximumWaitFrames = 300;
+
+        /// <summary>原点が保持範囲外へ確実に出る、テスト用カメラ移動先の水平タイル座標です。</summary>
+        private const int FarCameraXInTiles = WorldGridConstants.LogicalChunkSize * 8;
+
+        /// <summary>遠方移動時にカメラ左側へ見えるため、生成完了を待つ代表チャンクの水平座標です。</summary>
+        private const int ExpectedFarChunkX = 7;
+
+        /// <summary>
+        /// Windowboxの基準解像度を整数倍して中央配置し、余ったGameビュー領域が黒帯として除外されることを検証します。
+        /// F4グリッドとHUDが参照する純粋な矩形計算なので、Sceneロード前に複数アスペクト比をまとめて確認します。
+        /// </summary>
+        /// <param name="screenWidth">テストするGameビュー全体の幅です。単位は画面ピクセルです。</param>
+        /// <param name="screenHeight">テストするGameビュー全体の高さです。単位は画面ピクセルです。</param>
+        /// <param name="expectedX">期待する地形描画矩形の左端です。単位は画面ピクセルです。</param>
+        /// <param name="expectedY">期待する地形描画矩形の上端です。単位は画面ピクセルです。</param>
+        /// <param name="expectedWidth">期待する地形描画矩形の幅です。単位は画面ピクセルです。</param>
+        /// <param name="expectedHeight">期待する地形描画矩形の高さです。単位は画面ピクセルです。</param>
+        [TestCase(1920, 1080, 0, 0, 1920, 1080)]
+        [TestCase(1760, 916, 160, 53, 1440, 810)]
+        [TestCase(1761, 917, 160, 54, 1440, 810)]
+        [TestCase(1200, 900, 120, 180, 960, 540)]
+        public void CalculateWindowboxGuiRect_CentersIntegerScaledViewport(
+            int screenWidth,
+            int screenHeight,
+            int expectedX,
+            int expectedY,
+            int expectedWidth,
+            int expectedHeight)
+        {
+            Rect actual = WorldGridDebugOverlay.CalculateWindowboxGuiRect(
+                screenWidth,
+                screenHeight,
+                480,
+                270);
+
+            Assert.That(actual.x, Is.EqualTo(expectedX));
+            Assert.That(actual.y, Is.EqualTo(expectedY));
+            Assert.That(actual.width, Is.EqualTo(expectedWidth));
+            Assert.That(actual.height, Is.EqualTo(expectedHeight));
+        }
+
+        /// <summary>
+        /// F4グリッドの縦線と横線が、Windowbox内でGUI.matrixを回転せず描画できる正の矩形へ変換されることを検証します。
+        /// 開始・終了の向きを逆にしたケースも含め、縦線だけ消える不具合の再発を防ぎます。
+        /// </summary>
+        /// <param name="startX">線の開始X座標です。単位は画面ピクセルです。</param>
+        /// <param name="startY">線の開始Y座標です。単位は画面ピクセルです。</param>
+        /// <param name="endX">線の終了X座標です。単位は画面ピクセルです。</param>
+        /// <param name="endY">線の終了Y座標です。単位は画面ピクセルです。</param>
+        /// <param name="expectedX">期待する描画矩形の左端です。単位は画面ピクセルです。</param>
+        /// <param name="expectedY">期待する描画矩形の上端です。単位は画面ピクセルです。</param>
+        /// <param name="expectedWidth">期待する描画矩形の幅です。単位は画面ピクセルです。</param>
+        /// <param name="expectedHeight">期待する描画矩形の高さです。単位は画面ピクセルです。</param>
+        [TestCase(25f, 10f, 25f, 90f, 24f, 10f, 2f, 80f)]
+        [TestCase(25f, 90f, 25f, 10f, 24f, 10f, 2f, 80f)]
+        [TestCase(10f, 25f, 90f, 25f, 10f, 24f, 80f, 2f)]
+        [TestCase(90f, 25f, 10f, 25f, 10f, 24f, 80f, 2f)]
+        public void TryCalculateAxisAlignedLineRect_ReturnsVisibleRectangle(
+            float startX,
+            float startY,
+            float endX,
+            float endY,
+            float expectedX,
+            float expectedY,
+            float expectedWidth,
+            float expectedHeight)
+        {
+            bool succeeded = WorldGridDebugOverlay.TryCalculateAxisAlignedLineRect(
+                new Vector2(startX, startY),
+                new Vector2(endX, endY),
+                2f,
+                out Rect actual);
+
+            Assert.That(succeeded, Is.True);
+            Assert.That(actual.x, Is.EqualTo(expectedX));
+            Assert.That(actual.y, Is.EqualTo(expectedY));
+            Assert.That(actual.width, Is.EqualTo(expectedWidth));
+            Assert.That(actual.height, Is.EqualTo(expectedHeight));
+        }
+
+        /// <summary>
+        /// 開発者用可視化がBiome、連続ノイズ、移行帯を異なる色へ写像し、論理BiomeとGroundの差を正しく判定することを検証します。
+        /// SceneやECS Worldを作らない純粋計算として、表示色の両端と水域除外をまとめて保証します。
+        /// </summary>
+        [Test]
+        public void DebugVisualization_MapsGeneratedTileValuesWithoutChangingSimulationData()
+        {
+            GeneratedTile forestTransitionTile = new GeneratedTile
+            {
+                Biome = BiomeId.Forest,
+                Ground = GroundType.Normal,
+                Elevation = ushort.MaxValue,
+                Temperature = 0,
+                Moisture = ushort.MaxValue
+            };
+
+            Assert.That(
+                WorldGenerationDebugVisualizationOverlay.IsBiomeTransitionTile(forestTransitionTile),
+                Is.True,
+                "森林Biomeで通常地面が選ばれた陸上タイルは移行帯として強調される必要があります。");
+
+            Color coldColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.Temperature,
+                forestTransitionTile);
+            Assert.That(coldColor.b, Is.GreaterThan(coldColor.r), "最低気温は赤より青が強い必要があります。");
+
+            Color highElevationColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.Elevation,
+                forestTransitionTile);
+            Assert.That(
+                highElevationColor.r,
+                Is.GreaterThan(0.9f),
+                "最高標高は凡例どおり白に近い必要があります。");
+
+            Color transitionColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.BiomeTransition,
+                forestTransitionTile);
+            Assert.That(
+                transitionColor.r,
+                Is.GreaterThan(transitionColor.g),
+                "移行タイルは暗色ではなくマゼンタ系で強調される必要があります。");
+
+            GeneratedTile waterTile = forestTransitionTile;
+            waterTile.Ground = GroundType.Water;
+            Assert.That(
+                WorldGenerationDebugVisualizationOverlay.IsBiomeTransitionTile(waterTile),
+                Is.False,
+                "標高分類で生じる水域はバイオーム移行帯へ数えません。");
+
+            Color hiddenColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.None,
+                forestTransitionTile);
+            Assert.That(hiddenColor.a, Is.EqualTo(0f), "Offモードは地形を一切着色してはいけません。");
+        }
+
+        /// <summary>
+        /// SampleSceneを読み込み、初回表示、遠方移動時のアンロード、原点へ戻った再生成の決定論を検証します。
+        /// </summary>
+        /// <returns>非同期Sceneロードと複数フレームの生成・表示完了を待つIEnumeratorです。</returns>
+        [UnityTest]
+        public IEnumerator SampleScene_StreamsAndDeterministicallyRegeneratesFallbackTiles()
+        {
+            AsyncOperation loadOperation = SceneManager.LoadSceneAsync("SampleScene", LoadSceneMode.Single);
+            Assert.That(loadOperation, Is.Not.Null, "Build SettingsからSampleSceneを読み込めませんでした。");
+
+            while (!loadOperation.isDone)
+            {
+                yield return null;
+            }
+
+            Tilemap tilemap = Object.FindFirstObjectByType<Tilemap>();
+            Assert.That(tilemap, Is.Not.Null, "SampleSceneに地形表示用Tilemapがありません。");
+            CameraPanController cameraPanController = Object.FindFirstObjectByType<CameraPanController>();
+            Assert.That(cameraPanController, Is.Not.Null, "Main CameraにCameraPanControllerがありません。");
+            WorldGridDebugOverlay debugOverlay = Object.FindFirstObjectByType<WorldGridDebugOverlay>();
+            Assert.That(debugOverlay, Is.Not.Null, "Main CameraにWorldGridDebugOverlayがありません。");
+            WorldGenerationDebugVisualizationOverlay developerVisualization =
+                Object.FindFirstObjectByType<WorldGenerationDebugVisualizationOverlay>();
+            Assert.That(
+                developerVisualization,
+                Is.Not.Null,
+                "Main CameraにWorldGenerationDebugVisualizationOverlayがありません。");
+            PixelPerfectCamera pixelPerfectCamera = Object.FindFirstObjectByType<PixelPerfectCamera>();
+            Assert.That(pixelPerfectCamera, Is.Not.Null, "Main CameraにURP PixelPerfectCameraがありません。");
+
+            // 制作開始前に決めた16 PPU・480×270・WindowboxがSceneへ保存され、表示範囲が意図せず戻らないことを保証します。
+            Assert.That(pixelPerfectCamera.assetsPPU, Is.EqualTo(16));
+            Assert.That(pixelPerfectCamera.refResolutionX, Is.EqualTo(480));
+            Assert.That(pixelPerfectCamera.refResolutionY, Is.EqualTo(270));
+            Assert.That(
+                pixelPerfectCamera.gridSnapping,
+                Is.EqualTo(PixelPerfectCamera.GridSnapping.PixelSnapping));
+            Assert.That(
+                pixelPerfectCamera.cropFrame,
+                Is.EqualTo(PixelPerfectCamera.CropFrame.Windowbox));
+
+            // F3・F4と同じ公開入口で表示状態を切り替え、両オーバーレイを独立して操作できることを確認します。
+            debugOverlay.SetCoordinateHudVisible(true);
+            Assert.That(debugOverlay.IsCoordinateHudVisible, Is.True);
+            Assert.That(debugOverlay.IsChunkGridVisible, Is.False);
+            debugOverlay.SetChunkGridVisible(true);
+            Assert.That(debugOverlay.IsChunkGridVisible, Is.True);
+
+            // 開発者用表示はキーではなくEditorメニューと同じ公開入口から切り替え、F3/F4の状態へ影響しないことを確認します。
+            Assert.That(
+                developerVisualization.CurrentMode,
+                Is.EqualTo(WorldGenerationDebugVisualizationMode.None));
+            developerVisualization.SetMode(WorldGenerationDebugVisualizationMode.Biome);
+            Assert.That(
+                developerVisualization.CurrentMode,
+                Is.EqualTo(WorldGenerationDebugVisualizationMode.Biome));
+            Assert.That(debugOverlay.IsCoordinateHudVisible, Is.True);
+            Assert.That(debugOverlay.IsChunkGridVisible, Is.True);
+
+            // 1描画フレームだけ両方を有効にし、GUI Style作成、座標変換、タイル・サブチャンク・チャンク線とラベル描画まで例外なく通します。
+            yield return null;
+            developerVisualization.SetMode(WorldGenerationDebugVisualizationMode.None);
+            debugOverlay.SetCoordinateHudVisible(false);
+            debugOverlay.SetChunkGridVisible(false);
+
+            // 0.1ワールド単位は16 PPUでは2ピクセル相当の0.125へ丸まり、移動中のサブピクセル揺れを防ぎます。
+            cameraPanController.SetWorldPosition(new Vector2(0.1f, -0.1f));
+            Assert.That(cameraPanController.transform.position.x, Is.EqualTo(0.125f).Within(0.00001f));
+            Assert.That(cameraPanController.transform.position.y, Is.EqualTo(-0.125f).Within(0.00001f));
+            cameraPanController.SetWorldPosition(Vector2.zero);
+
+            World world = null;
+            EntityQuery settingsQuery = default;
+            EntityQuery chunkQuery = default;
+            bool queriesCreated = false;
+            bool initialLoadCompleted = false;
+            Entity originalChunkEntity = Entity.Null;
+
+            for (int frame = 0; frame < MaximumWaitFrames; frame++)
+            {
+                world = World.DefaultGameObjectInjectionWorld;
+                if (world != null && world.IsCreated && !queriesCreated)
+                {
+                    settingsQuery = world.EntityManager.CreateEntityQuery(
+                        ComponentType.ReadOnly<WorldGenerationSettings>(),
+                        ComponentType.ReadOnly<ChunkStreamingSettings>());
+                    chunkQuery = world.EntityManager.CreateEntityQuery(
+                        ComponentType.ReadOnly<ChunkCoordinateComponent>(),
+                        ComponentType.ReadOnly<ChunkGenerationStatus>(),
+                        ComponentType.ReadOnly<GeneratedTile>());
+                    queriesCreated = true;
+                }
+
+                // SubScene設定、原点チャンク、原点Tile表示の3条件がそろうまで待ち、固定秒数には依存しません。
+                if (queriesCreated
+                    && settingsQuery.CalculateEntityCount() == 1
+                    && TryGetActiveCompleteChunk(
+                        world.EntityManager,
+                        chunkQuery,
+                        0,
+                        0,
+                        out originalChunkEntity)
+                    && tilemap.GetTile(Vector3Int.zero) != null)
+                {
+                    initialLoadCompleted = true;
+                    break;
+                }
+
+                yield return null;
+            }
+
+            Assert.That(
+                initialLoadCompleted,
+                Is.True,
+                $"{MaximumWaitFrames}フレーム以内に初回生成と表示が完了しませんでした。");
+
+            // 生成済みタイルを使う移行帯表示を1フレーム描画し、ECS Buffer読取、Windowboxクリップ、情報HUDまで例外なく通します。
+            developerVisualization.SetMode(WorldGenerationDebugVisualizationMode.BiomeTransition);
+            yield return null;
+            developerVisualization.SetMode(WorldGenerationDebugVisualizationMode.None);
+
+            DynamicBuffer<GeneratedTile> originalTiles =
+                world.EntityManager.GetBuffer<GeneratedTile>(originalChunkEntity, true);
+            GeneratedTile originalFirstTile = originalTiles[0];
+            GeneratedTile originalCenterTile = originalTiles[WorldGridConstants.TilesPerChunk / 2];
+            GeneratedTile originalLastTile = originalTiles[WorldGridConstants.TilesPerChunk - 1];
+
+            // 8チャンク先へ即時移動し、原点がRetention範囲外になってEntityとTilemap表示の両方から消えるのを待ちます。
+            cameraPanController.SetWorldPosition(new Vector2(FarCameraXInTiles, 0f));
+            bool farLoadCompleted = false;
+            for (int frame = 0; frame < MaximumWaitFrames; frame++)
+            {
+                bool originalChunkWasUnloaded = !HasChunkAt(chunkQuery, 0, 0);
+                bool originalTileWasCleared = tilemap.GetTile(Vector3Int.zero) == null;
+                bool farChunkIsActive = TryGetActiveCompleteChunk(
+                    world.EntityManager,
+                    chunkQuery,
+                    ExpectedFarChunkX,
+                    0,
+                    out _);
+
+                if (originalChunkWasUnloaded && originalTileWasCleared && farChunkIsActive)
+                {
+                    farLoadCompleted = true;
+                    break;
+                }
+
+                yield return null;
+            }
+
+            Assert.That(
+                farLoadCompleted,
+                Is.True,
+                $"{MaximumWaitFrames}フレーム以内に遠方チャンクへの切替と原点のアンロードが完了しませんでした。");
+
+            // 原点へ戻り、破棄済みEntityに依存せず同じシードから同一タイルデータを再生成できることを確認します。
+            cameraPanController.SetWorldPosition(Vector2.zero);
+            bool returnLoadCompleted = false;
+            Entity regeneratedChunkEntity = Entity.Null;
+            for (int frame = 0; frame < MaximumWaitFrames; frame++)
+            {
+                if (TryGetActiveCompleteChunk(
+                        world.EntityManager,
+                        chunkQuery,
+                        0,
+                        0,
+                        out regeneratedChunkEntity)
+                    && tilemap.GetTile(Vector3Int.zero) != null)
+                {
+                    returnLoadCompleted = true;
+                    break;
+                }
+
+                yield return null;
+            }
+
+            Assert.That(
+                returnLoadCompleted,
+                Is.True,
+                $"{MaximumWaitFrames}フレーム以内に原点チャンクの再生成と再表示が完了しませんでした。");
+            Assert.That(
+                regeneratedChunkEntity,
+                Is.Not.EqualTo(originalChunkEntity),
+                "原点チャンクは遠方移動時に破棄され、別Entityとして再生成される必要があります。");
+
+            DynamicBuffer<GeneratedTile> regeneratedTiles =
+                world.EntityManager.GetBuffer<GeneratedTile>(regeneratedChunkEntity, true);
+            AssertTileEquals(originalFirstTile, regeneratedTiles[0], 0);
+            AssertTileEquals(
+                originalCenterTile,
+                regeneratedTiles[WorldGridConstants.TilesPerChunk / 2],
+                WorldGridConstants.TilesPerChunk / 2);
+            AssertTileEquals(
+                originalLastTile,
+                regeneratedTiles[WorldGridConstants.TilesPerChunk - 1],
+                WorldGridConstants.TilesPerChunk - 1);
+
+            if (queriesCreated && world != null && world.IsCreated)
+            {
+                settingsQuery.Dispose();
+                chunkQuery.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// 指定座標のチャンクがQuery内に存在するかを、生成段階に関係なく確認します。
+        /// </summary>
+        /// <param name="chunkQuery">座標、状態、GeneratedTile Bufferを持つチャンクQueryです。</param>
+        /// <param name="chunkX">検索する水平論理チャンク座標です。</param>
+        /// <param name="chunkY">検索する垂直論理チャンク座標です。</param>
+        /// <returns>指定座標を持つEntityが1つ以上あればtrueです。</returns>
+        private static bool HasChunkAt(EntityQuery chunkQuery, int chunkX, int chunkY)
+        {
+            using NativeArray<ChunkCoordinateComponent> coordinates =
+                chunkQuery.ToComponentDataArray<ChunkCoordinateComponent>(Allocator.Temp);
+
+            for (int index = 0; index < coordinates.Length; index++)
+            {
+                if (coordinates[index].X == chunkX && coordinates[index].Y == chunkY)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// 指定座標のチャンクを調べ、Active状態かつ4096タイルを保持するEntityを取得します。
+        /// </summary>
+        /// <param name="entityManager">Default WorldのEntityManagerです。</param>
+        /// <param name="chunkQuery">座標、状態、GeneratedTile Bufferを持つチャンクQueryです。</param>
+        /// <param name="chunkX">検索する水平論理チャンク座標です。</param>
+        /// <param name="chunkY">検索する垂直論理チャンク座標です。</param>
+        /// <param name="chunkEntity">成功時に、完全生成されたチャンクEntityを返します。</param>
+        /// <returns>完全生成され表示対象になった指定座標のチャンクが見つかればtrueです。</returns>
+        private static bool TryGetActiveCompleteChunk(
+            EntityManager entityManager,
+            EntityQuery chunkQuery,
+            int chunkX,
+            int chunkY,
+            out Entity chunkEntity)
+        {
+            using NativeArray<Entity> entities = chunkQuery.ToEntityArray(Allocator.Temp);
+            using NativeArray<ChunkCoordinateComponent> coordinates =
+                chunkQuery.ToComponentDataArray<ChunkCoordinateComponent>(Allocator.Temp);
+            using NativeArray<ChunkGenerationStatus> statuses =
+                chunkQuery.ToComponentDataArray<ChunkGenerationStatus>(Allocator.Temp);
+
+            for (int index = 0; index < entities.Length; index++)
+            {
+                if (coordinates[index].X != chunkX
+                    || coordinates[index].Y != chunkY
+                    || statuses[index].Phase != ChunkGenerationPhase.Active)
+                {
+                    continue;
+                }
+
+                DynamicBuffer<GeneratedTile> tiles = entityManager.GetBuffer<GeneratedTile>(entities[index], true);
+                if (tiles.Length == WorldGridConstants.TilesPerChunk)
+                {
+                    chunkEntity = entities[index];
+                    return true;
+                }
+            }
+
+            chunkEntity = Entity.Null;
+            return false;
+        }
+
+        /// <summary>
+        /// 再生成前後の1タイルについて、表示分類だけでなくゲームルールが参照する全フィールドの一致を保証します。
+        /// </summary>
+        /// <param name="expected">遠方移動前に原点チャンクから退避したタイル値です。</param>
+        /// <param name="actual">原点へ戻った後に再生成されたタイル値です。</param>
+        /// <param name="tileIndex">失敗メッセージへ表示するチャンク内の行優先Indexです。</param>
+        private static void AssertTileEquals(GeneratedTile expected, GeneratedTile actual, int tileIndex)
+        {
+            Assert.That(actual.Biome, Is.EqualTo(expected.Biome), $"Biomeが一致しません。Index={tileIndex}");
+            Assert.That(actual.Ground, Is.EqualTo(expected.Ground), $"Groundが一致しません。Index={tileIndex}");
+            Assert.That(
+                actual.ElevationClass,
+                Is.EqualTo(expected.ElevationClass),
+                $"ElevationClassが一致しません。Index={tileIndex}");
+            Assert.That(
+                actual.GameplayFlags,
+                Is.EqualTo(expected.GameplayFlags),
+                $"GameplayFlagsが一致しません。Index={tileIndex}");
+            Assert.That(
+                actual.ResourceSuitability,
+                Is.EqualTo(expected.ResourceSuitability),
+                $"ResourceSuitabilityが一致しません。Index={tileIndex}");
+            Assert.That(
+                actual.MovementCost,
+                Is.EqualTo(expected.MovementCost),
+                $"MovementCostが一致しません。Index={tileIndex}");
+        }
+    }
+}
