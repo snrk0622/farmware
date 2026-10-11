@@ -1,6 +1,7 @@
-// このファイルは、ECSで生成済みの可視タイルをPlayMode中だけ色分けして、ノイズ・バイオーム・水域判定を確認できるようにします。
+// このファイルは、ECSで生成済みの可視タイルをPlayMode中だけ色分けして、ノイズ・バイオーム・水域・岩壁表示判定を確認できるようにします。
 // 操作入口はEditor AssemblyのWorldGenerationDebugVisualizationMenuに置き、Simulationとプレイヤー用F3/F4入力から分離します。
 
+using System.Collections.Generic;
 using Unity.Collections;
 using Unity.Entities;
 using UnityEngine;
@@ -36,7 +37,10 @@ namespace Farmware.WorldGeneration.Presentation
         WaterBody = 6,
 
         /// <summary>論理Biomeと異なる陸上Groundが選ばれた移行タイルだけを強調します。</summary>
-        BiomeTransition = 7
+        BiomeTransition = 7,
+
+        /// <summary>最終岩壁を非岩壁・露出面・連続した内部影の濃さとして表示します。</summary>
+        RockWall = 8
     }
 
     /// <summary>
@@ -81,6 +85,10 @@ namespace Farmware.WorldGeneration.Presentation
 
         // モード名、凡例、中央タイル値を描くため、初回だけ作成して再利用するGUI Styleです。
         private GUIStyle informationStyle;
+
+        // Rock Wall表示の1回のRepaint内で座標ごとの岩壁判定を共有し、同じ重いノイズ生成を近隣タイルごとに繰り返さないキャッシュです。
+        private readonly Dictionary<long, bool> rockWallProbeCache =
+            new Dictionary<long, bool>();
 
         /// <summary>Editorメニューが選択中として表示する、現在の開発者用可視化モードです。</summary>
         public WorldGenerationDebugVisualizationMode CurrentMode => currentMode;
@@ -185,15 +193,17 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// 指定モードとGeneratedTileから、Gameビューへ重ねる色を純粋計算します。
+        /// 指定モード、GeneratedTile、岩壁影不透明度から、Gameビューへ重ねる色を純粋計算します。
         /// PlayModeテストも同じ入口を使い、凡例と実描画の対応が変わっていないことを保証します。
         /// </summary>
         /// <param name="mode">色の意味を決める可視化モードです。</param>
         /// <param name="tile">ECS Dynamic Bufferから読み取った1タイルの生成結果です。</param>
+        /// <param name="rockWallShadowOpacity">RockWallモードで使う0〜1の連続影不透明度です。他モードでは参照しません。</param>
         /// <returns>IMGUIへ設定するRGBA色です。Noneの場合は完全な透明色です。</returns>
         public static Color GetVisualizationColor(
             WorldGenerationDebugVisualizationMode mode,
-            GeneratedTile tile)
+            GeneratedTile tile,
+            float rockWallShadowOpacity = 0f)
         {
             switch (mode)
             {
@@ -269,6 +279,23 @@ namespace Farmware.WorldGeneration.Presentation
                         ? new Color32(255, 28, 210, 242)
                         : new Color32(0, 0, 0, 110);
 
+                case WorldGenerationDebugVisualizationMode.RockWall:
+                    if (tile.Ground != GroundType.RockWall)
+                    {
+                        return new Color32(24, 24, 30, 150);
+                    }
+
+                    // 通常表示と同じ連続値を使い、橙から黒へ滑らかに変化させて距離場の不自然な段差を確認できるようにします。
+                    float normalizedShadow = RockWallAppearanceUtility.MaximumShadowOpacity <= 0f
+                        ? 0f
+                        : Mathf.Clamp01(
+                            rockWallShadowOpacity
+                            / RockWallAppearanceUtility.MaximumShadowOpacity);
+                    return Color.Lerp(
+                        new Color32(232, 174, 76, 242),
+                        new Color32(5, 5, 8, 248),
+                        normalizedShadow);
+
                 default:
                     return Color.clear;
             }
@@ -276,7 +303,7 @@ namespace Farmware.WorldGeneration.Presentation
 
         /// <summary>
         /// 論理Biomeの代表Groundと実際の陸上Groundを比較し、移行帯で別の地面が選ばれたかを判定します。
-        /// 水域と岩壁は標高分類による上書きなので、バイオーム移行としては数えません。
+        /// 水域と独立生成された岩壁はバイオーム地面より優先されるため、バイオーム移行としては数えません。
         /// </summary>
         /// <param name="tile">判定する1タイルの生成結果です。</param>
         /// <returns>陸上で論理Biomeと異なるGroundが選択されている場合はtrueです。</returns>
@@ -350,6 +377,13 @@ namespace Farmware.WorldGeneration.Presentation
             bool hasCenterTile = false;
             GeneratedTile centerTile = default;
             EntityManager entityManager = presentationWorld.EntityManager;
+            bool hasGenerationSettings = settingsQuery.CalculateEntityCount() == 1;
+            WorldGenerationSettings settings = hasGenerationSettings
+                ? settingsQuery.GetSingleton<WorldGenerationSettings>()
+                : default;
+
+            // 距離探索範囲は隣接タイル同士で重なるため、Rock Wallモードの1描画中だけ座標判定を共有します。
+            rockWallProbeCache.Clear();
 
             using NativeArray<Entity> entities = chunkQuery.ToEntityArray(Allocator.Temp);
             using NativeArray<ChunkCoordinateComponent> coordinates =
@@ -399,7 +433,18 @@ namespace Farmware.WorldGeneration.Presentation
                         int localX = tileX - chunkMinimumX;
                         int tileIndex = (localY * WorldGridConstants.LogicalChunkSize) + localX;
                         GeneratedTile tile = tiles[tileIndex];
-                        GUI.color = GetVisualizationColor(currentMode, tile);
+                        float rockWallShadowOpacity =
+                            currentMode == WorldGenerationDebugVisualizationMode.RockWall
+                            && hasGenerationSettings
+                                ? CalculateCachedRockWallShadowOpacity(
+                                    settings,
+                                    tileX,
+                                    tileY)
+                                : 0f;
+                        GUI.color = GetVisualizationColor(
+                            currentMode,
+                            tile,
+                            rockWallShadowOpacity);
                         GUI.DrawTexture(CalculateTileGuiRect(tileX, tileY), Texture2D.whiteTexture);
 
                         if (tileX == centerTileCoordinate.x && tileY == centerTileCoordinate.y)
@@ -412,10 +457,82 @@ namespace Farmware.WorldGeneration.Presentation
             }
 
             GUI.color = previousGuiColor;
-            WorldGenerationSettings settings = settingsQuery.CalculateEntityCount() == 1
-                ? settingsQuery.GetSingleton<WorldGenerationSettings>()
-                : default;
             DrawInformationPanel(hasCenterTile, centerTileCoordinate, centerTile, settings);
+        }
+
+        /// <summary>
+        /// 開発者用Rock Wall表示について、Repaint内で共有した岩壁判定から最寄り空地距離と連続影値を求めます。
+        /// </summary>
+        /// <param name="settings">水域優先を含む最終岩壁判定に使う生成設定です。</param>
+        /// <param name="worldTileX">中心の符号付き水平ワールドタイル座標です。</param>
+        /// <param name="worldTileY">中心の符号付き垂直ワールドタイル座標です。</param>
+        /// <returns>0以上MaximumShadowOpacity以下の連続した影不透明度です。</returns>
+        private float CalculateCachedRockWallShadowOpacity(
+            in WorldGenerationSettings settings,
+            int worldTileX,
+            int worldTileY)
+        {
+            if (!GetCachedRockWall(settings, worldTileX, worldTileY))
+            {
+                return 0f;
+            }
+
+            int searchRadius = RockWallAppearanceUtility.ShadowSearchRadiusInTiles;
+            int maximumDistanceSquared = searchRadius * searchRadius;
+            int nearestOpenDistanceSquared = int.MaxValue;
+
+            // 通常表示と同じ円形距離を使い、デバッグ色と実際の影が別の形にならないようにします。
+            for (int offsetY = -searchRadius; offsetY <= searchRadius; offsetY++)
+            {
+                for (int offsetX = -searchRadius; offsetX <= searchRadius; offsetX++)
+                {
+                    int distanceSquared = (offsetX * offsetX) + (offsetY * offsetY);
+                    if (distanceSquared == 0
+                        || distanceSquared > maximumDistanceSquared
+                        || distanceSquared >= nearestOpenDistanceSquared)
+                    {
+                        continue;
+                    }
+
+                    if (!GetCachedRockWall(
+                            settings,
+                            worldTileX + offsetX,
+                            worldTileY + offsetY))
+                    {
+                        nearestOpenDistanceSquared = distanceSquared;
+                    }
+                }
+            }
+
+            return RockWallAppearanceUtility
+                .CalculateShadowOpacityFromNearestOpenDistanceSquared(
+                    nearestOpenDistanceSquared);
+        }
+
+        /// <summary>
+        /// 符号付きXY座標を64bitキーへ可逆に詰め、同じRepaint中の決定論的岩壁判定を再利用します。
+        /// </summary>
+        /// <param name="settings">岩壁判定に使う現在の生成設定です。</param>
+        /// <param name="worldTileX">調べる水平ワールドタイル座標です。</param>
+        /// <param name="worldTileY">調べる垂直ワールドタイル座標です。</param>
+        /// <returns>水域優先適用後の最終地形が岩壁ならtrueです。</returns>
+        private bool GetCachedRockWall(
+            in WorldGenerationSettings settings,
+            int worldTileX,
+            int worldTileY)
+        {
+            long coordinateKey = ((long)worldTileX << 32) | (uint)worldTileY;
+            if (rockWallProbeCache.TryGetValue(coordinateKey, out bool isRockWall))
+            {
+                return isRockWall;
+            }
+
+            isRockWall = DeterministicChunkGenerator.IsRockWall(
+                settings,
+                worldTileX,
+                worldTileY);
+            rockWallProbeCache.Add(coordinateKey, isRockWall);
+            return isRockWall;
         }
 
         /// <summary>
@@ -522,22 +639,56 @@ namespace Farmware.WorldGeneration.Presentation
             GeneratedTile centerTile,
             WorldGenerationSettings settings)
         {
-            const int generatedTileInformationLineCount = 6;
+            const int generatedTileInformationLineCount = 9;
             const int waitingInformationLineCount = 1;
             const float informationStartY = 48f;
             const float bottomPadding = 6f;
 
-            string centerInformation = hasCenterTile
-                ? $"Tile ({centerCoordinate.x}, {centerCoordinate.y})  "
+            string centerInformation = "Center tile is waiting for generation.";
+            if (hasCenterTile)
+            {
+                RockWallGenerationDebugInfo rockWallInfo =
+                    DeterministicRockWallGenerator.GetDebugInfo(
+                    settings,
+                    centerCoordinate.x,
+                    centerCoordinate.y);
+                RockWallAppearance rockWallAppearance =
+                    RockWallAppearanceUtility.ClassifyAt(
+                        settings,
+                        centerCoordinate.x,
+                        centerCoordinate.y);
+                float rockWallShadowOpacity =
+                    RockWallAppearanceUtility.CalculateShadowOpacityAt(
+                        settings,
+                        centerCoordinate.x,
+                        centerCoordinate.y);
+                string finalState = !rockWallInfo.FinalCandidate
+                    ? "Outside"
+                    : centerTile.Ground == GroundType.Water
+                        ? "Water-suppressed"
+                        : "Rock";
+
+                // 生密度・平滑化後・通路削り・連続影値を同時に表示し、生成規則変更時の食い違いをGameビューだけで診断できます。
+                centerInformation = $"Tile ({centerCoordinate.x}, {centerCoordinate.y})  "
                     + $"Biome={centerTile.Biome}  Ground={centerTile.Ground}\n"
                     + $"Water={centerTile.WaterSalinity} / {centerTile.WaterBodyType}\n"
                     + $"Elevation={centerTile.Elevation}  Temperature={centerTile.Temperature}  "
                     + $"Moisture={centerTile.Moisture}\n"
                     + $"Transition={(IsBiomeTransitionTile(centerTile) ? "Yes" : "No")}\n"
-                    + $"Thresholds: Sea={settings.SeaLevelThreshold}  Rock={settings.RockWallThreshold}  "
-                    + $"Hot={settings.HotTemperatureThreshold}\n"
-                    + $"Dry={settings.DryMoistureThreshold}  Wet={settings.WetMoistureThreshold}"
-                : "Center tile is waiting for generation.";
+                    + $"RockDensity={rockWallInfo.Density} / {settings.RockWallNoiseThreshold}  "
+                    + $"Raw={(rockWallInfo.RawCandidate ? "Yes" : "No")}\n"
+                    + $"Corridor={(rockWallInfo.Corridor ? "Yes" : "No")}  "
+                    + $"Final={finalState}  Surface={rockWallAppearance}  "
+                    + $"Shadow={rockWallShadowOpacity:F2}\n"
+                    + $"WaterSettings: Sea={settings.SeaLevelThreshold}  "
+                    + $"FreshMax={settings.FreshWaterMaximumElevation}\n"
+                    + $"RockSettings: Mass={settings.RockWallMassCellSizeInTiles}  "
+                    + $"Detail={settings.RockWallDetailCellSizeInTiles}  "
+                    + $"Warp={settings.RockWallWarpAmplitudeInTiles}  "
+                    + $"Corridor={settings.RockWallCorridorHalfWidth}\n"
+                    + $"Hot={settings.HotTemperatureThreshold}  Dry={settings.DryMoistureThreshold}  "
+                    + $"Wet={settings.WetMoistureThreshold}";
+            }
             int informationLineCount = hasCenterTile
                 ? generatedTileInformationLineCount
                 : waitingInformationLineCount;
@@ -594,6 +745,11 @@ namespace Farmware.WorldGeneration.Presentation
             if (mode == WorldGenerationDebugVisualizationMode.WaterBody)
             {
                 return "Water Body";
+            }
+
+            if (mode == WorldGenerationDebugVisualizationMode.RockWall)
+            {
+                return "Rock Wall";
             }
 
             return mode == WorldGenerationDebugVisualizationMode.BiomeTransition
@@ -732,6 +888,32 @@ namespace Farmware.WorldGeneration.Presentation
                             new GeneratedTile { Biome = BiomeId.Forest, Ground = GroundType.Vegetation }),
                         "Unchanged",
                         96f);
+                    break;
+                case WorldGenerationDebugVisualizationMode.RockWall:
+                    DrawLegendEntry(
+                        ref nextX,
+                        y,
+                        GetVisualizationColor(mode, new GeneratedTile()),
+                        "Non-wall",
+                        82f);
+                    DrawLegendEntry(
+                        ref nextX,
+                        y,
+                        GetVisualizationColor(
+                            mode,
+                            new GeneratedTile { Ground = GroundType.RockWall },
+                            0f),
+                        "Exposed",
+                        80f);
+                    DrawLegendEntry(
+                        ref nextX,
+                        y,
+                        GetVisualizationColor(
+                            mode,
+                            new GeneratedTile { Ground = GroundType.RockWall },
+                            RockWallAppearanceUtility.MaximumShadowOpacity),
+                        "Deep shadow",
+                        78f);
                     break;
                 default:
                     GUI.Label(new Rect(nextX, y - 2f, 40f, 18f), "Off", informationStyle);

@@ -29,6 +29,21 @@ namespace Farmware.WorldGeneration
         /// <summary>内陸へまとまって生成する池の形状ノイズ専用のソルトです。</summary>
         public const ulong Pond = 0xDB4F0B9175AE2165UL;
 
+        /// <summary>岩壁の広域的な塊を作る連続ノイズ専用のソルトです。</summary>
+        public const ulong RockWallMass = 0x6A09E667F3BCC909UL;
+
+        /// <summary>岩壁輪郭へ細かな凹凸を追加する連続ノイズ専用のソルトです。</summary>
+        public const ulong RockWallDetail = 0xBB67AE8584CAA73BUL;
+
+        /// <summary>岩壁密度の水平サンプリング座標を歪ませるノイズ専用のソルトです。</summary>
+        public const ulong RockWallWarpX = 0x3C6EF372FE94F82BUL;
+
+        /// <summary>岩壁密度の垂直サンプリング座標を歪ませるノイズ専用のソルトです。</summary>
+        public const ulong RockWallWarpY = 0xA54FF53A5F1D36F1UL;
+
+        /// <summary>岩壁を横切る曲がった通路帯を作る連続ノイズ専用のソルトです。</summary>
+        public const ulong RockWallCorridor = 0x510E527FADE682D1UL;
+
         /// <summary>樹木資源の群生ノイズ専用のソルトです。</summary>
         public const ulong TreeResource = 0xD6E8FEB86659FD93UL;
 

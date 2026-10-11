@@ -22,7 +22,7 @@ namespace Farmware.WorldGeneration.Authoring
         [SerializeField] private int generatorVersion = 1;
 
         // 標高の広がりを決める最も低周波な格子サイズで、Bake時からワールド寿命中は固定します。
-        [Tooltip("標高ノイズの基準格子サイズです。単位はタイルです。大きくすると水域と岩地が広く続き、変更すると生成結果が変わります。")]
+        [Tooltip("標高ノイズの基準格子サイズです。単位はタイルです。大きくすると海・低地・高地が広く続き、変更すると生成結果が変わります。")]
         [Min(16)]
         [SerializeField] private int elevationCellSizeInTiles = 192;
 
@@ -76,15 +76,35 @@ namespace Farmware.WorldGeneration.Authoring
         [Range(0f, 1f)]
         [SerializeField] private float pondThreshold = 57000f / ushort.MaxValue;
 
-        // 淡水を生成できる標高上限で、岩壁内や山頂を川が横切ることを防ぎます。
-        [Tooltip("川と池を生成できる最大標高です。0〜1で指定し、小さくすると淡水が低地へ限定されます。海面より高く、岩壁閾値より低くしてください。")]
+        // 淡水を生成できる標高上限で、山頂まで川や池が伸びることを防ぎます。
+        [Tooltip("川と池を生成できる最大標高です。0〜1で指定し、小さくすると淡水が低地へ限定されます。海面より高くしてください。")]
         [Range(0f, 1f)]
         [SerializeField] private float freshWaterMaximumElevation = 47000f / ushort.MaxValue;
 
-        // 0〜1の標高に対する岩壁境界で、水面より必ず高くなるようOnValidateで補正します。
-        [Tooltip("これ以上の標高を岩壁にする閾値です。0〜1で指定し、小さくすると岩壁が増えます。水域閾値より大きくしてください。")]
+        // 岩壁の大きなまとまりを作る低周波格子で、論理チャンク境界とは独立して連続します。
+        [Tooltip("岩壁の大きな塊を作るノイズ格子サイズです。単位はタイルです。大きくすると1つの岩壁域が広がります。")]
+        [Range(16, 64)]
+        [SerializeField] private int rockWallMassCellSizeInTiles = 24;
+
+        // 大きな塊へ細かな凹凸を足す高周波格子で、同じ楕円形に見える反復を崩します。
+        [Tooltip("岩壁輪郭の凹凸を作るノイズ格子サイズです。単位はタイルです。小さくすると輪郭が細かくなります。")]
+        [Range(4, 24)]
+        [SerializeField] private int rockWallDetailCellSizeInTiles = 8;
+
+        // 低周波ノイズで密度座標を歪ませ、軸へ沿った輪郭や規則的な塊を減らします。
+        [Tooltip("岩壁ノイズ座標を歪ませる最大幅です。単位はタイルです。大きくすると輪郭の曲がりが強くなります。")]
+        [Range(0, 16)]
+        [SerializeField] private int rockWallWarpAmplitudeInTiles = 6;
+
+        // 合成密度を岩壁へ変換する0〜1境界で、Bake時に0〜65535へ変換します。
+        [Tooltip("岩壁にする合成ノイズ下限です。0〜1で指定し、小さくすると岩壁の占有率が増えます。")]
         [Range(0f, 1f)]
-        [SerializeField] private float rockWallThreshold = 0.816f;
+        [SerializeField] private float rockWallNoiseThreshold = 41000f / ushort.MaxValue;
+
+        // 別ノイズの中心等高線を削る幅で、長く曲がった物流通路を確保します。
+        [Tooltip("岩壁から削る通路の半幅です。0〜1のノイズ差で指定し、大きくすると通路が太く増えます。")]
+        [Range(0f, 0.1f)]
+        [SerializeField] private float rockWallCorridorHalfWidth = 1100f / ushort.MaxValue;
 
         // 砂漠判定に使う0〜1の気温境界で、Bake時に固定小数点の閾値へ変換します。
         [Tooltip("これ以上を高温とみなす気温閾値です。0〜1で指定し、小さくすると砂漠候補が増えます。変更すると生成結果が変わります。")]
@@ -154,18 +174,14 @@ namespace Farmware.WorldGeneration.Authoring
         {
             const float minimumGap = 0.001f;
 
-            // 海面と岩壁が逆転すると陸地分類が成立しないため、岩壁側をわずかに上へ保ちます。
+            // 海面が正規化範囲の上端へ達すると淡水上限を置けないため、わずかな余白を残します。
             waterThreshold = Mathf.Min(waterThreshold, 1f - minimumGap);
-            rockWallThreshold = Mathf.Max(rockWallThreshold, waterThreshold + minimumGap);
-            rockWallThreshold = Mathf.Clamp01(rockWallThreshold);
 
-            // 淡水の上限を海面と岩壁の間へ収め、海や岩壁の分類と競合しないようにします。
+            // 淡水の上限を海面以上へ収め、海水だけの標高帯と逆転しないようにします。
             freshWaterMaximumElevation = Mathf.Max(
                 freshWaterMaximumElevation,
                 waterThreshold + minimumGap);
-            freshWaterMaximumElevation = Mathf.Min(
-                freshWaterMaximumElevation,
-                rockWallThreshold - minimumGap);
+            freshWaterMaximumElevation = Mathf.Clamp01(freshWaterMaximumElevation);
 
             // 乾燥と湿潤の領域が逆転しないよう、森林閾値を乾燥閾値より上へ保ちます。
             dryMoistureThreshold = Mathf.Min(dryMoistureThreshold, 1f - minimumGap);
@@ -212,7 +228,12 @@ namespace Farmware.WorldGeneration.Authoring
                     RiverCenterLineHalfWidth = ToNormalizedUShort(authoring.riverCenterLineHalfWidth),
                     PondThreshold = ToNormalizedUShort(authoring.pondThreshold),
                     FreshWaterMaximumElevation = ToNormalizedUShort(authoring.freshWaterMaximumElevation),
-                    RockWallThreshold = ToNormalizedUShort(authoring.rockWallThreshold),
+                    RockWallMassCellSizeInTiles = authoring.rockWallMassCellSizeInTiles,
+                    RockWallDetailCellSizeInTiles = authoring.rockWallDetailCellSizeInTiles,
+                    RockWallWarpAmplitudeInTiles = authoring.rockWallWarpAmplitudeInTiles,
+                    RockWallNoiseThreshold = ToNormalizedUShort(authoring.rockWallNoiseThreshold),
+                    RockWallCorridorHalfWidth =
+                        ToNormalizedUShort(authoring.rockWallCorridorHalfWidth),
                     HotTemperatureThreshold = ToNormalizedUShort(authoring.hotTemperatureThreshold),
                     DryMoistureThreshold = ToNormalizedUShort(authoring.dryMoistureThreshold),
                     WetMoistureThreshold = ToNormalizedUShort(authoring.wetMoistureThreshold)

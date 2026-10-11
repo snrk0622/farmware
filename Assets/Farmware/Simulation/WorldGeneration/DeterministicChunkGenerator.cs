@@ -10,6 +10,46 @@ namespace Farmware.WorldGeneration
     public static class DeterministicChunkGenerator
     {
         /// <summary>
+        /// 指定ワールド座標が、通常の地形生成規則で岩壁になるかだけを判定します。
+        /// Presentationがチャンク外周の隣接岩壁を調べる際に、気温・湿度など不要な値の生成を省くために使用します。
+        /// </summary>
+        /// <param name="settings">ワールド作成時に固定した生成設定です。</param>
+        /// <param name="worldTileX">符号付きワールド水平タイル座標です。</param>
+        /// <param name="worldTileY">符号付きワールド垂直タイル座標です。</param>
+        /// <returns>水域の優先判定後もGroundType.RockWallになる場合はtrueです。</returns>
+        public static bool IsRockWall(
+            in WorldGenerationSettings settings,
+            int worldTileX,
+            int worldTileY)
+        {
+            // 約9割の非候補タイルでは標高・淡水ノイズを計算せず、チャンク外周の影・露出面判定を軽量に保ちます。
+            if (!DeterministicRockWallGenerator.IsRockWallCandidate(
+                settings,
+                worldTileX,
+                worldTileY))
+            {
+                return false;
+            }
+
+            ushort elevation = DeterministicNoise.SampleFractalNoise(
+                settings.WorldSeed,
+                settings.GeneratorVersion,
+                worldTileX,
+                worldTileY,
+                settings.ElevationCellSizeInTiles,
+                settings.OctaveCount,
+                WorldGenerationPurposeSalts.Elevation);
+
+            // 地形生成では水域を岩壁より先に分類します。同じ優先順位を使い、表示だけがSimulation結果と食い違うことを防ぎます。
+            WaterBodyType waterBodyType = ClassifyWaterBody(
+                elevation,
+                settings,
+                worldTileX,
+                worldTileY);
+            return waterBodyType == WaterBodyType.None;
+        }
+
+        /// <summary>
         /// 1つのワールドタイル座標に対応する基礎地形データを生成します。
         /// </summary>
         /// <param name="settings">ワールド作成時に固定した生成設定です。</param>
@@ -55,7 +95,6 @@ namespace Farmware.WorldGeneration
                 worldTileX,
                 worldTileY);
             GroundType ground = ClassifyGround(
-                elevation,
                 temperature,
                 moisture,
                 biome,
@@ -101,9 +140,8 @@ namespace Farmware.WorldGeneration
                 return WaterBodyType.Sea;
             }
 
-            // 高地や岩壁まで淡水ノイズが貫通すると不自然なため、淡水を生成できる上限を明示します。
-            if (elevation > settings.FreshWaterMaximumElevation
-                || elevation >= settings.RockWallThreshold)
+            // 山頂まで淡水ノイズが貫通すると不自然なため、淡水を生成できる標高上限を明示します。
+            if (elevation > settings.FreshWaterMaximumElevation)
             {
                 return WaterBodyType.None;
             }
@@ -210,20 +248,18 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>
-        /// 標高を最優先し、その後に気候値と座標ハッシュから陸上の地面種別を決めます。
+        /// 水域と独立岩壁群を優先し、その後に気候値と座標ハッシュから陸上の地面種別を決めます。
         /// 論理Biome IDは閾値で一意に保ち、境界付近の地面だけを段階的に混ぜて見た目とゲームルールをなじませます。
         /// </summary>
-        /// <param name="elevation">0〜65535の標高です。</param>
         /// <param name="temperature">0〜65535の気温です。</param>
         /// <param name="moisture">0〜65535の湿度です。</param>
         /// <param name="biome">気候から決めた陸上バイオームです。</param>
         /// <param name="waterBodyType">先に分類済みの川・池・海です。</param>
-        /// <param name="settings">水面と岩壁の閾値を保持する生成設定です。</param>
+        /// <param name="settings">水面、岩壁群、バイオーム移行の設定です。</param>
         /// <param name="worldTileX">決定論的な移行タイル抽選に使う水平ワールドタイル座標です。</param>
         /// <param name="worldTileY">決定論的な移行タイル抽選に使う垂直ワールドタイル座標です。</param>
         /// <returns>ゲームルール用の地面種別です。</returns>
         private static GroundType ClassifyGround(
-            ushort elevation,
             ushort temperature,
             ushort moisture,
             BiomeId biome,
@@ -237,7 +273,11 @@ namespace Farmware.WorldGeneration
                 return GroundType.Water;
             }
 
-            if (elevation >= settings.RockWallThreshold)
+            // 岩壁候補と水域が重なる場合は、直前の水域判定が先にreturnするため海・川・池が必ず優先されます。
+            if (DeterministicRockWallGenerator.IsRockWallCandidate(
+                settings,
+                worldTileX,
+                worldTileY))
             {
                 return GroundType.RockWall;
             }
@@ -410,11 +450,11 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>
-        /// 連続標高を水域・低地・平地・高地・岩壁の5段階へ分類します。
+        /// 連続標高を水域・低地・平地・高地へ分け、独立生成された岩壁だけを岩壁分類へ上書きします。
         /// </summary>
         /// <param name="elevation">0〜65535の標高です。</param>
         /// <param name="ground">淡水を含めて分類済みの地面です。</param>
-        /// <param name="settings">海面と岩壁の閾値を保持する設定です。</param>
+        /// <param name="settings">海面を保持する生成設定です。</param>
         /// <returns>表示や配置条件で使う標高クラスです。</returns>
         private static ElevationClass ClassifyElevation(
             ushort elevation,
@@ -427,12 +467,12 @@ namespace Farmware.WorldGeneration
                 return ElevationClass.Water;
             }
 
-            if (elevation >= settings.RockWallThreshold)
+            if (ground == GroundType.RockWall)
             {
                 return ElevationClass.RockWall;
             }
 
-            int landRange = settings.RockWallThreshold - settings.SeaLevelThreshold;
+            int landRange = ushort.MaxValue - settings.SeaLevelThreshold;
             int lowlandEnd = settings.SeaLevelThreshold + (landRange / 3);
             int plainEnd = settings.SeaLevelThreshold + ((landRange * 2) / 3);
 

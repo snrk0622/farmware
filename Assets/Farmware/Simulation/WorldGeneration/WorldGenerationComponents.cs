@@ -97,7 +97,7 @@ namespace Farmware.WorldGeneration
         /// <summary>通常の平地です。</summary>
         Plain = 2,
 
-        /// <summary>岩壁になる直前の高地です。</summary>
+        /// <summary>陸地の標高範囲を3分割したうち最も高い領域です。</summary>
         Highland = 3,
 
         /// <summary>固体地形として扱う岩壁です。</summary>
@@ -261,11 +261,23 @@ namespace Farmware.WorldGeneration
         /// <summary>池を生成する0〜65535のノイズ下限です。大きいほど池が減ります。</summary>
         public ushort PondThreshold;
 
-        /// <summary>川と池を生成できる0〜65535の最大標高です。岩壁内や山頂の水域を防ぎます。</summary>
+        /// <summary>川と池を生成できる0〜65535の最大標高です。山頂まで淡水が伸びることを防ぎます。</summary>
         public ushort FreshWaterMaximumElevation;
 
-        /// <summary>これ以上の標高を岩壁にする0〜65535の閾値です。</summary>
-        public ushort RockWallThreshold;
+        /// <summary>岩壁の大きな塊を決めるノイズ格子の1辺です。単位はタイルです。</summary>
+        public int RockWallMassCellSizeInTiles;
+
+        /// <summary>岩壁輪郭の細かな凹凸を決めるノイズ格子の1辺です。単位はタイルです。</summary>
+        public int RockWallDetailCellSizeInTiles;
+
+        /// <summary>岩壁密度をサンプリングする座標の最大歪み幅です。単位はタイルです。</summary>
+        public int RockWallWarpAmplitudeInTiles;
+
+        /// <summary>これ以上を岩壁候補にする0〜65535の合成ノイズ閾値です。</summary>
+        public ushort RockWallNoiseThreshold;
+
+        /// <summary>岩壁から削る通路の中心値32768から許容する0〜65535の差です。</summary>
+        public ushort RockWallCorridorHalfWidth;
 
         /// <summary>これ以上を高温とみなす0〜65535の気温閾値です。</summary>
         public ushort HotTemperatureThreshold;
@@ -301,7 +313,11 @@ namespace Farmware.WorldGeneration
                 RiverCenterLineHalfWidth = 600,
                 PondThreshold = 57000,
                 FreshWaterMaximumElevation = 47000,
-                RockWallThreshold = 53500,
+                RockWallMassCellSizeInTiles = 24,
+                RockWallDetailCellSizeInTiles = 8,
+                RockWallWarpAmplitudeInTiles = 6,
+                RockWallNoiseThreshold = 41000,
+                RockWallCorridorHalfWidth = 1100,
                 HotTemperatureThreshold = 40000,
                 DryMoistureThreshold = 28500,
                 WetMoistureThreshold = 39500

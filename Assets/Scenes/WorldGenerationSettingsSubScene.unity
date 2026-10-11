@@ -162,7 +162,11 @@ MonoBehaviour:
   riverCenterLineHalfWidth: 0.009155413
   pondThreshold: 0.86976427
   freshWaterMaximumElevation: 0.71717405
-  rockWallThreshold: 0.816
+  rockWallMassCellSizeInTiles: 24
+  rockWallDetailCellSizeInTiles: 8
+  rockWallWarpAmplitudeInTiles: 6
+  rockWallNoiseThreshold: 0.6256199
+  rockWallCorridorHalfWidth: 0.016784925
   hotTemperatureThreshold: 0.61
   dryMoistureThreshold: 0.435
   wetMoistureThreshold: 0.603

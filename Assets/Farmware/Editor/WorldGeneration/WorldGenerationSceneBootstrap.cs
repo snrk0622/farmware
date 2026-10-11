@@ -73,6 +73,21 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>淡水を生成できる固定小数点標高上限をInspector表現へ戻した値です。</summary>
         private const float PrototypeFreshWaterMaximumElevation = 47000f / ushort.MaxValue;
 
+        /// <summary>岩壁の大きな塊を作る試作ノイズ格子サイズです。単位はタイルです。</summary>
+        private const int PrototypeRockWallMassCellSizeInTiles = 24;
+
+        /// <summary>岩壁輪郭の凹凸を作る試作ノイズ格子サイズです。単位はタイルです。</summary>
+        private const int PrototypeRockWallDetailCellSizeInTiles = 8;
+
+        /// <summary>岩壁密度のサンプリング座標を歪ませる最大幅です。単位はタイルです。</summary>
+        private const int PrototypeRockWallWarpAmplitudeInTiles = 6;
+
+        /// <summary>岩壁へ分類する固定小数点密度下限をInspector表現へ戻した値です。</summary>
+        private const float PrototypeRockWallNoiseThreshold = 41000f / ushort.MaxValue;
+
+        /// <summary>岩壁から削る通路ノイズ帯の半幅をInspector表現へ戻した値です。</summary>
+        private const float PrototypeRockWallCorridorHalfWidth = 1100f / ushort.MaxValue;
+
         /// <summary>基礎資源を点ではなく群れとして配置する試作ノイズ格子サイズです。単位はタイルです。</summary>
         private const int PrototypeResourceClusterCellSizeInTiles = 24;
 
@@ -126,6 +141,7 @@ namespace Farmware.WorldGeneration.Editor
             // 水は地形そのものを採水源に変更したため、旧水域Tileと水資源アイコンを再生成対象から除外します。
             DeleteObsoleteFallbackTile("Water");
             DeleteObsoleteFallbackTile("WaterResource");
+            DeleteObsoleteFallbackTile("RockWallInterior");
 
             // PNGのSaveAndReimport中に以前読み込んだUnity Object参照が無効化される場合があります。
             // 9種類をすべて生成した後、AssetDatabaseから最新のTileを読み直してSceneへ保存します。
@@ -464,6 +480,16 @@ namespace Farmware.WorldGeneration.Editor
                 PrototypePondThreshold;
             serializedAuthoring.FindProperty("freshWaterMaximumElevation").floatValue =
                 PrototypeFreshWaterMaximumElevation;
+            serializedAuthoring.FindProperty("rockWallMassCellSizeInTiles").intValue =
+                PrototypeRockWallMassCellSizeInTiles;
+            serializedAuthoring.FindProperty("rockWallDetailCellSizeInTiles").intValue =
+                PrototypeRockWallDetailCellSizeInTiles;
+            serializedAuthoring.FindProperty("rockWallWarpAmplitudeInTiles").intValue =
+                PrototypeRockWallWarpAmplitudeInTiles;
+            serializedAuthoring.FindProperty("rockWallNoiseThreshold").floatValue =
+                PrototypeRockWallNoiseThreshold;
+            serializedAuthoring.FindProperty("rockWallCorridorHalfWidth").floatValue =
+                PrototypeRockWallCorridorHalfWidth;
             serializedAuthoring.FindProperty("resourceClusterCellSizeInTiles").intValue =
                 PrototypeResourceClusterCellSizeInTiles;
             serializedAuthoring.FindProperty("resourceOctaveCount").intValue =
@@ -487,7 +513,7 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="desertTile">砂漠用の単色Tileです。</param>
         /// <param name="freshWaterTile">川と池の淡水域用の単色Tileです。</param>
         /// <param name="saltWaterTile">海の海水域用の単色Tileです。</param>
-        /// <param name="rockWallTile">岩壁用の単色Tileです。</param>
+        /// <param name="rockWallTile">全岩壁へ共通で使用し、別の影Meshで内部グラデーションを後付けする単色Tileです。</param>
         /// <param name="treeResourceTile">樹木資源用の透明背景Tileです。</param>
         /// <param name="stoneResourceTile">石資源用の透明背景Tileです。</param>
         /// <param name="sandResourceTile">砂資源用の透明背景Tileです。</param>
@@ -568,7 +594,7 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="desertTile">砂漠用の単色Tileです。</param>
         /// <param name="freshWaterTile">川と池の淡水域用の単色Tileです。</param>
         /// <param name="saltWaterTile">海の海水域用の単色Tileです。</param>
-        /// <param name="rockWallTile">岩壁用の単色Tileです。</param>
+        /// <param name="rockWallTile">全岩壁へ共通で使用し、別の影Meshで内部グラデーションを後付けする単色Tileです。</param>
         /// <param name="treeResourceTile">樹木資源用の透明背景Tileです。</param>
         /// <param name="stoneResourceTile">石資源用の透明背景Tileです。</param>
         /// <param name="sandResourceTile">砂資源用の透明背景Tileです。</param>

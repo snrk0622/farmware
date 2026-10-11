@@ -118,6 +118,198 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// 正負座標と64×64チャンク境界を準備し、軽量な岩壁判定が完全な地形生成結果と一致することを保証します。
+        /// Presentationが境界外セルだけを再判定しても、SimulationのGroundTypeと食い違わないための回帰テストです。
+        /// </summary>
+        [Test]
+        public void RockWallProbe_MatchesGeneratedGroundAcrossChunkEdges()
+        {
+            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.FromString("rock-wall-probe-test"),
+                1);
+            int[] tileCoordinates = { -65, -64, -63, -1, 0, 1, 63, 64, 65 };
+
+            // XとYへ同じ境界候補を組み合わせ、正負4象限とチャンク端の判定を少数の81セルで確認します。
+            for (int yIndex = 0; yIndex < tileCoordinates.Length; yIndex++)
+            {
+                for (int xIndex = 0; xIndex < tileCoordinates.Length; xIndex++)
+                {
+                    int tileX = tileCoordinates[xIndex];
+                    int tileY = tileCoordinates[yIndex];
+                    bool expected = DeterministicChunkGenerator.GenerateTile(
+                        settings,
+                        tileX,
+                        tileY).Ground == GroundType.RockWall;
+                    bool actual = DeterministicChunkGenerator.IsRockWall(settings, tileX, tileY);
+
+                    Assert.That(
+                        actual,
+                        Is.EqualTo(expected),
+                        $"岩壁の軽量判定が完全生成と不一致です: ({tileX}, {tileY})");
+                }
+            }
+        }
+
+        /// <summary>
+        /// 128×128タイル分の最終岩壁候補を直接数え、既定値がリンク経路へ適度な迂回を作る占有率に収まることを保証します。
+        /// 地形全体を生成せず岩壁純粋計算だけを使い、日常実行するEditModeテストを現実的な時間へ抑えます。
+        /// </summary>
+        [Test]
+        public void RockWallNoise_DefaultSettingsCreateModerateCoverage()
+        {
+            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.FromString("rock-wall-coverage-test"),
+                1);
+            const int sampleSize = 128;
+            int rockWallCandidateCount = 0;
+
+            // 複数のノイズ格子と正負座標を含む固定範囲を走査し、局所的な密度差だけへ結果が偏らないようにします。
+            for (int tileY = -(sampleSize / 2); tileY < sampleSize / 2; tileY++)
+            {
+                for (int tileX = -(sampleSize / 2); tileX < sampleSize / 2; tileX++)
+                {
+                    if (DeterministicRockWallGenerator.IsRockWallCandidate(settings, tileX, tileY))
+                    {
+                        rockWallCandidateCount++;
+                    }
+                }
+            }
+
+            float coverage = rockWallCandidateCount / (float)(sampleSize * sampleSize);
+            Assert.That(
+                coverage,
+                Is.InRange(0.08f, 0.25f),
+                $"既定岩壁候補率が想定範囲外です。Coverage={coverage:P2}");
+        }
+
+        /// <summary>
+        /// 岩壁候補と水域が重なる座標を探し、海・川・池の判定が優先されて岩壁データを重ねないことを保証します。
+        /// </summary>
+        [Test]
+        public void RockWallNoise_WaterAlwaysSuppressesRockWallGround()
+        {
+            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.FromString("rock-wall-water-priority-test"),
+                1);
+            settings.SeaLevelThreshold = ushort.MaxValue;
+            int overlappingWaterCandidateCount = 0;
+
+            // 64×64だけを調べれば複数のノイズ形状を含み、重い広域生成をせず優先順位を確認できます。
+            for (int tileY = -32; tileY < 32; tileY++)
+            {
+                for (int tileX = -32; tileX < 32; tileX++)
+                {
+                    if (!DeterministicRockWallGenerator.IsRockWallCandidate(settings, tileX, tileY))
+                    {
+                        continue;
+                    }
+
+                    GeneratedTile tile = DeterministicChunkGenerator.GenerateTile(settings, tileX, tileY);
+                    if (tile.WaterBodyType == WaterBodyType.None)
+                    {
+                        continue;
+                    }
+
+                    overlappingWaterCandidateCount++;
+                    Assert.That(tile.Ground, Is.EqualTo(GroundType.Water));
+                    Assert.That(DeterministicChunkGenerator.IsRockWall(settings, tileX, tileY), Is.False);
+                }
+            }
+
+            Assert.That(
+                overlappingWaterCandidateCount,
+                Is.GreaterThan(0),
+                "試験範囲で水域と岩壁候補の重なりを確認できませんでした。");
+        }
+
+        /// <summary>
+        /// 生の密度場、平滑化後の最終形状、通路削りを同じ範囲で調べ、固定図形ではない複雑な輪郭と空路が生じることを保証します。
+        /// 連結成分を広域探索せず3×3近傍パターンだけを数えるため、形状退行を軽量に検出できます。
+        /// </summary>
+        [Test]
+        public void RockWallNoise_CreatesVariedEdgesAndCarvedCorridors()
+        {
+            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.FromString("rock-wall-variety-test"),
+                1);
+            const int sampleRadius = 32;
+            const int sampleDiameter = sampleRadius * 2;
+            const int paddedDiameter = sampleDiameter + 2;
+            bool[] observedPatterns = new bool[512];
+            bool[] finalCandidates = new bool[paddedDiameter * paddedDiameter];
+            int distinctPatternCount = 0;
+            int carvedRawCandidateCount = 0;
+
+            // 1タイル外側まで一度だけ生成し、3×3パターンごとに同じ重いノイズ計算を繰り返さないようにします。
+            for (int paddedY = 0; paddedY < paddedDiameter; paddedY++)
+            {
+                for (int paddedX = 0; paddedX < paddedDiameter; paddedX++)
+                {
+                    int tileX = paddedX - sampleRadius - 1;
+                    int tileY = paddedY - sampleRadius - 1;
+                    RockWallGenerationDebugInfo centerInfo =
+                        DeterministicRockWallGenerator.GetDebugInfo(settings, tileX, tileY);
+                    finalCandidates[(paddedY * paddedDiameter) + paddedX] =
+                        centerInfo.FinalCandidate;
+                    if (centerInfo.RawCandidate && centerInfo.Corridor)
+                    {
+                        carvedRawCandidateCount++;
+                    }
+                }
+            }
+
+            // 各中心の3×3最終候補を9bitへ詰め、楕円や長方形だけでは現れにくい多様な局所輪郭を数えます。
+            for (int centerY = 1; centerY <= sampleDiameter; centerY++)
+            {
+                for (int centerX = 1; centerX <= sampleDiameter; centerX++)
+                {
+                    int pattern = 0;
+                    int bit = 0;
+                    for (int offsetY = -1; offsetY <= 1; offsetY++)
+                    {
+                        for (int offsetX = -1; offsetX <= 1; offsetX++)
+                        {
+                            int candidateIndex =
+                                ((centerY + offsetY) * paddedDiameter) + centerX + offsetX;
+                            if (finalCandidates[candidateIndex])
+                            {
+                                pattern |= 1 << bit;
+                            }
+
+                            bit++;
+                        }
+                    }
+
+                    if (!observedPatterns[pattern])
+                    {
+                        observedPatterns[pattern] = true;
+                        distinctPatternCount++;
+                    }
+                }
+            }
+
+            // 通路は長い低周波帯なので、局所パターン範囲に交差しない場合だけ広い範囲を軽い生密度判定で探します。
+            for (int tileY = -128; tileY < 128 && carvedRawCandidateCount == 0; tileY++)
+            {
+                for (int tileX = -128; tileX < 128; tileX++)
+                {
+                    bool isRawCandidate =
+                        DeterministicRockWallGenerator.SampleDensity(settings, tileX, tileY)
+                        >= settings.RockWallNoiseThreshold;
+                    if (isRawCandidate
+                        && DeterministicRockWallGenerator.IsCorridor(settings, tileX, tileY))
+                    {
+                        carvedRawCandidateCount++;
+                        break;
+                    }
+                }
+            }
+
+            Assert.That(distinctPatternCount, Is.GreaterThanOrEqualTo(20));
+            Assert.That(carvedRawCandidateCount, Is.GreaterThan(0));
+        }
+
+        /// <summary>
         /// 現在の試作既定値を作り、64×64チャンクとは独立したバイオーム規模と移行帯幅が設定されることを保証します。
         /// </summary>
         [Test]
@@ -133,6 +325,11 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(settings.RiverCellSizeInTiles, Is.EqualTo(96));
             Assert.That(settings.PondCellSizeInTiles, Is.EqualTo(48));
             Assert.That(settings.FreshWaterOctaveCount, Is.EqualTo(2));
+            Assert.That(settings.RockWallMassCellSizeInTiles, Is.EqualTo(24));
+            Assert.That(settings.RockWallDetailCellSizeInTiles, Is.EqualTo(8));
+            Assert.That(settings.RockWallWarpAmplitudeInTiles, Is.EqualTo(6));
+            Assert.That(settings.RockWallNoiseThreshold, Is.EqualTo(41000));
+            Assert.That(settings.RockWallCorridorHalfWidth, Is.EqualTo(1100));
         }
 
         /// <summary>

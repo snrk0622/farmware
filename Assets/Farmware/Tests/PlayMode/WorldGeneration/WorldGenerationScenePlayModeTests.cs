@@ -1,5 +1,5 @@
 // このファイルは、SampleSceneを実際に再生し、SubSceneのBakeからECS地形・資源生成、Tilemap表示までの縦切りを検証します。
-// F3/F4デバッグ表示を含め、純粋計算では確認できないGameObject・SubScene・Presentation間の参照切れを検出します。
+// F3/F4と開発者用岩壁表示を含め、純粋計算では確認できないGameObject・SubScene・Presentation間の参照切れを検出します。
 
 using System.Collections;
 using Farmware.WorldGeneration.Presentation;
@@ -186,6 +186,104 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 WorldGenerationDebugVisualizationMode.None,
                 forestTransitionTile);
             Assert.That(hiddenColor.a, Is.EqualTo(0f), "Offモードは地形を一切着色してはいけません。");
+        }
+
+        /// <summary>
+        /// 岩壁の露出面から内部へ連続増加する影不透明度と、共有頂点へ平均する補間値を確認します。
+        /// 64×64チャンク境界の両側もワールド座標から同じ規則で分類され、内部だけ資源表示を隠すことを保証します。
+        /// </summary>
+        [Test]
+        public void RockWallAppearance_UsesContinuousGradientAcrossChunkBoundary()
+        {
+            float exposedOpacity =
+                RockWallAppearanceUtility.CalculateShadowOpacityFromNearestOpenDistanceSquared(1);
+            float shallowOpacity =
+                RockWallAppearanceUtility.CalculateShadowOpacityFromNearestOpenDistanceSquared(4);
+            float middleOpacity =
+                RockWallAppearanceUtility.CalculateShadowOpacityFromNearestOpenDistanceSquared(16);
+            float deepOpacity =
+                RockWallAppearanceUtility.CalculateShadowOpacityFromNearestOpenDistanceSquared(
+                    int.MaxValue);
+            Assert.That(exposedOpacity, Is.EqualTo(0f));
+            Assert.That(shallowOpacity, Is.GreaterThan(exposedOpacity));
+            Assert.That(
+                shallowOpacity,
+                Is.GreaterThan(0.5f),
+                "露出面から1タイル内側の影が薄すぎる状態へ戻ってはいけません。");
+            Assert.That(middleOpacity, Is.GreaterThan(shallowOpacity));
+            Assert.That(
+                deepOpacity,
+                Is.EqualTo(RockWallAppearanceUtility.MaximumShadowOpacity));
+
+            // 共有頂点は周囲4タイルの中間値になり、1タイル全面を同じ暗色にする旧方式へ戻っていないことを保証します。
+            float interpolatedVertexOpacity = RockWallAppearanceUtility.CalculateVertexOpacity(
+                0f,
+                shallowOpacity,
+                middleOpacity,
+                deepOpacity);
+            Assert.That(interpolatedVertexOpacity, Is.GreaterThan(shallowOpacity));
+            Assert.That(interpolatedVertexOpacity, Is.LessThan(deepOpacity));
+            Assert.That(
+                RockWallAppearanceUtility.ShouldDisplayResource(RockWallAppearance.Interior),
+                Is.False,
+                "岩壁内部の資源アイコンは影の上へ表示してはいけません。");
+            Assert.That(
+                RockWallAppearanceUtility.ShouldDisplayResource(RockWallAppearance.Exposed),
+                Is.True,
+                "空間へ露出した岩壁の資源表示は内部影の非表示規則へ巻き込んではいけません。");
+            Assert.That(
+                RockWallAppearanceUtility.ShouldDisplayResource(RockWallAppearance.None),
+                Is.True,
+                "通常地面の資源アイコンは岩壁用の非表示規則へ巻き込んではいけません。");
+
+            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.FromString("rock-wall-chunk-edge-test"),
+                1);
+            settings.SeaLevelThreshold = 0;
+            settings.FreshWaterMaximumElevation = 0;
+            settings.RiverCenterLineHalfWidth = 0;
+            settings.PondThreshold = ushort.MaxValue;
+            bool foundShadowAcrossChunkBoundary = false;
+
+            // X=63とX=64は別チャンクです。境界をまたぐ岩壁を探し、両側が座標再生成で影分類できることを確認します。
+            for (int tileY = -256; tileY <= 256; tileY++)
+            {
+                RockWallAppearance left =
+                    RockWallAppearanceUtility.ClassifyAt(settings, 63, tileY);
+                RockWallAppearance right =
+                    RockWallAppearanceUtility.ClassifyAt(settings, 64, tileY);
+                if (left != RockWallAppearance.None && right != RockWallAppearance.None)
+                {
+                    foundShadowAcrossChunkBoundary = true;
+                    break;
+                }
+            }
+
+            Assert.That(
+                foundShadowAcrossChunkBoundary,
+                Is.True,
+                "64×64チャンク境界をまたぐ岩壁を試験範囲で確認できませんでした。");
+
+            // 境界上の座標版も0〜最大値へ収まり、未ロード隣接チャンクを含む距離探索で例外や範囲外値を出さないことを確認します。
+            float boundaryOpacity =
+                RockWallAppearanceUtility.CalculateShadowOpacityAt(settings, 63, 0);
+            Assert.That(
+                boundaryOpacity,
+                Is.InRange(0f, RockWallAppearanceUtility.MaximumShadowOpacity));
+
+            GeneratedTile rockWallTile = new GeneratedTile { Ground = GroundType.RockWall };
+            Color exposedColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.RockWall,
+                rockWallTile,
+                0f);
+            Color deepShadowColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.RockWall,
+                rockWallTile,
+                RockWallAppearanceUtility.MaximumShadowOpacity);
+            Assert.That(
+                exposedColor,
+                Is.Not.EqualTo(deepShadowColor),
+                "岩壁デバッグ表示では露出面と深い内部影を別色で確認できる必要があります。");
         }
 
         /// <summary>
