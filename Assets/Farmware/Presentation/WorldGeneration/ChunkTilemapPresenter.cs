@@ -1,5 +1,5 @@
-// このファイルは、ECSで生成済みのチャンクデータを16×16サブチャンク単位でTilemapへ反映・消去します。
-// Tilemapは表示専用キャッシュであり、建築可否やバイオームなどのゲーム状態はGeneratedTileを正として参照します。
+// このファイルは、ECSで生成済みの地形・資源チャンクデータを16×16サブチャンク単位でTilemapへ反映・消去します。
+// Tilemapは表示専用キャッシュであり、地形はGeneratedTile、資源はGeneratedResourceTileをゲーム状態の正として参照します。
 
 using System.Collections.Generic;
 using Unity.Collections;
@@ -25,6 +25,10 @@ namespace Farmware.WorldGeneration.Presentation
         [Tooltip("生成地形を描画する専用Tilemapです。このComponentが表示・消去するため、手描きタイルとは分けてください。")]
         [SerializeField] private Tilemap targetTilemap;
 
+        // 基礎資源アイコンだけを地形の上へ描画する専用Tilemapです。採取状態の正には使用しません。
+        [Tooltip("木・石・水・砂の仮アイコンを描画する専用Tilemapです。地形Tilemapより手前のSorting Orderへ設定してください。")]
+        [SerializeField] private Tilemap resourceTilemap;
+
         // 草原の通常地面へ使用する表示専用Tileです。ゲームルール判定には使いません。
         [Tooltip("草原バイオームの通常地面に表示するTileです。未指定の場合、そのセルは空表示になります。")]
         [SerializeField] private TileBase grasslandTile;
@@ -44,6 +48,22 @@ namespace Farmware.WorldGeneration.Presentation
         // GroundType.RockWallへ使用する表示専用Tileです。
         [Tooltip("岩壁に表示するTileです。岩壁の建築・リンク遮断判定はECSデータで行います。")]
         [SerializeField] private TileBase rockWallTile;
+
+        // GeneratedResourceType.Treeへ使用する透明背景の表示専用Tileです。
+        [Tooltip("樹木資源に表示する仮Tileです。資源の種類と存在はECSバッファを正とします。")]
+        [SerializeField] private TileBase treeResourceTile;
+
+        // GeneratedResourceType.Stoneへ使用する透明背景の表示専用Tileです。
+        [Tooltip("石資源に表示する仮Tileです。資源の種類と存在はECSバッファを正とします。")]
+        [SerializeField] private TileBase stoneResourceTile;
+
+        // GeneratedResourceType.Waterへ使用する透明背景の表示専用Tileです。
+        [Tooltip("水資源に表示する仮Tileです。水域地形そのものとは別の採取候補表示です。")]
+        [SerializeField] private TileBase waterResourceTile;
+
+        // GeneratedResourceType.Sandへ使用する透明背景の表示専用Tileです。
+        [Tooltip("砂資源に表示する仮Tileです。砂地地形そのものとは別の採取候補表示です。")]
+        [SerializeField] private TileBase sandResourceTile;
 
         // World再作成を検知し、EntityQueryを作り直すために保持する現在のDefault Worldです。
         private World presentationWorld;
@@ -88,30 +108,48 @@ namespace Farmware.WorldGeneration.Presentation
         // 消去用のnullだけを持つ256要素配列です。各フレームで作り直しません。
         private TileBase[] emptySubChunkTileBuffer;
 
+        // 資源Tilemapへ渡す256要素の再利用配列です。地形配列と分け、透明セルも同時更新します。
+        private TileBase[] resourceSubChunkTileBuffer;
+
         /// <summary>
-        /// Editor構築ツールまたはテストから、専用Tilemapと地形分類ごとの表示Tileをまとめて設定します。
-        /// ゲームルールは変更せず、GeneratedTileをどのTileBaseで見せるかだけを更新します。
+        /// Editor構築ツールまたはテストから、地形・資源Tilemapと分類ごとの表示Tileをまとめて設定します。
+        /// ゲームルールは変更せず、ECSバッファをどのTileBaseで見せるかだけを更新します。
         /// </summary>
-        /// <param name="tilemap">生成地形だけを描画する専用Tilemapです。</param>
+        /// <param name="terrainTilemap">生成地形だけを描画する専用Tilemapです。</param>
+        /// <param name="generatedResourceTilemap">生成資源だけを描画する専用Tilemapです。</param>
         /// <param name="grassland">草原バイオームの通常地面に表示するTileです。</param>
         /// <param name="forest">森林バイオームの地面に表示するTileです。</param>
         /// <param name="desert">砂漠バイオームの地面に表示するTileです。</param>
         /// <param name="water">GroundType.Waterに表示するTileです。</param>
         /// <param name="rockWall">GroundType.RockWallに表示するTileです。</param>
+        /// <param name="treeResource">樹木資源に表示するTileです。</param>
+        /// <param name="stoneResource">石資源に表示するTileです。</param>
+        /// <param name="waterResource">水資源に表示するTileです。</param>
+        /// <param name="sandResource">砂資源に表示するTileです。</param>
         public void Configure(
-            Tilemap tilemap,
+            Tilemap terrainTilemap,
+            Tilemap generatedResourceTilemap,
             TileBase grassland,
             TileBase forest,
             TileBase desert,
             TileBase water,
-            TileBase rockWall)
+            TileBase rockWall,
+            TileBase treeResource,
+            TileBase stoneResource,
+            TileBase waterResource,
+            TileBase sandResource)
         {
-            targetTilemap = tilemap;
+            targetTilemap = terrainTilemap;
+            resourceTilemap = generatedResourceTilemap;
             grasslandTile = grassland;
             forestTile = forest;
             desertTile = desert;
             waterTile = water;
             rockWallTile = rockWall;
+            treeResourceTile = treeResource;
+            stoneResourceTile = stoneResource;
+            waterResourceTile = waterResource;
+            sandResourceTile = sandResource;
         }
 
         /// <summary>
@@ -122,6 +160,7 @@ namespace Farmware.WorldGeneration.Presentation
             int tileCount = WorldGridConstants.SubChunkSize * WorldGridConstants.SubChunkSize;
             subChunkTileBuffer = new TileBase[tileCount];
             emptySubChunkTileBuffer = new TileBase[tileCount];
+            resourceSubChunkTileBuffer = new TileBase[tileCount];
         }
 
         /// <summary>
@@ -131,7 +170,7 @@ namespace Farmware.WorldGeneration.Presentation
         {
             using (PresentationProfilerMarker.Auto())
             {
-                if (targetTilemap == null || !TryEnsureQueries())
+                if (targetTilemap == null || resourceTilemap == null || !TryEnsureQueries())
                 {
                     return;
                 }
@@ -156,7 +195,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// </summary>
         private void OnDisable()
         {
-            if (targetTilemap != null)
+            if (targetTilemap != null || resourceTilemap != null)
             {
                 coordinateScratch.Clear();
                 foreach (ChunkCoordinate coordinate in displayedCoordinates)
@@ -212,7 +251,8 @@ namespace Farmware.WorldGeneration.Presentation
             chunkQuery = entityManager.CreateEntityQuery(
                 ComponentType.ReadOnly<ChunkCoordinateComponent>(),
                 ComponentType.ReadOnly<ChunkGenerationStatus>(),
-                ComponentType.ReadOnly<GeneratedTile>());
+                ComponentType.ReadOnly<GeneratedTile>(),
+                ComponentType.ReadOnly<GeneratedResourceTile>());
             observerQuery = entityManager.CreateEntityQuery(ComponentType.ReadOnly<ChunkStreamingObserver>());
             settingsQuery = entityManager.CreateEntityQuery(ComponentType.ReadOnly<ChunkStreamingSettings>());
             queriesAreCreated = true;
@@ -362,7 +402,8 @@ namespace Farmware.WorldGeneration.Presentation
                 }
 
                 if (!entityManager.Exists(progress.Entity)
-                    || !entityManager.HasBuffer<GeneratedTile>(progress.Entity))
+                    || !entityManager.HasBuffer<GeneratedTile>(progress.Entity)
+                    || !entityManager.HasBuffer<GeneratedResourceTile>(progress.Entity))
                 {
                     CancelApplyAndScheduleClearIfNeeded(coordinate);
                     applyQueue.Dequeue();
@@ -370,13 +411,16 @@ namespace Farmware.WorldGeneration.Presentation
                 }
 
                 DynamicBuffer<GeneratedTile> tiles = entityManager.GetBuffer<GeneratedTile>(progress.Entity, true);
-                if (tiles.Length != WorldGridConstants.TilesPerChunk)
+                DynamicBuffer<GeneratedResourceTile> resources =
+                    entityManager.GetBuffer<GeneratedResourceTile>(progress.Entity, true);
+                if (tiles.Length != WorldGridConstants.TilesPerChunk
+                    || resources.Length != WorldGridConstants.TilesPerChunk)
                 {
                     // Job完了前または不正バッファは描画せず、次フレームに再確認します。
                     return;
                 }
 
-                ApplySubChunk(coordinate, progress.NextSubChunkIndex, tiles);
+                ApplySubChunk(coordinate, progress.NextSubChunkIndex, tiles, resources);
                 progress.NextSubChunkIndex++;
                 remainingBudget--;
 
@@ -402,10 +446,12 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="coordinate">対象の論理チャンク座標です。</param>
         /// <param name="subChunkIndex">行優先の0〜15サブチャンク番号です。</param>
         /// <param name="tiles">4096件の生成済みタイルBufferです。</param>
+        /// <param name="resources">地形と同じ行優先4096件の生成済み資源Bufferです。</param>
         private void ApplySubChunk(
             ChunkCoordinate coordinate,
             int subChunkIndex,
-            DynamicBuffer<GeneratedTile> tiles)
+            DynamicBuffer<GeneratedTile> tiles,
+            DynamicBuffer<GeneratedResourceTile> resources)
         {
             int subChunkX = subChunkIndex % WorldGridConstants.SubChunksPerAxis;
             int subChunkY = subChunkIndex / WorldGridConstants.SubChunksPerAxis;
@@ -419,11 +465,14 @@ namespace Farmware.WorldGeneration.Presentation
                     int sourceIndex = WorldGrid.ToTileIndex(localStartX + localX, localStartY + localY);
                     int destinationIndex = (localY * WorldGridConstants.SubChunkSize) + localX;
                     subChunkTileBuffer[destinationIndex] = SelectTile(tiles[sourceIndex]);
+                    resourceSubChunkTileBuffer[destinationIndex] =
+                        SelectResourceTile(resources[sourceIndex]);
                 }
             }
 
             BoundsInt bounds = CreateSubChunkBounds(coordinate, subChunkIndex);
             targetTilemap.SetTilesBlock(bounds, subChunkTileBuffer);
+            resourceTilemap.SetTilesBlock(bounds, resourceSubChunkTileBuffer);
         }
 
         /// <summary>
@@ -433,9 +482,16 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="subChunkIndex">行優先の0〜15サブチャンク番号です。</param>
         private void ClearSubChunk(ChunkCoordinate coordinate, int subChunkIndex)
         {
-            targetTilemap.SetTilesBlock(
-                CreateSubChunkBounds(coordinate, subChunkIndex),
-                emptySubChunkTileBuffer);
+            BoundsInt bounds = CreateSubChunkBounds(coordinate, subChunkIndex);
+            if (targetTilemap != null)
+            {
+                targetTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
+            }
+
+            if (resourceTilemap != null)
+            {
+                resourceTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
+            }
         }
 
         /// <summary>
@@ -506,6 +562,28 @@ namespace Farmware.WorldGeneration.Presentation
             }
 
             return grasslandTile;
+        }
+
+        /// <summary>
+        /// ゲーム状態用GeneratedResourceTileを、透明背景の表示専用Tileへ変換します。
+        /// </summary>
+        /// <param name="resource">ECSを正とする1タイル分の基礎資源データです。</param>
+        /// <returns>資源種類に対応するTile、または配置なしの場合はnullです。</returns>
+        private TileBase SelectResourceTile(GeneratedResourceTile resource)
+        {
+            switch (resource.Type)
+            {
+                case GeneratedResourceType.Tree:
+                    return treeResourceTile;
+                case GeneratedResourceType.Stone:
+                    return stoneResourceTile;
+                case GeneratedResourceType.Water:
+                    return waterResourceTile;
+                case GeneratedResourceType.Sand:
+                    return sandResourceTile;
+                default:
+                    return null;
+            }
         }
 
         /// <summary>

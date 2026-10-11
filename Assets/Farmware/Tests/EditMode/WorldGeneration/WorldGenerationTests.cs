@@ -1,4 +1,4 @@
-// このファイルは、負座標変換、安定シード、ノイズ境界、チャンク決定性、ECS生成SystemをEditModeで検証します。
+// このファイルは、負座標変換、安定シード、地形・資源の決定性、初期候補条件、ECS生成SystemをEditModeで検証します。
 // 失敗時にどの仕様が崩れたか分かるよう、純粋計算とEntityデータフローを分けてテストします。
 
 using System;
@@ -8,7 +8,7 @@ using Unity.Entities;
 namespace Farmware.WorldGeneration.Tests
 {
     /// <summary>
-    /// Phase 1〜2の決定論的チャンク基盤が、境界値とECS実行の両方で同じ結果を作ることを保証します。
+    /// Phase 1〜3の決定論的チャンク基盤が、境界値とECS実行の両方で同じ結果を作ることを保証します。
     /// Unity Test RunnerのEditModeテストから実行されます。
     /// </summary>
     public sealed class WorldGenerationTests
@@ -127,8 +127,8 @@ namespace Farmware.WorldGeneration.Tests
                 WorldSeedUtility.FromString("default-settings-test"),
                 2);
 
-            Assert.That(settings.TemperatureCellSizeInTiles, Is.EqualTo(192));
-            Assert.That(settings.MoistureCellSizeInTiles, Is.EqualTo(160));
+            Assert.That(settings.TemperatureCellSizeInTiles, Is.EqualTo(96));
+            Assert.That(settings.MoistureCellSizeInTiles, Is.EqualTo(80));
             Assert.That(settings.BiomeTransitionWidthInTiles, Is.EqualTo(6));
         }
 
@@ -181,6 +181,205 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// 通常生成された地形だけを探索し、発見領域の全タイルがコアを含む共通ノード建築条件を満たすことを保証します。
+        /// </summary>
+        [Test]
+        public void NodeBuildableRegionLocator_FindsOnlyNormallyBuildableTiles()
+        {
+            WorldGenerationSettings generationSettings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.FromString("node-buildable-region-test"),
+                2);
+            NodeBuildableRegionSearchSettings searchSettings =
+                NodeBuildableRegionSearchSettings.CreateDefault();
+
+            bool found = NodeBuildableRegionLocator.TryFindNearest(
+                generationSettings,
+                searchSettings,
+                out NodeBuildableRegion region);
+
+            Assert.That(found, Is.True);
+            Assert.That(region.WidthInTiles, Is.EqualTo(searchSettings.RegionWidthInTiles));
+            Assert.That(region.HeightInTiles, Is.EqualTo(searchSettings.RegionHeightInTiles));
+
+            // 領域の一部だけが建築可能でも合格しないよう、12×8の全タイルを通常生成器から再確認します。
+            for (int localY = 0; localY < region.HeightInTiles; localY++)
+            {
+                for (int localX = 0; localX < region.WidthInTiles; localX++)
+                {
+                    GeneratedTile tile = DeterministicChunkGenerator.GenerateTile(
+                        generationSettings,
+                        region.MinimumTileX + localX,
+                        region.MinimumTileY + localY);
+                    Assert.That(
+                        NodeBuildableRegionLocator.CanPlaceNode(tile),
+                        Is.True,
+                        $"建築不可タイル: ({region.MinimumTileX + localX}, {region.MinimumTileY + localY})");
+                }
+            }
+        }
+
+        /// <summary>
+        /// 同じ設定で探索を繰り返し、結果座標が一致し、探索前後で通常地形のチャンクハッシュが変わらないことを保証します。
+        /// </summary>
+        [Test]
+        public void NodeBuildableRegionLocator_IsDeterministicAndDoesNotMutateTerrain()
+        {
+            WorldGenerationSettings generationSettings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.FromString("node-region-determinism-test"),
+                2);
+            NodeBuildableRegionSearchSettings searchSettings =
+                NodeBuildableRegionSearchSettings.CreateDefault(-17, 93);
+            ChunkCoordinate observedChunk = new ChunkCoordinate(-1, 1);
+            ulong beforeSearch = DeterministicChunkGenerator.ComputeChunkHash(
+                generationSettings,
+                observedChunk);
+
+            bool foundFirst = NodeBuildableRegionLocator.TryFindNearest(
+                generationSettings,
+                searchSettings,
+                out NodeBuildableRegion first);
+            bool foundSecond = NodeBuildableRegionLocator.TryFindNearest(
+                generationSettings,
+                searchSettings,
+                out NodeBuildableRegion second);
+            ulong afterSearch = DeterministicChunkGenerator.ComputeChunkHash(
+                generationSettings,
+                observedChunk);
+
+            Assert.That(foundFirst, Is.True);
+            Assert.That(foundSecond, Is.True);
+            Assert.That(second.MinimumTileX, Is.EqualTo(first.MinimumTileX));
+            Assert.That(second.MinimumTileY, Is.EqualTo(first.MinimumTileY));
+            Assert.That(second.WidthInTiles, Is.EqualTo(first.WidthInTiles));
+            Assert.That(second.HeightInTiles, Is.EqualTo(first.HeightInTiles));
+            Assert.That(afterSearch, Is.EqualTo(beforeSearch));
+        }
+
+        /// <summary>
+        /// 1,000個の異なるワールドシードを準備し、地形の上書きなしで5×5チャンク以内に既定領域が見つかることを検証します。
+        /// </summary>
+        [Test]
+        public void NodeBuildableRegionLocator_OneThousandSeedsFindDefaultRegion()
+        {
+            NodeBuildableRegionSearchSettings searchSettings =
+                NodeBuildableRegionSearchSettings.CreateDefault();
+
+            // 文字列生成を乱数代わりにせず、連番を安定64bit混合して広いシード分布を再現可能に調べます。
+            for (int seedIndex = 0; seedIndex < 1000; seedIndex++)
+            {
+                ulong worldSeed = WorldSeedUtility.Mix64((ulong)seedIndex);
+                WorldGenerationSettings generationSettings =
+                    WorldGenerationSettings.CreateDefault(worldSeed, 2);
+                bool found = NodeBuildableRegionLocator.TryFindNearest(
+                    generationSettings,
+                    searchSettings,
+                    out NodeBuildableRegion region);
+
+                Assert.That(
+                    found,
+                    Is.True,
+                    $"5×5チャンク内に12×8建築可能領域がないシードです。seedIndex={seedIndex}, worldSeed={worldSeed}");
+                Assert.That(region.WidthInTiles, Is.EqualTo(12));
+                Assert.That(region.HeightInTiles, Is.EqualTo(8));
+            }
+        }
+
+        /// <summary>
+        /// 広い正負座標範囲を2回生成し、資源種類と表示差分が同一で、配置先が地形適性から外れないことを保証します。
+        /// 木・石・水・砂が少なくとも1件ずつ生成されることも確認し、閾値誤設定による資源消失を検出します。
+        /// </summary>
+        [Test]
+        public void ResourceGeneration_IsDeterministicAndRespectsTerrainSuitability()
+        {
+            WorldGenerationSettings generationSettings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.FromString("resource-generation-test"),
+                2);
+            ResourceGenerationSettings resourceSettings = ResourceGenerationSettings.CreateDefault();
+            GeneratedResourceTypeMask foundTypes = GeneratedResourceTypeMask.None;
+
+            // 複数のバイオームと水域を含む512×512タイルを調べ、チャンク境界や負座標に依存しないことも同時に確認します。
+            for (int worldY = -256; worldY < 256; worldY++)
+            {
+                for (int worldX = -256; worldX < 256; worldX++)
+                {
+                    GeneratedTile terrainTile = DeterministicChunkGenerator.GenerateTile(
+                        generationSettings,
+                        worldX,
+                        worldY);
+                    GeneratedResourceTile first = DeterministicResourceGenerator.GenerateResource(
+                        generationSettings,
+                        resourceSettings,
+                        terrainTile,
+                        worldX,
+                        worldY);
+                    GeneratedResourceTile second = DeterministicResourceGenerator.GenerateResource(
+                        generationSettings,
+                        resourceSettings,
+                        terrainTile,
+                        worldX,
+                        worldY);
+
+                    // 数十万回のNUnit Assert呼び出しは検証本体より重いため、不一致時だけ詳細メッセージ付きで失敗させます。
+                    if (first.Type != second.Type || first.VisualVariant != second.VisualVariant)
+                    {
+                        Assert.Fail(
+                            $"同じ入力の資源結果が一致しません。座標=({worldX}, {worldY}), "
+                            + $"first=({first.Type}, {first.VisualVariant}), "
+                            + $"second=({second.Type}, {second.VisualVariant})");
+                    }
+
+                    if (first.Type == GeneratedResourceType.None)
+                    {
+                        continue;
+                    }
+
+                    foundTypes |= DeterministicResourceGenerator.ToMask(first.Type);
+                    ResourceSuitability requiredSuitability = ToSuitability(first.Type);
+                    if ((terrainTile.ResourceSuitability & requiredSuitability) == 0)
+                    {
+                        Assert.Fail(
+                            $"地形適性外へ資源が配置されました。座標=({worldX}, {worldY}), 資源={first.Type}");
+                    }
+                }
+            }
+
+            GeneratedResourceTypeMask allTypes = GeneratedResourceTypeMask.Tree
+                | GeneratedResourceTypeMask.Stone
+                | GeneratedResourceTypeMask.Water
+                | GeneratedResourceTypeMask.Sand;
+            Assert.That(foundTypes, Is.EqualTo(allTypes), "試験範囲内に4種類の基礎資源がすべて必要です。");
+        }
+
+        /// <summary>
+        /// 分布の異なる代表シードを1つずつ準備し、通常生成された建築可能領域の周囲に木・石・水が自然に存在する候補を選べることを保証します。
+        /// 日常的な一括テストを数秒で終えるため3ケースに限定し、広いシード範囲は明示実行の負荷テストへ分離します。
+        /// </summary>
+        /// <param name="seedIndex">決定論的なワールドシードへ変換する代表番号です。</param>
+        [TestCase(1)]
+        [TestCase(37)]
+        [TestCase(99)]
+        public void NodeBuildableRegionLocator_RepresentativeSeedFindsNaturalRequiredResources(
+            int seedIndex)
+        {
+            AssertNaturalRequiredResourcesForSeed(seedIndex);
+        }
+
+        /// <summary>
+        /// 100個のシードを連続検査する長時間負荷テストです。
+        /// 通常のRun Allでは実行せず、生成パラメーターや探索範囲を変更した節目でTest Runnerから明示的に選択します。
+        /// </summary>
+        [Test]
+        [Explicit("最大17×17チャンクの資源探索を100シード行うため、通常の変更確認から分離した負荷テストです。")]
+        public void NodeBuildableRegionLocator_OneHundredSeedSoakTest()
+        {
+            // 失敗時に再現用seedIndexがAssertionへ残るよう、同じ1シード検証を順番に呼び出します。
+            for (int seedIndex = 0; seedIndex < 100; seedIndex++)
+            {
+                AssertNaturalRequiredResourcesForSeed(seedIndex);
+            }
+        }
+
+        /// <summary>
         /// テスト用Worldへ設定Entityと要求チャンクを作り、System更新後に4096タイルと完了状態が得られることを保証します。
         /// </summary>
         [Test]
@@ -194,6 +393,8 @@ namespace Farmware.WorldGeneration.Tests
 
             Entity settingsEntity = entityManager.CreateEntity();
             entityManager.AddComponentData(settingsEntity, settings);
+            ResourceGenerationSettings resourceSettings = ResourceGenerationSettings.CreateDefault();
+            entityManager.AddComponentData(settingsEntity, resourceSettings);
 
             Entity chunkEntity = entityManager.CreateEntity();
             entityManager.AddComponentData(chunkEntity, new ChunkCoordinateComponent { X = 1, Y = -1 });
@@ -204,6 +405,7 @@ namespace Farmware.WorldGeneration.Tests
             });
             entityManager.AddComponent<ChunkGenerationRequest>(chunkEntity);
             entityManager.AddBuffer<GeneratedTile>(chunkEntity);
+            entityManager.AddBuffer<GeneratedResourceTile>(chunkEntity);
 
             // ISystemを明示的に1回更新し、テスト終了前にJobを完了してからEntityデータを読み取ります。
             SystemHandle system = world.GetOrCreateSystem<ChunkGenerationSystem>();
@@ -212,14 +414,25 @@ namespace Farmware.WorldGeneration.Tests
 
             ChunkGenerationStatus status = entityManager.GetComponentData<ChunkGenerationStatus>(chunkEntity);
             DynamicBuffer<GeneratedTile> tiles = entityManager.GetBuffer<GeneratedTile>(chunkEntity);
+            DynamicBuffer<GeneratedResourceTile> resources =
+                entityManager.GetBuffer<GeneratedResourceTile>(chunkEntity);
 
             Assert.That(status.Phase, Is.EqualTo(ChunkGenerationPhase.ReadyToApply));
             Assert.That(status.GeneratedWithVersion, Is.EqualTo(settings.GeneratorVersion));
             Assert.That(tiles.Length, Is.EqualTo(WorldGridConstants.TilesPerChunk));
+            Assert.That(resources.Length, Is.EqualTo(WorldGridConstants.TilesPerChunk));
             Assert.That(entityManager.IsComponentEnabled<ChunkGenerationRequest>(chunkEntity), Is.False);
 
             GeneratedTile expectedFirstTile = DeterministicChunkGenerator.GenerateTile(settings, 64, -64);
             AssertTileEqual(expectedFirstTile, tiles[0]);
+            GeneratedResourceTile expectedFirstResource =
+                DeterministicResourceGenerator.GenerateResource(
+                    settings,
+                    resourceSettings,
+                    expectedFirstTile,
+                    64,
+                    -64);
+            AssertResourceEqual(expectedFirstResource, resources[0], 64, -64);
         }
 
         /// <summary>
@@ -450,6 +663,7 @@ namespace Farmware.WorldGeneration.Tests
             entityManager.AddComponentData(
                 settingsEntity,
                 WorldGenerationSettings.CreateDefault(WorldSeedUtility.FromString("streaming-test"), 1));
+            entityManager.AddComponentData(settingsEntity, ResourceGenerationSettings.CreateDefault());
             entityManager.AddComponentData(settingsEntity, streamingSettings);
 
             Entity observerEntity = entityManager.CreateEntity();
@@ -457,7 +671,7 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// ストリーミングテスト用のチャンクEntityを指定状態で作り、空のGeneratedTile Bufferも追加します。
+        /// ストリーミングテスト用のチャンクEntityを指定状態で作り、空の地形・資源Bufferも追加します。
         /// </summary>
         /// <param name="entityManager">テスト用WorldのEntityManagerです。</param>
         /// <param name="x">論理チャンクの水平座標です。</param>
@@ -482,7 +696,111 @@ namespace Farmware.WorldGeneration.Tests
             entityManager.AddComponent<ChunkGenerationRequest>(entity);
             entityManager.SetComponentEnabled<ChunkGenerationRequest>(entity, requestEnabled);
             entityManager.AddBuffer<GeneratedTile>(entity);
+            entityManager.AddBuffer<GeneratedResourceTile>(entity);
             return entity;
+        }
+
+        /// <summary>
+        /// 1つのシードについて、地形や資源を上書きせずに必須資源付き建築候補を発見できることを検証します。
+        /// 代表シードの通常テストと100シード負荷テストで同じAssertionを共有するための補助メソッドです。
+        /// </summary>
+        /// <param name="seedIndex">決定論的なワールドシードへ変換する番号です。</param>
+        private static void AssertNaturalRequiredResourcesForSeed(int seedIndex)
+        {
+            ResourceGenerationSettings resourceSettings = ResourceGenerationSettings.CreateDefault();
+            NodeBuildableRegionSearchSettings searchSettings =
+                NodeBuildableRegionSearchSettings.CreateInitialLocationDefault();
+            NodeBuildableRegionResourceRequirements requirements =
+                NodeBuildableRegionResourceRequirements.CreateDefault();
+            ulong worldSeed = WorldSeedUtility.Mix64((ulong)seedIndex);
+            WorldGenerationSettings generationSettings =
+                WorldGenerationSettings.CreateDefault(worldSeed, 2);
+
+            // 地形・資源の追加生成や上書きを行わず、同じ通常生成関数だけで初期候補を選別します。
+            bool found = NodeBuildableRegionLocator.TryFindNearestWithResources(
+                generationSettings,
+                resourceSettings,
+                searchSettings,
+                requirements,
+                out NodeBuildableRegion region);
+
+            Assert.That(
+                found,
+                Is.True,
+                $"通常生成だけで木・石・水がそろう建築領域を発見できません。seedIndex={seedIndex}, worldSeed={worldSeed}");
+            GeneratedResourceTypeMask foundTypes = CollectResourceTypesAroundRegion(
+                generationSettings,
+                resourceSettings,
+                region,
+                requirements.SearchMarginInTiles);
+            Assert.That(
+                foundTypes & requirements.RequiredTypes,
+                Is.EqualTo(requirements.RequiredTypes),
+                $"返された候補の周囲に必須資源が不足しています。seedIndex={seedIndex}");
+        }
+
+        /// <summary>
+        /// 建築候補の周囲を通常生成器で読み直し、存在する基礎資源種類をビット集合へまとめます。
+        /// </summary>
+        /// <param name="generationSettings">通常地形を再生成する設定です。</param>
+        /// <param name="resourceSettings">通常資源を再生成する設定です。</param>
+        /// <param name="region">中央となる建築候補矩形です。</param>
+        /// <param name="marginInTiles">矩形の各辺から外へ調べる距離です。単位はタイルです。</param>
+        /// <returns>走査範囲で見つかった資源種類のビット集合です。</returns>
+        private static GeneratedResourceTypeMask CollectResourceTypesAroundRegion(
+            in WorldGenerationSettings generationSettings,
+            in ResourceGenerationSettings resourceSettings,
+            in NodeBuildableRegion region,
+            int marginInTiles)
+        {
+            GeneratedResourceTypeMask foundTypes = GeneratedResourceTypeMask.None;
+            int minimumX = region.MinimumTileX - marginInTiles;
+            int minimumY = region.MinimumTileY - marginInTiles;
+            int maximumX = region.MinimumTileX + region.WidthInTiles - 1 + marginInTiles;
+            int maximumY = region.MinimumTileY + region.HeightInTiles - 1 + marginInTiles;
+
+            for (int worldY = minimumY; worldY <= maximumY; worldY++)
+            {
+                for (int worldX = minimumX; worldX <= maximumX; worldX++)
+                {
+                    GeneratedTile terrainTile = DeterministicChunkGenerator.GenerateTile(
+                        generationSettings,
+                        worldX,
+                        worldY);
+                    GeneratedResourceTile resourceTile =
+                        DeterministicResourceGenerator.GenerateResource(
+                            generationSettings,
+                            resourceSettings,
+                            terrainTile,
+                            worldX,
+                            worldY);
+                    foundTypes |= DeterministicResourceGenerator.ToMask(resourceTile.Type);
+                }
+            }
+
+            return foundTypes;
+        }
+
+        /// <summary>
+        /// 資源IDから、同じ資源を配置可能にする地形適性フラグへ変換します。
+        /// </summary>
+        /// <param name="resourceType">配置済み基礎資源IDです。</param>
+        /// <returns>対応する地形適性です。配置なしはNoneです。</returns>
+        private static ResourceSuitability ToSuitability(GeneratedResourceType resourceType)
+        {
+            switch (resourceType)
+            {
+                case GeneratedResourceType.Tree:
+                    return ResourceSuitability.Tree;
+                case GeneratedResourceType.Stone:
+                    return ResourceSuitability.Stone;
+                case GeneratedResourceType.Water:
+                    return ResourceSuitability.Water;
+                case GeneratedResourceType.Sand:
+                    return ResourceSuitability.Sand;
+                default:
+                    return ResourceSuitability.None;
+            }
         }
 
         /// <summary>
@@ -544,6 +862,29 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(actual.Elevation, Is.EqualTo(expected.Elevation));
             Assert.That(actual.Temperature, Is.EqualTo(expected.Temperature));
             Assert.That(actual.Moisture, Is.EqualTo(expected.Moisture));
+        }
+
+        /// <summary>
+        /// GeneratedResourceTileの資源IDと表示差分を比較し、失敗座標をTest Runnerへ明示します。
+        /// </summary>
+        /// <param name="expected">期待する資源データです。</param>
+        /// <param name="actual">実際に生成された資源データです。</param>
+        /// <param name="worldTileX">失敗メッセージ用の水平ワールドタイル座標です。</param>
+        /// <param name="worldTileY">失敗メッセージ用の垂直ワールドタイル座標です。</param>
+        private static void AssertResourceEqual(
+            GeneratedResourceTile expected,
+            GeneratedResourceTile actual,
+            int worldTileX,
+            int worldTileY)
+        {
+            Assert.That(
+                actual.Type,
+                Is.EqualTo(expected.Type),
+                $"資源IDが一致しません。座標=({worldTileX}, {worldTileY})");
+            Assert.That(
+                actual.VisualVariant,
+                Is.EqualTo(expected.VisualVariant),
+                $"資源表示差分が一致しません。座標=({worldTileX}, {worldTileY})");
         }
     }
 }

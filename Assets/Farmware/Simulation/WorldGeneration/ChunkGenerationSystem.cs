@@ -1,4 +1,4 @@
-// このファイルは、生成要求が有効なチャンクEntityを並列Jobで処理し、4096タイルのDynamic Bufferを作ります。
+// このファイルは、生成要求が有効なチャンクEntityを並列Jobで処理し、地形・資源それぞれ4096件のDynamic Bufferを作ります。
 // データ生成だけを担当し、TilemapやGameObjectへの反映は後続のPresentation層へ委ねます。
 
 using Unity.Burst;
@@ -7,7 +7,7 @@ using Unity.Entities;
 namespace Farmware.WorldGeneration
 {
     /// <summary>
-    /// 有効なChunkGenerationRequestを持つチャンクだけを生成するECS Systemです。
+    /// 有効なChunkGenerationRequestを持つチャンクだけを生成し、同じ座標の地形と資源を対応付けるECS Systemです。
     /// 完了後は要求を無効化し、生成済みの大量チャンクを毎フレーム再走査しないようにします。
     /// </summary>
     [BurstCompile]
@@ -23,6 +23,7 @@ namespace Farmware.WorldGeneration
         public void OnCreate(ref SystemState state)
         {
             state.RequireForUpdate<WorldGenerationSettings>();
+            state.RequireForUpdate<ResourceGenerationSettings>();
         }
 
         /// <summary>
@@ -34,16 +35,19 @@ namespace Farmware.WorldGeneration
         public void OnUpdate(ref SystemState state)
         {
             WorldGenerationSettings settings = SystemAPI.GetSingleton<WorldGenerationSettings>();
+            ResourceGenerationSettings resourceSettings =
+                SystemAPI.GetSingleton<ResourceGenerationSettings>();
             GenerateQueuedChunksJob job = new GenerateQueuedChunksJob
             {
-                Settings = settings
+                Settings = settings,
+                ResourceSettings = resourceSettings
             };
 
             state.Dependency = job.ScheduleParallel(state.Dependency);
         }
 
         /// <summary>
-        /// 1チャンクEntityずつ4096タイルを生成するBurst対応Jobです。
+        /// 1チャンクEntityずつ4096件の地形と資源を生成するBurst対応Jobです。
         /// Entity間に共有書き込みを持たないため、チャンク単位で安全に並列実行できます。
         /// </summary>
         [BurstCompile]
@@ -52,21 +56,27 @@ namespace Farmware.WorldGeneration
             /// <summary>WorldのSingletonから値コピーした、Job実行中は読み取り専用の生成設定です。</summary>
             public WorldGenerationSettings Settings;
 
+            /// <summary>WorldのSingletonから値コピーした、資源群の大きさと密度設定です。</summary>
+            public ResourceGenerationSettings ResourceSettings;
+
             /// <summary>
             /// 1つの要求チャンクを生成し、状態をReadyToApplyへ進めて要求を無効化します。
             /// </summary>
             /// <param name="coordinate">このEntityが表す論理チャンク座標です。</param>
             /// <param name="status">生成段階と使用バージョンを書き戻すComponentです。</param>
             /// <param name="tiles">4096件へ確保して生成結果を書き込むDynamic Bufferです。</param>
+            /// <param name="resources">地形と同じ行優先4096件へ資源結果を書き込むDynamic Bufferです。</param>
             /// <param name="requestEnabled">完了時にfalseへ切り替える生成要求の有効状態です。</param>
             private void Execute(
                 in ChunkCoordinateComponent coordinate,
                 ref ChunkGenerationStatus status,
                 ref DynamicBuffer<GeneratedTile> tiles,
+                ref DynamicBuffer<GeneratedResourceTile> resources,
                 EnabledRefRW<ChunkGenerationRequest> requestEnabled)
             {
                 status.Phase = ChunkGenerationPhase.GeneratingData;
                 tiles.ResizeUninitialized(WorldGridConstants.TilesPerChunk);
+                resources.ResizeUninitialized(WorldGridConstants.TilesPerChunk);
 
                 // 各タイルはワールド整数座標だけから求めるため、隣接チャンクの生成済み状態を参照しません。
                 for (int localY = 0; localY < WorldGridConstants.LogicalChunkSize; localY++)
@@ -76,8 +86,15 @@ namespace Farmware.WorldGeneration
                         int tileIndex = WorldGrid.ToTileIndex(localX, localY);
                         int worldTileX = WorldGrid.ToWorldTileX(coordinate.X, localX);
                         int worldTileY = WorldGrid.ToWorldTileY(coordinate.Y, localY);
-                        tiles[tileIndex] = DeterministicChunkGenerator.GenerateTile(
+                        GeneratedTile terrainTile = DeterministicChunkGenerator.GenerateTile(
                             Settings,
+                            worldTileX,
+                            worldTileY);
+                        tiles[tileIndex] = terrainTile;
+                        resources[tileIndex] = DeterministicResourceGenerator.GenerateResource(
+                            Settings,
+                            ResourceSettings,
+                            terrainTile,
                             worldTileX,
                             worldTileY);
                     }

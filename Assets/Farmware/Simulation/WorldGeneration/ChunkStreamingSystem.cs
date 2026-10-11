@@ -320,6 +320,7 @@ namespace Farmware.WorldGeneration
             });
             commandBuffer.AddComponent<ChunkGenerationRequest>(entity);
             commandBuffer.AddBuffer<GeneratedTile>(entity);
+            commandBuffer.AddBuffer<GeneratedResourceTile>(entity);
             requestBudget--;
         }
 

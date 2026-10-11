@@ -149,10 +149,10 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Farmware.WorldGeneration.Authoring::Farmware.WorldGeneration.Authoring.WorldGenerationAuthoring
   seedText: Farmware
-  generatorVersion: 2
+  generatorVersion: 1
   elevationCellSizeInTiles: 192
-  temperatureCellSizeInTiles: 192
-  moistureCellSizeInTiles: 160
+  temperatureCellSizeInTiles: 96
+  moistureCellSizeInTiles: 80
   octaveCount: 4
   biomeTransitionWidthInTiles: 6
   waterThreshold: 0.305
@@ -160,6 +160,12 @@ MonoBehaviour:
   hotTemperatureThreshold: 0.61
   dryMoistureThreshold: 0.435
   wetMoistureThreshold: 0.603
+  resourceClusterCellSizeInTiles: 24
+  resourceOctaveCount: 2
+  treeResourceThreshold: 0.7629511
+  stoneResourceThreshold: 0.8468757
+  waterResourceThreshold: 0.7858396
+  sandResourceThreshold: 0.7858396
   preloadMarginInChunks: 1
   retentionMarginInChunks: 1
   maximumConcurrentGenerations: 2

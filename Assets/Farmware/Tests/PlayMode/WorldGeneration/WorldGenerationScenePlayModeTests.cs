@@ -1,4 +1,4 @@
-// このファイルは、SampleSceneを実際に再生し、SubSceneのBakeからECS生成、Tilemap表示までの縦切りを検証します。
+// このファイルは、SampleSceneを実際に再生し、SubSceneのBakeからECS地形・資源生成、Tilemap表示までの縦切りを検証します。
 // F3/F4デバッグ表示を含め、純粋計算では確認できないGameObject・SubScene・Presentation間の参照切れを検出します。
 
 using System.Collections;
@@ -15,7 +15,7 @@ using UnityEngine.Tilemaps;
 namespace Farmware.WorldGeneration.PlayModeTests
 {
     /// <summary>
-    /// SampleSceneの起動後にデバッグ表示、生成設定Singleton、チャンクEntity、表示Tileが正しく連携することを保証します。
+    /// SampleSceneの起動後にデバッグ表示、生成設定Singleton、チャンクEntity、地形・資源Tileが正しく連携することを保証します。
     /// Unity Test RunnerのPlayModeテストから実行されます。
     /// </summary>
     public sealed class WorldGenerationScenePlayModeTests
@@ -172,8 +172,16 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 yield return null;
             }
 
-            Tilemap tilemap = Object.FindFirstObjectByType<Tilemap>();
-            Assert.That(tilemap, Is.Not.Null, "SampleSceneに地形表示用Tilemapがありません。");
+            GameObject groundTilemapObject = GameObject.Find("World Grid/Ground Tilemap");
+            Tilemap tilemap = groundTilemapObject == null
+                ? null
+                : groundTilemapObject.GetComponent<Tilemap>();
+            Assert.That(tilemap, Is.Not.Null, "SampleSceneに地形表示用Ground Tilemapがありません。");
+            GameObject resourceTilemapObject = GameObject.Find("World Grid/Resource Tilemap");
+            Tilemap resourceTilemap = resourceTilemapObject == null
+                ? null
+                : resourceTilemapObject.GetComponent<Tilemap>();
+            Assert.That(resourceTilemap, Is.Not.Null, "SampleSceneに資源表示用Resource Tilemapがありません。");
             CameraPanController cameraPanController = Object.FindFirstObjectByType<CameraPanController>();
             Assert.That(cameraPanController, Is.Not.Null, "Main CameraにCameraPanControllerがありません。");
             WorldGridDebugOverlay debugOverlay = Object.FindFirstObjectByType<WorldGridDebugOverlay>();
@@ -234,6 +242,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
             bool queriesCreated = false;
             bool initialLoadCompleted = false;
             Entity originalChunkEntity = Entity.Null;
+            Vector3Int originalResourceCell = default;
 
             for (int frame = 0; frame < MaximumWaitFrames; frame++)
             {
@@ -242,15 +251,17 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 {
                     settingsQuery = world.EntityManager.CreateEntityQuery(
                         ComponentType.ReadOnly<WorldGenerationSettings>(),
+                        ComponentType.ReadOnly<ResourceGenerationSettings>(),
                         ComponentType.ReadOnly<ChunkStreamingSettings>());
                     chunkQuery = world.EntityManager.CreateEntityQuery(
                         ComponentType.ReadOnly<ChunkCoordinateComponent>(),
                         ComponentType.ReadOnly<ChunkGenerationStatus>(),
-                        ComponentType.ReadOnly<GeneratedTile>());
+                        ComponentType.ReadOnly<GeneratedTile>(),
+                        ComponentType.ReadOnly<GeneratedResourceTile>());
                     queriesCreated = true;
                 }
 
-                // SubScene設定、原点チャンク、原点Tile表示の3条件がそろうまで待ち、固定秒数には依存しません。
+                // SubScene設定、原点チャンク、地形Tile、資源Tileの4条件がそろうまで待ち、固定秒数には依存しません。
                 if (queriesCreated
                     && settingsQuery.CalculateEntityCount() == 1
                     && TryGetActiveCompleteChunk(
@@ -259,7 +270,12 @@ namespace Farmware.WorldGeneration.PlayModeTests
                         0,
                         0,
                         out originalChunkEntity)
-                    && tilemap.GetTile(Vector3Int.zero) != null)
+                    && tilemap.GetTile(Vector3Int.zero) != null
+                    && TryGetDisplayedResourceCell(
+                        world.EntityManager,
+                        originalChunkEntity,
+                        resourceTilemap,
+                        out originalResourceCell))
                 {
                     initialLoadCompleted = true;
                     break;
@@ -273,6 +289,14 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Is.True,
                 $"{MaximumWaitFrames}フレーム以内に初回生成と表示が完了しませんでした。");
 
+            // 正式なセーブ互換運用前は生成調整のたびに番号を増やさず、Sceneの初期バージョンを1へ固定します。
+            WorldGenerationSettings runtimeGenerationSettings =
+                settingsQuery.GetSingleton<WorldGenerationSettings>();
+            Assert.That(
+                runtimeGenerationSettings.GeneratorVersion,
+                Is.EqualTo(1),
+                "初期開発中のGeneratorVersionは1へ固定してください。");
+
             // 生成済みタイルを使う移行帯表示を1フレーム描画し、ECS Buffer読取、Windowboxクリップ、情報HUDまで例外なく通します。
             developerVisualization.SetMode(WorldGenerationDebugVisualizationMode.BiomeTransition);
             yield return null;
@@ -280,9 +304,16 @@ namespace Farmware.WorldGeneration.PlayModeTests
 
             DynamicBuffer<GeneratedTile> originalTiles =
                 world.EntityManager.GetBuffer<GeneratedTile>(originalChunkEntity, true);
+            DynamicBuffer<GeneratedResourceTile> originalResources =
+                world.EntityManager.GetBuffer<GeneratedResourceTile>(originalChunkEntity, true);
             GeneratedTile originalFirstTile = originalTiles[0];
             GeneratedTile originalCenterTile = originalTiles[WorldGridConstants.TilesPerChunk / 2];
             GeneratedTile originalLastTile = originalTiles[WorldGridConstants.TilesPerChunk - 1];
+            GeneratedResourceTile originalFirstResource = originalResources[0];
+            GeneratedResourceTile originalCenterResource =
+                originalResources[WorldGridConstants.TilesPerChunk / 2];
+            GeneratedResourceTile originalLastResource =
+                originalResources[WorldGridConstants.TilesPerChunk - 1];
 
             // 8チャンク先へ即時移動し、原点がRetention範囲外になってEntityとTilemap表示の両方から消えるのを待ちます。
             cameraPanController.SetWorldPosition(new Vector2(FarCameraXInTiles, 0f));
@@ -291,6 +322,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
             {
                 bool originalChunkWasUnloaded = !HasChunkAt(chunkQuery, 0, 0);
                 bool originalTileWasCleared = tilemap.GetTile(Vector3Int.zero) == null;
+                bool originalResourceWasCleared = resourceTilemap.GetTile(originalResourceCell) == null;
                 bool farChunkIsActive = TryGetActiveCompleteChunk(
                     world.EntityManager,
                     chunkQuery,
@@ -298,7 +330,10 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     0,
                     out _);
 
-                if (originalChunkWasUnloaded && originalTileWasCleared && farChunkIsActive)
+                if (originalChunkWasUnloaded
+                    && originalTileWasCleared
+                    && originalResourceWasCleared
+                    && farChunkIsActive)
                 {
                     farLoadCompleted = true;
                     break;
@@ -344,6 +379,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
 
             DynamicBuffer<GeneratedTile> regeneratedTiles =
                 world.EntityManager.GetBuffer<GeneratedTile>(regeneratedChunkEntity, true);
+            DynamicBuffer<GeneratedResourceTile> regeneratedResources =
+                world.EntityManager.GetBuffer<GeneratedResourceTile>(regeneratedChunkEntity, true);
             AssertTileEquals(originalFirstTile, regeneratedTiles[0], 0);
             AssertTileEquals(
                 originalCenterTile,
@@ -353,6 +390,19 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 originalLastTile,
                 regeneratedTiles[WorldGridConstants.TilesPerChunk - 1],
                 WorldGridConstants.TilesPerChunk - 1);
+            AssertResourceEquals(originalFirstResource, regeneratedResources[0], 0);
+            AssertResourceEquals(
+                originalCenterResource,
+                regeneratedResources[WorldGridConstants.TilesPerChunk / 2],
+                WorldGridConstants.TilesPerChunk / 2);
+            AssertResourceEquals(
+                originalLastResource,
+                regeneratedResources[WorldGridConstants.TilesPerChunk - 1],
+                WorldGridConstants.TilesPerChunk - 1);
+            Assert.That(
+                resourceTilemap.GetTile(originalResourceCell),
+                Is.Not.Null,
+                "原点へ戻った後、決定論的に再生成された資源アイコンが再表示される必要があります。");
 
             if (queriesCreated && world != null && world.IsCreated)
             {
@@ -364,7 +414,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
         /// <summary>
         /// 指定座標のチャンクがQuery内に存在するかを、生成段階に関係なく確認します。
         /// </summary>
-        /// <param name="chunkQuery">座標、状態、GeneratedTile Bufferを持つチャンクQueryです。</param>
+        /// <param name="chunkQuery">座標、状態、地形・資源Bufferを持つチャンクQueryです。</param>
         /// <param name="chunkX">検索する水平論理チャンク座標です。</param>
         /// <param name="chunkY">検索する垂直論理チャンク座標です。</param>
         /// <returns>指定座標を持つEntityが1つ以上あればtrueです。</returns>
@@ -385,10 +435,10 @@ namespace Farmware.WorldGeneration.PlayModeTests
         }
 
         /// <summary>
-        /// 指定座標のチャンクを調べ、Active状態かつ4096タイルを保持するEntityを取得します。
+        /// 指定座標のチャンクを調べ、Active状態かつ地形・資源を各4096件保持するEntityを取得します。
         /// </summary>
         /// <param name="entityManager">Default WorldのEntityManagerです。</param>
-        /// <param name="chunkQuery">座標、状態、GeneratedTile Bufferを持つチャンクQueryです。</param>
+        /// <param name="chunkQuery">座標、状態、地形・資源Bufferを持つチャンクQueryです。</param>
         /// <param name="chunkX">検索する水平論理チャンク座標です。</param>
         /// <param name="chunkY">検索する垂直論理チャンク座標です。</param>
         /// <param name="chunkEntity">成功時に、完全生成されたチャンクEntityを返します。</param>
@@ -416,7 +466,10 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 }
 
                 DynamicBuffer<GeneratedTile> tiles = entityManager.GetBuffer<GeneratedTile>(entities[index], true);
-                if (tiles.Length == WorldGridConstants.TilesPerChunk)
+                DynamicBuffer<GeneratedResourceTile> resources =
+                    entityManager.GetBuffer<GeneratedResourceTile>(entities[index], true);
+                if (tiles.Length == WorldGridConstants.TilesPerChunk
+                    && resources.Length == WorldGridConstants.TilesPerChunk)
                 {
                     chunkEntity = entities[index];
                     return true;
@@ -424,6 +477,41 @@ namespace Farmware.WorldGeneration.PlayModeTests
             }
 
             chunkEntity = Entity.Null;
+            return false;
+        }
+
+        /// <summary>
+        /// 原点チャンクの資源Bufferから最初の配置済みセルを探し、Resource Tilemapにも同じセルが表示されたか確認します。
+        /// </summary>
+        /// <param name="entityManager">Default WorldのEntityManagerです。</param>
+        /// <param name="chunkEntity">原点チャンクを表す完全生成済みEntityです。</param>
+        /// <param name="resourceTilemap">資源だけを重ね描画するTilemapです。</param>
+        /// <param name="resourceCell">成功時に、表示済み資源のワールドセル座標を返します。</param>
+        /// <returns>配置済み資源が1件以上あり、そのTileが表示済みならtrueです。</returns>
+        private static bool TryGetDisplayedResourceCell(
+            EntityManager entityManager,
+            Entity chunkEntity,
+            Tilemap resourceTilemap,
+            out Vector3Int resourceCell)
+        {
+            DynamicBuffer<GeneratedResourceTile> resources =
+                entityManager.GetBuffer<GeneratedResourceTile>(chunkEntity, true);
+
+            // Bufferは行優先なので、Indexを64で割った商と余りから原点チャンク内座標へ戻します。
+            for (int tileIndex = 0; tileIndex < resources.Length; tileIndex++)
+            {
+                if (resources[tileIndex].Type == GeneratedResourceType.None)
+                {
+                    continue;
+                }
+
+                int localX = tileIndex % WorldGridConstants.LogicalChunkSize;
+                int localY = tileIndex / WorldGridConstants.LogicalChunkSize;
+                resourceCell = new Vector3Int(localX, localY, 0);
+                return resourceTilemap.GetTile(resourceCell) != null;
+            }
+
+            resourceCell = default;
             return false;
         }
 
@@ -453,6 +541,24 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 actual.MovementCost,
                 Is.EqualTo(expected.MovementCost),
                 $"MovementCostが一致しません。Index={tileIndex}");
+        }
+
+        /// <summary>
+        /// 再生成前後の資源IDと表示差分を比較し、地形と同じ決定論が維持されていることを保証します。
+        /// </summary>
+        /// <param name="expected">遠方移動前に退避した資源データです。</param>
+        /// <param name="actual">原点へ戻った後に再生成された資源データです。</param>
+        /// <param name="tileIndex">失敗メッセージへ表示するチャンク内の行優先Indexです。</param>
+        private static void AssertResourceEquals(
+            GeneratedResourceTile expected,
+            GeneratedResourceTile actual,
+            int tileIndex)
+        {
+            Assert.That(actual.Type, Is.EqualTo(expected.Type), $"資源IDが一致しません。Index={tileIndex}");
+            Assert.That(
+                actual.VisualVariant,
+                Is.EqualTo(expected.VisualVariant),
+                $"資源表示差分が一致しません。Index={tileIndex}");
         }
     }
 }

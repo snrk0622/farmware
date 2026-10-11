@@ -1,5 +1,5 @@
-// このファイルは、Inspectorで編集したワールド生成設定をBaker経由でECSのSingleton Componentへ変換します。
-// MonoBehaviourは入力用に限定し、実行中の生成Systemは変換後のWorldGenerationSettingsだけを正として参照します。
+// このファイルは、Inspectorで編集した地形・資源生成設定をBaker経由でECSのSingleton Componentへ変換します。
+// MonoBehaviourは入力用に限定し、実行中の生成Systemは変換後のECS設定だけを正として参照します。
 
 using Unity.Entities;
 using UnityEngine;
@@ -8,7 +8,7 @@ namespace Farmware.WorldGeneration.Authoring
 {
     /// <summary>
     /// SceneまたはSubSceneからワールド生成設定を入力するためのAuthoring用MonoBehaviourです。
-    /// 開発用シードと気候閾値をInspectorで調整し、Bakerが実行時Entityデータへ変換します。
+    /// 開発用シード、気候閾値、資源密度をInspectorで調整し、Bakerが実行時Entityデータへ変換します。
     /// </summary>
     public sealed class WorldGenerationAuthoring : MonoBehaviour
     {
@@ -16,25 +16,25 @@ namespace Farmware.WorldGeneration.Authoring
         [Tooltip("開発用ワールドのシード文字列です。数字以外や日本語も使用できます。同じ文字列とGeneratorVersionなら同じ地形になります。")]
         [SerializeField] private string seedText = "Farmware";
 
-        // 互換性のない生成規則変更時に開発者が更新し、生成済みチャンクへ記録するバージョンです。
-        [Tooltip("生成規則の互換バージョンです。地形結果が変わる修正を行ったときだけ増やします。既存チャンクは記録済みのバージョンを維持します。")]
+        // 初期開発中は1へ固定し、正式なセーブ互換運用を始めた後だけ非互換変更に合わせて更新します。
+        [Tooltip("生成規則の互換バージョンです。初期開発中は1へ固定し、正式なセーブ互換運用を始めた後だけ非互換変更時に増やします。")]
         [Min(1)]
-        [SerializeField] private int generatorVersion = 2;
+        [SerializeField] private int generatorVersion = 1;
 
         // 標高の広がりを決める最も低周波な格子サイズで、Bake時からワールド寿命中は固定します。
         [Tooltip("標高ノイズの基準格子サイズです。単位はタイルです。大きくすると水域と岩地が広く続き、変更すると生成結果が変わります。")]
         [Min(16)]
         [SerializeField] private int elevationCellSizeInTiles = 192;
 
-        // 気温バイオームの広がりを決める格子サイズで、複数チャンクにまたがるよう初期値を設定します。
+        // 気温バイオームの広がりを決める格子サイズで、約1.5論理チャンクのまとまりになる初期値です。
         [Tooltip("気温ノイズの基準格子サイズです。単位はタイルです。大きくすると同じ気温帯が広く続き、変更すると生成結果が変わります。")]
         [Min(16)]
-        [SerializeField] private int temperatureCellSizeInTiles = 192;
+        [SerializeField] private int temperatureCellSizeInTiles = 96;
 
-        // 湿度バイオームの広がりを決める格子サイズで、森林と草原のまとまりへ影響します。
+        // 湿度バイオームの広がりを決める格子サイズで、約1.25論理チャンクのまとまりになる初期値です。
         [Tooltip("湿度ノイズの基準格子サイズです。単位はタイルです。大きくすると森林や乾燥地が広く続き、変更すると生成結果が変わります。")]
         [Min(16)]
-        [SerializeField] private int moistureCellSizeInTiles = 160;
+        [SerializeField] private int moistureCellSizeInTiles = 80;
 
         // 低周波へ重ねる細部の段数で、Bake時にECS設定へコピーされます。
         [Tooltip("重ねるノイズ解像度の数です。増やすと細部が増えますが生成計算が重くなり、生成結果も変わります。初期候補は3〜5です。")]
@@ -70,6 +70,36 @@ namespace Farmware.WorldGeneration.Authoring
         [Tooltip("これ以上を森林候補とみなす湿度閾値です。0〜1で指定し、小さくすると森林が増えます。変更すると生成結果が変わります。")]
         [Range(0f, 1f)]
         [SerializeField] private float wetMoistureThreshold = 0.603f;
+
+        // 木・石・水・砂が1タイルずつ散らばらず、まとまった採取場所になるように使う低周波格子です。
+        [Tooltip("基礎資源の群れを作るノイズ格子サイズです。単位はタイルです。大きくすると同じ資源が広くまとまり、変更すると資源配置が変わります。")]
+        [Min(4)]
+        [SerializeField] private int resourceClusterCellSizeInTiles = 24;
+
+        // 資源群の輪郭へ追加する細部の段数で、地形より少なくして細かな点在を抑えます。
+        [Tooltip("資源群ノイズへ重ねる解像度の数です。増やすと輪郭が細かくなりますが生成負荷も増えます。初期値は2です。")]
+        [Range(1, 4)]
+        [SerializeField] private int resourceOctaveCount = 2;
+
+        // 樹木群の密度を決める0〜1の下限で、低くすると配置タイルが増えます。
+        [Tooltip("樹木資源を配置するノイズ下限です。0〜1で指定し、小さくすると樹木群が増えます。")]
+        [Range(0f, 1f)]
+        [SerializeField] private float treeResourceThreshold = 50000f / ushort.MaxValue;
+
+        // 石群の密度を決める0〜1の下限で、木より希少になる初期値です。
+        [Tooltip("石資源を配置するノイズ下限です。0〜1で指定し、小さくすると石群が増えます。")]
+        [Range(0f, 1f)]
+        [SerializeField] private float stoneResourceThreshold = 55500f / ushort.MaxValue;
+
+        // 水域内の採取可能な水資源群を決める0〜1の下限です。
+        [Tooltip("水資源を配置するノイズ下限です。0〜1で指定し、小さくすると水域内の採取候補が増えます。")]
+        [Range(0f, 1f)]
+        [SerializeField] private float waterResourceThreshold = 51500f / ushort.MaxValue;
+
+        // 砂地内の採取可能な砂資源群を決める0〜1の下限です。
+        [Tooltip("砂資源を配置するノイズ下限です。0〜1で指定し、小さくすると砂地内の採取候補が増えます。")]
+        [Range(0f, 1f)]
+        [SerializeField] private float sandResourceThreshold = 51500f / ushort.MaxValue;
 
         // 可視範囲の外側で事前生成する幅で、最低1チャンクを確保してカメラ移動時の空白を減らします。
         [Tooltip("カメラ表示範囲の外側へ先読みする幅です。単位は論理チャンクです。大きくすると高速パンに強くなりますが、生成量とメモリ使用量が増えます。")]
@@ -121,7 +151,7 @@ namespace Farmware.WorldGeneration.Authoring
         }
 
         /// <summary>
-        /// WorldGenerationAuthoringを実行時のWorldGenerationSettings Entityへ変換します。
+        /// WorldGenerationAuthoringを実行時の地形・資源・ストリーミング設定Entityへ変換します。
         /// Bake時だけMonoBehaviourを読み、実行中の生成JobへUnityEngine.Object参照を持ち込みません。
         /// </summary>
         private sealed class WorldGenerationBaker : Baker<WorldGenerationAuthoring>
@@ -154,6 +184,15 @@ namespace Farmware.WorldGeneration.Authoring
                     RetentionMarginInChunks = authoring.retentionMarginInChunks,
                     MaximumConcurrentGenerations = authoring.maximumConcurrentGenerations,
                     MaximumSubChunkApplicationsPerFrame = authoring.maximumSubChunkApplicationsPerFrame
+                });
+                AddComponent(entity, new ResourceGenerationSettings
+                {
+                    ClusterCellSizeInTiles = authoring.resourceClusterCellSizeInTiles,
+                    OctaveCount = authoring.resourceOctaveCount,
+                    TreeThreshold = ToNormalizedUShort(authoring.treeResourceThreshold),
+                    StoneThreshold = ToNormalizedUShort(authoring.stoneResourceThreshold),
+                    WaterThreshold = ToNormalizedUShort(authoring.waterResourceThreshold),
+                    SandThreshold = ToNormalizedUShort(authoring.sandResourceThreshold)
                 });
             }
         }

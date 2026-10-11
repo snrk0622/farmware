@@ -204,7 +204,7 @@ Animate only the tiny water ripples in a subtle seamless four-frame loop. Keep t
 ```
 
 - Animation settings: `4 frames`、Loop、動きの強さ`Low`
-- [ ] 静止差分を生成
+- [x] 静止差分を生成
 - [ ] アニメーション採用可否を決定
 - [ ] 取込
 - [ ] 設定

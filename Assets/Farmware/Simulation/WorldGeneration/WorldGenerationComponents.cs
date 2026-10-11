@@ -88,7 +88,7 @@ namespace Farmware.WorldGeneration
 
     /// <summary>
     /// 自然資源を配置できる地形候補をビット単位で表します。
-    /// 実際の資源配置はPhase 3で別Systemがこの適性と座標ハッシュを組み合わせて決定します。
+    /// 実際の資源配置では、チャンク生成Jobがこの適性と用途別ノイズを組み合わせて候補を決定します。
     /// </summary>
     [Flags]
     public enum ResourceSuitability : byte
@@ -106,6 +106,51 @@ namespace Farmware.WorldGeneration
         Water = 1 << 2,
 
         /// <summary>砂の採取候補にできます。</summary>
+        Sand = 1 << 3
+    }
+
+    /// <summary>
+    /// ワールド初回生成で配置する基礎資源の安定IDです。
+    /// セーブデータと表示の対応に使うため、既存値の番号は将来も変更しません。
+    /// </summary>
+    public enum GeneratedResourceType : byte
+    {
+        /// <summary>このタイルに基礎資源が配置されていない状態です。</summary>
+        None = 0,
+
+        /// <summary>木材系の採取元になる樹木資源です。</summary>
+        Tree = 1,
+
+        /// <summary>石材系の採取元になる石資源です。</summary>
+        Stone = 2,
+
+        /// <summary>流体系の採取元になる水資源です。</summary>
+        Water = 3,
+
+        /// <summary>砂系の採取元になる砂資源です。</summary>
+        Sand = 4
+    }
+
+    /// <summary>
+    /// 複数種類の基礎資源を1つの検索条件へまとめるビットフラグです。
+    /// 初期位置候補の周囲に必要な資源が自然配置されているか確認するときに使用します。
+    /// </summary>
+    [Flags]
+    public enum GeneratedResourceTypeMask : byte
+    {
+        /// <summary>資源の存在を条件にしません。</summary>
+        None = 0,
+
+        /// <summary>樹木資源が少なくとも1タイル必要です。</summary>
+        Tree = 1 << 0,
+
+        /// <summary>石資源が少なくとも1タイル必要です。</summary>
+        Stone = 1 << 1,
+
+        /// <summary>水資源が少なくとも1タイル必要です。</summary>
+        Water = 1 << 2,
+
+        /// <summary>砂資源が少なくとも1タイル必要です。</summary>
         Sand = 1 << 3
     }
 
@@ -184,7 +229,7 @@ namespace Farmware.WorldGeneration
 
         /// <summary>
         /// Phase 1〜2の比較基準となる既定設定を作ります。
-        /// 調整値はこの1か所に集約し、生成結果を変える変更ではGeneratorVersionも更新します。
+        /// 調整値はこの1か所に集約します。初期開発中は呼び出し側から1を渡し、正式なセーブ互換運用開始後だけ非互換変更に合わせて更新します。
         /// </summary>
         /// <param name="worldSeed">文字列から変換済みのワールドシードです。</param>
         /// <param name="generatorVersion">保存対象の生成器バージョンです。</param>
@@ -196,8 +241,8 @@ namespace Farmware.WorldGeneration
                 WorldSeed = worldSeed,
                 GeneratorVersion = generatorVersion,
                 ElevationCellSizeInTiles = 192,
-                TemperatureCellSizeInTiles = 192,
-                MoistureCellSizeInTiles = 160,
+                TemperatureCellSizeInTiles = 96,
+                MoistureCellSizeInTiles = 80,
                 OctaveCount = 4,
                 BiomeTransitionWidthInTiles = 6,
                 WaterThreshold = 20000,
@@ -205,6 +250,49 @@ namespace Farmware.WorldGeneration
                 HotTemperatureThreshold = 40000,
                 DryMoistureThreshold = 28500,
                 WetMoistureThreshold = 39500
+            };
+        }
+    }
+
+    /// <summary>
+    /// ワールド全体の基礎資源群の大きさと種類別密度を保持する生成設定です。
+    /// AuthoringからSingleton Entityへ変換し、チャンク生成Jobと初期位置探索が同じ値を参照します。
+    /// </summary>
+    public struct ResourceGenerationSettings : IComponentData
+    {
+        /// <summary>資源群をまとめるノイズの基準格子サイズです。単位はタイルです。</summary>
+        public int ClusterCellSizeInTiles;
+
+        /// <summary>資源群の輪郭へ重ねるノイズ解像度の数です。</summary>
+        public int OctaveCount;
+
+        /// <summary>樹木を配置する0〜65535のノイズ下限です。大きいほど樹木が減ります。</summary>
+        public ushort TreeThreshold;
+
+        /// <summary>石を配置する0〜65535のノイズ下限です。大きいほど石が減ります。</summary>
+        public ushort StoneThreshold;
+
+        /// <summary>水資源を配置する0〜65535のノイズ下限です。大きいほど水資源が減ります。</summary>
+        public ushort WaterThreshold;
+
+        /// <summary>砂資源を配置する0〜65535のノイズ下限です。大きいほど砂資源が減ります。</summary>
+        public ushort SandThreshold;
+
+        /// <summary>
+        /// Phase 3の初期検証に使う資源群設定を作ります。
+        /// 24タイル程度のまとまりを作り、石だけを少し希少にする暫定値です。
+        /// </summary>
+        /// <returns>木、石、水、砂をワールド全体へ群生させる設定です。</returns>
+        public static ResourceGenerationSettings CreateDefault()
+        {
+            return new ResourceGenerationSettings
+            {
+                ClusterCellSizeInTiles = 24,
+                OctaveCount = 2,
+                TreeThreshold = 50000,
+                StoneThreshold = 55500,
+                WaterThreshold = 51500,
+                SandThreshold = 51500
             };
         }
     }
@@ -330,5 +418,19 @@ namespace Farmware.WorldGeneration
 
         /// <summary>0〜65535へ正規化した連続湿度値です。</summary>
         public ushort Moisture;
+    }
+
+    /// <summary>
+    /// 1タイルに対応する基礎資源の生成結果です。
+    /// GeneratedTileと同じ行優先4096件のDynamic Bufferへ格納し、採取やセーブ差分では地形と別に変更します。
+    /// </summary>
+    [InternalBufferCapacity(0)]
+    public struct GeneratedResourceTile : IBufferElementData
+    {
+        /// <summary>このタイルへ初期配置された基礎資源の安定IDです。</summary>
+        public GeneratedResourceType Type;
+
+        /// <summary>同じ資源内の見た目差分に使う0〜3の決定論的な番号です。</summary>
+        public byte VisualVariant;
     }
 }
