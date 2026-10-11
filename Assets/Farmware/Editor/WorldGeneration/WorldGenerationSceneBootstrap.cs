@@ -55,6 +55,24 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>隣接バイオームの地面を段階的に混ぜる試作幅です。単位はタイルです。</summary>
         private const int PrototypeBiomeTransitionWidthInTiles = 6;
 
+        /// <summary>川の大きな蛇行を決める試作ノイズ格子サイズです。単位はタイルです。</summary>
+        private const int PrototypeRiverCellSizeInTiles = 96;
+
+        /// <summary>内陸の池をまとめる試作ノイズ格子サイズです。単位はタイルです。</summary>
+        private const int PrototypePondCellSizeInTiles = 48;
+
+        /// <summary>川と池の輪郭へ重ねる試作ノイズ解像度数です。</summary>
+        private const int PrototypeFreshWaterOctaveCount = 2;
+
+        /// <summary>川の中心線から許容する固定小数点差をInspector表現へ戻した値です。</summary>
+        private const float PrototypeRiverCenterLineHalfWidth = 600f / ushort.MaxValue;
+
+        /// <summary>池を生成する固定小数点下限をInspector表現へ戻した値です。</summary>
+        private const float PrototypePondThreshold = 57000f / ushort.MaxValue;
+
+        /// <summary>淡水を生成できる固定小数点標高上限をInspector表現へ戻した値です。</summary>
+        private const float PrototypeFreshWaterMaximumElevation = 47000f / ushort.MaxValue;
+
         /// <summary>基礎資源を点ではなく群れとして配置する試作ノイズ格子サイズです。単位はタイルです。</summary>
         private const int PrototypeResourceClusterCellSizeInTiles = 24;
 
@@ -66,9 +84,6 @@ namespace Farmware.WorldGeneration.Editor
 
         /// <summary>石資源を配置する固定小数点下限をInspectorの0〜1表現へ戻した値です。</summary>
         private const float PrototypeStoneResourceThreshold = 55500f / ushort.MaxValue;
-
-        /// <summary>水資源を配置する固定小数点下限をInspectorの0〜1表現へ戻した値です。</summary>
-        private const float PrototypeWaterResourceThreshold = 51500f / ushort.MaxValue;
 
         /// <summary>砂資源を配置する固定小数点下限をInspectorの0〜1表現へ戻した値です。</summary>
         private const float PrototypeSandResourceThreshold = 51500f / ushort.MaxValue;
@@ -101,12 +116,16 @@ namespace Farmware.WorldGeneration.Editor
             CreateOrUpdateFallbackTile("Grassland", new Color32(112, 169, 86, 255));
             CreateOrUpdateFallbackTile("Forest", new Color32(61, 112, 66, 255));
             CreateOrUpdateFallbackTile("Desert", new Color32(210, 177, 100, 255));
-            CreateOrUpdateFallbackTile("Water", new Color32(66, 132, 194, 255));
+            CreateOrUpdateFallbackTile("FreshWater", new Color32(76, 157, 211, 255));
+            CreateOrUpdateFallbackTile("SaltWater", new Color32(42, 101, 176, 255));
             CreateOrUpdateFallbackTile("RockWall", new Color32(101, 101, 109, 255));
             CreateOrUpdateFallbackResourceTile("TreeResource", GeneratedResourceType.Tree);
             CreateOrUpdateFallbackResourceTile("StoneResource", GeneratedResourceType.Stone);
-            CreateOrUpdateFallbackResourceTile("WaterResource", GeneratedResourceType.Water);
             CreateOrUpdateFallbackResourceTile("SandResource", GeneratedResourceType.Sand);
+
+            // 水は地形そのものを採水源に変更したため、旧水域Tileと水資源アイコンを再生成対象から除外します。
+            DeleteObsoleteFallbackTile("Water");
+            DeleteObsoleteFallbackTile("WaterResource");
 
             // PNGのSaveAndReimport中に以前読み込んだUnity Object参照が無効化される場合があります。
             // 9種類をすべて生成した後、AssetDatabaseから最新のTileを読み直してSceneへ保存します。
@@ -115,11 +134,11 @@ namespace Farmware.WorldGeneration.Editor
             Tile grasslandTile = LoadRequiredFallbackTile("Grassland");
             Tile forestTile = LoadRequiredFallbackTile("Forest");
             Tile desertTile = LoadRequiredFallbackTile("Desert");
-            Tile waterTile = LoadRequiredFallbackTile("Water");
+            Tile freshWaterTile = LoadRequiredFallbackTile("FreshWater");
+            Tile saltWaterTile = LoadRequiredFallbackTile("SaltWater");
             Tile rockWallTile = LoadRequiredFallbackTile("RockWall");
             Tile treeResourceTile = LoadRequiredFallbackTile("TreeResource");
             Tile stoneResourceTile = LoadRequiredFallbackTile("StoneResource");
-            Tile waterResourceTile = LoadRequiredFallbackTile("WaterResource");
             Tile sandResourceTile = LoadRequiredFallbackTile("SandResource");
 
             SceneAsset settingsSubSceneAsset = CreateOrUpdateSettingsSubScene();
@@ -128,11 +147,11 @@ namespace Farmware.WorldGeneration.Editor
                 grasslandTile,
                 forestTile,
                 desertTile,
-                waterTile,
+                freshWaterTile,
+                saltWaterTile,
                 rockWallTile,
                 treeResourceTile,
                 stoneResourceTile,
-                waterResourceTile,
                 sandResourceTile);
             ConfigurePixelArtQualitySettings();
 
@@ -183,6 +202,21 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>
+        /// 旧仕様で生成したPNGとTileをAssetDatabase経由で削除します。
+        /// GUID参照もUnityに通知し、ファイルだけを消してSceneへ壊れた参照を残さないための移行処理です。
+        /// </summary>
+        /// <param name="assetName">拡張子を除いた旧フォールバック素材名です。</param>
+        private static void DeleteObsoleteFallbackTile(string assetName)
+        {
+            string tileAssetPath = $"{FallbackAssetFolder}/{assetName}.asset";
+            string textureAssetPath = $"{FallbackAssetFolder}/{assetName}.png";
+
+            // DeleteAssetは対象が存在しない場合にfalseを返すだけなので、構築処理を何度実行しても同じ結果になります。
+            AssetDatabase.DeleteAsset(tileAssetPath);
+            AssetDatabase.DeleteAsset(textureAssetPath);
+        }
+
+        /// <summary>
         /// 指定色の16×16 PNGを作成・更新し、Point・MipMapなし・無圧縮・PPU 16のSpriteとTileへ変換します。
         /// </summary>
         /// <param name="assetName">PNGとTileアセットに使用する英語名です。</param>
@@ -202,11 +236,11 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>
-        /// 木・石・水・砂を見分けられる小さな透明背景アイコンを16×16 PNGとTileへ変換します。
+        /// 木・石・砂を見分けられる小さな透明背景アイコンを16×16 PNGとTileへ変換します。
         /// 本番Spriteではなく、資源分布とチャンク境界をGameビューで検証するための仮表示です。
         /// </summary>
         /// <param name="assetName">PNGとTileアセットに使用する英語名です。</param>
-        /// <param name="resourceType">形と色を決める基礎資源IDです。</param>
+        /// <param name="resourceType">形と色を決める木・石・砂の基礎資源IDです。</param>
         /// <returns>作成または更新された資源表示専用Tileアセットです。</returns>
         private static Tile CreateOrUpdateFallbackResourceTile(
             string assetName,
@@ -230,7 +264,7 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>
         /// 資源種類と16×16内座標から、仮アイコンの不透明色または透明色を返します。
         /// </summary>
-        /// <param name="resourceType">描画する木、石、水、砂の種類です。</param>
+        /// <param name="resourceType">描画する木、石、砂の種類です。</param>
         /// <param name="x">画像左端からの0〜15の水平ピクセル座標です。</param>
         /// <param name="y">画像下端からの0〜15の垂直ピクセル座標です。</param>
         /// <returns>単純形状の色です。形の外側は完全透明です。</returns>
@@ -262,11 +296,6 @@ namespace Farmware.WorldGeneration.Editor
                     // 横長の楕円で岩塊を表し、完全な正方形より地形Tileとの差が読みやすくなるようにします。
                     bool isStone = (offsetX * offsetX * 3) + (offsetY * offsetY * 5) <= 245;
                     return isStone ? new Color32(185, 190, 199, 255) : transparent;
-
-                case GeneratedResourceType.Water:
-                    // 小さな円形マーカーを明るい水色にし、下層の濃い水域から採取候補だけを分離します。
-                    bool isWaterSource = (offsetX * offsetX) + (offsetY * offsetY) <= 38;
-                    return isWaterSource ? new Color32(100, 220, 255, 255) : transparent;
 
                 case GeneratedResourceType.Sand:
                     // ひし形の砂山を暖色で描き、砂地の全面色と区別します。
@@ -423,6 +452,18 @@ namespace Farmware.WorldGeneration.Editor
                 PrototypeMoistureCellSizeInTiles;
             serializedAuthoring.FindProperty("biomeTransitionWidthInTiles").intValue =
                 PrototypeBiomeTransitionWidthInTiles;
+            serializedAuthoring.FindProperty("riverCellSizeInTiles").intValue =
+                PrototypeRiverCellSizeInTiles;
+            serializedAuthoring.FindProperty("pondCellSizeInTiles").intValue =
+                PrototypePondCellSizeInTiles;
+            serializedAuthoring.FindProperty("freshWaterOctaveCount").intValue =
+                PrototypeFreshWaterOctaveCount;
+            serializedAuthoring.FindProperty("riverCenterLineHalfWidth").floatValue =
+                PrototypeRiverCenterLineHalfWidth;
+            serializedAuthoring.FindProperty("pondThreshold").floatValue =
+                PrototypePondThreshold;
+            serializedAuthoring.FindProperty("freshWaterMaximumElevation").floatValue =
+                PrototypeFreshWaterMaximumElevation;
             serializedAuthoring.FindProperty("resourceClusterCellSizeInTiles").intValue =
                 PrototypeResourceClusterCellSizeInTiles;
             serializedAuthoring.FindProperty("resourceOctaveCount").intValue =
@@ -431,8 +472,6 @@ namespace Farmware.WorldGeneration.Editor
                 PrototypeTreeResourceThreshold;
             serializedAuthoring.FindProperty("stoneResourceThreshold").floatValue =
                 PrototypeStoneResourceThreshold;
-            serializedAuthoring.FindProperty("waterResourceThreshold").floatValue =
-                PrototypeWaterResourceThreshold;
             serializedAuthoring.FindProperty("sandResourceThreshold").floatValue =
                 PrototypeSandResourceThreshold;
             serializedAuthoring.ApplyModifiedPropertiesWithoutUndo();
@@ -446,22 +485,22 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="grasslandTile">草原用の単色Tileです。</param>
         /// <param name="forestTile">森林用の単色Tileです。</param>
         /// <param name="desertTile">砂漠用の単色Tileです。</param>
-        /// <param name="waterTile">水域用の単色Tileです。</param>
+        /// <param name="freshWaterTile">川と池の淡水域用の単色Tileです。</param>
+        /// <param name="saltWaterTile">海の海水域用の単色Tileです。</param>
         /// <param name="rockWallTile">岩壁用の単色Tileです。</param>
         /// <param name="treeResourceTile">樹木資源用の透明背景Tileです。</param>
         /// <param name="stoneResourceTile">石資源用の透明背景Tileです。</param>
-        /// <param name="waterResourceTile">水資源用の透明背景Tileです。</param>
         /// <param name="sandResourceTile">砂資源用の透明背景Tileです。</param>
         private static void ConfigureMainScene(
             SceneAsset settingsSubSceneAsset,
             TileBase grasslandTile,
             TileBase forestTile,
             TileBase desertTile,
-            TileBase waterTile,
+            TileBase freshWaterTile,
+            TileBase saltWaterTile,
             TileBase rockWallTile,
             TileBase treeResourceTile,
             TileBase stoneResourceTile,
-            TileBase waterResourceTile,
             TileBase sandResourceTile)
         {
             Scene mainScene = EditorSceneManager.OpenScene(MainScenePath, OpenSceneMode.Single);
@@ -501,11 +540,11 @@ namespace Farmware.WorldGeneration.Editor
                 grasslandTile,
                 forestTile,
                 desertTile,
-                waterTile,
+                freshWaterTile,
+                saltWaterTile,
                 rockWallTile,
                 treeResourceTile,
                 stoneResourceTile,
-                waterResourceTile,
                 sandResourceTile);
 
             Camera camera = FindMainCamera(mainScene);
@@ -527,11 +566,11 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="grasslandTile">草原用の単色Tileです。</param>
         /// <param name="forestTile">森林用の単色Tileです。</param>
         /// <param name="desertTile">砂漠用の単色Tileです。</param>
-        /// <param name="waterTile">水域用の単色Tileです。</param>
+        /// <param name="freshWaterTile">川と池の淡水域用の単色Tileです。</param>
+        /// <param name="saltWaterTile">海の海水域用の単色Tileです。</param>
         /// <param name="rockWallTile">岩壁用の単色Tileです。</param>
         /// <param name="treeResourceTile">樹木資源用の透明背景Tileです。</param>
         /// <param name="stoneResourceTile">石資源用の透明背景Tileです。</param>
-        /// <param name="waterResourceTile">水資源用の透明背景Tileです。</param>
         /// <param name="sandResourceTile">砂資源用の透明背景Tileです。</param>
         private static void ConfigurePresenter(
             ChunkTilemapPresenter presenter,
@@ -540,11 +579,11 @@ namespace Farmware.WorldGeneration.Editor
             TileBase grasslandTile,
             TileBase forestTile,
             TileBase desertTile,
-            TileBase waterTile,
+            TileBase freshWaterTile,
+            TileBase saltWaterTile,
             TileBase rockWallTile,
             TileBase treeResourceTile,
             TileBase stoneResourceTile,
-            TileBase waterResourceTile,
             TileBase sandResourceTile)
         {
             presenter.Configure(
@@ -553,11 +592,11 @@ namespace Farmware.WorldGeneration.Editor
                 grasslandTile,
                 forestTile,
                 desertTile,
-                waterTile,
+                freshWaterTile,
+                saltWaterTile,
                 rockWallTile,
                 treeResourceTile,
                 stoneResourceTile,
-                waterResourceTile,
                 sandResourceTile);
             EditorUtility.SetDirty(presenter);
         }
@@ -737,11 +776,11 @@ namespace Farmware.WorldGeneration.Editor
                 "Grassland",
                 "Forest",
                 "Desert",
-                "Water",
+                "FreshWater",
+                "SaltWater",
                 "RockWall",
                 "TreeResource",
                 "StoneResource",
-                "WaterResource",
                 "SandResource"
             };
             for (int index = 0; index < tileNames.Length; index++)
@@ -824,11 +863,11 @@ namespace Farmware.WorldGeneration.Editor
                 "grasslandTile",
                 "forestTile",
                 "desertTile",
-                "waterTile",
+                "freshWaterTile",
+                "saltWaterTile",
                 "rockWallTile",
                 "treeResourceTile",
                 "stoneResourceTile",
-                "waterResourceTile",
                 "sandResourceTile"
             };
 

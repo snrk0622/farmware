@@ -48,6 +48,41 @@ namespace Farmware.WorldGeneration
     }
 
     /// <summary>
+    /// 水域が淡水か海水かを表す安定IDです。
+    /// 採水設備や水生生物はGroundTypeだけでなく、この値を参照して利用可能な水を判定します。
+    /// </summary>
+    public enum WaterSalinity : byte
+    {
+        /// <summary>水域ではない陸地または岩壁です。</summary>
+        None = 0,
+
+        /// <summary>川または池として生成された淡水です。</summary>
+        FreshWater = 1,
+
+        /// <summary>広域の低標高地として生成された海水です。</summary>
+        SaltWater = 2
+    }
+
+    /// <summary>
+    /// 水域の生成由来を表す安定IDです。
+    /// 同じ淡水でも川と池を区別し、将来の魚・設備・見た目の条件へ利用できるようにします。
+    /// </summary>
+    public enum WaterBodyType : byte
+    {
+        /// <summary>水域ではありません。</summary>
+        None = 0,
+
+        /// <summary>連続ノイズの等高線に沿って陸上を横断する川です。</summary>
+        River = 1,
+
+        /// <summary>内陸の低地へまとまって生成される池です。</summary>
+        Pond = 2,
+
+        /// <summary>海面より低い広域地形として生成される海です。</summary>
+        Sea = 3
+    }
+
+    /// <summary>
     /// 連続した標高値をゲームルール向けに大まかに分類した値です。
     /// デバッグ表示や地形別の配置条件で使用します。
     /// </summary>
@@ -102,9 +137,7 @@ namespace Farmware.WorldGeneration
         /// <summary>石の群生または固定資源候補にできます。</summary>
         Stone = 1 << 1,
 
-        /// <summary>水源として利用できます。</summary>
-        Water = 1 << 2,
-
+        // bit 2は旧Water適性が使用していたため、既存データの誤読を防ぐ目的で再利用しません。
         /// <summary>砂の採取候補にできます。</summary>
         Sand = 1 << 3
     }
@@ -124,19 +157,17 @@ namespace Farmware.WorldGeneration
         /// <summary>石材系の採取元になる石資源です。</summary>
         Stone = 2,
 
-        /// <summary>流体系の採取元になる水資源です。</summary>
-        Water = 3,
-
+        // ID 3は旧Water資源が使用していたため、既存データの誤読を防ぐ目的で再利用しません。
         /// <summary>砂系の採取元になる砂資源です。</summary>
         Sand = 4
     }
 
     /// <summary>
-    /// 複数種類の基礎資源を1つの検索条件へまとめるビットフラグです。
-    /// 初期位置候補の周囲に必要な資源が自然配置されているか確認するときに使用します。
+    /// 初期位置の周囲に必要な自然資源を1つの検索条件へまとめるビットフラグです。
+    /// 木・石・砂は生成資源、水は水域地形そのものを検索対象にします。
     /// </summary>
     [Flags]
-    public enum GeneratedResourceTypeMask : byte
+    public enum NaturalResourceTypeMask : byte
     {
         /// <summary>資源の存在を条件にしません。</summary>
         None = 0,
@@ -147,7 +178,7 @@ namespace Farmware.WorldGeneration
         /// <summary>石資源が少なくとも1タイル必要です。</summary>
         Stone = 1 << 1,
 
-        /// <summary>水資源が少なくとも1タイル必要です。</summary>
+        /// <summary>淡水または海水の水域が少なくとも1タイル必要です。</summary>
         Water = 1 << 2,
 
         /// <summary>砂資源が少なくとも1タイル必要です。</summary>
@@ -212,8 +243,26 @@ namespace Farmware.WorldGeneration
         /// <summary>バイオーム境界で隣接地面を混ぜる帯のおおよその幅です。単位はタイルです。</summary>
         public int BiomeTransitionWidthInTiles;
 
-        /// <summary>これ未満の標高を水域にする0〜65535の閾値です。</summary>
-        public ushort WaterThreshold;
+        /// <summary>これ未満の標高を海水域にする0〜65535の閾値です。</summary>
+        public ushort SeaLevelThreshold;
+
+        /// <summary>川の大きな蛇行を決めるノイズ格子サイズです。単位はタイルです。</summary>
+        public int RiverCellSizeInTiles;
+
+        /// <summary>池のまとまりを決めるノイズ格子サイズです。単位はタイルです。</summary>
+        public int PondCellSizeInTiles;
+
+        /// <summary>川と池の輪郭へ重ねるノイズ解像度の数です。</summary>
+        public int FreshWaterOctaveCount;
+
+        /// <summary>川の中心値32768から許容する差です。大きいほど川幅と本数が増えます。</summary>
+        public ushort RiverCenterLineHalfWidth;
+
+        /// <summary>池を生成する0〜65535のノイズ下限です。大きいほど池が減ります。</summary>
+        public ushort PondThreshold;
+
+        /// <summary>川と池を生成できる0〜65535の最大標高です。岩壁内や山頂の水域を防ぎます。</summary>
+        public ushort FreshWaterMaximumElevation;
 
         /// <summary>これ以上の標高を岩壁にする0〜65535の閾値です。</summary>
         public ushort RockWallThreshold;
@@ -245,7 +294,13 @@ namespace Farmware.WorldGeneration
                 MoistureCellSizeInTiles = 80,
                 OctaveCount = 4,
                 BiomeTransitionWidthInTiles = 6,
-                WaterThreshold = 20000,
+                SeaLevelThreshold = 20000,
+                RiverCellSizeInTiles = 96,
+                PondCellSizeInTiles = 48,
+                FreshWaterOctaveCount = 2,
+                RiverCenterLineHalfWidth = 600,
+                PondThreshold = 57000,
+                FreshWaterMaximumElevation = 47000,
                 RockWallThreshold = 53500,
                 HotTemperatureThreshold = 40000,
                 DryMoistureThreshold = 28500,
@@ -272,9 +327,6 @@ namespace Farmware.WorldGeneration
         /// <summary>石を配置する0〜65535のノイズ下限です。大きいほど石が減ります。</summary>
         public ushort StoneThreshold;
 
-        /// <summary>水資源を配置する0〜65535のノイズ下限です。大きいほど水資源が減ります。</summary>
-        public ushort WaterThreshold;
-
         /// <summary>砂資源を配置する0〜65535のノイズ下限です。大きいほど砂資源が減ります。</summary>
         public ushort SandThreshold;
 
@@ -282,7 +334,7 @@ namespace Farmware.WorldGeneration
         /// Phase 3の初期検証に使う資源群設定を作ります。
         /// 24タイル程度のまとまりを作り、石だけを少し希少にする暫定値です。
         /// </summary>
-        /// <returns>木、石、水、砂をワールド全体へ群生させる設定です。</returns>
+        /// <returns>木、石、砂をワールド全体へ群生させる設定です。</returns>
         public static ResourceGenerationSettings CreateDefault()
         {
             return new ResourceGenerationSettings
@@ -291,7 +343,6 @@ namespace Farmware.WorldGeneration
                 OctaveCount = 2,
                 TreeThreshold = 50000,
                 StoneThreshold = 55500,
-                WaterThreshold = 51500,
                 SandThreshold = 51500
             };
         }
@@ -397,6 +448,12 @@ namespace Farmware.WorldGeneration
 
         /// <summary>建築やリンク判定に使う基礎地面種別です。</summary>
         public GroundType Ground;
+
+        /// <summary>水域なら淡水または海水、陸地ならNoneです。</summary>
+        public WaterSalinity WaterSalinity;
+
+        /// <summary>水域なら川・池・海の生成由来、陸地ならNoneです。</summary>
+        public WaterBodyType WaterBodyType;
 
         /// <summary>連続標高をゲームルール向けに分類した値です。</summary>
         public ElevationClass ElevationClass;

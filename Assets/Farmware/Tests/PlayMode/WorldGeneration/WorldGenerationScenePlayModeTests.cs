@@ -103,8 +103,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
         }
 
         /// <summary>
-        /// 開発者用可視化がBiome、連続ノイズ、移行帯を異なる色へ写像し、論理BiomeとGroundの差を正しく判定することを検証します。
-        /// SceneやECS Worldを作らない純粋計算として、表示色の両端と水域除外をまとめて保証します。
+        /// 開発者用可視化がBiome、連続ノイズ、水域、移行帯を異なる色へ写像し、論理BiomeとGroundの差を正しく判定することを検証します。
+        /// SceneやECS Worldを作らない純粋計算として、表示色の両端、水域分類、水域除外をまとめて保証します。
         /// </summary>
         [Test]
         public void DebugVisualization_MapsGeneratedTileValuesWithoutChangingSimulationData()
@@ -146,10 +146,41 @@ namespace Farmware.WorldGeneration.PlayModeTests
 
             GeneratedTile waterTile = forestTransitionTile;
             waterTile.Ground = GroundType.Water;
+            waterTile.WaterSalinity = WaterSalinity.FreshWater;
+            waterTile.WaterBodyType = WaterBodyType.River;
             Assert.That(
                 WorldGenerationDebugVisualizationOverlay.IsBiomeTransitionTile(waterTile),
                 Is.False,
                 "標高分類で生じる水域はバイオーム移行帯へ数えません。");
+
+            Color freshWaterColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.WaterSalinity,
+                waterTile);
+            GeneratedTile saltWaterTile = waterTile;
+            saltWaterTile.WaterSalinity = WaterSalinity.SaltWater;
+            saltWaterTile.WaterBodyType = WaterBodyType.Sea;
+            Color saltWaterColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.WaterSalinity,
+                saltWaterTile);
+            Assert.That(
+                freshWaterColor,
+                Is.Not.EqualTo(saltWaterColor),
+                "淡水と海水はWater Salinity表示で別の色になる必要があります。");
+
+            Color riverColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.WaterBody,
+                waterTile);
+            GeneratedTile pondTile = waterTile;
+            pondTile.WaterBodyType = WaterBodyType.Pond;
+            Color pondColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.WaterBody,
+                pondTile);
+            Color seaColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.WaterBody,
+                saltWaterTile);
+            Assert.That(riverColor, Is.Not.EqualTo(pondColor), "川と池は別の色で判別できる必要があります。");
+            Assert.That(pondColor, Is.Not.EqualTo(seaColor), "池と海は別の色で判別できる必要があります。");
+            Assert.That(riverColor, Is.Not.EqualTo(seaColor), "川と海は別の色で判別できる必要があります。");
 
             Color hiddenColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
                 WorldGenerationDebugVisualizationMode.None,
@@ -525,6 +556,14 @@ namespace Farmware.WorldGeneration.PlayModeTests
         {
             Assert.That(actual.Biome, Is.EqualTo(expected.Biome), $"Biomeが一致しません。Index={tileIndex}");
             Assert.That(actual.Ground, Is.EqualTo(expected.Ground), $"Groundが一致しません。Index={tileIndex}");
+            Assert.That(
+                actual.WaterSalinity,
+                Is.EqualTo(expected.WaterSalinity),
+                $"WaterSalinityが一致しません。Index={tileIndex}");
+            Assert.That(
+                actual.WaterBodyType,
+                Is.EqualTo(expected.WaterBodyType),
+                $"WaterBodyTypeが一致しません。Index={tileIndex}");
             Assert.That(
                 actual.ElevationClass,
                 Is.EqualTo(expected.ElevationClass),

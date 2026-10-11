@@ -70,8 +70,8 @@ namespace Farmware.WorldGeneration
     /// </summary>
     public struct NodeBuildableRegionResourceRequirements
     {
-        /// <summary>候補周辺で少なくとも1タイルずつ必要な資源種類です。</summary>
-        public GeneratedResourceTypeMask RequiredTypes;
+        /// <summary>候補周辺で少なくとも1タイルずつ必要な生成資源または水域地形です。</summary>
+        public NaturalResourceTypeMask RequiredTypes;
 
         /// <summary>候補矩形の各辺から外側へ資源を探す距離です。単位はタイルです。</summary>
         public int SearchMarginInTiles;
@@ -85,9 +85,9 @@ namespace Farmware.WorldGeneration
         {
             return new NodeBuildableRegionResourceRequirements
             {
-                RequiredTypes = GeneratedResourceTypeMask.Tree
-                    | GeneratedResourceTypeMask.Stone
-                    | GeneratedResourceTypeMask.Water,
+                RequiredTypes = NaturalResourceTypeMask.Tree
+                    | NaturalResourceTypeMask.Stone
+                    | NaturalResourceTypeMask.Water,
                 SearchMarginInTiles = 48
             };
         }
@@ -155,7 +155,7 @@ namespace Farmware.WorldGeneration
             /// <summary>石数の二次元累積表です。検索処理だけが所有し、処理終了時に破棄します。</summary>
             public readonly NativeArray<int> StoneCounts;
 
-            /// <summary>水資源数の二次元累積表です。検索処理だけが所有し、処理終了時に破棄します。</summary>
+            /// <summary>採水可能な水域タイル数の二次元累積表です。検索処理だけが所有し、処理終了時に破棄します。</summary>
             public readonly NativeArray<int> WaterCounts;
 
             /// <summary>砂資源数の二次元累積表です。検索処理だけが所有し、処理終了時に破棄します。</summary>
@@ -320,7 +320,7 @@ namespace Farmware.WorldGeneration
                                 (int)chunkX,
                                 (int)chunkY,
                                 default,
-                                GeneratedResourceTypeMask.None,
+                                NaturalResourceTypeMask.None,
                                 resourceSearchMarginInTiles: 0,
                                 filterByResourcePresence: false,
                                 out NodeBuildableRegion candidate,
@@ -416,7 +416,7 @@ namespace Farmware.WorldGeneration
             in NodeBuildableRegion region,
             in NodeBuildableRegionResourceRequirements requirements)
         {
-            if (requirements.RequiredTypes == GeneratedResourceTypeMask.None)
+            if (requirements.RequiredTypes == NaturalResourceTypeMask.None)
             {
                 return true;
             }
@@ -438,7 +438,7 @@ namespace Farmware.WorldGeneration
                 return false;
             }
 
-            GeneratedResourceTypeMask foundTypes = GeneratedResourceTypeMask.None;
+            NaturalResourceTypeMask foundTypes = NaturalResourceTypeMask.None;
             // 1種類見つかるたびにビットへ記録し、全種類がそろった時点で残り座標を生成せず終了します。
             for (int worldY = (int)minimumY; worldY <= (int)maximumY; worldY++)
             {
@@ -456,6 +456,11 @@ namespace Farmware.WorldGeneration
                             worldX,
                             worldY);
                     foundTypes |= DeterministicResourceGenerator.ToMask(resourceTile.Type);
+                    if (terrainTile.WaterSalinity != WaterSalinity.None)
+                    {
+                        foundTypes |= NaturalResourceTypeMask.Water;
+                    }
+
                     if ((foundTypes & requirements.RequiredTypes) == requirements.RequiredTypes)
                     {
                         return true;
@@ -535,7 +540,7 @@ namespace Farmware.WorldGeneration
                 prefixLength,
                 Allocator.Temp,
                 NativeArrayOptions.ClearMemory);
-            GeneratedResourceTypeMask foundTypes = GeneratedResourceTypeMask.None;
+            NaturalResourceTypeMask foundTypes = NaturalResourceTypeMask.None;
 
             // このチャンクに左下を持つ全候補が参照し得る外接矩形を一度だけ生成し、種類別の累積表へ変換します。
             for (int localY = 1; localY <= resourceHeight; localY++)
@@ -555,8 +560,13 @@ namespace Farmware.WorldGeneration
                             terrainTile,
                             worldX,
                             worldY);
-                    GeneratedResourceTypeMask typeMask = DeterministicResourceGenerator.ToMask(
+                    NaturalResourceTypeMask typeMask = DeterministicResourceGenerator.ToMask(
                         resourceTile.Type);
+                    if (terrainTile.WaterSalinity != WaterSalinity.None)
+                    {
+                        typeMask |= NaturalResourceTypeMask.Water;
+                    }
+
                     foundTypes |= typeMask;
 
                     // 各表には「左 + 下 - 左下 + 現在セル」を書き、左下から現在までの総数を保持します。
@@ -575,7 +585,7 @@ namespace Farmware.WorldGeneration
                         waterCounts,
                         prefixIndex,
                         prefixWidth,
-                        resourceTile.Type == GeneratedResourceType.Water);
+                        terrainTile.WaterSalinity != WaterSalinity.None);
                     WritePrefixValue(
                         sandCounts,
                         prefixIndex,
@@ -631,7 +641,7 @@ namespace Farmware.WorldGeneration
             int chunkX,
             int chunkY,
             ResourcePresencePrefixMap resourcePresence,
-            GeneratedResourceTypeMask requiredTypes,
+            NaturalResourceTypeMask requiredTypes,
             int resourceSearchMarginInTiles,
             bool filterByResourcePresence,
             out NodeBuildableRegion region,
@@ -749,7 +759,7 @@ namespace Farmware.WorldGeneration
         private static bool HasRequiredResources(
             in ResourcePresencePrefixMap resourcePresence,
             in NodeBuildableRegion region,
-            GeneratedResourceTypeMask requiredTypes,
+            NaturalResourceTypeMask requiredTypes,
             int searchMarginInTiles)
         {
             int minimumX = region.MinimumTileX
@@ -770,7 +780,7 @@ namespace Farmware.WorldGeneration
                 - resourcePresence.MinimumWorldTileY;
 
             // 必須フラグに含まれる種類だけを4点参照で確認し、候補数に比例した資源リスト走査をなくします。
-            return (!RequiresResource(requiredTypes, GeneratedResourceTypeMask.Tree)
+            return (!RequiresResource(requiredTypes, NaturalResourceTypeMask.Tree)
                     || HasAnyInRectangle(
                         resourcePresence.TreeCounts,
                         resourcePresence.PrefixWidth,
@@ -778,7 +788,7 @@ namespace Farmware.WorldGeneration
                         minimumY,
                         maximumX,
                         maximumY))
-                && (!RequiresResource(requiredTypes, GeneratedResourceTypeMask.Stone)
+                && (!RequiresResource(requiredTypes, NaturalResourceTypeMask.Stone)
                     || HasAnyInRectangle(
                         resourcePresence.StoneCounts,
                         resourcePresence.PrefixWidth,
@@ -786,7 +796,7 @@ namespace Farmware.WorldGeneration
                         minimumY,
                         maximumX,
                         maximumY))
-                && (!RequiresResource(requiredTypes, GeneratedResourceTypeMask.Water)
+                && (!RequiresResource(requiredTypes, NaturalResourceTypeMask.Water)
                     || HasAnyInRectangle(
                         resourcePresence.WaterCounts,
                         resourcePresence.PrefixWidth,
@@ -794,7 +804,7 @@ namespace Farmware.WorldGeneration
                         minimumY,
                         maximumX,
                         maximumY))
-                && (!RequiresResource(requiredTypes, GeneratedResourceTypeMask.Sand)
+                && (!RequiresResource(requiredTypes, NaturalResourceTypeMask.Sand)
                     || HasAnyInRectangle(
                         resourcePresence.SandCounts,
                         resourcePresence.PrefixWidth,
@@ -833,8 +843,8 @@ namespace Farmware.WorldGeneration
         /// <param name="type">確認する1種類の資源フラグです。</param>
         /// <returns>指定種類が必要ならtrueです。</returns>
         private static bool RequiresResource(
-            GeneratedResourceTypeMask requiredTypes,
-            GeneratedResourceTypeMask type)
+            NaturalResourceTypeMask requiredTypes,
+            NaturalResourceTypeMask type)
         {
             return (requiredTypes & type) != 0;
         }

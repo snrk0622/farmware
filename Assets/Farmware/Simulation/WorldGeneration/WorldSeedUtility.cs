@@ -23,14 +23,17 @@ namespace Farmware.WorldGeneration
         /// <summary>バイオーム境界で地面種別を段階的に混ぜる座標抽選専用のソルトです。</summary>
         public const ulong BiomeTransition = 0x1D8E4E27C47D124FUL;
 
+        /// <summary>陸上を連続して横断する川の中心線ノイズ専用のソルトです。</summary>
+        public const ulong River = 0x8CB92BA72F3D8DD7UL;
+
+        /// <summary>内陸へまとまって生成する池の形状ノイズ専用のソルトです。</summary>
+        public const ulong Pond = 0xDB4F0B9175AE2165UL;
+
         /// <summary>樹木資源の群生ノイズ専用のソルトです。</summary>
         public const ulong TreeResource = 0xD6E8FEB86659FD93UL;
 
         /// <summary>石資源の群生ノイズ専用のソルトです。</summary>
         public const ulong StoneResource = 0xA5A3564E27F8862BUL;
-
-        /// <summary>水資源の群生ノイズ専用のソルトです。</summary>
-        public const ulong WaterResource = 0x9E6C63D0676A9A99UL;
 
         /// <summary>砂資源の群生ノイズ専用のソルトです。</summary>
         public const ulong SandResource = 0xC2B2AE3D27D4EB4FUL;

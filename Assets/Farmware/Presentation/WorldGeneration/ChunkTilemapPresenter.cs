@@ -6,6 +6,7 @@ using Unity.Collections;
 using Unity.Entities;
 using Unity.Profiling;
 using UnityEngine;
+using UnityEngine.Serialization;
 using UnityEngine.Tilemaps;
 
 namespace Farmware.WorldGeneration.Presentation
@@ -26,7 +27,7 @@ namespace Farmware.WorldGeneration.Presentation
         [SerializeField] private Tilemap targetTilemap;
 
         // 基礎資源アイコンだけを地形の上へ描画する専用Tilemapです。採取状態の正には使用しません。
-        [Tooltip("木・石・水・砂の仮アイコンを描画する専用Tilemapです。地形Tilemapより手前のSorting Orderへ設定してください。")]
+        [Tooltip("木・石・砂の仮アイコンを描画する専用Tilemapです。地形Tilemapより手前のSorting Orderへ設定してください。")]
         [SerializeField] private Tilemap resourceTilemap;
 
         // 草原の通常地面へ使用する表示専用Tileです。ゲームルール判定には使いません。
@@ -41,9 +42,14 @@ namespace Farmware.WorldGeneration.Presentation
         [Tooltip("砂漠バイオームの地面に表示するTileです。未指定の場合、そのセルは空表示になります。")]
         [SerializeField] private TileBase desertTile;
 
-        // GroundType.Waterへ使用する表示専用Tileです。
-        [Tooltip("水域に表示するTileです。水域のリンク通過可否はECSデータで判定し、この参照には依存しません。")]
-        [SerializeField] private TileBase waterTile;
+        // WaterSalinity.FreshWaterへ使用する表示専用Tileです。
+        [Tooltip("川と池の淡水域に表示するTileです。採水種別はECSデータで判定し、この参照には依存しません。")]
+        [SerializeField] private TileBase freshWaterTile;
+
+        // WaterSalinity.SaltWaterへ使用する表示専用Tileです。旧waterTile参照は海水表示として引き継ぎます。
+        [FormerlySerializedAs("waterTile")]
+        [Tooltip("海の海水域に表示するTileです。採水種別はECSデータで判定し、この参照には依存しません。")]
+        [SerializeField] private TileBase saltWaterTile;
 
         // GroundType.RockWallへ使用する表示専用Tileです。
         [Tooltip("岩壁に表示するTileです。岩壁の建築・リンク遮断判定はECSデータで行います。")]
@@ -56,10 +62,6 @@ namespace Farmware.WorldGeneration.Presentation
         // GeneratedResourceType.Stoneへ使用する透明背景の表示専用Tileです。
         [Tooltip("石資源に表示する仮Tileです。資源の種類と存在はECSバッファを正とします。")]
         [SerializeField] private TileBase stoneResourceTile;
-
-        // GeneratedResourceType.Waterへ使用する透明背景の表示専用Tileです。
-        [Tooltip("水資源に表示する仮Tileです。水域地形そのものとは別の採取候補表示です。")]
-        [SerializeField] private TileBase waterResourceTile;
 
         // GeneratedResourceType.Sandへ使用する透明背景の表示専用Tileです。
         [Tooltip("砂資源に表示する仮Tileです。砂地地形そのものとは別の採取候補表示です。")]
@@ -111,6 +113,10 @@ namespace Farmware.WorldGeneration.Presentation
         // 資源Tilemapへ渡す256要素の再利用配列です。地形配列と分け、透明セルも同時更新します。
         private TileBase[] resourceSubChunkTileBuffer;
 
+        // 旧Sceneが淡水Tile参照をまだ保存していない場合だけ、既存水面Spriteを着色して作る実行時フォールバックです。
+        // 正式なTileアセットが設定されている場合は作成せず、このComponentが作成した場合だけOnDestroyで破棄します。
+        private Tile generatedFreshWaterFallbackTile;
+
         /// <summary>
         /// Editor構築ツールまたはテストから、地形・資源Tilemapと分類ごとの表示Tileをまとめて設定します。
         /// ゲームルールは変更せず、ECSバッファをどのTileBaseで見せるかだけを更新します。
@@ -120,11 +126,11 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="grassland">草原バイオームの通常地面に表示するTileです。</param>
         /// <param name="forest">森林バイオームの地面に表示するTileです。</param>
         /// <param name="desert">砂漠バイオームの地面に表示するTileです。</param>
-        /// <param name="water">GroundType.Waterに表示するTileです。</param>
+        /// <param name="freshWater">淡水の川と池に表示するTileです。</param>
+        /// <param name="saltWater">海水の海に表示するTileです。</param>
         /// <param name="rockWall">GroundType.RockWallに表示するTileです。</param>
         /// <param name="treeResource">樹木資源に表示するTileです。</param>
         /// <param name="stoneResource">石資源に表示するTileです。</param>
-        /// <param name="waterResource">水資源に表示するTileです。</param>
         /// <param name="sandResource">砂資源に表示するTileです。</param>
         public void Configure(
             Tilemap terrainTilemap,
@@ -132,11 +138,11 @@ namespace Farmware.WorldGeneration.Presentation
             TileBase grassland,
             TileBase forest,
             TileBase desert,
-            TileBase water,
+            TileBase freshWater,
+            TileBase saltWater,
             TileBase rockWall,
             TileBase treeResource,
             TileBase stoneResource,
-            TileBase waterResource,
             TileBase sandResource)
         {
             targetTilemap = terrainTilemap;
@@ -144,11 +150,11 @@ namespace Farmware.WorldGeneration.Presentation
             grasslandTile = grassland;
             forestTile = forest;
             desertTile = desert;
-            waterTile = water;
+            freshWaterTile = freshWater;
+            saltWaterTile = saltWater;
             rockWallTile = rockWall;
             treeResourceTile = treeResource;
             stoneResourceTile = stoneResource;
-            waterResourceTile = waterResource;
             sandResourceTile = sandResource;
         }
 
@@ -161,6 +167,29 @@ namespace Farmware.WorldGeneration.Presentation
             subChunkTileBuffer = new TileBase[tileCount];
             emptySubChunkTileBuffer = new TileBase[tileCount];
             resourceSubChunkTileBuffer = new TileBase[tileCount];
+            EnsureFreshWaterFallbackTile();
+        }
+
+        /// <summary>
+        /// 淡水参照が未保存の旧Sceneでも川と池を海と見分けられるよう、既存水面Spriteから一時Tileを1つだけ作ります。
+        /// Editor構築ツールでFreshWater.assetを割り当てた後は、この処理は何も変更しません。
+        /// </summary>
+        private void EnsureFreshWaterFallbackTile()
+        {
+            if (freshWaterTile != null || !(saltWaterTile is Tile saltWaterSource))
+            {
+                return;
+            }
+
+            generatedFreshWaterFallbackTile = ScriptableObject.CreateInstance<Tile>();
+            generatedFreshWaterFallbackTile.name = "Generated Fresh Water Fallback";
+            generatedFreshWaterFallbackTile.sprite = saltWaterSource.sprite;
+            generatedFreshWaterFallbackTile.transform = saltWaterSource.transform;
+            generatedFreshWaterFallbackTile.flags = saltWaterSource.flags;
+            generatedFreshWaterFallbackTile.colliderType = saltWaterSource.colliderType;
+            // 元の海水色へ少し緑を残した明色を掛け、仮素材の段階でも淡水と海水を目視で区別します。
+            generatedFreshWaterFallbackTile.color = new Color32(190, 255, 230, 255);
+            freshWaterTile = generatedFreshWaterFallbackTile;
         }
 
         /// <summary>
@@ -226,6 +255,13 @@ namespace Farmware.WorldGeneration.Presentation
         private void OnDestroy()
         {
             DisposeQueries();
+
+            // Sceneアセットから参照したTileは破棄せず、このComponentがAwakeで作った一時Tileだけを所有者として破棄します。
+            if (generatedFreshWaterFallbackTile != null)
+            {
+                Destroy(generatedFreshWaterFallbackTile);
+                generatedFreshWaterFallbackTile = null;
+            }
         }
 
         /// <summary>
@@ -543,7 +579,10 @@ namespace Farmware.WorldGeneration.Presentation
         {
             if (tile.Ground == GroundType.Water)
             {
-                return waterTile;
+                // 移行直後の旧Sceneでも淡水を空表示にしないよう、淡水参照が未設定なら海水Tileへフォールバックします。
+                return tile.WaterSalinity == WaterSalinity.FreshWater && freshWaterTile != null
+                    ? freshWaterTile
+                    : saltWaterTile;
             }
 
             if (tile.Ground == GroundType.RockWall)
@@ -577,8 +616,6 @@ namespace Farmware.WorldGeneration.Presentation
                     return treeResourceTile;
                 case GeneratedResourceType.Stone:
                     return stoneResourceTile;
-                case GeneratedResourceType.Water:
-                    return waterResourceTile;
                 case GeneratedResourceType.Sand:
                     return sandResourceTile;
                 default:

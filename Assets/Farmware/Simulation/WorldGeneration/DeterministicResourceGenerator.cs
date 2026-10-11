@@ -1,5 +1,6 @@
 // このファイルは、通常生成済みタイルの適性と用途別ノイズから基礎資源を決定論的に配置します。
-// 地形生成順やチャンク境界に依存せず、木・石・水・砂をワールド全体へ同じ規則で群生させます。
+// 地形生成順やチャンク境界に依存せず、木・石・砂をワールド全体へ同じ規則で群生させます。
+// 水はGeneratedResourceTileへ配置せず、GeneratedTileの淡水・海水属性そのものを採水源として扱います。
 
 namespace Farmware.WorldGeneration
 {
@@ -46,18 +47,6 @@ namespace Farmware.WorldGeneration
                 GeneratedResourceType.Stone,
                 WorldGenerationPurposeSalts.StoneResource,
                 resourceSettings.StoneThreshold,
-                terrainTile.ResourceSuitability,
-                worldSettings,
-                resourceSettings,
-                worldTileX,
-                worldTileY,
-                ref selectedType,
-                ref selectedScore);
-            TrySelectResource(
-                ResourceSuitability.Water,
-                GeneratedResourceType.Water,
-                WorldGenerationPurposeSalts.WaterResource,
-                resourceSettings.WaterThreshold,
                 terrainTile.ResourceSuitability,
                 worldSettings,
                 resourceSettings,
@@ -155,20 +144,18 @@ namespace Farmware.WorldGeneration
         /// </summary>
         /// <param name="resourceType">変換する基礎資源の安定IDです。</param>
         /// <returns>対応する1bit、または配置なしの場合はNoneです。</returns>
-        public static GeneratedResourceTypeMask ToMask(GeneratedResourceType resourceType)
+        public static NaturalResourceTypeMask ToMask(GeneratedResourceType resourceType)
         {
             switch (resourceType)
             {
                 case GeneratedResourceType.Tree:
-                    return GeneratedResourceTypeMask.Tree;
+                    return NaturalResourceTypeMask.Tree;
                 case GeneratedResourceType.Stone:
-                    return GeneratedResourceTypeMask.Stone;
-                case GeneratedResourceType.Water:
-                    return GeneratedResourceTypeMask.Water;
+                    return NaturalResourceTypeMask.Stone;
                 case GeneratedResourceType.Sand:
-                    return GeneratedResourceTypeMask.Sand;
+                    return NaturalResourceTypeMask.Sand;
                 default:
-                    return GeneratedResourceTypeMask.None;
+                    return NaturalResourceTypeMask.None;
             }
         }
     }

@@ -46,10 +46,40 @@ namespace Farmware.WorldGeneration.Authoring
         [Range(0, 16)]
         [SerializeField] private int biomeTransitionWidthInTiles = 6;
 
-        // 0〜1の標高に対する水面境界で、Inspector編集後にushortの固定値へ変換します。
-        [Tooltip("これ未満の標高を水域にする閾値です。0〜1で指定し、大きくすると水域が増えます。変更すると生成結果が変わります。")]
+        // 0〜1の標高に対する海面境界です。既存Sceneとの互換のためフィールド名はwaterThresholdを維持します。
+        [Tooltip("これ未満の標高を海水域にする海面閾値です。0〜1で指定し、大きくすると海が増えます。変更すると生成結果が変わります。")]
         [Range(0f, 1f)]
         [SerializeField] private float waterThreshold = 0.305f;
+
+        // 川の大きな蛇行を決める低周波格子で、チャンク境界より大きくして短い断片を減らします。
+        [Tooltip("川の蛇行を作るノイズ格子サイズです。単位はタイルです。大きくすると川が緩やかに曲がり、変更すると生成結果が変わります。")]
+        [Min(16)]
+        [SerializeField] private int riverCellSizeInTiles = 96;
+
+        // 池のまとまりを決める格子で、川より小さくして内陸に局所的な水面を作ります。
+        [Tooltip("池の形を作るノイズ格子サイズです。単位はタイルです。大きくすると池が広くまとまり、変更すると生成結果が変わります。")]
+        [Min(8)]
+        [SerializeField] private int pondCellSizeInTiles = 48;
+
+        // 淡水形状へ重ねる解像度数で、細かすぎる水路を避けるため地形より少なくします。
+        [Tooltip("川と池の輪郭へ重ねるノイズ解像度数です。増やすと輪郭が細かくなりますが生成負荷も増えます。")]
+        [Range(1, 4)]
+        [SerializeField] private int freshWaterOctaveCount = 2;
+
+        // ノイズ中心値の周囲を川として扱う幅で、0〜1正規化値をBake時に固定小数点へ変換します。
+        [Tooltip("川の中心線から許容するノイズ差です。0〜1で指定し、大きくすると川幅と本数が増えます。")]
+        [Range(0.001f, 0.1f)]
+        [SerializeField] private float riverCenterLineHalfWidth = 600f / ushort.MaxValue;
+
+        // 池ノイズの下限で、高い場所だけを水面にして群れ状の池を作ります。
+        [Tooltip("池を生成するノイズ下限です。0〜1で指定し、小さくすると池が増えます。")]
+        [Range(0f, 1f)]
+        [SerializeField] private float pondThreshold = 57000f / ushort.MaxValue;
+
+        // 淡水を生成できる標高上限で、岩壁内や山頂を川が横切ることを防ぎます。
+        [Tooltip("川と池を生成できる最大標高です。0〜1で指定し、小さくすると淡水が低地へ限定されます。海面より高く、岩壁閾値より低くしてください。")]
+        [Range(0f, 1f)]
+        [SerializeField] private float freshWaterMaximumElevation = 47000f / ushort.MaxValue;
 
         // 0〜1の標高に対する岩壁境界で、水面より必ず高くなるようOnValidateで補正します。
         [Tooltip("これ以上の標高を岩壁にする閾値です。0〜1で指定し、小さくすると岩壁が増えます。水域閾値より大きくしてください。")]
@@ -91,11 +121,6 @@ namespace Farmware.WorldGeneration.Authoring
         [Range(0f, 1f)]
         [SerializeField] private float stoneResourceThreshold = 55500f / ushort.MaxValue;
 
-        // 水域内の採取可能な水資源群を決める0〜1の下限です。
-        [Tooltip("水資源を配置するノイズ下限です。0〜1で指定し、小さくすると水域内の採取候補が増えます。")]
-        [Range(0f, 1f)]
-        [SerializeField] private float waterResourceThreshold = 51500f / ushort.MaxValue;
-
         // 砂地内の採取可能な砂資源群を決める0〜1の下限です。
         [Tooltip("砂資源を配置するノイズ下限です。0〜1で指定し、小さくすると砂地内の採取候補が増えます。")]
         [Range(0f, 1f)]
@@ -129,10 +154,18 @@ namespace Farmware.WorldGeneration.Authoring
         {
             const float minimumGap = 0.001f;
 
-            // 水面と岩壁が逆転すると陸地分類が成立しないため、岩壁側をわずかに上へ保ちます。
+            // 海面と岩壁が逆転すると陸地分類が成立しないため、岩壁側をわずかに上へ保ちます。
             waterThreshold = Mathf.Min(waterThreshold, 1f - minimumGap);
             rockWallThreshold = Mathf.Max(rockWallThreshold, waterThreshold + minimumGap);
             rockWallThreshold = Mathf.Clamp01(rockWallThreshold);
+
+            // 淡水の上限を海面と岩壁の間へ収め、海や岩壁の分類と競合しないようにします。
+            freshWaterMaximumElevation = Mathf.Max(
+                freshWaterMaximumElevation,
+                waterThreshold + minimumGap);
+            freshWaterMaximumElevation = Mathf.Min(
+                freshWaterMaximumElevation,
+                rockWallThreshold - minimumGap);
 
             // 乾燥と湿潤の領域が逆転しないよう、森林閾値を乾燥閾値より上へ保ちます。
             dryMoistureThreshold = Mathf.Min(dryMoistureThreshold, 1f - minimumGap);
@@ -172,7 +205,13 @@ namespace Farmware.WorldGeneration.Authoring
                     MoistureCellSizeInTiles = authoring.moistureCellSizeInTiles,
                     OctaveCount = authoring.octaveCount,
                     BiomeTransitionWidthInTiles = authoring.biomeTransitionWidthInTiles,
-                    WaterThreshold = ToNormalizedUShort(authoring.waterThreshold),
+                    SeaLevelThreshold = ToNormalizedUShort(authoring.waterThreshold),
+                    RiverCellSizeInTiles = authoring.riverCellSizeInTiles,
+                    PondCellSizeInTiles = authoring.pondCellSizeInTiles,
+                    FreshWaterOctaveCount = authoring.freshWaterOctaveCount,
+                    RiverCenterLineHalfWidth = ToNormalizedUShort(authoring.riverCenterLineHalfWidth),
+                    PondThreshold = ToNormalizedUShort(authoring.pondThreshold),
+                    FreshWaterMaximumElevation = ToNormalizedUShort(authoring.freshWaterMaximumElevation),
                     RockWallThreshold = ToNormalizedUShort(authoring.rockWallThreshold),
                     HotTemperatureThreshold = ToNormalizedUShort(authoring.hotTemperatureThreshold),
                     DryMoistureThreshold = ToNormalizedUShort(authoring.dryMoistureThreshold),
@@ -191,7 +230,6 @@ namespace Farmware.WorldGeneration.Authoring
                     OctaveCount = authoring.resourceOctaveCount,
                     TreeThreshold = ToNormalizedUShort(authoring.treeResourceThreshold),
                     StoneThreshold = ToNormalizedUShort(authoring.stoneResourceThreshold),
-                    WaterThreshold = ToNormalizedUShort(authoring.waterResourceThreshold),
                     SandThreshold = ToNormalizedUShort(authoring.sandResourceThreshold)
                 });
             }

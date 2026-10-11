@@ -130,6 +130,9 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(settings.TemperatureCellSizeInTiles, Is.EqualTo(96));
             Assert.That(settings.MoistureCellSizeInTiles, Is.EqualTo(80));
             Assert.That(settings.BiomeTransitionWidthInTiles, Is.EqualTo(6));
+            Assert.That(settings.RiverCellSizeInTiles, Is.EqualTo(96));
+            Assert.That(settings.PondCellSizeInTiles, Is.EqualTo(48));
+            Assert.That(settings.FreshWaterOctaveCount, Is.EqualTo(2));
         }
 
         /// <summary>
@@ -285,8 +288,8 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 広い正負座標範囲を2回生成し、資源種類と表示差分が同一で、配置先が地形適性から外れないことを保証します。
-        /// 木・石・水・砂が少なくとも1件ずつ生成されることも確認し、閾値誤設定による資源消失を検出します。
+        /// 広い正負座標範囲を2回生成し、水域分類と資源配置が決定論的で、資源が地形適性から外れないことを保証します。
+        /// 川・池・海、河口の淡水海水接続、木・石・砂を同じ走査で確認し、日常テストの重複生成を避けます。
         /// </summary>
         [Test]
         public void ResourceGeneration_IsDeterministicAndRespectsTerrainSuitability()
@@ -295,12 +298,20 @@ namespace Farmware.WorldGeneration.Tests
                 WorldSeedUtility.FromString("resource-generation-test"),
                 2);
             ResourceGenerationSettings resourceSettings = ResourceGenerationSettings.CreateDefault();
-            GeneratedResourceTypeMask foundTypes = GeneratedResourceTypeMask.None;
+            NaturalResourceTypeMask foundTypes = NaturalResourceTypeMask.None;
+            const int scanRadiusInTiles = 192;
+            const int scanDiameterInTiles = scanRadiusInTiles * 2;
+            WaterSalinity[] previousRowSalinities = new WaterSalinity[scanDiameterInTiles];
+            WaterSalinity[] currentRowSalinities = new WaterSalinity[scanDiameterInTiles];
+            int riverTileCount = 0;
+            int pondTileCount = 0;
+            int seaTileCount = 0;
+            int freshAndSaltBoundaryCount = 0;
 
-            // 複数のバイオームと水域を含む512×512タイルを調べ、チャンク境界や負座標に依存しないことも同時に確認します。
-            for (int worldY = -256; worldY < 256; worldY++)
+            // 6×6チャンク相当だけを走査し、日常実行時間を抑えながら複数バイオーム、水域、正負境界を確認します。
+            for (int worldY = -scanRadiusInTiles; worldY < scanRadiusInTiles; worldY++)
             {
-                for (int worldX = -256; worldX < 256; worldX++)
+                for (int worldX = -scanRadiusInTiles; worldX < scanRadiusInTiles; worldX++)
                 {
                     GeneratedTile terrainTile = DeterministicChunkGenerator.GenerateTile(
                         generationSettings,
@@ -328,6 +339,68 @@ namespace Farmware.WorldGeneration.Tests
                             + $"second=({second.Type}, {second.VisualVariant})");
                     }
 
+                    bool isWaterGround = terrainTile.Ground == GroundType.Water;
+                    bool hasWaterAttributes = terrainTile.WaterSalinity != WaterSalinity.None
+                        && terrainTile.WaterBodyType != WaterBodyType.None;
+                    if (isWaterGround != hasWaterAttributes)
+                    {
+                        Assert.Fail(
+                            $"水域地形と水属性が一致しません。座標=({worldX}, {worldY}), "
+                            + $"Ground={terrainTile.Ground}, Salinity={terrainTile.WaterSalinity}, "
+                            + $"Body={terrainTile.WaterBodyType}");
+                    }
+
+                    // 水域であることだけでなく、生成由来と塩分の対応も固定し、海を淡水として扱う退行を防ぎます。
+                    bool hasCorrectSalinity = terrainTile.WaterBodyType switch
+                    {
+                        WaterBodyType.River => terrainTile.WaterSalinity == WaterSalinity.FreshWater,
+                        WaterBodyType.Pond => terrainTile.WaterSalinity == WaterSalinity.FreshWater,
+                        WaterBodyType.Sea => terrainTile.WaterSalinity == WaterSalinity.SaltWater,
+                        _ => terrainTile.WaterSalinity == WaterSalinity.None
+                    };
+                    if (!hasCorrectSalinity)
+                    {
+                        Assert.Fail(
+                            $"水域の生成由来と塩分が一致しません。座標=({worldX}, {worldY}), "
+                            + $"Salinity={terrainTile.WaterSalinity}, Body={terrainTile.WaterBodyType}");
+                    }
+
+                    if (terrainTile.ResourceSuitability != ResourceSuitability.None && isWaterGround)
+                    {
+                        Assert.Fail($"水域へ別配置資源の適性が残っています。座標=({worldX}, {worldY})");
+                    }
+
+                    if (terrainTile.WaterBodyType == WaterBodyType.River)
+                    {
+                        riverTileCount++;
+                    }
+                    else if (terrainTile.WaterBodyType == WaterBodyType.Pond)
+                    {
+                        pondTileCount++;
+                    }
+                    else if (terrainTile.WaterBodyType == WaterBodyType.Sea)
+                    {
+                        seaTileCount++;
+                    }
+
+                    int rowIndex = worldX + scanRadiusInTiles;
+                    currentRowSalinities[rowIndex] = terrainTile.WaterSalinity;
+                    if (rowIndex > 0
+                        && IsFreshSaltBoundary(
+                            terrainTile.WaterSalinity,
+                            currentRowSalinities[rowIndex - 1]))
+                    {
+                        freshAndSaltBoundaryCount++;
+                    }
+
+                    if (worldY > -scanRadiusInTiles
+                        && IsFreshSaltBoundary(
+                            terrainTile.WaterSalinity,
+                            previousRowSalinities[rowIndex]))
+                    {
+                        freshAndSaltBoundaryCount++;
+                    }
+
                     if (first.Type == GeneratedResourceType.None)
                     {
                         continue;
@@ -341,13 +414,24 @@ namespace Farmware.WorldGeneration.Tests
                             $"地形適性外へ資源が配置されました。座標=({worldX}, {worldY}), 資源={first.Type}");
                     }
                 }
+
+                // 次の行では直前行との上下接続を調べるため、配列参照だけを交換して再利用します。
+                WaterSalinity[] swap = previousRowSalinities;
+                previousRowSalinities = currentRowSalinities;
+                currentRowSalinities = swap;
             }
 
-            GeneratedResourceTypeMask allTypes = GeneratedResourceTypeMask.Tree
-                | GeneratedResourceTypeMask.Stone
-                | GeneratedResourceTypeMask.Water
-                | GeneratedResourceTypeMask.Sand;
-            Assert.That(foundTypes, Is.EqualTo(allTypes), "試験範囲内に4種類の基礎資源がすべて必要です。");
+            NaturalResourceTypeMask allTypes = NaturalResourceTypeMask.Tree
+                | NaturalResourceTypeMask.Stone
+                | NaturalResourceTypeMask.Sand;
+            Assert.That(foundTypes, Is.EqualTo(allTypes), "試験範囲内に木・石・砂がすべて必要です。");
+            Assert.That(riverTileCount, Is.GreaterThan(0), "試験範囲内に淡水の川が必要です。");
+            Assert.That(pondTileCount, Is.GreaterThan(0), "試験範囲内に淡水の池が必要です。");
+            Assert.That(seaTileCount, Is.GreaterThan(0), "試験範囲内に海水の海が必要です。");
+            Assert.That(
+                freshAndSaltBoundaryCount,
+                Is.GreaterThan(0),
+                "川または池の淡水が海水へ隙間なく接する河口境界が必要です。");
         }
 
         /// <summary>
@@ -728,7 +812,7 @@ namespace Farmware.WorldGeneration.Tests
                 found,
                 Is.True,
                 $"通常生成だけで木・石・水がそろう建築領域を発見できません。seedIndex={seedIndex}, worldSeed={worldSeed}");
-            GeneratedResourceTypeMask foundTypes = CollectResourceTypesAroundRegion(
+            NaturalResourceTypeMask foundTypes = CollectResourceTypesAroundRegion(
                 generationSettings,
                 resourceSettings,
                 region,
@@ -740,20 +824,20 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 建築候補の周囲を通常生成器で読み直し、存在する基礎資源種類をビット集合へまとめます。
+        /// 建築候補の周囲を通常生成器で読み直し、存在する生成資源と採水可能な水域をビット集合へまとめます。
         /// </summary>
         /// <param name="generationSettings">通常地形を再生成する設定です。</param>
         /// <param name="resourceSettings">通常資源を再生成する設定です。</param>
         /// <param name="region">中央となる建築候補矩形です。</param>
         /// <param name="marginInTiles">矩形の各辺から外へ調べる距離です。単位はタイルです。</param>
         /// <returns>走査範囲で見つかった資源種類のビット集合です。</returns>
-        private static GeneratedResourceTypeMask CollectResourceTypesAroundRegion(
+        private static NaturalResourceTypeMask CollectResourceTypesAroundRegion(
             in WorldGenerationSettings generationSettings,
             in ResourceGenerationSettings resourceSettings,
             in NodeBuildableRegion region,
             int marginInTiles)
         {
-            GeneratedResourceTypeMask foundTypes = GeneratedResourceTypeMask.None;
+            NaturalResourceTypeMask foundTypes = NaturalResourceTypeMask.None;
             int minimumX = region.MinimumTileX - marginInTiles;
             int minimumY = region.MinimumTileY - marginInTiles;
             int maximumX = region.MinimumTileX + region.WidthInTiles - 1 + marginInTiles;
@@ -775,6 +859,10 @@ namespace Farmware.WorldGeneration.Tests
                             worldX,
                             worldY);
                     foundTypes |= DeterministicResourceGenerator.ToMask(resourceTile.Type);
+                    if (terrainTile.WaterSalinity != WaterSalinity.None)
+                    {
+                        foundTypes |= NaturalResourceTypeMask.Water;
+                    }
                 }
             }
 
@@ -794,8 +882,6 @@ namespace Farmware.WorldGeneration.Tests
                     return ResourceSuitability.Tree;
                 case GeneratedResourceType.Stone:
                     return ResourceSuitability.Stone;
-                case GeneratedResourceType.Water:
-                    return ResourceSuitability.Water;
                 case GeneratedResourceType.Sand:
                     return ResourceSuitability.Sand;
                 default:
@@ -855,6 +941,8 @@ namespace Farmware.WorldGeneration.Tests
         {
             Assert.That(actual.Biome, Is.EqualTo(expected.Biome));
             Assert.That(actual.Ground, Is.EqualTo(expected.Ground));
+            Assert.That(actual.WaterSalinity, Is.EqualTo(expected.WaterSalinity));
+            Assert.That(actual.WaterBodyType, Is.EqualTo(expected.WaterBodyType));
             Assert.That(actual.ElevationClass, Is.EqualTo(expected.ElevationClass));
             Assert.That(actual.GameplayFlags, Is.EqualTo(expected.GameplayFlags));
             Assert.That(actual.ResourceSuitability, Is.EqualTo(expected.ResourceSuitability));
@@ -862,6 +950,19 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(actual.Elevation, Is.EqualTo(expected.Elevation));
             Assert.That(actual.Temperature, Is.EqualTo(expected.Temperature));
             Assert.That(actual.Moisture, Is.EqualTo(expected.Moisture));
+        }
+
+        /// <summary>
+        /// 隣接する2タイルが淡水と海水の組み合わせかを判定します。
+        /// 河口検証のループ内でAssertionを増やさず、境界数だけを集計するために使用します。
+        /// </summary>
+        /// <param name="first">現在タイルまたは上側タイルの水種別です。</param>
+        /// <param name="second">左または下に隣接するタイルの水種別です。</param>
+        /// <returns>一方が淡水でもう一方が海水ならtrueです。</returns>
+        private static bool IsFreshSaltBoundary(WaterSalinity first, WaterSalinity second)
+        {
+            return (first == WaterSalinity.FreshWater && second == WaterSalinity.SaltWater)
+                || (first == WaterSalinity.SaltWater && second == WaterSalinity.FreshWater);
         }
 
         /// <summary>

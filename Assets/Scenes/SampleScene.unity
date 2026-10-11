@@ -712,11 +712,11 @@ MonoBehaviour:
   grasslandTile: {fileID: 11400000, guid: 3f62d22d3fbf94acd8c72508c1e524a4, type: 2}
   forestTile: {fileID: 11400000, guid: 7f15e6dd5283548c6bade0e9dcc8bd41, type: 2}
   desertTile: {fileID: 11400000, guid: 04b3d3fd6ee0c46ce9028e80537d7a7a, type: 2}
-  waterTile: {fileID: 11400000, guid: 4015af9a4e22e4033acfd966027165bc, type: 2}
+  freshWaterTile: {fileID: 11400000, guid: 0c8767b14ec794733bf2093f1c6b8c2f, type: 2}
+  saltWaterTile: {fileID: 11400000, guid: 06507ec0f78364046ab6c0ec235d8bcf, type: 2}
   rockWallTile: {fileID: 11400000, guid: 1efd85541c8714c359c7e09eea3ffb12, type: 2}
   treeResourceTile: {fileID: 11400000, guid: d0ed51681421f401c8cbd24b40cc37aa, type: 2}
   stoneResourceTile: {fileID: 11400000, guid: dd83e286027f74f4587d09fe3dc7e45d, type: 2}
-  waterResourceTile: {fileID: 11400000, guid: c85e52f896fa4454da16eb2660a75bcc, type: 2}
   sandResourceTile: {fileID: 11400000, guid: b8e65db995c3f4fde88b4cdbf5b3169c, type: 2}
 --- !u!483693784 &2049644691
 TilemapRenderer:

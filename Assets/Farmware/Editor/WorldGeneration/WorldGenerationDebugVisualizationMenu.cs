@@ -1,4 +1,4 @@
-// このファイルは、PlayMode中のノイズ・バイオーム可視化をUnity Editorメニューから切り替えます。
+// このファイルは、PlayMode中のノイズ・バイオーム・水域可視化をUnity Editorメニューから切り替えます。
 // Editor Assemblyだけに属し、プレイヤー用入力や製品版ビルドへ開発者専用の操作UIを追加しません。
 
 using Farmware.WorldGeneration.Presentation;
@@ -27,6 +27,14 @@ namespace Farmware.WorldGeneration.Editor
 
         /// <summary>連続湿度表示へ切り替えるメニューパスです。</summary>
         private const string MoistureMenuPath = "Farmware/World Generation/Debug Visualization/Moisture";
+
+        /// <summary>淡水・海水表示へ切り替えるメニューパスです。</summary>
+        private const string WaterSalinityMenuPath =
+            "Farmware/World Generation/Debug Visualization/Water Salinity";
+
+        /// <summary>川・池・海表示へ切り替えるメニューパスです。</summary>
+        private const string WaterBodyMenuPath =
+            "Farmware/World Generation/Debug Visualization/Water Body";
 
         /// <summary>バイオーム移行タイル表示へ切り替えるメニューパスです。</summary>
         private const string TransitionMenuPath =
@@ -67,8 +75,22 @@ namespace Farmware.WorldGeneration.Editor
             SelectMode(WorldGenerationDebugVisualizationMode.Moisture);
         }
 
+        /// <summary>PlayMode中の水域を陸地・淡水・海水の固定色で表示します。</summary>
+        [MenuItem(WaterSalinityMenuPath, false, 205)]
+        private static void SelectWaterSalinity()
+        {
+            SelectMode(WorldGenerationDebugVisualizationMode.WaterSalinity);
+        }
+
+        /// <summary>PlayMode中の水域を陸地・川・池・海の固定色で表示します。</summary>
+        [MenuItem(WaterBodyMenuPath, false, 206)]
+        private static void SelectWaterBody()
+        {
+            SelectMode(WorldGenerationDebugVisualizationMode.WaterBody);
+        }
+
         /// <summary>PlayMode中に論理Biomeと異なる陸上Groundだけを強調表示します。</summary>
-        [MenuItem(TransitionMenuPath, false, 205)]
+        [MenuItem(TransitionMenuPath, false, 207)]
         private static void SelectTransition()
         {
             SelectMode(WorldGenerationDebugVisualizationMode.BiomeTransition);
@@ -112,6 +134,24 @@ namespace Farmware.WorldGeneration.Editor
         private static bool ValidateMoisture()
         {
             return ValidateMode(MoistureMenuPath, WorldGenerationDebugVisualizationMode.Moisture);
+        }
+
+        /// <summary>Water Salinity項目の有効状態とチェック表示を更新します。</summary>
+        /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
+        [MenuItem(WaterSalinityMenuPath, true)]
+        private static bool ValidateWaterSalinity()
+        {
+            return ValidateMode(
+                WaterSalinityMenuPath,
+                WorldGenerationDebugVisualizationMode.WaterSalinity);
+        }
+
+        /// <summary>Water Body項目の有効状態とチェック表示を更新します。</summary>
+        /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
+        [MenuItem(WaterBodyMenuPath, true)]
+        private static bool ValidateWaterBody()
+        {
+            return ValidateMode(WaterBodyMenuPath, WorldGenerationDebugVisualizationMode.WaterBody);
         }
 
         /// <summary>Biome Transition項目の有効状態とチェック表示を更新します。</summary>

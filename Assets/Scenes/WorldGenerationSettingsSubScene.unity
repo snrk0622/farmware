@@ -156,6 +156,12 @@ MonoBehaviour:
   octaveCount: 4
   biomeTransitionWidthInTiles: 6
   waterThreshold: 0.305
+  riverCellSizeInTiles: 96
+  pondCellSizeInTiles: 48
+  freshWaterOctaveCount: 2
+  riverCenterLineHalfWidth: 0.009155413
+  pondThreshold: 0.86976427
+  freshWaterMaximumElevation: 0.71717405
   rockWallThreshold: 0.816
   hotTemperatureThreshold: 0.61
   dryMoistureThreshold: 0.435
@@ -164,7 +170,6 @@ MonoBehaviour:
   resourceOctaveCount: 2
   treeResourceThreshold: 0.7629511
   stoneResourceThreshold: 0.8468757
-  waterResourceThreshold: 0.7858396
   sandResourceThreshold: 0.7858396
   preloadMarginInChunks: 1
   retentionMarginInChunks: 1

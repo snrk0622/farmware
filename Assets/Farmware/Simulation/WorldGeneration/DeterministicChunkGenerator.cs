@@ -4,7 +4,7 @@
 namespace Farmware.WorldGeneration
 {
     /// <summary>
-    /// 3種類の初期バイオームと水域・岩壁を決定論的に分類します。
+    /// 3種類の初期バイオーム、淡水・海水、水域の生成由来、岩壁を決定論的に分類します。
     /// UnityEngine.Objectやグローバル乱数を参照しないため、Burst Jobから並列に呼び出せます。
     /// </summary>
     public static class DeterministicChunkGenerator
@@ -49,11 +49,17 @@ namespace Farmware.WorldGeneration
                 WorldGenerationPurposeSalts.Moisture);
 
             BiomeId biome = ClassifyBiome(temperature, moisture, settings);
+            WaterBodyType waterBodyType = ClassifyWaterBody(
+                elevation,
+                settings,
+                worldTileX,
+                worldTileY);
             GroundType ground = ClassifyGround(
                 elevation,
                 temperature,
                 moisture,
                 biome,
+                waterBodyType,
                 settings,
                 worldTileX,
                 worldTileY);
@@ -62,7 +68,9 @@ namespace Farmware.WorldGeneration
             {
                 Biome = biome,
                 Ground = ground,
-                ElevationClass = ClassifyElevation(elevation, settings),
+                WaterSalinity = ClassifyWaterSalinity(waterBodyType),
+                WaterBodyType = waterBodyType,
+                ElevationClass = ClassifyElevation(elevation, ground, settings),
                 GameplayFlags = ClassifyGameplayFlags(ground),
                 ResourceSuitability = ClassifyResourceSuitability(ground, biome),
                 MovementCost = ClassifyMovementCost(ground),
@@ -70,6 +78,80 @@ namespace Farmware.WorldGeneration
                 Temperature = temperature,
                 Moisture = moisture
             };
+        }
+
+        /// <summary>
+        /// 標高から海を先に決め、残る陸上へ独立した連続ノイズで池と川を生成します。
+        /// 川は連続ノイズの中心等高線を細い帯として使うためチャンク境界で途切れず、海へ達した場所では海水域へ隙間なく接続します。
+        /// </summary>
+        /// <param name="elevation">0〜65535の標高です。</param>
+        /// <param name="settings">海面と淡水形状の設定です。</param>
+        /// <param name="worldTileX">淡水ノイズをサンプリングする水平ワールドタイル座標です。</param>
+        /// <param name="worldTileY">淡水ノイズをサンプリングする垂直ワールドタイル座標です。</param>
+        /// <returns>川、池、海のいずれか、または水域でなければNoneです。</returns>
+        private static WaterBodyType ClassifyWaterBody(
+            ushort elevation,
+            in WorldGenerationSettings settings,
+            int worldTileX,
+            int worldTileY)
+        {
+            // 海は広域標高の最低部を占め、陸上バイオームIDとは独立した海水地形として最優先します。
+            if (elevation < settings.SeaLevelThreshold)
+            {
+                return WaterBodyType.Sea;
+            }
+
+            // 高地や岩壁まで淡水ノイズが貫通すると不自然なため、淡水を生成できる上限を明示します。
+            if (elevation > settings.FreshWaterMaximumElevation
+                || elevation >= settings.RockWallThreshold)
+            {
+                return WaterBodyType.None;
+            }
+
+            ushort pondSample = DeterministicNoise.SampleFractalNoise(
+                settings.WorldSeed,
+                settings.GeneratorVersion,
+                worldTileX,
+                worldTileY,
+                settings.PondCellSizeInTiles,
+                settings.FreshWaterOctaveCount,
+                WorldGenerationPurposeSalts.Pond);
+            if (pondSample >= settings.PondThreshold)
+            {
+                return WaterBodyType.Pond;
+            }
+
+            ushort riverSample = DeterministicNoise.SampleFractalNoise(
+                settings.WorldSeed,
+                settings.GeneratorVersion,
+                worldTileX,
+                worldTileY,
+                settings.RiverCellSizeInTiles,
+                settings.FreshWaterOctaveCount,
+                WorldGenerationPurposeSalts.River);
+            int distanceFromCenterLine = riverSample >= 32768
+                ? riverSample - 32768
+                : 32768 - riverSample;
+            return distanceFromCenterLine <= settings.RiverCenterLineHalfWidth
+                ? WaterBodyType.River
+                : WaterBodyType.None;
+        }
+
+        /// <summary>
+        /// 水域の生成由来を、採水や生物判定で使う淡水・海水へ変換します。
+        /// </summary>
+        /// <param name="waterBodyType">川、池、海の生成由来です。</param>
+        /// <returns>川と池は淡水、海は海水、陸地はNoneです。</returns>
+        private static WaterSalinity ClassifyWaterSalinity(WaterBodyType waterBodyType)
+        {
+            if (waterBodyType == WaterBodyType.Sea)
+            {
+                return WaterSalinity.SaltWater;
+            }
+
+            return waterBodyType == WaterBodyType.River || waterBodyType == WaterBodyType.Pond
+                ? WaterSalinity.FreshWater
+                : WaterSalinity.None;
         }
 
         /// <summary>
@@ -135,6 +217,7 @@ namespace Farmware.WorldGeneration
         /// <param name="temperature">0〜65535の気温です。</param>
         /// <param name="moisture">0〜65535の湿度です。</param>
         /// <param name="biome">気候から決めた陸上バイオームです。</param>
+        /// <param name="waterBodyType">先に分類済みの川・池・海です。</param>
         /// <param name="settings">水面と岩壁の閾値を保持する生成設定です。</param>
         /// <param name="worldTileX">決定論的な移行タイル抽選に使う水平ワールドタイル座標です。</param>
         /// <param name="worldTileY">決定論的な移行タイル抽選に使う垂直ワールドタイル座標です。</param>
@@ -144,11 +227,12 @@ namespace Farmware.WorldGeneration
             ushort temperature,
             ushort moisture,
             BiomeId biome,
+            WaterBodyType waterBodyType,
             in WorldGenerationSettings settings,
             int worldTileX,
             int worldTileY)
         {
-            if (elevation < settings.WaterThreshold)
+            if (waterBodyType != WaterBodyType.None)
             {
                 return GroundType.Water;
             }
@@ -329,13 +413,16 @@ namespace Farmware.WorldGeneration
         /// 連続標高を水域・低地・平地・高地・岩壁の5段階へ分類します。
         /// </summary>
         /// <param name="elevation">0〜65535の標高です。</param>
-        /// <param name="settings">水面と岩壁の閾値を保持する設定です。</param>
+        /// <param name="ground">淡水を含めて分類済みの地面です。</param>
+        /// <param name="settings">海面と岩壁の閾値を保持する設定です。</param>
         /// <returns>表示や配置条件で使う標高クラスです。</returns>
         private static ElevationClass ClassifyElevation(
             ushort elevation,
+            GroundType ground,
             in WorldGenerationSettings settings)
         {
-            if (elevation < settings.WaterThreshold)
+            // 川と池は元の標高が海面より高くても、水域として同じ分類を返します。
+            if (ground == GroundType.Water)
             {
                 return ElevationClass.Water;
             }
@@ -345,9 +432,9 @@ namespace Farmware.WorldGeneration
                 return ElevationClass.RockWall;
             }
 
-            int landRange = settings.RockWallThreshold - settings.WaterThreshold;
-            int lowlandEnd = settings.WaterThreshold + (landRange / 3);
-            int plainEnd = settings.WaterThreshold + ((landRange * 2) / 3);
+            int landRange = settings.RockWallThreshold - settings.SeaLevelThreshold;
+            int lowlandEnd = settings.SeaLevelThreshold + (landRange / 3);
+            int plainEnd = settings.SeaLevelThreshold + ((landRange * 2) / 3);
 
             if (elevation < lowlandEnd)
             {
@@ -387,7 +474,8 @@ namespace Farmware.WorldGeneration
         {
             if (ground == GroundType.Water)
             {
-                return ResourceSuitability.Water;
+                // 水は全水域タイルから直接採取できる地形属性なので、別の配置資源候補にはしません。
+                return ResourceSuitability.None;
             }
 
             if (ground == GroundType.RockWall)
@@ -440,6 +528,8 @@ namespace Farmware.WorldGeneration
                 packedClassifications |= (ulong)(byte)tile.GameplayFlags << 24;
                 packedClassifications |= (ulong)(byte)tile.ResourceSuitability << 32;
                 packedClassifications |= (ulong)tile.MovementCost << 40;
+                packedClassifications |= (ulong)(byte)tile.WaterSalinity << 48;
+                packedClassifications |= (ulong)(byte)tile.WaterBodyType << 56;
 
                 ulong packedClimate = tile.Elevation;
                 packedClimate |= (ulong)tile.Temperature << 16;

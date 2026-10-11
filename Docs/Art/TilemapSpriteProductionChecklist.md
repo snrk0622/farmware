@@ -1,7 +1,7 @@
 # Farmware タイルマップ用スプライト制作・導入チェックリスト v0.1
 
 - 作成日: 2026-10-11
-- 対象: ランダムマップ生成の第1段階（草原、森林、砂漠、水域、岩壁、木、石、砂、ドローン、開始コア）
+- 対象: ランダムマップ生成の第1段階（草原、森林、砂漠、淡水、海水、岩壁、木、石、砂、ドローン、開始コア）
 - 関連仕様: [ランダムマップ生成仕様](../GameSpecification/RandomMapGenerationSpecification.md)
 - 関連仕様: [ゲームコンセプト仕様](../GameSpecification/2026-10-11_casual_factory_concept_v0.1.md)
 - 基準解像度: 1タイル = 16×16 px（試作値。設備、リンク、ドローンを重ねた可読性確認後に確定する）
@@ -10,7 +10,7 @@
 
 PixelLabで制作するスプライトを漏れなく管理し、生成、Unityへのインポート、表示設定、実機確認を段階別に記録する。
 
-現在の `Assets/Farmware/Art/WorldGeneration/Fallback/` にある5枚の16×16 PNGは、地形表示を成立させるための仮素材である。本書のチェックは、PixelLabで制作した本番候補へ置き換えた時点から付ける。仮素材が存在するだけではチェックしない。
+Editorの構築メニューが `Assets/Farmware/Art/WorldGeneration/Fallback/` へ生成する6種類の16×16地形PNGは、地形表示を成立させるための仮素材である。本書のチェックは、PixelLabで制作した本番候補へ置き換えた時点から付ける。仮素材が存在するだけではチェックしない。
 
 ### 1.1 チェック欄の意味
 
@@ -186,7 +186,7 @@ STYLE-TERRAIN. Create eight interchangeable seamless compact desert-ground varia
 - [ ] 設定
 - [ ] 確認
 
-### 4.4 水面 `terrain_fresh_water`
+### 4.4 淡水面 `terrain_fresh_water`
 
 - 必要数: 静止画の場合6差分。アニメーションを採用する場合は、低ノイズ2種類×4フレームを初期値とする
 - PixelLabツール: 静止画は`Create tiles (Pro)` → `Tiles (variations)`、アニメーションは採用静止画を`Animate with text`へ渡す
@@ -210,7 +210,31 @@ Animate only the tiny water ripples in a subtle seamless four-frame loop. Keep t
 - [ ] 設定
 - [ ] 確認
 
-### 4.5 岩壁上面 `terrain_rock_top`
+### 4.5 海水面 `terrain_salt_water`
+
+- 必要数: 静止画の場合6差分。アニメーションを採用する場合は、低ノイズ2種類×4フレームを初期値とする
+- PixelLabツール: 静止画は`Create tiles (Pro)` → `Tiles (variations)`、アニメーションは採用静止画を`Animate with text`へ渡す
+- 静止画設定: 3.3の共通設定。Tile thicknessは0、Outlineなし。淡水面をStyle referenceへ指定する
+- Static Prompt:
+
+```text
+STYLE-TERRAIN. Create six interchangeable seamless calm saltwater surface variations viewed directly from above. Use a slightly deeper and darker blue than the freshwater reference, with sparse small wave clusters and a very limited amount of pale reflected light. Keep the surface readable as ocean water without drawing foam or a shoreline. Avoid tropical cyan, large ocean swell, parallel stripes, fish, boats, floating objects, and strong directional highlights.
+```
+
+- Animation Prompt:
+
+```text
+Animate only the small saltwater wave clusters in a subtle seamless four-frame loop. Keep the darker ocean palette, brightness, tile edges, pixel density, and camera perfectly fixed. No camera movement, shore foam, large waves, or new objects.
+```
+
+- Animation settings: `4 frames`、Loop、動きの強さ`Low`
+- [ ] 静止差分を生成
+- [ ] アニメーション採用可否を決定
+- [ ] 取込
+- [ ] 設定
+- [ ] 確認
+
+### 4.6 岩壁上面 `terrain_rock_top`
 
 - 必要数: 基本3、弱いひび2、鉱物色の点1の計6差分
 - PixelLabツール: `Create tiles (Pro)` → `Tiles (variations)`
@@ -226,7 +250,7 @@ STYLE-TERRAIN. Create six interchangeable seamless solid natural rock-top variat
 - [ ] 設定
 - [ ] 確認
 
-### 4.6 岩壁内部 `terrain_rock_interior_black`
+### 4.7 岩壁内部 `terrain_rock_interior_black`
 
 - 必要数: 1枚。必要なら黒に近い2差分まで
 - PixelLabツール: PixelLabを使用せず、Unityまたはドット絵エディタで16×16の不透明単色PNGを作成する
@@ -605,7 +629,7 @@ Three separate mineable sand-resource overlays for a top-down 16 by 16 pixel til
 
 ### 7.4 水資源表示
 
-水は地形そのものを固定資源として扱うため、第1段階では専用オブジェクトを追加しない。採取可能地点を示す必要が生じた場合は、採取ノードの配置プレビューまたはUIアイコンで示し、常時表示のマーカーを地形へ焼き込まない。
+淡水・海水は地形属性そのものを固定資源として扱うため、第1段階では専用オブジェクトを追加しない。採取可能地点と水種別を示す必要が生じた場合は、採取ノードの配置プレビューまたはUIアイコンで示し、常時表示のマーカーを地形へ焼き込まない。
 
 - [ ] 専用スプライト不要であることを実装と確認
 

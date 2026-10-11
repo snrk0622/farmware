@@ -1,4 +1,4 @@
-// このファイルは、ECSで生成済みの可視タイルをPlayMode中だけ色分けして、ノイズとバイオーム判定を確認できるようにします。
+// このファイルは、ECSで生成済みの可視タイルをPlayMode中だけ色分けして、ノイズ・バイオーム・水域判定を確認できるようにします。
 // 操作入口はEditor AssemblyのWorldGenerationDebugVisualizationMenuに置き、Simulationとプレイヤー用F3/F4入力から分離します。
 
 using Unity.Collections;
@@ -29,8 +29,14 @@ namespace Farmware.WorldGeneration.Presentation
         /// <summary>0〜65535の連続湿度値を茶から水色のグラデーションで表示します。</summary>
         Moisture = 4,
 
+        /// <summary>水域を陸地・淡水・海水の固定色で表示します。</summary>
+        WaterSalinity = 5,
+
+        /// <summary>水域の生成由来を陸地・川・池・海の固定色で表示します。</summary>
+        WaterBody = 6,
+
         /// <summary>論理Biomeと異なる陸上Groundが選ばれた移行タイルだけを強調します。</summary>
-        BiomeTransition = 5
+        BiomeTransition = 7
     }
 
     /// <summary>
@@ -224,6 +230,39 @@ namespace Farmware.WorldGeneration.Presentation
                         new Color32(176, 116, 52, 238),
                         new Color32(50, 185, 225, 238),
                         moisture);
+
+                case WorldGenerationDebugVisualizationMode.WaterSalinity:
+                    // 通常地形でも淡水と海水を見分けられますが、専用表示では地表色を消して境界判定だけを確認しやすくします。
+                    if (tile.WaterSalinity == Farmware.WorldGeneration.WaterSalinity.FreshWater)
+                    {
+                        return new Color32(64, 196, 230, 238);
+                    }
+
+                    if (tile.WaterSalinity == Farmware.WorldGeneration.WaterSalinity.SaltWater)
+                    {
+                        return new Color32(39, 99, 210, 238);
+                    }
+
+                    return new Color32(45, 45, 52, 210);
+
+                case WorldGenerationDebugVisualizationMode.WaterBody:
+                    // 淡水内の川と池を別色にし、川ノイズと池ノイズの生成結果が意図どおり分離されているか確認します。
+                    if (tile.WaterBodyType == Farmware.WorldGeneration.WaterBodyType.River)
+                    {
+                        return new Color32(60, 210, 230, 238);
+                    }
+
+                    if (tile.WaterBodyType == Farmware.WorldGeneration.WaterBodyType.Pond)
+                    {
+                        return new Color32(58, 178, 136, 238);
+                    }
+
+                    if (tile.WaterBodyType == Farmware.WorldGeneration.WaterBodyType.Sea)
+                    {
+                        return new Color32(35, 89, 204, 238);
+                    }
+
+                    return new Color32(45, 45, 52, 210);
 
                 case WorldGenerationDebugVisualizationMode.BiomeTransition:
                     return IsBiomeTransitionTile(tile)
@@ -483,7 +522,7 @@ namespace Farmware.WorldGeneration.Presentation
             GeneratedTile centerTile,
             WorldGenerationSettings settings)
         {
-            const int generatedTileInformationLineCount = 5;
+            const int generatedTileInformationLineCount = 6;
             const int waitingInformationLineCount = 1;
             const float informationStartY = 48f;
             const float bottomPadding = 6f;
@@ -491,10 +530,11 @@ namespace Farmware.WorldGeneration.Presentation
             string centerInformation = hasCenterTile
                 ? $"Tile ({centerCoordinate.x}, {centerCoordinate.y})  "
                     + $"Biome={centerTile.Biome}  Ground={centerTile.Ground}\n"
+                    + $"Water={centerTile.WaterSalinity} / {centerTile.WaterBodyType}\n"
                     + $"Elevation={centerTile.Elevation}  Temperature={centerTile.Temperature}  "
                     + $"Moisture={centerTile.Moisture}\n"
                     + $"Transition={(IsBiomeTransitionTile(centerTile) ? "Yes" : "No")}\n"
-                    + $"Thresholds: Water={settings.WaterThreshold}  Rock={settings.RockWallThreshold}  "
+                    + $"Thresholds: Sea={settings.SeaLevelThreshold}  Rock={settings.RockWallThreshold}  "
                     + $"Hot={settings.HotTemperatureThreshold}\n"
                     + $"Dry={settings.DryMoistureThreshold}  Wet={settings.WetMoistureThreshold}"
                 : "Center tile is waiting for generation.";
@@ -546,6 +586,16 @@ namespace Farmware.WorldGeneration.Presentation
         /// <returns>開発者向けHUDへ表示する英語名です。</returns>
         private static string GetModeDisplayName(WorldGenerationDebugVisualizationMode mode)
         {
+            if (mode == WorldGenerationDebugVisualizationMode.WaterSalinity)
+            {
+                return "Water Salinity";
+            }
+
+            if (mode == WorldGenerationDebugVisualizationMode.WaterBody)
+            {
+                return "Water Body";
+            }
+
             return mode == WorldGenerationDebugVisualizationMode.BiomeTransition
                 ? "Biome Transition"
                 : mode.ToString();
@@ -593,6 +643,77 @@ namespace Farmware.WorldGeneration.Presentation
                     break;
                 case WorldGenerationDebugVisualizationMode.Moisture:
                     DrawContinuousValueLegend(mode, ref nextX, y, "0 (Dry)", "65535 (Wet)");
+                    break;
+                case WorldGenerationDebugVisualizationMode.WaterSalinity:
+                    DrawLegendEntry(
+                        ref nextX,
+                        y,
+                        GetVisualizationColor(mode, new GeneratedTile()),
+                        "Land",
+                        64f);
+                    DrawLegendEntry(
+                        ref nextX,
+                        y,
+                        GetVisualizationColor(
+                            mode,
+                            new GeneratedTile
+                            {
+                                WaterSalinity = Farmware.WorldGeneration.WaterSalinity.FreshWater
+                            }),
+                        "Fresh Water",
+                        104f);
+                    DrawLegendEntry(
+                        ref nextX,
+                        y,
+                        GetVisualizationColor(
+                            mode,
+                            new GeneratedTile
+                            {
+                                WaterSalinity = Farmware.WorldGeneration.WaterSalinity.SaltWater
+                            }),
+                        "Salt Water",
+                        96f);
+                    break;
+                case WorldGenerationDebugVisualizationMode.WaterBody:
+                    DrawLegendEntry(
+                        ref nextX,
+                        y,
+                        GetVisualizationColor(mode, new GeneratedTile()),
+                        "Land",
+                        64f);
+                    DrawLegendEntry(
+                        ref nextX,
+                        y,
+                        GetVisualizationColor(
+                            mode,
+                            new GeneratedTile
+                            {
+                                WaterBodyType = Farmware.WorldGeneration.WaterBodyType.River
+                            }),
+                        "River",
+                        68f);
+                    DrawLegendEntry(
+                        ref nextX,
+                        y,
+                        GetVisualizationColor(
+                            mode,
+                            new GeneratedTile
+                            {
+                                WaterBodyType = Farmware.WorldGeneration.WaterBodyType.Pond
+                            }),
+                        "Pond",
+                        66f);
+                    DrawLegendEntry(
+                        ref nextX,
+                        y,
+                        GetVisualizationColor(
+                            mode,
+                            new GeneratedTile
+                            {
+                                WaterBodyType = Farmware.WorldGeneration.WaterBodyType.Sea
+                            }),
+                        "Sea",
+                        58f);
                     break;
                 case WorldGenerationDebugVisualizationMode.BiomeTransition:
                     DrawLegendEntry(
