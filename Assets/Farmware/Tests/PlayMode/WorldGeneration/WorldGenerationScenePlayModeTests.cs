@@ -1,5 +1,5 @@
-// このファイルは、SampleSceneを実際に再生し、SubSceneのBakeからECS地形・資源生成、Tilemap表示までの縦切りを検証します。
-// F3/F4と開発者用岩壁表示を含め、純粋計算では確認できないGameObject・SubScene・Presentation間の参照切れを検出します。
+// このファイルは、SampleSceneを実際に再生し、初期カメラ位置、ECS地形・資源生成、Tilemap表示までの縦切りを検証します。
+// F3/F4と開発者用表示を含め、純粋計算では確認できないGameObject・SubScene・Presentation間の参照切れを検出します。
 
 using System.Collections;
 using Farmware.WorldGeneration.Presentation;
@@ -23,11 +23,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
         /// <summary>SubSceneの非同期Bake・ロードと初回チャンク生成を待つ最大描画フレーム数です。</summary>
         private const int MaximumWaitFrames = 300;
 
-        /// <summary>原点が保持範囲外へ確実に出る、テスト用カメラ移動先の水平タイル座標です。</summary>
-        private const int FarCameraXInTiles = WorldGridConstants.LogicalChunkSize * 8;
-
-        /// <summary>遠方移動時にカメラ左側へ見えるため、生成完了を待つ代表チャンクの水平座標です。</summary>
-        private const int ExpectedFarChunkX = 7;
+        /// <summary>初期スポーンチャンクが保持範囲外へ確実に出る、テスト用カメラ水平移動量です。</summary>
+        private const int FarCameraOffsetInTiles = WorldGridConstants.LogicalChunkSize * 8;
 
         /// <summary>
         /// Windowboxの基準解像度を整数倍して中央配置し、余ったGameビュー領域が黒帯として除外されることを検証します。
@@ -61,6 +58,50 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(actual.y, Is.EqualTo(expectedY));
             Assert.That(actual.width, Is.EqualTo(expectedWidth));
             Assert.That(actual.height, Is.EqualTo(expectedHeight));
+        }
+
+        /// <summary>
+        /// 現在の負座標と記録済み初期スポーンを準備し、F3文字列が両者を混同せずタイル・チャンク座標として表示することを保証します。
+        /// </summary>
+        [Test]
+        public void BuildCoordinateHudText_IncludesRecordedInitialSpawnLocation()
+        {
+            InitialSpawnLocation spawnLocation = new InitialSpawnLocation
+            {
+                TileX = -65,
+                TileY = 64
+            };
+
+            string text = WorldGridDebugOverlay.BuildCoordinateHudText(
+                new Vector3(5.5f, -2.5f, -10f),
+                new Vector3Int(5, -3, 0),
+                true,
+                spawnLocation);
+
+            Assert.That(text, Does.Contain("Tile  : (5, -3)"));
+            Assert.That(text, Does.Contain("Spawn: Tile (-65, 64) / Chunk (-2, 1)"));
+        }
+
+        /// <summary>
+        /// 負座標の初期スポーンを準備し、F4の赤い所属チャンク枠と専用ラベルがF3と同じ床方向チャンクを指すことを保証します。
+        /// </summary>
+        [Test]
+        public void InitialSpawnF4Marker_UsesContainingChunkBoundsAndDistinctLabel()
+        {
+            InitialSpawnLocation spawnLocation = new InitialSpawnLocation
+            {
+                TileX = -65,
+                TileY = 64
+            };
+
+            RectInt chunkBounds = WorldGridDebugOverlay.CalculateInitialSpawnChunkTileBounds(
+                spawnLocation);
+            string spawnLabel = WorldGridDebugOverlay.BuildChunkCoordinateLabelText(-2, 1, true);
+            string normalLabel = WorldGridDebugOverlay.BuildChunkCoordinateLabelText(-1, 1, false);
+
+            Assert.That(chunkBounds, Is.EqualTo(new RectInt(-128, 64, 64, 64)));
+            Assert.That(spawnLabel, Is.EqualTo("Spawn Chunk (-2, 1)"));
+            Assert.That(normalLabel, Is.EqualTo("Chunk (-1, 1)"));
         }
 
         /// <summary>
@@ -335,6 +376,12 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(resourceTilemap, Is.Not.Null, "SampleSceneに資源表示用Resource Tilemapがありません。");
             CameraPanController cameraPanController = Object.FindFirstObjectByType<CameraPanController>();
             Assert.That(cameraPanController, Is.Not.Null, "Main CameraにCameraPanControllerがありません。");
+            InitialCameraPositionController initialPositionController =
+                Object.FindFirstObjectByType<InitialCameraPositionController>();
+            Assert.That(
+                initialPositionController,
+                Is.Not.Null,
+                "Main CameraにInitialCameraPositionControllerがありません。");
             WorldGridDebugOverlay debugOverlay = Object.FindFirstObjectByType<WorldGridDebugOverlay>();
             Assert.That(debugOverlay, Is.Not.Null, "Main CameraにWorldGridDebugOverlayがありません。");
             WorldGenerationDebugVisualizationOverlay developerVisualization =
@@ -381,19 +428,17 @@ namespace Farmware.WorldGeneration.PlayModeTests
             debugOverlay.SetCoordinateHudVisible(false);
             debugOverlay.SetChunkGridVisible(false);
 
-            // 0.1ワールド単位は16 PPUでは2ピクセル相当の0.125へ丸まり、移動中のサブピクセル揺れを防ぎます。
-            cameraPanController.SetWorldPosition(new Vector2(0.1f, -0.1f));
-            Assert.That(cameraPanController.transform.position.x, Is.EqualTo(0.125f).Within(0.00001f));
-            Assert.That(cameraPanController.transform.position.y, Is.EqualTo(-0.125f).Within(0.00001f));
-            cameraPanController.SetWorldPosition(Vector2.zero);
-
             World world = null;
             EntityQuery settingsQuery = default;
+            EntityQuery locationQuery = default;
             EntityQuery chunkQuery = default;
             bool queriesCreated = false;
             bool initialLoadCompleted = false;
             Entity originalChunkEntity = Entity.Null;
             Vector3Int originalResourceCell = default;
+            InitialSpawnLocation initialSpawnLocation = default;
+            ChunkCoordinate initialSpawnChunk = default;
+            Vector2 initialCameraWorldPosition = default;
 
             for (int frame = 0; frame < MaximumWaitFrames; frame++)
             {
@@ -404,6 +449,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
                         ComponentType.ReadOnly<WorldGenerationSettings>(),
                         ComponentType.ReadOnly<ResourceGenerationSettings>(),
                         ComponentType.ReadOnly<ChunkStreamingSettings>());
+                    locationQuery = world.EntityManager.CreateEntityQuery(
+                        ComponentType.ReadOnly<InitialSpawnLocation>());
                     chunkQuery = world.EntityManager.CreateEntityQuery(
                         ComponentType.ReadOnly<ChunkCoordinateComponent>(),
                         ComponentType.ReadOnly<ChunkGenerationStatus>(),
@@ -412,24 +459,41 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     queriesCreated = true;
                 }
 
-                // SubScene設定、原点チャンク、地形Tile、資源Tileの4条件がそろうまで待ち、固定秒数には依存しません。
+                // 設定、初期スポーン記録、カメラ移動、スポーン先チャンク、地形・資源Tileがそろうまで固定秒数に依存せず待ちます。
                 if (queriesCreated
                     && settingsQuery.CalculateEntityCount() == 1
-                    && TryGetActiveCompleteChunk(
-                        world.EntityManager,
-                        chunkQuery,
-                        0,
-                        0,
-                        out originalChunkEntity)
-                    && tilemap.GetTile(Vector3Int.zero) != null
-                    && TryGetDisplayedResourceCell(
-                        world.EntityManager,
-                        originalChunkEntity,
-                        resourceTilemap,
-                        out originalResourceCell))
+                    && locationQuery.CalculateEntityCount() == 1)
                 {
-                    initialLoadCompleted = true;
-                    break;
+                    initialSpawnLocation = locationQuery.GetSingleton<InitialSpawnLocation>();
+                    initialSpawnChunk = WorldGrid.ToChunkCoordinate(
+                        initialSpawnLocation.TileX,
+                        initialSpawnLocation.TileY);
+                    initialCameraWorldPosition = new Vector2(
+                        initialSpawnLocation.TileX + 0.5f,
+                        initialSpawnLocation.TileY + 0.5f);
+                    Vector3Int spawnCell = new Vector3Int(
+                        initialSpawnLocation.TileX,
+                        initialSpawnLocation.TileY,
+                        0);
+
+                    if (initialPositionController.HasAppliedInitialPosition
+                        && TryGetActiveCompleteChunk(
+                            world.EntityManager,
+                            chunkQuery,
+                            initialSpawnChunk.X,
+                            initialSpawnChunk.Y,
+                            out originalChunkEntity)
+                        && tilemap.GetTile(spawnCell) != null
+                        && TryGetDisplayedResourceCell(
+                            world.EntityManager,
+                            originalChunkEntity,
+                            initialSpawnChunk,
+                            resourceTilemap,
+                            out originalResourceCell))
+                    {
+                        initialLoadCompleted = true;
+                        break;
+                    }
                 }
 
                 yield return null;
@@ -439,6 +503,25 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 initialLoadCompleted,
                 Is.True,
                 $"{MaximumWaitFrames}フレーム以内に初回生成と表示が完了しませんでした。");
+            Assert.That(
+                cameraPanController.transform.position.x,
+                Is.EqualTo(initialCameraWorldPosition.x).Within(0.00001f),
+                "カメラX座標が記録済み初期スポーンタイル中央と一致しません。");
+            Assert.That(
+                cameraPanController.transform.position.y,
+                Is.EqualTo(initialCameraWorldPosition.y).Within(0.00001f),
+                "カメラY座標が記録済み初期スポーンタイル中央と一致しません。");
+
+            // 初期移動後も通常カメラ操作は16 PPUへ丸まり、テスト後は記録済みスポーンへ正確に戻せることを確認します。
+            cameraPanController.SetWorldPosition(
+                initialCameraWorldPosition + new Vector2(0.1f, -0.1f));
+            Assert.That(
+                cameraPanController.transform.position.x,
+                Is.EqualTo(initialCameraWorldPosition.x + 0.125f).Within(0.00001f));
+            Assert.That(
+                cameraPanController.transform.position.y,
+                Is.EqualTo(initialCameraWorldPosition.y - 0.125f).Within(0.00001f));
+            cameraPanController.SetWorldPosition(initialCameraWorldPosition);
 
             // 正式なセーブ互換運用前は生成調整のたびに番号を増やさず、Sceneの初期バージョンを1へ固定します。
             WorldGenerationSettings runtimeGenerationSettings =
@@ -466,19 +549,31 @@ namespace Farmware.WorldGeneration.PlayModeTests
             GeneratedResourceTile originalLastResource =
                 originalResources[WorldGridConstants.TilesPerChunk - 1];
 
-            // 8チャンク先へ即時移動し、原点がRetention範囲外になってEntityとTilemap表示の両方から消えるのを待ちます。
-            cameraPanController.SetWorldPosition(new Vector2(FarCameraXInTiles, 0f));
+            // 初期スポーンから8チャンク東へ即時移動し、開始チャンクがRetention範囲外になってデータと表示から消えるのを待ちます。
+            Vector2 farCameraWorldPosition = initialCameraWorldPosition
+                + new Vector2(FarCameraOffsetInTiles, 0f);
+            ChunkCoordinate farCameraChunk = WorldGrid.ToChunkCoordinate(
+                Mathf.FloorToInt(farCameraWorldPosition.x),
+                Mathf.FloorToInt(farCameraWorldPosition.y));
+            cameraPanController.SetWorldPosition(farCameraWorldPosition);
             bool farLoadCompleted = false;
             for (int frame = 0; frame < MaximumWaitFrames; frame++)
             {
-                bool originalChunkWasUnloaded = !HasChunkAt(chunkQuery, 0, 0);
-                bool originalTileWasCleared = tilemap.GetTile(Vector3Int.zero) == null;
+                bool originalChunkWasUnloaded = !HasChunkAt(
+                    chunkQuery,
+                    initialSpawnChunk.X,
+                    initialSpawnChunk.Y);
+                bool originalTileWasCleared = tilemap.GetTile(
+                    new Vector3Int(
+                        initialSpawnLocation.TileX,
+                        initialSpawnLocation.TileY,
+                        0)) == null;
                 bool originalResourceWasCleared = resourceTilemap.GetTile(originalResourceCell) == null;
                 bool farChunkIsActive = TryGetActiveCompleteChunk(
                     world.EntityManager,
                     chunkQuery,
-                    ExpectedFarChunkX,
-                    0,
+                    farCameraChunk.X,
+                    farCameraChunk.Y,
                     out _);
 
                 if (originalChunkWasUnloaded
@@ -498,8 +593,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Is.True,
                 $"{MaximumWaitFrames}フレーム以内に遠方チャンクへの切替と原点のアンロードが完了しませんでした。");
 
-            // 原点へ戻り、破棄済みEntityに依存せず同じシードから同一タイルデータを再生成できることを確認します。
-            cameraPanController.SetWorldPosition(Vector2.zero);
+            // 記録済みスポーンへ戻り、破棄済みEntityに依存せず同じシードから同一タイルデータを再生成できることを確認します。
+            cameraPanController.SetWorldPosition(initialCameraWorldPosition);
             bool returnLoadCompleted = false;
             Entity regeneratedChunkEntity = Entity.Null;
             for (int frame = 0; frame < MaximumWaitFrames; frame++)
@@ -507,10 +602,14 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 if (TryGetActiveCompleteChunk(
                         world.EntityManager,
                         chunkQuery,
-                        0,
-                        0,
+                        initialSpawnChunk.X,
+                        initialSpawnChunk.Y,
                         out regeneratedChunkEntity)
-                    && tilemap.GetTile(Vector3Int.zero) != null)
+                    && tilemap.GetTile(
+                        new Vector3Int(
+                            initialSpawnLocation.TileX,
+                            initialSpawnLocation.TileY,
+                            0)) != null)
                 {
                     returnLoadCompleted = true;
                     break;
@@ -526,7 +625,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(
                 regeneratedChunkEntity,
                 Is.Not.EqualTo(originalChunkEntity),
-                "原点チャンクは遠方移動時に破棄され、別Entityとして再生成される必要があります。");
+                "初期スポーンチャンクは遠方移動時に破棄され、別Entityとして再生成される必要があります。");
 
             DynamicBuffer<GeneratedTile> regeneratedTiles =
                 world.EntityManager.GetBuffer<GeneratedTile>(regeneratedChunkEntity, true);
@@ -558,6 +657,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
             if (queriesCreated && world != null && world.IsCreated)
             {
                 settingsQuery.Dispose();
+                locationQuery.Dispose();
                 chunkQuery.Dispose();
             }
         }
@@ -632,16 +732,18 @@ namespace Farmware.WorldGeneration.PlayModeTests
         }
 
         /// <summary>
-        /// 原点チャンクの資源Bufferから最初の配置済みセルを探し、Resource Tilemapにも同じセルが表示されたか確認します。
+        /// 指定チャンクの資源Bufferから最初の配置済みセルを探し、Resource Tilemapにも同じワールドセルが表示されたか確認します。
         /// </summary>
         /// <param name="entityManager">Default WorldのEntityManagerです。</param>
-        /// <param name="chunkEntity">原点チャンクを表す完全生成済みEntityです。</param>
+        /// <param name="chunkEntity">検査対象チャンクを表す完全生成済みEntityです。</param>
+        /// <param name="chunkCoordinate">ローカルBuffer Indexをワールドセルへ戻す論理チャンク座標です。</param>
         /// <param name="resourceTilemap">資源だけを重ね描画するTilemapです。</param>
         /// <param name="resourceCell">成功時に、表示済み資源のワールドセル座標を返します。</param>
         /// <returns>配置済み資源が1件以上あり、そのTileが表示済みならtrueです。</returns>
         private static bool TryGetDisplayedResourceCell(
             EntityManager entityManager,
             Entity chunkEntity,
+            ChunkCoordinate chunkCoordinate,
             Tilemap resourceTilemap,
             out Vector3Int resourceCell)
         {
@@ -658,7 +760,10 @@ namespace Farmware.WorldGeneration.PlayModeTests
 
                 int localX = tileIndex % WorldGridConstants.LogicalChunkSize;
                 int localY = tileIndex / WorldGridConstants.LogicalChunkSize;
-                resourceCell = new Vector3Int(localX, localY, 0);
+                resourceCell = new Vector3Int(
+                    WorldGrid.ToWorldTileX(chunkCoordinate.X, localX),
+                    WorldGrid.ToWorldTileY(chunkCoordinate.Y, localY),
+                    0);
                 return resourceTilemap.GetTile(resourceCell) != null;
             }
 

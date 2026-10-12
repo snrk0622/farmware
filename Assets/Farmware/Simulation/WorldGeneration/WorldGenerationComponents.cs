@@ -389,6 +389,50 @@ namespace Farmware.WorldGeneration
     }
 
     /// <summary>
+    /// 新規ワールド開始時に決定した初期スポーン地点と、その根拠になった建設可能領域を保持します。
+    /// Simulationが一度だけ作成し、カメラ、将来のドローン生成、セーブ処理、F3表示が同じ座標を参照します。
+    /// </summary>
+    public struct InitialSpawnLocation : IComponentData
+    {
+        /// <summary>初期スポーンに選んだ水平ワールドタイル座標です。ワールド存続中は変更しません。</summary>
+        public int TileX;
+
+        /// <summary>初期スポーンに選んだ垂直ワールドタイル座標です。ワールド存続中は変更しません。</summary>
+        public int TileY;
+
+        /// <summary>選択元となった建設可能矩形の左下水平タイル座標です。</summary>
+        public int RegionMinimumTileX;
+
+        /// <summary>選択元となった建設可能矩形の左下垂直タイル座標です。</summary>
+        public int RegionMinimumTileY;
+
+        /// <summary>選択元となった建設可能矩形の横幅です。単位はタイルです。</summary>
+        public int RegionWidthInTiles;
+
+        /// <summary>選択元となった建設可能矩形の縦幅です。単位はタイルです。</summary>
+        public int RegionHeightInTiles;
+
+        /// <summary>
+        /// 発見済みの建設可能矩形から、将来プレイヤーやドローンにも利用できる中央寄りの1タイルを選びます。
+        /// 偶数幅では中央2タイルのうち右・上側を選び、常に整数タイル座標として記録します。
+        /// </summary>
+        /// <param name="region">全セルが建設可能と確認済みの矩形です。</param>
+        /// <returns>矩形情報と、その内部にある初期スポーンタイルです。</returns>
+        public static InitialSpawnLocation FromRegion(in NodeBuildableRegion region)
+        {
+            return new InitialSpawnLocation
+            {
+                TileX = region.MinimumTileX + (region.WidthInTiles / 2),
+                TileY = region.MinimumTileY + (region.HeightInTiles / 2),
+                RegionMinimumTileX = region.MinimumTileX,
+                RegionMinimumTileY = region.MinimumTileY,
+                RegionWidthInTiles = region.WidthInTiles,
+                RegionHeightInTiles = region.HeightInTiles
+            };
+        }
+    }
+
+    /// <summary>
     /// カメラ周辺チャンクの生成・保持・表示反映に使う実行時設定です。
     /// WorldGenerationAuthoringから変換され、ストリーミングSystemとPresentationが同じ予算を参照します。
     /// </summary>

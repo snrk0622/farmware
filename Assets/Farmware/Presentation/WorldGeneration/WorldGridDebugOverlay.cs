@@ -1,6 +1,7 @@
-// このファイルは、プレイヤーがF3で論理座標HUD、F4でタイル・サブチャンク・チャンク境界と座標ラベルを表示できるようにします。
+// このファイルは、プレイヤーがF3で現在・初期スポーン座標、F4で各グリッド境界と初期スポーン位置を表示できるようにします。
 // ゲーム状態を変更しない診断表示として製品版でも利用でき、開発者専用のノイズ可視化とは入力と責務を分離します。
 
+using Unity.Entities;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.Rendering.Universal;
@@ -8,7 +9,7 @@ using UnityEngine.Rendering.Universal;
 namespace Farmware.WorldGeneration.Presentation
 {
     /// <summary>
-    /// カメラ中心のワールド・タイル・チャンク座標と、1×1タイル・16×16サブチャンク・64×64チャンク境界を画面へ重ねます。
+    /// カメラ中心と初期スポーンの座標、各グリッド境界、赤系の初期スポーンタイル・所属チャンク表示を画面へ重ねます。
     /// プレイヤー向け診断表示として製品版でも動作しますが、地形やチャンクのゲーム状態は変更しません。
     /// </summary>
     [DisallowMultipleComponent]
@@ -71,6 +72,28 @@ namespace Farmware.WorldGeneration.Presentation
         [Min(1f)]
         [SerializeField] private float chunkBoundaryThicknessInPixels = 2f;
 
+        // 初期スポーンタイルの地形を隠さず位置を面として読めるよう、低い不透明度の明るい赤を重ねます。
+        [Tooltip("F4で初期スポーンタイル内へ重ねる色です。アルファ値を上げるほど地形が赤く覆われます。")]
+        [SerializeField] private Color initialSpawnTileFillColor = new Color(1f, 0.12f, 0.12f, 0.18f);
+
+        // 初期スポーンタイルの1セル輪郭へ使用し、通常の白いタイル境界より強く区別します。
+        [Tooltip("F4で初期スポーンタイルの輪郭へ使用する明るい赤色です。")]
+        [SerializeField] private Color initialSpawnTileBoundaryColor = new Color(1f, 0.18f, 0.18f, 1f);
+
+        // 初期スポーンタイル輪郭の画面上の太さです。ズーム率に関係なく見つけられる太さを保ちます。
+        [Tooltip("F4で初期スポーンタイルの輪郭へ使用する太さです。単位は画面ピクセルです。")]
+        [Min(1f)]
+        [SerializeField] private float initialSpawnTileBoundaryThicknessInPixels = 3f;
+
+        // 初期スポーン所属チャンクの輪郭とラベルへ使用し、通常の橙色チャンクから区別する濃い赤です。
+        [Tooltip("F4で初期スポーン所属チャンクの輪郭とラベルへ使用する濃い赤色です。")]
+        [SerializeField] private Color initialSpawnChunkColor = new Color(0.82f, 0.05f, 0.12f, 0.95f);
+
+        // 初期スポーン所属チャンクの輪郭を通常チャンク線より太くし、重なっても赤線を手前で読めるようにします。
+        [Tooltip("F4で初期スポーン所属チャンクの輪郭へ使用する太さです。単位は画面ピクセルです。")]
+        [Min(1f)]
+        [SerializeField] private float initialSpawnChunkThicknessInPixels = 3f;
+
         // F3で切り替わる現在のHUD表示状態です。Sceneへは保存せず、Play開始ごとに初期設定から復元します。
         private bool isCoordinateHudVisible;
 
@@ -89,8 +112,20 @@ namespace Farmware.WorldGeneration.Presentation
         // 各可視チャンクの中央へ座標を描くため、初回描画時に作って再利用するラベルStyleです。
         private GUIStyle chunkLabelStyle;
 
+        // 初期スポーン所属チャンクだけを赤い文字で示すため、通常チャンクと分けて再利用するラベルStyleです。
+        private GUIStyle initialSpawnChunkLabelStyle;
+
         // F3・F4の操作説明へ使用し、デバッグ表示を閉じた状態でも小さく表示するStyleです。
         private GUIStyle shortcutHintStyle;
+
+        // F3とF4へ初期スポーン地点を表示するため、InitialSpawnLocation Singletonを読むWorldを保持します。
+        private World spawnLocationWorld;
+
+        // F3またはF4表示中に毎フレームQueryを作り直さず、初期スポーンSingletonだけを読み取るためのQueryです。
+        private EntityQuery spawnLocationQuery;
+
+        // spawnLocationQueryを現在のWorld向けに作成済みかを示します。
+        private bool spawnLocationQueryIsCreated;
 
         /// <summary>現在F3の座標HUDを表示している場合はtrueです。</summary>
         public bool IsCoordinateHudVisible => isCoordinateHudVisible;
@@ -135,6 +170,14 @@ namespace Farmware.WorldGeneration.Presentation
         {
             isCoordinateHudVisible = showCoordinateHudOnStart;
             isChunkGridVisible = showChunkGridOnStart;
+        }
+
+        /// <summary>
+        /// Component破棄時にUnityから呼ばれ、F3・F4表示のために作成したEntityQueryを解放します。
+        /// </summary>
+        private void OnDestroy()
+        {
+            DisposeSpawnLocationQuery();
         }
 
         /// <summary>
@@ -349,22 +392,20 @@ namespace Farmware.WorldGeneration.Presentation
             Vector3Int tile = targetGrid == null
                 ? new Vector3Int(Mathf.FloorToInt(worldPosition.x), Mathf.FloorToInt(worldPosition.y), 0)
                 : targetGrid.WorldToCell(worldPosition);
-            ChunkCoordinate chunk = WorldGrid.ToChunkCoordinate(tile.x, tile.y);
-            ChunkLocalTileCoordinate local = WorldGrid.ToLocalTileCoordinate(tile.x, tile.y);
-            string text =
-                $"F3  Coordinates\n"
-                + $"World : ({worldPosition.x:0.###}, {worldPosition.y:0.###})\n"
-                + $"Tile  : ({tile.x}, {tile.y})\n"
-                + $"Chunk : ({chunk.X}, {chunk.Y})\n"
-                + $"Local : ({local.X}, {local.Y})";
+            bool hasSpawnLocation = TryGetInitialSpawnLocation(out InitialSpawnLocation spawnLocation);
+            string text = BuildCoordinateHudText(
+                worldPosition,
+                tile,
+                hasSpawnLocation,
+                spawnLocation);
 
-            const int textLineCount = 5;
-            const float panelWidth = 250f;
+            const int textLineCount = 6;
+            const float panelWidth = 340f;
             const float horizontalPadding = 8f;
             const float verticalPadding = 6f;
             const float glyphBottomSafetyPadding = 4f;
 
-            // 固定高では約1行分の空白が残るため、5行分の高さと小さな文字保護余白だけを確保します。
+            // 固定高では約1行分の空白が残るため、6行分の高さと小さな文字保護余白だけを確保します。
             // 最後の4pxはg・yなどの下へ伸びる字形がパネル枠へ触れないために必要で、空行ではありません。
             float textHeight = Mathf.Ceil(Mathf.Max(1f, coordinateHudStyle.lineHeight) * textLineCount);
             float panelHeight = textHeight + (verticalPadding * 2f) + glyphBottomSafetyPadding;
@@ -381,11 +422,135 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
+        /// 現在のカメラ座標と、ワールド開始時に記録した初期スポーン座標をF3表示用文字列へまとめます。
+        /// </summary>
+        /// <param name="worldPosition">現在のカメラ中心ワールド座標です。</param>
+        /// <param name="tile">現在のカメラ中心タイル座標です。</param>
+        /// <param name="hasSpawnLocation">初期スポーン探索が完了し、記録済み座標を渡せる場合はtrueです。</param>
+        /// <param name="spawnLocation">記録済みの初期スポーン座標です。未完了時は表示に使用しません。</param>
+        /// <returns>見出しを含む6行のF3座標HUD文字列です。</returns>
+        public static string BuildCoordinateHudText(
+            Vector3 worldPosition,
+            Vector3Int tile,
+            bool hasSpawnLocation,
+            InitialSpawnLocation spawnLocation)
+        {
+            ChunkCoordinate chunk = WorldGrid.ToChunkCoordinate(tile.x, tile.y);
+            ChunkLocalTileCoordinate local = WorldGrid.ToLocalTileCoordinate(tile.x, tile.y);
+            string spawnText = "Spawn: Searching...";
+            if (hasSpawnLocation)
+            {
+                ChunkCoordinate spawnChunk = WorldGrid.ToChunkCoordinate(
+                    spawnLocation.TileX,
+                    spawnLocation.TileY);
+                spawnText = $"Spawn: Tile ({spawnLocation.TileX}, {spawnLocation.TileY})"
+                    + $" / Chunk ({spawnChunk.X}, {spawnChunk.Y})";
+            }
+
+            return $"F3  Coordinates\n"
+                + $"World : ({worldPosition.x:0.###}, {worldPosition.y:0.###})\n"
+                + $"Tile  : ({tile.x}, {tile.y})\n"
+                + $"Chunk : ({chunk.X}, {chunk.Y})\n"
+                + $"Local : ({local.X}, {local.Y})\n"
+                + spawnText;
+        }
+
+        /// <summary>
+        /// 初期スポーンタイルを含む64×64論理チャンクのワールドタイル範囲を求めます。
+        /// 負座標でも床方向除算を共有することで、F3の座標表示とF4の赤枠を同じチャンクへ一致させます。
+        /// </summary>
+        /// <param name="spawnLocation">ワールド開始時に記録した初期スポーンタイルです。</param>
+        /// <returns>左下タイルを原点とする64×64タイルの整数矩形です。</returns>
+        public static RectInt CalculateInitialSpawnChunkTileBounds(InitialSpawnLocation spawnLocation)
+        {
+            ChunkCoordinate spawnChunk = WorldGrid.ToChunkCoordinate(
+                spawnLocation.TileX,
+                spawnLocation.TileY);
+            return new RectInt(
+                spawnChunk.X * WorldGridConstants.LogicalChunkSize,
+                spawnChunk.Y * WorldGridConstants.LogicalChunkSize,
+                WorldGridConstants.LogicalChunkSize,
+                WorldGridConstants.LogicalChunkSize);
+        }
+
+        /// <summary>
+        /// F4のチャンク座標ラベルを作り、初期スポーン所属チャンクだけを文字でも判別できるようにします。
+        /// </summary>
+        /// <param name="chunkX">表示する水平論理チャンク座標です。</param>
+        /// <param name="chunkY">表示する垂直論理チャンク座標です。</param>
+        /// <param name="isInitialSpawnChunk">初期スポーンタイルを含むチャンクの場合はtrueです。</param>
+        /// <returns>通常または初期スポーン用のチャンク座標ラベルです。</returns>
+        public static string BuildChunkCoordinateLabelText(
+            int chunkX,
+            int chunkY,
+            bool isInitialSpawnChunk)
+        {
+            return isInitialSpawnChunk
+                ? $"Spawn Chunk ({chunkX}, {chunkY})"
+                : $"Chunk ({chunkX}, {chunkY})";
+        }
+
+        /// <summary>
+        /// Default Worldから初期スポーンSingletonを読み、F3描画へ渡します。
+        /// World未作成、探索中、またはSingleton数が1件でない場合は未準備として扱います。
+        /// </summary>
+        /// <param name="spawnLocation">成功時に、ワールド開始時から不変の初期スポーン情報を返します。</param>
+        /// <returns>初期スポーンSingletonをちょうど1件読み取れた場合はtrueです。</returns>
+        private bool TryGetInitialSpawnLocation(out InitialSpawnLocation spawnLocation)
+        {
+            spawnLocation = default;
+            World currentWorld = World.DefaultGameObjectInjectionWorld;
+            if (currentWorld == null || !currentWorld.IsCreated)
+            {
+                return false;
+            }
+
+            if (!spawnLocationQueryIsCreated || spawnLocationWorld != currentWorld)
+            {
+                DisposeSpawnLocationQuery();
+                spawnLocationWorld = currentWorld;
+                spawnLocationQuery = currentWorld.EntityManager.CreateEntityQuery(
+                    ComponentType.ReadOnly<InitialSpawnLocation>());
+                spawnLocationQueryIsCreated = true;
+            }
+
+            if (spawnLocationQuery.CalculateEntityCount() != 1)
+            {
+                return false;
+            }
+
+            spawnLocation = spawnLocationQuery.GetSingleton<InitialSpawnLocation>();
+            return true;
+        }
+
+        /// <summary>
+        /// 初期スポーン表示用Queryと所有Worldが有効な場合だけQueryを破棄し、PlayMode終了後に古い参照を残しません。
+        /// UnityはWorldをMonoBehaviourより先に破棄する場合があるため、破棄済みEntityManagerへDisposeを要求しないことが重要です。
+        /// </summary>
+        private void DisposeSpawnLocationQuery()
+        {
+            if (spawnLocationQueryIsCreated
+                && spawnLocationWorld != null
+                && spawnLocationWorld.IsCreated)
+            {
+                spawnLocationQuery.Dispose();
+            }
+
+            spawnLocationWorld = null;
+            spawnLocationQuery = default;
+            spawnLocationQueryIsCreated = false;
+        }
+
+        /// <summary>
         /// 現在のViewportへタイル・サブチャンク・チャンク境界を階層順に描き、各チャンク中央へ論理座標を表示します。
         /// </summary>
         private void DrawVisibleChunkGrid()
         {
             VisibleGridBounds bounds = CalculateVisibleGridBounds();
+            bool hasSpawnLocation = TryGetInitialSpawnLocation(out InitialSpawnLocation spawnLocation);
+            ChunkCoordinate spawnChunk = hasSpawnLocation
+                ? WorldGrid.ToChunkCoordinate(spawnLocation.TileX, spawnLocation.TileY)
+                : default;
             int chunkCountX = bounds.MaximumChunkX - bounds.MinimumChunkX + 1;
             int chunkCountY = bounds.MaximumChunkY - bounds.MinimumChunkY + 1;
             long visibleChunkCount = (long)chunkCountX * chunkCountY;
@@ -440,13 +605,119 @@ namespace Farmware.WorldGeneration.Presentation
                 chunkBoundaryColor,
                 chunkBoundaryThicknessInPixels);
 
+            // 通常グリッドの後から赤系マーカーを重ね、同じ境界座標でもスポーン側の線を手前に表示します。
+            if (hasSpawnLocation)
+            {
+                DrawInitialSpawnMarkers(spawnLocation);
+            }
+
             for (int chunkY = bounds.MinimumChunkY; chunkY <= bounds.MaximumChunkY; chunkY++)
             {
                 for (int chunkX = bounds.MinimumChunkX; chunkX <= bounds.MaximumChunkX; chunkX++)
                 {
-                    DrawChunkCoordinateLabel(chunkX, chunkY);
+                    bool isInitialSpawnChunk = hasSpawnLocation
+                        && chunkX == spawnChunk.X
+                        && chunkY == spawnChunk.Y;
+                    DrawChunkCoordinateLabel(chunkX, chunkY, isInitialSpawnChunk);
                 }
             }
+        }
+
+        /// <summary>
+        /// F4表示へ初期スポーンタイルの赤い面・輪郭と、所属チャンクの濃い赤い輪郭を重ねます。
+        /// ECSの記録値を読み取るだけで、生成済み地形や初期スポーン自体は変更しません。
+        /// </summary>
+        /// <param name="spawnLocation">ワールド開始時から不変の初期スポーン情報です。</param>
+        private void DrawInitialSpawnMarkers(InitialSpawnLocation spawnLocation)
+        {
+            RectInt spawnChunkBounds = CalculateInitialSpawnChunkTileBounds(spawnLocation);
+
+            DrawWorldRectangleBoundary(
+                spawnChunkBounds.xMin,
+                spawnChunkBounds.yMin,
+                spawnChunkBounds.xMax,
+                spawnChunkBounds.yMax,
+                initialSpawnChunkColor,
+                initialSpawnChunkThicknessInPixels);
+
+            DrawWorldArea(
+                spawnLocation.TileX,
+                spawnLocation.TileY,
+                spawnLocation.TileX + 1,
+                spawnLocation.TileY + 1,
+                initialSpawnTileFillColor);
+            DrawWorldRectangleBoundary(
+                spawnLocation.TileX,
+                spawnLocation.TileY,
+                spawnLocation.TileX + 1,
+                spawnLocation.TileY + 1,
+                initialSpawnTileBoundaryColor,
+                initialSpawnTileBoundaryThicknessInPixels);
+        }
+
+        /// <summary>
+        /// ワールドタイル境界で指定した矩形の4辺を描き、タイルとチャンクの赤枠描画を共通化します。
+        /// </summary>
+        /// <param name="minimumTileX">矩形左端のワールドタイル境界座標です。</param>
+        /// <param name="minimumTileY">矩形下端のワールドタイル境界座標です。</param>
+        /// <param name="maximumTileX">矩形右端のワールドタイル境界座標です。</param>
+        /// <param name="maximumTileY">矩形上端のワールドタイル境界座標です。</param>
+        /// <param name="lineColor">4辺へ使用する色です。</param>
+        /// <param name="lineThicknessInPixels">画面上で一定に保つ線の太さです。</param>
+        private void DrawWorldRectangleBoundary(
+            int minimumTileX,
+            int minimumTileY,
+            int maximumTileX,
+            int maximumTileY,
+            Color lineColor,
+            float lineThicknessInPixels)
+        {
+            Vector3 bottomLeft = CellBoundaryToWorld(minimumTileX, minimumTileY);
+            Vector3 bottomRight = CellBoundaryToWorld(maximumTileX, minimumTileY);
+            Vector3 topLeft = CellBoundaryToWorld(minimumTileX, maximumTileY);
+            Vector3 topRight = CellBoundaryToWorld(maximumTileX, maximumTileY);
+
+            DrawWorldLine(bottomLeft, bottomRight, lineColor, lineThicknessInPixels);
+            DrawWorldLine(bottomRight, topRight, lineColor, lineThicknessInPixels);
+            DrawWorldLine(topRight, topLeft, lineColor, lineThicknessInPixels);
+            DrawWorldLine(topLeft, bottomLeft, lineColor, lineThicknessInPixels);
+        }
+
+        /// <summary>
+        /// ワールドタイル境界で指定した軸平行領域を単色で塗り、初期スポーン1タイルの位置を面として示します。
+        /// </summary>
+        /// <param name="minimumTileX">塗り領域左端のワールドタイル境界座標です。</param>
+        /// <param name="minimumTileY">塗り領域下端のワールドタイル境界座標です。</param>
+        /// <param name="maximumTileX">塗り領域右端のワールドタイル境界座標です。</param>
+        /// <param name="maximumTileY">塗り領域上端のワールドタイル境界座標です。</param>
+        /// <param name="fillColor">地形へ重ねる半透明色です。</param>
+        private void DrawWorldArea(
+            int minimumTileX,
+            int minimumTileY,
+            int maximumTileX,
+            int maximumTileY,
+            Color fillColor)
+        {
+            if (!TryWorldToGuiPoint(
+                    CellBoundaryToWorld(minimumTileX, minimumTileY),
+                    out Vector2 firstCorner)
+                || !TryWorldToGuiPoint(
+                    CellBoundaryToWorld(maximumTileX, maximumTileY),
+                    out Vector2 oppositeCorner))
+            {
+                return;
+            }
+
+            // IMGUIは左上原点なので、投影後の大小を取り直して正の幅と高さを持つ矩形へ変換します。
+            Rect areaRect = new Rect(
+                Mathf.Min(firstCorner.x, oppositeCorner.x),
+                Mathf.Min(firstCorner.y, oppositeCorner.y),
+                Mathf.Abs(oppositeCorner.x - firstCorner.x),
+                Mathf.Abs(oppositeCorner.y - firstCorner.y));
+            Color previousColor = GUI.color;
+            GUI.color = fillColor;
+            GUI.DrawTexture(areaRect, Texture2D.whiteTexture);
+            GUI.color = previousColor;
         }
 
         /// <summary>
@@ -500,7 +771,8 @@ namespace Farmware.WorldGeneration.Presentation
         /// </summary>
         /// <param name="chunkX">ラベルを付ける水平論理チャンク座標です。</param>
         /// <param name="chunkY">ラベルを付ける垂直論理チャンク座標です。</param>
-        private void DrawChunkCoordinateLabel(int chunkX, int chunkY)
+        /// <param name="isInitialSpawnChunk">初期スポーン所属チャンクとして赤い専用ラベルを使う場合はtrueです。</param>
+        private void DrawChunkCoordinateLabel(int chunkX, int chunkY, bool isInitialSpawnChunk)
         {
             int centerTileX = (chunkX * WorldGridConstants.LogicalChunkSize)
                 + (WorldGridConstants.LogicalChunkSize / 2);
@@ -515,7 +787,7 @@ namespace Farmware.WorldGeneration.Presentation
 
             // 64タイル幅より描画領域が狭い場合はチャンク中央が画面外になります。
             // ラベルだけをWindowbox内へ寄せ、現在見えている部分がどのチャンクか必ず読めるようにします。
-            float halfLabelWidth = Mathf.Min(55f, activeGuiViewportRect.width * 0.5f);
+            float halfLabelWidth = Mathf.Min(70f, activeGuiViewportRect.width * 0.5f);
             float halfLabelHeight = Mathf.Min(14f, activeGuiViewportRect.height * 0.5f);
             float minimumGuiX = halfLabelWidth;
             float maximumGuiX = activeGuiViewportRect.width - halfLabelWidth;
@@ -525,9 +797,9 @@ namespace Farmware.WorldGeneration.Presentation
             centerGui.y = Mathf.Clamp(centerGui.y, minimumGuiY, maximumGuiY);
 
             GUI.Label(
-                new Rect(centerGui.x - 55f, centerGui.y - 14f, 110f, 28f),
-                $"Chunk ({chunkX}, {chunkY})",
-                chunkLabelStyle);
+                new Rect(centerGui.x - 70f, centerGui.y - 14f, 140f, 28f),
+                BuildChunkCoordinateLabelText(chunkX, chunkY, isInitialSpawnChunk),
+                isInitialSpawnChunk ? initialSpawnChunkLabelStyle : chunkLabelStyle);
         }
 
         /// <summary>
@@ -708,6 +980,9 @@ namespace Farmware.WorldGeneration.Presentation
                 wordWrap = false
             };
             chunkLabelStyle.normal.textColor = chunkBoundaryColor;
+
+            initialSpawnChunkLabelStyle = new GUIStyle(chunkLabelStyle);
+            initialSpawnChunkLabelStyle.normal.textColor = initialSpawnChunkColor;
 
             shortcutHintStyle = new GUIStyle(GUI.skin.box)
             {

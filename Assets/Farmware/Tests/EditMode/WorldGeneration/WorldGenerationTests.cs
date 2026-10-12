@@ -1,4 +1,4 @@
-// このファイルは、負座標変換、安定シード、地形・資源の決定性、初期候補条件、ECS生成SystemをEditModeで検証します。
+// このファイルは、負座標変換、地形・資源の決定性、初期スポーン探索と記録、ECS生成SystemをEditModeで検証します。
 // 失敗時にどの仕様が崩れたか分かるよう、純粋計算とEntityデータフローを分けてテストします。
 
 using System;
@@ -511,6 +511,24 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// 偶数寸法の建設可能矩形を準備し、初期スポーンが矩形内の中央寄りタイルへ決まり、元矩形も記録されることを保証します。
+        /// </summary>
+        [Test]
+        public void InitialSpawnLocation_FromRegionRecordsCenterTileAndSourceRegion()
+        {
+            NodeBuildableRegion region = new NodeBuildableRegion(-12, 7, 12, 8);
+
+            InitialSpawnLocation location = InitialSpawnLocation.FromRegion(region);
+
+            Assert.That(location.TileX, Is.EqualTo(-6));
+            Assert.That(location.TileY, Is.EqualTo(11));
+            Assert.That(location.RegionMinimumTileX, Is.EqualTo(region.MinimumTileX));
+            Assert.That(location.RegionMinimumTileY, Is.EqualTo(region.MinimumTileY));
+            Assert.That(location.RegionWidthInTiles, Is.EqualTo(region.WidthInTiles));
+            Assert.That(location.RegionHeightInTiles, Is.EqualTo(region.HeightInTiles));
+        }
+
+        /// <summary>
         /// 広い正負座標範囲を2回生成し、水域分類と資源配置が決定論的で、資源が地形適性から外れないことを保証します。
         /// 川・池・海、河口の淡水海水接続、木・石・砂を同じ走査で確認し、日常テストの重複生成を避けます。
         /// </summary>
@@ -782,6 +800,47 @@ namespace Farmware.WorldGeneration.Tests
             {
                 AssertNaturalRequiredResourcesForSeed(seedIndex);
             }
+        }
+
+        /// <summary>
+        /// テスト用Worldへ生成設定を準備し、非同期探索Jobの完了後に建設可能な初期スポーンSingletonが1件だけ作られることを保証します。
+        /// </summary>
+        [Test]
+        public void InitialSpawnLocationSystem_RecordsOneBuildableLocationAfterJobCompletion()
+        {
+            using World world = new World("InitialSpawnLocationSystemTests");
+            EntityManager entityManager = world.EntityManager;
+            WorldGenerationSettings generationSettings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.Mix64(1UL),
+                1);
+            ResourceGenerationSettings resourceSettings = ResourceGenerationSettings.CreateDefault();
+            Entity settingsEntity = entityManager.CreateEntity();
+            entityManager.AddComponentData(settingsEntity, generationSettings);
+            entityManager.AddComponentData(settingsEntity, resourceSettings);
+
+            SystemHandle system = world.GetOrCreateSystem<InitialSpawnLocationSystem>();
+
+            // 1回目はWorker Threadへ探索を渡し、明示的な完了後の2回目で結果Entityを作る二段階を再現します。
+            system.Update(world.Unmanaged);
+            entityManager.CompleteAllTrackedJobs();
+            system.Update(world.Unmanaged);
+
+            using EntityQuery locationQuery = entityManager.CreateEntityQuery(
+                ComponentType.ReadOnly<InitialSpawnLocation>());
+            Assert.That(locationQuery.CalculateEntityCount(), Is.EqualTo(1));
+            InitialSpawnLocation location = locationQuery.GetSingleton<InitialSpawnLocation>();
+            GeneratedTile spawnTile = DeterministicChunkGenerator.GenerateTile(
+                generationSettings,
+                location.TileX,
+                location.TileY);
+            Assert.That(
+                NodeBuildableRegionLocator.CanPlaceNode(spawnTile),
+                Is.True,
+                "記録された初期スポーンタイルは通常ノードを建設できる必要があります。");
+
+            // 完了後に再更新してもSingletonを増やさず、ワールド内の開始地点が一意であることを保証します。
+            system.Update(world.Unmanaged);
+            Assert.That(locationQuery.CalculateEntityCount(), Is.EqualTo(1));
         }
 
         /// <summary>

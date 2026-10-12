@@ -658,7 +658,7 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>
-        /// Main Cameraへ移動、Observer Bridge、Debug Overlay、URP Pixel Perfect Cameraを追加し、16 PPU・480×270の基準へ設定します。
+        /// Main Cameraへ初期位置、移動、Observer Bridge、Debug Overlay、URP Pixel Perfect Cameraを追加し、16 PPU・480×270の基準へ設定します。
         /// </summary>
         /// <param name="camera">SampleSceneでMainCameraタグを持つOrthographic Cameraです。</param>
         /// <param name="grid">カメラ範囲を整数セルへ変換するWorld Gridです。</param>
@@ -680,7 +680,13 @@ namespace Farmware.WorldGeneration.Editor
             pixelPerfectCamera.cropFrame = PixelPerfectCamera.CropFrame.Windowbox;
 
             // 移動Component自身が16 PPUへ座標を丸めるため、入力中もPixel Perfect Cameraと同じ格子を保ちます。
-            GetOrAddComponent<CameraPanController>(camera.gameObject);
+            CameraPanController panController = GetOrAddComponent<CameraPanController>(camera.gameObject);
+
+            // Simulationが記録した初期スポーンタイルを一度だけ読み、通常の移動Controller経由でカメラへ反映します。
+            InitialCameraPositionController initialPositionController =
+                GetOrAddComponent<InitialCameraPositionController>(camera.gameObject);
+            initialPositionController.Configure(panController, grid);
+            EditorUtility.SetDirty(initialPositionController);
 
             CameraChunkStreamingBridge bridge = GetOrAddComponent<CameraChunkStreamingBridge>(camera.gameObject);
             SerializedObject serializedBridge = new SerializedObject(bridge);
@@ -872,6 +878,10 @@ namespace Farmware.WorldGeneration.Editor
             bool presenterReferencesAreValid = presenter != null && PresenterHasAllReferences(presenter);
             WorldGridDebugOverlay debugOverlay = camera.GetComponent<WorldGridDebugOverlay>();
             bool debugOverlayReferencesAreValid = debugOverlay != null && DebugOverlayHasAllReferences(debugOverlay);
+            InitialCameraPositionController initialPositionController =
+                camera.GetComponent<InitialCameraPositionController>();
+            bool initialPositionReferencesAreValid = initialPositionController != null
+                && InitialPositionControllerHasAllReferences(initialPositionController);
             WorldGenerationDebugVisualizationOverlay developerVisualization =
                 camera.GetComponent<WorldGenerationDebugVisualizationOverlay>();
             bool developerVisualizationReferencesAreValid = developerVisualization != null
@@ -887,6 +897,7 @@ namespace Farmware.WorldGeneration.Editor
 
             if (camera.GetComponent<CameraPanController>() == null
                 || camera.GetComponent<CameraChunkStreamingBridge>() == null
+                || !initialPositionReferencesAreValid
                 || !debugOverlayReferencesAreValid
                 || !developerVisualizationReferencesAreValid
                 || !pixelPerfectCameraIsValid
@@ -902,6 +913,19 @@ namespace Farmware.WorldGeneration.Editor
             {
                 throw new InvalidOperationException("SampleSceneのマップ生成Component接続を検証できませんでした。");
             }
+        }
+
+        /// <summary>
+        /// 初期カメラ位置Controllerが、通常移動Controllerと地形Gridの両方を参照しているか確認します。
+        /// </summary>
+        /// <param name="controller">保存済みSampleSceneから読み込んだ初期位置Controllerです。</param>
+        /// <returns>必要な2参照がどちらも非nullならtrueです。</returns>
+        private static bool InitialPositionControllerHasAllReferences(
+            InitialCameraPositionController controller)
+        {
+            SerializedObject serializedController = new SerializedObject(controller);
+            return serializedController.FindProperty("cameraPanController").objectReferenceValue != null
+                && serializedController.FindProperty("targetGrid").objectReferenceValue != null;
         }
 
         /// <summary>
