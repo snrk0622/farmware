@@ -347,6 +347,97 @@ namespace Farmware.WorldGeneration.Authoring
         [SerializeField] private int maximumSubChunkApplicationsPerFrame = 4;
 
         /// <summary>
+        /// Inspectorへ保存されている開発用シード文字列を返します。
+        /// Editorのマップビューアが、実際のBake入力と同じシードを初期表示へ使用します。
+        /// </summary>
+        public string SeedText => seedText;
+
+        /// <summary>
+        /// BakerとEditorのマップビューアが共有する、地形生成設定の値コピーを作ります。
+        /// このメソッドへ変換処理を一元化し、ビューアだけ別の閾値を使って実マップと食い違うことを防ぎます。
+        /// </summary>
+        /// <param name="seedTextOverride">
+        /// nullならInspectorのシード文字列を使用します。別シードを比較するときだけ任意の文字列を渡します。
+        /// </param>
+        /// <returns>Bake後のECS Singletonと同じ形式の地形生成設定です。</returns>
+        public WorldGenerationSettings CreateWorldGenerationSettingsSnapshot(
+            string seedTextOverride = null)
+        {
+            string effectiveSeedText = seedTextOverride ?? seedText;
+            return new WorldGenerationSettings
+            {
+                WorldSeed = WorldSeedUtility.FromString(effectiveSeedText),
+                GeneratorVersion = generatorVersion,
+                ElevationCellSizeInTiles = elevationCellSizeInTiles,
+                TemperatureCellSizeInTiles = temperatureCellSizeInTiles,
+                MoistureCellSizeInTiles = moistureCellSizeInTiles,
+                WeirdnessCellSizeInTiles = weirdnessCellSizeInTiles,
+                BiomeWarpCellSizeInTiles = biomeWarpCellSizeInTiles,
+                BiomeWarpAmplitudeInTiles = biomeWarpAmplitudeInTiles,
+                OctaveCount = octaveCount,
+                BiomeClassificationTransitionWidthInTiles =
+                    biomeClassificationTransitionWidthInTiles,
+                BiomeTransitionWidthInTiles = biomeTransitionWidthInTiles,
+                SeaLevelThreshold = ToNormalizedUShort(waterThreshold),
+                RiverCellSizeInTiles = riverCellSizeInTiles,
+                PondCellSizeInTiles = pondCellSizeInTiles,
+                FreshWaterOctaveCount = freshWaterOctaveCount,
+                RiverCenterLineHalfWidth = ToNormalizedUShort(riverCenterLineHalfWidth),
+                PondThreshold = ToNormalizedUShort(pondThreshold),
+                WetClimatePondThresholdReduction =
+                    ToNormalizedUShort(wetClimatePondThresholdReduction),
+                WetlandPondThresholdReduction =
+                    ToNormalizedUShort(wetlandPondThresholdReduction),
+                DesertPondThresholdIncrease =
+                    ToNormalizedUShort(desertPondThresholdIncrease),
+                HighlandPondThresholdIncrease =
+                    ToNormalizedUShort(highlandPondThresholdIncrease),
+                VolcanicPondThresholdIncrease =
+                    ToNormalizedUShort(volcanicPondThresholdIncrease),
+                WetlandRiverHalfWidthIncrease =
+                    ToNormalizedUShort(wetlandRiverHalfWidthIncrease),
+                VolcanicRiverHalfWidthReduction =
+                    ToNormalizedUShort(volcanicRiverHalfWidthReduction),
+                FreshWaterMaximumElevation = ToNormalizedUShort(freshWaterMaximumElevation),
+                MagmaCellSizeInTiles = magmaCellSizeInTiles,
+                MagmaDetailCellSizeInTiles = magmaDetailCellSizeInTiles,
+                MagmaWarpAmplitudeInTiles = magmaWarpAmplitudeInTiles,
+                MagmaOctaveCount = magmaOctaveCount,
+                MagmaNoiseThreshold = ToNormalizedUShort(magmaNoiseThreshold),
+                MagmaInfluenceNoiseThreshold =
+                    ToNormalizedUShort(magmaInfluenceNoiseThreshold),
+                MagmaMinimumVolcanicInfluence =
+                    ToNormalizedUShort(magmaMinimumVolcanicInfluence),
+                MagmaInfluenceMinimumVolcanicInfluence =
+                    ToNormalizedUShort(magmaInfluenceMinimumVolcanicInfluence),
+                RocklandMagmaCellSizeInTiles = rocklandMagmaCellSizeInTiles,
+                RocklandMagmaNoiseThreshold =
+                    ToNormalizedUShort(rocklandMagmaNoiseThreshold),
+                RocklandMagmaInfluenceNoiseThreshold =
+                    ToNormalizedUShort(rocklandMagmaInfluenceNoiseThreshold),
+                RocklandMagmaMinimumVolcanicInfluence =
+                    ToNormalizedUShort(rocklandMagmaMinimumVolcanicInfluence),
+                RocklandMagmaInfluenceMinimumVolcanicInfluence =
+                    ToNormalizedUShort(rocklandMagmaInfluenceMinimumVolcanicInfluence),
+                RockWallMassCellSizeInTiles = rockWallMassCellSizeInTiles,
+                RockWallDetailCellSizeInTiles = rockWallDetailCellSizeInTiles,
+                RockWallWarpAmplitudeInTiles = rockWallWarpAmplitudeInTiles,
+                RockWallNoiseThreshold = ToNormalizedUShort(rockWallNoiseThreshold),
+                RockWallCorridorHalfWidth = ToNormalizedUShort(rockWallCorridorHalfWidth),
+                HotTemperatureThreshold = ToNormalizedUShort(hotTemperatureThreshold),
+                ColdTemperatureThreshold = ToNormalizedUShort(coldTemperatureThreshold),
+                DryMoistureThreshold = ToNormalizedUShort(dryMoistureThreshold),
+                WetMoistureThreshold = ToNormalizedUShort(wetMoistureThreshold),
+                WetlandMoistureThreshold = ToNormalizedUShort(wetlandMoistureThreshold),
+                WetlandMaximumElevation = ToNormalizedUShort(wetlandMaximumElevation),
+                HighlandElevationThreshold = ToNormalizedUShort(highlandElevationThreshold),
+                VolcanicWeirdnessThreshold = ToNormalizedUShort(volcanicWeirdnessThreshold),
+                BiomeAdjacencyTransitionScoreMargin =
+                    (ushort)biomeAdjacencyTransitionScoreMargin
+            };
+        }
+
+        /// <summary>
         /// Inspector値が変更されたときにUnity Editorから呼ばれ、矛盾する閾値を安全な順序へ補正します。
         /// 実行時の地形を変更する処理ではなく、Bake前のAuthoringデータだけを整えます。
         /// </summary>
@@ -435,78 +526,7 @@ namespace Farmware.WorldGeneration.Authoring
             public override void Bake(WorldGenerationAuthoring authoring)
             {
                 Entity entity = GetEntity(TransformUsageFlags.None);
-                AddComponent(entity, new WorldGenerationSettings
-                {
-                    WorldSeed = WorldSeedUtility.FromString(authoring.seedText),
-                    GeneratorVersion = authoring.generatorVersion,
-                    ElevationCellSizeInTiles = authoring.elevationCellSizeInTiles,
-                    TemperatureCellSizeInTiles = authoring.temperatureCellSizeInTiles,
-                    MoistureCellSizeInTiles = authoring.moistureCellSizeInTiles,
-                    WeirdnessCellSizeInTiles = authoring.weirdnessCellSizeInTiles,
-                    BiomeWarpCellSizeInTiles = authoring.biomeWarpCellSizeInTiles,
-                    BiomeWarpAmplitudeInTiles = authoring.biomeWarpAmplitudeInTiles,
-                    OctaveCount = authoring.octaveCount,
-                    BiomeClassificationTransitionWidthInTiles =
-                        authoring.biomeClassificationTransitionWidthInTiles,
-                    BiomeTransitionWidthInTiles = authoring.biomeTransitionWidthInTiles,
-                    SeaLevelThreshold = ToNormalizedUShort(authoring.waterThreshold),
-                    RiverCellSizeInTiles = authoring.riverCellSizeInTiles,
-                    PondCellSizeInTiles = authoring.pondCellSizeInTiles,
-                    FreshWaterOctaveCount = authoring.freshWaterOctaveCount,
-                    RiverCenterLineHalfWidth = ToNormalizedUShort(authoring.riverCenterLineHalfWidth),
-                    PondThreshold = ToNormalizedUShort(authoring.pondThreshold),
-                    WetClimatePondThresholdReduction =
-                        ToNormalizedUShort(authoring.wetClimatePondThresholdReduction),
-                    WetlandPondThresholdReduction =
-                        ToNormalizedUShort(authoring.wetlandPondThresholdReduction),
-                    DesertPondThresholdIncrease =
-                        ToNormalizedUShort(authoring.desertPondThresholdIncrease),
-                    HighlandPondThresholdIncrease =
-                        ToNormalizedUShort(authoring.highlandPondThresholdIncrease),
-                    VolcanicPondThresholdIncrease =
-                        ToNormalizedUShort(authoring.volcanicPondThresholdIncrease),
-                    WetlandRiverHalfWidthIncrease =
-                        ToNormalizedUShort(authoring.wetlandRiverHalfWidthIncrease),
-                    VolcanicRiverHalfWidthReduction =
-                        ToNormalizedUShort(authoring.volcanicRiverHalfWidthReduction),
-                    FreshWaterMaximumElevation = ToNormalizedUShort(authoring.freshWaterMaximumElevation),
-                    MagmaCellSizeInTiles = authoring.magmaCellSizeInTiles,
-                    MagmaDetailCellSizeInTiles = authoring.magmaDetailCellSizeInTiles,
-                    MagmaWarpAmplitudeInTiles = authoring.magmaWarpAmplitudeInTiles,
-                    MagmaOctaveCount = authoring.magmaOctaveCount,
-                    MagmaNoiseThreshold = ToNormalizedUShort(authoring.magmaNoiseThreshold),
-                    MagmaInfluenceNoiseThreshold =
-                        ToNormalizedUShort(authoring.magmaInfluenceNoiseThreshold),
-                    MagmaMinimumVolcanicInfluence =
-                        ToNormalizedUShort(authoring.magmaMinimumVolcanicInfluence),
-                    MagmaInfluenceMinimumVolcanicInfluence =
-                        ToNormalizedUShort(authoring.magmaInfluenceMinimumVolcanicInfluence),
-                    RocklandMagmaCellSizeInTiles = authoring.rocklandMagmaCellSizeInTiles,
-                    RocklandMagmaNoiseThreshold =
-                        ToNormalizedUShort(authoring.rocklandMagmaNoiseThreshold),
-                    RocklandMagmaInfluenceNoiseThreshold =
-                        ToNormalizedUShort(authoring.rocklandMagmaInfluenceNoiseThreshold),
-                    RocklandMagmaMinimumVolcanicInfluence =
-                        ToNormalizedUShort(authoring.rocklandMagmaMinimumVolcanicInfluence),
-                    RocklandMagmaInfluenceMinimumVolcanicInfluence =
-                        ToNormalizedUShort(authoring.rocklandMagmaInfluenceMinimumVolcanicInfluence),
-                    RockWallMassCellSizeInTiles = authoring.rockWallMassCellSizeInTiles,
-                    RockWallDetailCellSizeInTiles = authoring.rockWallDetailCellSizeInTiles,
-                    RockWallWarpAmplitudeInTiles = authoring.rockWallWarpAmplitudeInTiles,
-                    RockWallNoiseThreshold = ToNormalizedUShort(authoring.rockWallNoiseThreshold),
-                    RockWallCorridorHalfWidth =
-                        ToNormalizedUShort(authoring.rockWallCorridorHalfWidth),
-                    HotTemperatureThreshold = ToNormalizedUShort(authoring.hotTemperatureThreshold),
-                    ColdTemperatureThreshold = ToNormalizedUShort(authoring.coldTemperatureThreshold),
-                    DryMoistureThreshold = ToNormalizedUShort(authoring.dryMoistureThreshold),
-                    WetMoistureThreshold = ToNormalizedUShort(authoring.wetMoistureThreshold),
-                    WetlandMoistureThreshold = ToNormalizedUShort(authoring.wetlandMoistureThreshold),
-                    WetlandMaximumElevation = ToNormalizedUShort(authoring.wetlandMaximumElevation),
-                    HighlandElevationThreshold = ToNormalizedUShort(authoring.highlandElevationThreshold),
-                    VolcanicWeirdnessThreshold = ToNormalizedUShort(authoring.volcanicWeirdnessThreshold),
-                    BiomeAdjacencyTransitionScoreMargin =
-                        (ushort)authoring.biomeAdjacencyTransitionScoreMargin
-                });
+                AddComponent(entity, authoring.CreateWorldGenerationSettingsSnapshot());
                 AddComponent(entity, new ChunkStreamingSettings
                 {
                     PreloadMarginInChunks = authoring.preloadMarginInChunks,

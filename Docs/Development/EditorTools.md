@@ -125,6 +125,61 @@ Consoleレポートには、次の比較材料を出力する。
 4. 同一コード・同一条件で再実行した署名が一致する。
 5. 大きな比率変化がある場合は、ランダムマップ生成仕様の調整値と説明も更新する。
 
+### 2.4 Map Viewer
+
+- メニュー: `Farmware > World Generation > Map Viewer`
+- 実装: `WorldGenerationMapViewerWindow`、`WorldGenerationMapSampler`
+- PlayMode: 不要。PlayMode中に開いた場合は、実行中ECSの`WorldGenerationSettings`を優先する。
+
+#### 用途
+
+MinecraftのBiome Finderのように、無限ワールドの広い範囲を独立したEditorWindowで確認する。
+シード、中心タイル座標、表示モード、ズームを指定でき、ドラッグ移動とカーソル中心のホイールズームに対応する。
+
+Farmwareのワールドは無限なので「全体」を有限画像へ収めることはできない。最大ズームでは、画像1ピクセルにつき256タイルを代表サンプルとして、現在位置を中心に非常に広い範囲を確認する。
+
+#### 実マップとの一致
+
+- EditModeでは`WorldGenerationSettingsSubScene`をHierarchyへ影響しないPreview Sceneとして読み込む。
+- `WorldGenerationAuthoring.CreateWorldGenerationSettingsSnapshot`をBakerとMap Viewerで共有する。
+- PlayModeでは、`ChunkGenerationSystem`が使用中のECS Singletonを直接読む。
+- 各代表タイルは`DeterministicChunkGenerator.GenerateTile`で生成し、ビューア専用の簡易バイオーム計算は持たない。
+- 実設定を取得できない場合は生成を停止し、別の既定値へフォールバックしない。
+
+`Terrain`は7バイオームの地面に淡水、海水、マグマ、岩壁を重ねた最終地形を表示する。
+`Biome`は水域や障害物の下も含む論理バイオームを表示する。木、石、砂の資源分布は現時点では対象外である。
+
+#### 画面上部の入力欄・ボタン
+
+| 項目 | 説明 |
+| --- | --- |
+| `Seed` | 確認するワールドのシード文字列。値を変更して`移動・再生成`を押すと、Sceneの設定を変更せずに別シードを比較できる。 |
+| `X` / `Y` | 画像中央に表示するタイル座標。負座標も指定できる。 |
+| `表示` | `Terrain`は最終地形、`Biome`は地形で覆われる前の論理バイオームへ切り替える。変更すると現在位置を再生成する。 |
+| `Grid` | 16×16タイルのサブチャンク境界と64×64タイルの論理チャンク境界の表示を切り替える。生成結果自体は変化しない。 |
+| `移動・再生成` | 入力中のSeedとX/Yを確定し、その地点の画像を生成し直す。 |
+| `実設定を再読込` | EditModeではAuthoring、PlayModeでは実行中ECSから生成設定とSeedを読み直し、現在位置を再生成する。入力した一時的なSeedは破棄される。 |
+| `原点` | 中心座標を`(0, 0)`へ戻し、現在のSeedと表示モードで再生成する。 |
+| `＋` | 中心座標を保ったまま拡大し、より細かな地形を表示する。 |
+| `－` | 中心座標を保ったまま縮小し、より広い範囲を表示する。 |
+
+地図上をドラッグすると表示範囲を移動できる。マウスホイールでは、カーソルが指している地点を基準に拡大・縮小できる。
+
+#### 次の修正をしたら確認する
+
+- `WorldGenerationAuthoring`の地形設定、Baker、設定SubSceneを変更した。
+- `DeterministicChunkGenerator`、`GeneratedTile`、Biome、Ground、水域の分類を変更した。
+- チャンク・サブチャンク寸法、負座標変換、シード変換、GeneratorVersionを変更した。
+- Map Viewerの色、凡例、座標変換、パン、ズーム、非同期処理を変更した。
+
+#### 確認内容
+
+1. 原点付近と既知の遠距離座標で、Map ViewerとGameビューのバイオーム・水域・マグマ・岩壁が一致する。
+2. `実設定を再読込`後のSeed、WorldSeed、GeneratorVersion、設定取得元が想定どおり表示される。
+3. 負座標への移動、ドラッグ、ホイール、＋・－Buttonで中心と縮尺が正しく変化する。
+4. 同じSeed・座標・縮尺へ戻ると同じ画像になる。
+5. 連続操作で古い非同期結果が後から上書きされず、Editorが長時間応答不能にならない。
+
 ## 3. 変更時の選び方
 
 | 変更内容 | 最低限確認するEditorツール |
@@ -132,7 +187,8 @@ Consoleレポートには、次の比較材料を出力する。
 | Authoring、Scene、Tileアセット、Camera、Tilemapレイヤー | Build Fallback Map Prototype |
 | 個別タイルの分類、色、境界、凡例 | Debug Visualization |
 | バイオームや地形の広域分布、隣接関係、決定性 | Analyze Distribution |
-| 生成規則と表示の両方 | Analyze Distributionの後にDebug Visualization |
+| 広域形状、特定Seed・遠距離座標の探索 | Map Viewer |
+| 生成規則と表示の両方 | Analyze Distribution、Map Viewer、Debug Visualization |
 
 Editorツールだけで検証を完了しない。対応する自動テストは[テスト](./Testing.md)に従って実行し、見た目に関係する変更はGameビューでも確認する。
 

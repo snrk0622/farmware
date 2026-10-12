@@ -1,0 +1,233 @@
+:root {
+    --map-bg: #11141a;
+    --panel-bg: #20242b;
+    --panel-border: #3f4652;
+    --text-main: #e7ebf1;
+    --text-muted: #abb3c0;
+    --accent: #4faac4;
+    --danger: #e06363;
+}
+
+.map-viewer-root {
+    flex-grow: 1;
+    min-width: 720px;
+    min-height: 480px;
+    background-color: var(--map-bg);
+    color: var(--text-main);
+}
+
+.header {
+    padding: 10px 12px 8px 12px;
+    background-color: #252a32;
+    border-bottom-width: 1px;
+    border-bottom-color: var(--panel-border);
+}
+
+.title {
+    font-size: 17px;
+    -unity-font-style: bold;
+}
+
+.subtitle {
+    margin-top: 2px;
+    color: var(--text-muted);
+}
+
+.controls {
+    flex-direction: column;
+    padding: 8px 10px 4px 10px;
+    background-color: var(--panel-bg);
+    border-bottom-width: 1px;
+    border-bottom-color: var(--panel-border);
+}
+
+.control-row {
+    flex-direction: row;
+    align-items: flex-end;
+}
+
+.control-row > * {
+    margin-right: 6px;
+    margin-bottom: 5px;
+}
+
+.seed-field {
+    width: 220px;
+    flex-shrink: 0;
+}
+
+.coordinate-field {
+    width: 100px;
+}
+
+.coordinate-field > .unity-base-field__label {
+    display: none;
+}
+
+.coordinate-field > .unity-base-field__input {
+    flex-grow: 1;
+}
+
+.coordinate-control {
+    width: 125px;
+    flex-direction: row;
+    align-items: center;
+}
+
+.axis-label {
+    width: 18px;
+    margin-right: 5px;
+}
+
+.mode-field {
+    width: 110px;
+}
+
+/* label=""でもBaseField内部の空Label領域が残るため、外側の「表示」Labelだけを使います。 */
+.mode-field > .unity-base-field__label {
+    display: none;
+}
+
+.mode-field > .unity-base-field__input {
+    flex-grow: 1;
+}
+
+.mode-control {
+    width: 155px;
+    flex-direction: row;
+    align-items: center;
+}
+
+.compact-label {
+    width: 38px;
+    margin-right: 5px;
+}
+
+.grid-toggle {
+    min-width: 72px;
+}
+
+.primary-button {
+    background-color: #2d748a;
+    color: #ffffff;
+    -unity-font-style: bold;
+}
+
+.zoom-button {
+    width: 34px;
+    -unity-font-style: bold;
+}
+
+.body {
+    flex-grow: 1;
+    flex-direction: row;
+    min-height: 0;
+}
+
+.map-panel {
+    flex-grow: 1;
+    min-width: 320px;
+    background-color: var(--map-bg);
+    overflow: hidden;
+}
+
+.map-host {
+    flex-grow: 1;
+    min-height: 240px;
+    overflow: hidden;
+}
+
+.map-canvas {
+    flex-grow: 1;
+    background-size: 100% 100%;
+    background-repeat: no-repeat;
+    background-position: center;
+}
+
+.hover-label {
+    min-height: 24px;
+    padding: 5px 8px;
+    background-color: #1b1f26;
+    border-top-width: 1px;
+    border-top-color: var(--panel-border);
+    color: var(--text-main);
+}
+
+.side-panel {
+    width: 250px;
+    flex-shrink: 0;
+    padding: 8px;
+    background-color: var(--panel-bg);
+    border-left-width: 1px;
+    border-left-color: var(--panel-border);
+}
+
+.section-title {
+    margin-top: 6px;
+    margin-bottom: 5px;
+    padding-bottom: 3px;
+    -unity-font-style: bold;
+    border-bottom-width: 1px;
+    border-bottom-color: var(--panel-border);
+}
+
+.info-label,
+.help-label {
+    margin-bottom: 5px;
+    color: var(--text-muted);
+    white-space: normal;
+}
+
+.legend {
+    margin-bottom: 8px;
+}
+
+.legend-row {
+    flex-direction: row;
+    align-items: center;
+    margin-bottom: 4px;
+}
+
+.legend-swatch {
+    width: 14px;
+    height: 14px;
+    margin-right: 7px;
+    border-left-width: 1px;
+    border-top-width: 1px;
+    border-right-width: 1px;
+    border-bottom-width: 1px;
+    border-left-color: #727b88;
+    border-top-color: #727b88;
+    border-right-color: #727b88;
+    border-bottom-color: #727b88;
+}
+
+.legend-grassland { background-color: rgb(112, 169, 86); }
+.legend-forest { background-color: rgb(61, 112, 66); }
+.legend-desert { background-color: rgb(210, 177, 100); }
+.legend-rockland { background-color: rgb(128, 123, 137); }
+.legend-wetland { background-color: rgb(72, 128, 103); }
+.legend-snowfield { background-color: rgb(198, 225, 232); }
+.legend-volcanic { background-color: rgb(130, 67, 57); }
+.legend-fresh-water { background-color: rgb(76, 157, 211); }
+.legend-salt-water { background-color: rgb(42, 101, 176); }
+.legend-magma { background-color: rgb(238, 82, 24); }
+.legend-rock-wall { background-color: rgb(52, 52, 60); }
+
+.legend-label {
+    color: var(--text-main);
+}
+
+.status-label {
+    min-height: 25px;
+    padding: 5px 10px;
+    background-color: #252a32;
+    border-top-width: 1px;
+    border-top-color: var(--panel-border);
+    color: var(--text-muted);
+    white-space: normal;
+}
+
+.status-label.error {
+    color: var(--danger);
+}

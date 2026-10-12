@@ -46,6 +46,11 @@ Unity Editorを開いたまま外部プロセスから同じプロジェクト�
 Editorの分布監査と同じAnalyzerを小さな固定サンプルで2回実行し、集計漏れがないことと、署名・レポートが決定論的に一致することを保証する。
 広域のバランス確認はテストへ組み込まず、`Farmware > World Generation > Analyze Distribution`から実行する。
 
+#### `WorldGenerationMapViewerTests`
+
+Map Viewerの全ピクセルが同じ座標へ直接`DeterministicChunkGenerator.GenerateTile`した結果と一致することを保証する。
+あわせて、負座標を含むPointer座標変換、カーソル中心ズーム、Bakerと共有するAuthoring設定Snapshotのシード変換を検証する。
+
 ### 3.2 PlayMode: `Farmware.WorldGeneration.PlayModeTests`
 
 #### `WorldGenerationScenePlayModeTests`
@@ -63,11 +68,11 @@ Editorの分布監査と同じAnalyzerを小さな固定サンプルで2回実�
 
 | 変更内容 | 必須の自動確認 | 追加の確認 |
 | --- | --- | --- |
-| 座標、ハッシュ、ノイズ、生成規則、調整値 | 関連するEditModeテスト | 分布監査、Debug Visualization |
+| 座標、ハッシュ、ノイズ、生成規則、調整値 | 関連するEditModeテストとMap Viewerテスト | 分布監査、Map Viewer、Debug Visualization |
 | バイオーム、水域、マグマ、岩壁、資源 | 該当分類のEditModeテスト | 分布監査とGameビュー |
 | Component、Buffer、System、Job | 関連するECS EditModeテスト | Safety Check、必要に応じてProfiler |
 | Camera、Tilemap、HUD、F3/F4、可視化 | 関連するPlayModeテスト | 複数アスペクト比のGameビュー |
-| Scene、SubScene、Authoring、Baker、参照 | SampleScene縦切りPlayModeテスト | Scene内のMissing参照確認 |
+| Scene、SubScene、Authoring、Baker、参照 | SampleScene縦切りPlayModeテストとMap Viewerテスト | Scene内のMissing参照確認 |
 | asmdef、パッケージ、プラットフォーム条件 | 影響するEditModeとPlayMode Assembly | Playerビルドへの混入確認 |
 
 不具合修正では、可能なら不具合を再現するテストを先に追加し、そのテストと既存の関連テストが成功することを確認する。
