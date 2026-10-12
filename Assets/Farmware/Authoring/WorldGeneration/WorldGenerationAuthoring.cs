@@ -144,7 +144,37 @@ namespace Farmware.WorldGeneration.Authoring
         // 砂地内の採取可能な砂資源群を決める0〜1の下限です。
         [Tooltip("砂資源を配置するノイズ下限です。0〜1で指定し、小さくすると砂地内の採取候補が増えます。")]
         [Range(0f, 1f)]
-        [SerializeField] private float sandResourceThreshold = 51500f / ushort.MaxValue;
+        [SerializeField] private float sandResourceThreshold = 48000f / ushort.MaxValue;
+
+        // 樹木群の中心を離す距離で、群れ同士が連結して巨大な森になることを防ぎます。
+        [Tooltip("樹木群の中心同士に確保する最低距離です。単位はタイルです。大きくすると樹木群が疎になります。")]
+        [Min(2)]
+        [SerializeField] private int treeResourceMinimumSpacingInTiles = 14;
+
+        // 石群は樹木より希少に見せるため、中心間隔を広く取ります。
+        [Tooltip("石群の中心同士に確保する最低距離です。単位はタイルです。大きくすると石群が疎になります。")]
+        [Min(2)]
+        [SerializeField] private int stoneResourceMinimumSpacingInTiles = 20;
+
+        // 砂資源群の中心を離す距離で、砂漠全体が資源アイコンで埋まることを防ぎます。
+        [Tooltip("砂資源群の中心同士に確保する最低距離です。単位はタイルです。大きくすると砂資源群が疎になります。")]
+        [Min(2)]
+        [SerializeField] private int sandResourceMinimumSpacingInTiles = 18;
+
+        // 樹木群の中心から資源候補を置ける最大半径で、最低間隔の半分以下へ補正します。
+        [Tooltip("樹木群の最大半径です。単位はタイルです。大きくすると1群が広がりますが、最低間隔の半分以下へ補正されます。")]
+        [Min(1)]
+        [SerializeField] private int treeResourceClusterRadiusInTiles = 5;
+
+        // 石群の中心から資源候補を置ける最大半径で、小さな鉱床として見える値にします。
+        [Tooltip("石群の最大半径です。単位はタイルです。大きくすると1群が広がりますが、最低間隔の半分以下へ補正されます。")]
+        [Min(1)]
+        [SerializeField] private int stoneResourceClusterRadiusInTiles = 4;
+
+        // 砂資源群の中心から資源候補を置ける最大半径です。
+        [Tooltip("砂資源群の最大半径です。単位はタイルです。大きくすると1群が広がりますが、最低間隔の半分以下へ補正されます。")]
+        [Min(1)]
+        [SerializeField] private int sandResourceClusterRadiusInTiles = 6;
 
         // 可視範囲の外側で事前生成する幅で、最低1チャンクを確保してカメラ移動時の空白を減らします。
         [Tooltip("カメラ表示範囲の外側へ先読みする幅です。単位は論理チャンクです。大きくすると高速パンに強くなりますが、生成量とメモリ使用量が増えます。")]
@@ -187,6 +217,17 @@ namespace Farmware.WorldGeneration.Authoring
             dryMoistureThreshold = Mathf.Min(dryMoistureThreshold, 1f - minimumGap);
             wetMoistureThreshold = Mathf.Max(wetMoistureThreshold, dryMoistureThreshold + minimumGap);
             wetMoistureThreshold = Mathf.Clamp01(wetMoistureThreshold);
+
+            // 群半径が中心間隔の半分を超えると同種の群が重なるため、Inspector上で安全な上限へ揃えます。
+            treeResourceClusterRadiusInTiles = Mathf.Min(
+                treeResourceClusterRadiusInTiles,
+                Mathf.Max(1, treeResourceMinimumSpacingInTiles / 2));
+            stoneResourceClusterRadiusInTiles = Mathf.Min(
+                stoneResourceClusterRadiusInTiles,
+                Mathf.Max(1, stoneResourceMinimumSpacingInTiles / 2));
+            sandResourceClusterRadiusInTiles = Mathf.Min(
+                sandResourceClusterRadiusInTiles,
+                Mathf.Max(1, sandResourceMinimumSpacingInTiles / 2));
         }
 
         /// <summary>
@@ -251,7 +292,13 @@ namespace Farmware.WorldGeneration.Authoring
                     OctaveCount = authoring.resourceOctaveCount,
                     TreeThreshold = ToNormalizedUShort(authoring.treeResourceThreshold),
                     StoneThreshold = ToNormalizedUShort(authoring.stoneResourceThreshold),
-                    SandThreshold = ToNormalizedUShort(authoring.sandResourceThreshold)
+                    SandThreshold = ToNormalizedUShort(authoring.sandResourceThreshold),
+                    TreeMinimumSpacingInTiles = authoring.treeResourceMinimumSpacingInTiles,
+                    StoneMinimumSpacingInTiles = authoring.stoneResourceMinimumSpacingInTiles,
+                    SandMinimumSpacingInTiles = authoring.sandResourceMinimumSpacingInTiles,
+                    TreeClusterRadiusInTiles = authoring.treeResourceClusterRadiusInTiles,
+                    StoneClusterRadiusInTiles = authoring.stoneResourceClusterRadiusInTiles,
+                    SandClusterRadiusInTiles = authoring.sandResourceClusterRadiusInTiles
                 });
             }
         }

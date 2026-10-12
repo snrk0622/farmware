@@ -174,7 +174,13 @@ MonoBehaviour:
   resourceOctaveCount: 2
   treeResourceThreshold: 0.7629511
   stoneResourceThreshold: 0.8468757
-  sandResourceThreshold: 0.7858396
+  sandResourceThreshold: 0.7324331
+  treeResourceMinimumSpacingInTiles: 14
+  stoneResourceMinimumSpacingInTiles: 20
+  sandResourceMinimumSpacingInTiles: 18
+  treeResourceClusterRadiusInTiles: 5
+  stoneResourceClusterRadiusInTiles: 4
+  sandResourceClusterRadiusInTiles: 6
   preloadMarginInChunks: 1
   retentionMarginInChunks: 1
   maximumConcurrentGenerations: 2

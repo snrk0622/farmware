@@ -103,8 +103,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
         }
 
         /// <summary>
-        /// 開発者用可視化がBiome、連続ノイズ、水域、移行帯を異なる色へ写像し、論理BiomeとGroundの差を正しく判定することを検証します。
-        /// SceneやECS Worldを作らない純粋計算として、表示色の両端、水域分類、水域除外をまとめて保証します。
+        /// 開発者用可視化がBiome、連続ノイズ、水域、移行帯、資源を異なる色へ写像し、論理BiomeとGroundの差を正しく判定することを検証します。
+        /// SceneやECS Worldを作らない純粋計算として、表示色の両端、水域分類、水域除外、最終資源分類をまとめて保証します。
         /// </summary>
         [Test]
         public void DebugVisualization_MapsGeneratedTileValuesWithoutChangingSimulationData()
@@ -181,6 +181,28 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(riverColor, Is.Not.EqualTo(pondColor), "川と池は別の色で判別できる必要があります。");
             Assert.That(pondColor, Is.Not.EqualTo(seaColor), "池と海は別の色で判別できる必要があります。");
             Assert.That(riverColor, Is.Not.EqualTo(seaColor), "川と海は別の色で判別できる必要があります。");
+
+            Color treeResourceColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.Resources,
+                forestTransitionTile,
+                0f,
+                GeneratedResourceType.Tree);
+            Color stoneResourceColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.Resources,
+                forestTransitionTile,
+                0f,
+                GeneratedResourceType.Stone);
+            Color emptyResourceColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.Resources,
+                forestTransitionTile);
+            Assert.That(
+                treeResourceColor,
+                Is.Not.EqualTo(stoneResourceColor),
+                "Resources表示では木と石を別色で判別できる必要があります。");
+            Assert.That(
+                emptyResourceColor,
+                Is.Not.EqualTo(treeResourceColor),
+                "Resources表示では配置なしと樹木を別色で判別できる必要があります。");
 
             Color hiddenColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
                 WorldGenerationDebugVisualizationMode.None,

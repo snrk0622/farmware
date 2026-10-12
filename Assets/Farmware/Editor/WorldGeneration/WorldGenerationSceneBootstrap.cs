@@ -101,7 +101,25 @@ namespace Farmware.WorldGeneration.Editor
         private const float PrototypeStoneResourceThreshold = 55500f / ushort.MaxValue;
 
         /// <summary>砂資源を配置する固定小数点下限をInspectorの0〜1表現へ戻した値です。</summary>
-        private const float PrototypeSandResourceThreshold = 51500f / ushort.MaxValue;
+        private const float PrototypeSandResourceThreshold = 48000f / ushort.MaxValue;
+
+        /// <summary>樹木群の中心同士へ確保する試作最低間隔です。単位はタイルです。</summary>
+        private const int PrototypeTreeResourceMinimumSpacingInTiles = 14;
+
+        /// <summary>石群の中心同士へ確保する試作最低間隔です。単位はタイルです。</summary>
+        private const int PrototypeStoneResourceMinimumSpacingInTiles = 20;
+
+        /// <summary>砂資源群の中心同士へ確保する試作最低間隔です。単位はタイルです。</summary>
+        private const int PrototypeSandResourceMinimumSpacingInTiles = 18;
+
+        /// <summary>樹木群の試作最大半径です。単位はタイルです。</summary>
+        private const int PrototypeTreeResourceClusterRadiusInTiles = 5;
+
+        /// <summary>石群の試作最大半径です。単位はタイルです。</summary>
+        private const int PrototypeStoneResourceClusterRadiusInTiles = 4;
+
+        /// <summary>砂資源群の試作最大半径です。単位はタイルです。</summary>
+        private const int PrototypeSandResourceClusterRadiusInTiles = 6;
 
         /// <summary>
         /// Unityメニューからフォールバック表示付きマップ生成Sceneを構築します。
@@ -500,6 +518,18 @@ namespace Farmware.WorldGeneration.Editor
                 PrototypeStoneResourceThreshold;
             serializedAuthoring.FindProperty("sandResourceThreshold").floatValue =
                 PrototypeSandResourceThreshold;
+            serializedAuthoring.FindProperty("treeResourceMinimumSpacingInTiles").intValue =
+                PrototypeTreeResourceMinimumSpacingInTiles;
+            serializedAuthoring.FindProperty("stoneResourceMinimumSpacingInTiles").intValue =
+                PrototypeStoneResourceMinimumSpacingInTiles;
+            serializedAuthoring.FindProperty("sandResourceMinimumSpacingInTiles").intValue =
+                PrototypeSandResourceMinimumSpacingInTiles;
+            serializedAuthoring.FindProperty("treeResourceClusterRadiusInTiles").intValue =
+                PrototypeTreeResourceClusterRadiusInTiles;
+            serializedAuthoring.FindProperty("stoneResourceClusterRadiusInTiles").intValue =
+                PrototypeStoneResourceClusterRadiusInTiles;
+            serializedAuthoring.FindProperty("sandResourceClusterRadiusInTiles").intValue =
+                PrototypeSandResourceClusterRadiusInTiles;
             serializedAuthoring.ApplyModifiedPropertiesWithoutUndo();
             EditorUtility.SetDirty(authoring);
         }

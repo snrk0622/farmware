@@ -326,7 +326,7 @@ namespace Farmware.WorldGeneration
     }
 
     /// <summary>
-    /// ワールド全体の基礎資源群の大きさと種類別密度を保持する生成設定です。
+    /// ワールド全体の基礎資源群について、ノイズ密度、群中心の最低間隔、群半径を保持する生成設定です。
     /// AuthoringからSingleton Entityへ変換し、チャンク生成Jobと初期位置探索が同じ値を参照します。
     /// </summary>
     public struct ResourceGenerationSettings : IComponentData
@@ -346,9 +346,27 @@ namespace Farmware.WorldGeneration
         /// <summary>砂資源を配置する0〜65535のノイズ下限です。大きいほど砂資源が減ります。</summary>
         public ushort SandThreshold;
 
+        /// <summary>樹木群の中心同士に確保する最小距離です。単位はタイルです。</summary>
+        public int TreeMinimumSpacingInTiles;
+
+        /// <summary>石群の中心同士に確保する最小距離です。単位はタイルです。</summary>
+        public int StoneMinimumSpacingInTiles;
+
+        /// <summary>砂資源群の中心同士に確保する最小距離です。単位はタイルです。</summary>
+        public int SandMinimumSpacingInTiles;
+
+        /// <summary>樹木群を中心から広げる最大半径です。単位はタイルです。</summary>
+        public int TreeClusterRadiusInTiles;
+
+        /// <summary>石群を中心から広げる最大半径です。単位はタイルです。</summary>
+        public int StoneClusterRadiusInTiles;
+
+        /// <summary>砂資源群を中心から広げる最大半径です。単位はタイルです。</summary>
+        public int SandClusterRadiusInTiles;
+
         /// <summary>
         /// Phase 3の初期検証に使う資源群設定を作ります。
-        /// 24タイル程度のまとまりを作り、石だけを少し希少にする暫定値です。
+        /// 24タイル格子のノイズで群の輪郭を作り、種類別の最低間隔と半径で密集しすぎない分布へ整える暫定値です。
         /// </summary>
         /// <returns>木、石、砂をワールド全体へ群生させる設定です。</returns>
         public static ResourceGenerationSettings CreateDefault()
@@ -359,7 +377,13 @@ namespace Farmware.WorldGeneration
                 OctaveCount = 2,
                 TreeThreshold = 50000,
                 StoneThreshold = 55500,
-                SandThreshold = 51500
+                SandThreshold = 48000,
+                TreeMinimumSpacingInTiles = 14,
+                StoneMinimumSpacingInTiles = 20,
+                SandMinimumSpacingInTiles = 18,
+                TreeClusterRadiusInTiles = 5,
+                StoneClusterRadiusInTiles = 4,
+                SandClusterRadiusInTiles = 6
             };
         }
     }

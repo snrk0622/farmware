@@ -2,6 +2,7 @@
 // 失敗時にどの仕様が崩れたか分かるよう、純粋計算とEntityデータフローを分けてテストします。
 
 using System;
+using System.Collections.Generic;
 using NUnit.Framework;
 using Unity.Entities;
 
@@ -333,6 +334,31 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// 資源既定値を作り、木・石・砂が種類別の最低間隔と群半径を持ち、半径が間隔の半分を超えないことを保証します。
+        /// </summary>
+        [Test]
+        public void DefaultResourceSettings_UsePerTypeSpacingAndClusterRadius()
+        {
+            ResourceGenerationSettings settings = ResourceGenerationSettings.CreateDefault();
+
+            Assert.That(settings.TreeMinimumSpacingInTiles, Is.EqualTo(14));
+            Assert.That(settings.StoneMinimumSpacingInTiles, Is.EqualTo(20));
+            Assert.That(settings.SandMinimumSpacingInTiles, Is.EqualTo(18));
+            Assert.That(settings.TreeClusterRadiusInTiles, Is.EqualTo(5));
+            Assert.That(settings.StoneClusterRadiusInTiles, Is.EqualTo(4));
+            Assert.That(settings.SandClusterRadiusInTiles, Is.EqualTo(6));
+            Assert.That(
+                settings.TreeClusterRadiusInTiles * 2,
+                Is.LessThan(settings.TreeMinimumSpacingInTiles));
+            Assert.That(
+                settings.StoneClusterRadiusInTiles * 2,
+                Is.LessThan(settings.StoneMinimumSpacingInTiles));
+            Assert.That(
+                settings.SandClusterRadiusInTiles * 2,
+                Is.LessThan(settings.SandMinimumSpacingInTiles));
+        }
+
+        /// <summary>
         /// 同じシードを移行帯あり・なしで生成し、論理Biomeと気候値を維持したまま境界付近の陸上地面だけが混ざることを保証します。
         /// </summary>
         [Test]
@@ -629,6 +655,104 @@ namespace Farmware.WorldGeneration.Tests
                 freshAndSaltBoundaryCount,
                 Is.GreaterThan(0),
                 "川または池の淡水が海水へ隙間なく接する河口境界が必要です。");
+        }
+
+        /// <summary>
+        /// 地形生成を省いた全適性タイルへ1種類ずつ資源を生成し、負座標をまたいでも群中心同士が設定距離より近づかないことを保証します。
+        /// 日常テストを軽く保つため96×96だけを走査し、同じ群に属する複数タイルは中心座標で重複除外します。
+        /// </summary>
+        [Test]
+        public void ResourceGeneration_ClusterAnchorsRespectPerTypeMinimumSpacing()
+        {
+            WorldGenerationSettings generationSettings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.FromString("resource-spacing-test"),
+                1);
+            ResourceGenerationSettings resourceSettings = ResourceGenerationSettings.CreateDefault();
+
+            // 閾値を0にすると候補セルの有無ではなく、アンカー配置そのものの最低間隔だけを確実に検証できます。
+            resourceSettings.TreeThreshold = 0;
+            resourceSettings.StoneThreshold = 0;
+            resourceSettings.SandThreshold = 0;
+            AssertResourceClusterSpacing(
+                generationSettings,
+                resourceSettings,
+                GeneratedResourceType.Tree,
+                ResourceSuitability.Tree,
+                resourceSettings.TreeMinimumSpacingInTiles);
+            AssertResourceClusterSpacing(
+                generationSettings,
+                resourceSettings,
+                GeneratedResourceType.Stone,
+                ResourceSuitability.Stone,
+                resourceSettings.StoneMinimumSpacingInTiles);
+            AssertResourceClusterSpacing(
+                generationSettings,
+                resourceSettings,
+                GeneratedResourceType.Sand,
+                ResourceSuitability.Sand,
+                resourceSettings.SandMinimumSpacingInTiles);
+        }
+
+        /// <summary>
+        /// 木・石・砂の群が重なりやすい小間隔設定を準備し、同じタイルに複数候補があっても最終Buffer相当の結果が1種類へ決まることを保証します。
+        /// </summary>
+        [Test]
+        public void ResourceGeneration_OverlappingCandidatesResolveToOneStableType()
+        {
+            WorldGenerationSettings generationSettings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.FromString("resource-conflict-test"),
+                1);
+            ResourceGenerationSettings resourceSettings = ResourceGenerationSettings.CreateDefault();
+            resourceSettings.TreeThreshold = 0;
+            resourceSettings.StoneThreshold = 0;
+            resourceSettings.SandThreshold = 0;
+            resourceSettings.TreeMinimumSpacingInTiles = 8;
+            resourceSettings.StoneMinimumSpacingInTiles = 8;
+            resourceSettings.SandMinimumSpacingInTiles = 8;
+            resourceSettings.TreeClusterRadiusInTiles = 4;
+            resourceSettings.StoneClusterRadiusInTiles = 4;
+            resourceSettings.SandClusterRadiusInTiles = 4;
+            GeneratedTile allSuitableTerrain = new GeneratedTile
+            {
+                ResourceSuitability = ResourceSuitability.Tree
+                    | ResourceSuitability.Stone
+                    | ResourceSuitability.Sand
+            };
+            int resolvedConflictCount = 0;
+
+            // 64×64内の競合セルだけを検証し、広域地形生成を伴う重いテストにはしません。
+            for (int worldY = -32; worldY < 32; worldY++)
+            {
+                for (int worldX = -32; worldX < 32; worldX++)
+                {
+                    ResourceGenerationDebugInfo debugInfo =
+                        DeterministicResourceGenerator.GetDebugInfo(
+                            generationSettings,
+                            resourceSettings,
+                            allSuitableTerrain,
+                            worldX,
+                            worldY);
+                    if (debugInfo.EligibleCandidateCount < 2)
+                    {
+                        continue;
+                    }
+
+                    GeneratedResourceTile generated = DeterministicResourceGenerator.GenerateResource(
+                        generationSettings,
+                        resourceSettings,
+                        allSuitableTerrain,
+                        worldX,
+                        worldY);
+                    Assert.That(generated.Type, Is.EqualTo(debugInfo.SelectedType));
+                    Assert.That(generated.Type, Is.Not.EqualTo(GeneratedResourceType.None));
+                    resolvedConflictCount++;
+                }
+            }
+
+            Assert.That(
+                resolvedConflictCount,
+                Is.GreaterThan(0),
+                "試験範囲に複数資源群が競合するタイルが必要です。");
         }
 
         /// <summary>
@@ -1083,6 +1207,72 @@ namespace Farmware.WorldGeneration.Tests
                     return ResourceSuitability.Sand;
                 default:
                     return ResourceSuitability.None;
+            }
+        }
+
+        /// <summary>
+        /// 1種類だけ配置可能な平坦テスト地形を走査し、発見した一意な群中心を総当たりで比較します。
+        /// </summary>
+        /// <param name="generationSettings">群中心を固定するシードと生成器バージョンです。</param>
+        /// <param name="resourceSettings">最低間隔、群半径、ノイズ条件を含む資源設定です。</param>
+        /// <param name="resourceType">今回検証する木・石・砂のいずれかです。</param>
+        /// <param name="suitability">テスト地形へ付ける対象資源だけの適性です。</param>
+        /// <param name="minimumSpacingInTiles">中心間で保証する期待距離です。単位はタイルです。</param>
+        private static void AssertResourceClusterSpacing(
+            in WorldGenerationSettings generationSettings,
+            in ResourceGenerationSettings resourceSettings,
+            GeneratedResourceType resourceType,
+            ResourceSuitability suitability,
+            int minimumSpacingInTiles)
+        {
+            GeneratedTile suitableTerrain = new GeneratedTile { ResourceSuitability = suitability };
+            Dictionary<long, ResourceGenerationDebugInfo> uniqueAnchors =
+                new Dictionary<long, ResourceGenerationDebugInfo>();
+
+            // 正負座標と複数の最低間隔セルを含む固定範囲だけを走査し、チャンク生成やPresentationは起動しません。
+            for (int worldY = -48; worldY < 48; worldY++)
+            {
+                for (int worldX = -48; worldX < 48; worldX++)
+                {
+                    ResourceGenerationDebugInfo debugInfo =
+                        DeterministicResourceGenerator.GetDebugInfo(
+                            generationSettings,
+                            resourceSettings,
+                            suitableTerrain,
+                            worldX,
+                            worldY);
+                    if (debugInfo.SelectedType == GeneratedResourceType.None)
+                    {
+                        continue;
+                    }
+
+                    Assert.That(debugInfo.SelectedType, Is.EqualTo(resourceType));
+                    long anchorKey = ((long)debugInfo.AnchorTileX << 32)
+                        | (uint)debugInfo.AnchorTileY;
+                    uniqueAnchors[anchorKey] = debugInfo;
+                }
+            }
+
+            Assert.That(uniqueAnchors.Count, Is.GreaterThan(1), $"{resourceType}の群中心が不足しています。");
+            ResourceGenerationDebugInfo[] anchors = new ResourceGenerationDebugInfo[uniqueAnchors.Count];
+            uniqueAnchors.Values.CopyTo(anchors, 0);
+            int minimumDistanceSquared = minimumSpacingInTiles * minimumSpacingInTiles;
+
+            // 群内の多数の資源タイルではなく一意な中心だけを比較し、テスト時間を中心数の二乗へ抑えます。
+            for (int firstIndex = 0; firstIndex < anchors.Length; firstIndex++)
+            {
+                for (int secondIndex = firstIndex + 1; secondIndex < anchors.Length; secondIndex++)
+                {
+                    int deltaX = anchors[firstIndex].AnchorTileX - anchors[secondIndex].AnchorTileX;
+                    int deltaY = anchors[firstIndex].AnchorTileY - anchors[secondIndex].AnchorTileY;
+                    int distanceSquared = (deltaX * deltaX) + (deltaY * deltaY);
+                    Assert.That(
+                        distanceSquared,
+                        Is.GreaterThanOrEqualTo(minimumDistanceSquared),
+                        $"{resourceType}群中心の最低間隔違反です。"
+                        + $"first=({anchors[firstIndex].AnchorTileX}, {anchors[firstIndex].AnchorTileY}), "
+                        + $"second=({anchors[secondIndex].AnchorTileX}, {anchors[secondIndex].AnchorTileY})");
+                }
             }
         }
 

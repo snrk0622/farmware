@@ -1,4 +1,4 @@
-// このファイルは、ECSで生成済みの可視タイルをPlayMode中だけ色分けして、ノイズ・バイオーム・水域・岩壁表示判定を確認できるようにします。
+// このファイルは、ECSで生成済みの可視タイルをPlayMode中だけ色分けして、ノイズ・バイオーム・水域・岩壁・資源判定を確認できるようにします。
 // 操作入口はEditor AssemblyのWorldGenerationDebugVisualizationMenuに置き、Simulationとプレイヤー用F3/F4入力から分離します。
 
 using System.Collections.Generic;
@@ -40,7 +40,10 @@ namespace Farmware.WorldGeneration.Presentation
         BiomeTransition = 7,
 
         /// <summary>最終岩壁を非岩壁・露出面・連続した内部影の濃さとして表示します。</summary>
-        RockWall = 8
+        RockWall = 8,
+
+        /// <summary>最低間隔と配置競合を適用した後の木・石・砂を固定色で表示します。</summary>
+        Resources = 9
     }
 
     /// <summary>
@@ -71,11 +74,14 @@ namespace Farmware.WorldGeneration.Presentation
         // PlayMode終了やDefault World再作成を検知してEntityQueryを作り直すために保持するWorldです。
         private World presentationWorld;
 
-        // 座標、生成状態、GeneratedTile Bufferを持つチャンクだけを読み取る再利用Queryです。
+        // 座標、生成状態、地形・資源Bufferを持つチャンクだけを読み取る再利用Queryです。
         private EntityQuery chunkQuery;
 
         // 中央タイルHUDへ現在の閾値を表示するため、WorldGenerationSettings Singletonを読むQueryです。
         private EntityQuery settingsQuery;
+
+        // 中央タイルHUDへ資源の最低間隔と群半径を表示するため、ResourceGenerationSettings Singletonを読むQueryです。
+        private EntityQuery resourceSettingsQuery;
 
         // EntityQueryを現在のDefault World向けに作成済みかを示します。
         private bool queriesAreCreated;
@@ -165,7 +171,7 @@ namespace Farmware.WorldGeneration.Presentation
             {
                 if (!TryEnsureQueries())
                 {
-                    DrawInformationPanel(false, default, default, default);
+                    DrawInformationPanel(false, default, default, default, default, default);
                     return;
                 }
 
@@ -193,17 +199,19 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// 指定モード、GeneratedTile、岩壁影不透明度から、Gameビューへ重ねる色を純粋計算します。
+        /// 指定モード、GeneratedTile、岩壁影不透明度、最終資源IDからGameビューへ重ねる色を純粋計算します。
         /// PlayModeテストも同じ入口を使い、凡例と実描画の対応が変わっていないことを保証します。
         /// </summary>
         /// <param name="mode">色の意味を決める可視化モードです。</param>
         /// <param name="tile">ECS Dynamic Bufferから読み取った1タイルの生成結果です。</param>
         /// <param name="rockWallShadowOpacity">RockWallモードで使う0〜1の連続影不透明度です。他モードでは参照しません。</param>
+        /// <param name="resourceType">Resourcesモードで色分けする競合解決後の資源IDです。</param>
         /// <returns>IMGUIへ設定するRGBA色です。Noneの場合は完全な透明色です。</returns>
         public static Color GetVisualizationColor(
             WorldGenerationDebugVisualizationMode mode,
             GeneratedTile tile,
-            float rockWallShadowOpacity = 0f)
+            float rockWallShadowOpacity = 0f,
+            GeneratedResourceType resourceType = GeneratedResourceType.None)
         {
             switch (mode)
             {
@@ -296,6 +304,25 @@ namespace Farmware.WorldGeneration.Presentation
                         new Color32(5, 5, 8, 248),
                         normalizedShadow);
 
+                case WorldGenerationDebugVisualizationMode.Resources:
+                    // 最終Bufferと同じ1種類だけを描き、候補ノイズではなく実際の配置競合結果をGameビューで確認します。
+                    if (resourceType == GeneratedResourceType.Tree)
+                    {
+                        return new Color32(38, 178, 72, 242);
+                    }
+
+                    if (resourceType == GeneratedResourceType.Stone)
+                    {
+                        return new Color32(168, 178, 194, 242);
+                    }
+
+                    if (resourceType == GeneratedResourceType.Sand)
+                    {
+                        return new Color32(239, 181, 65, 242);
+                    }
+
+                    return new Color32(24, 24, 30, 165);
+
                 default:
                     return Color.clear;
             }
@@ -350,8 +377,11 @@ namespace Farmware.WorldGeneration.Presentation
             chunkQuery = entityManager.CreateEntityQuery(
                 ComponentType.ReadOnly<ChunkCoordinateComponent>(),
                 ComponentType.ReadOnly<ChunkGenerationStatus>(),
-                ComponentType.ReadOnly<GeneratedTile>());
+                ComponentType.ReadOnly<GeneratedTile>(),
+                ComponentType.ReadOnly<GeneratedResourceTile>());
             settingsQuery = entityManager.CreateEntityQuery(ComponentType.ReadOnly<WorldGenerationSettings>());
+            resourceSettingsQuery = entityManager.CreateEntityQuery(
+                ComponentType.ReadOnly<ResourceGenerationSettings>());
             queriesAreCreated = true;
             return true;
         }
@@ -376,10 +406,15 @@ namespace Farmware.WorldGeneration.Presentation
                 : targetGrid.WorldToCell(centerWorld);
             bool hasCenterTile = false;
             GeneratedTile centerTile = default;
+            GeneratedResourceTile centerResource = default;
             EntityManager entityManager = presentationWorld.EntityManager;
             bool hasGenerationSettings = settingsQuery.CalculateEntityCount() == 1;
             WorldGenerationSettings settings = hasGenerationSettings
                 ? settingsQuery.GetSingleton<WorldGenerationSettings>()
+                : default;
+            bool hasResourceSettings = resourceSettingsQuery.CalculateEntityCount() == 1;
+            ResourceGenerationSettings resourceSettings = hasResourceSettings
+                ? resourceSettingsQuery.GetSingleton<ResourceGenerationSettings>()
                 : default;
 
             // 距離探索範囲は隣接タイル同士で重なるため、Rock Wallモードの1描画中だけ座標判定を共有します。
@@ -419,7 +454,10 @@ namespace Farmware.WorldGeneration.Presentation
 
                 DynamicBuffer<GeneratedTile> tiles =
                     entityManager.GetBuffer<GeneratedTile>(entities[entityIndex], true);
-                if (tiles.Length != WorldGridConstants.TilesPerChunk)
+                DynamicBuffer<GeneratedResourceTile> resources =
+                    entityManager.GetBuffer<GeneratedResourceTile>(entities[entityIndex], true);
+                if (tiles.Length != WorldGridConstants.TilesPerChunk
+                    || resources.Length != WorldGridConstants.TilesPerChunk)
                 {
                     continue;
                 }
@@ -433,6 +471,7 @@ namespace Farmware.WorldGeneration.Presentation
                         int localX = tileX - chunkMinimumX;
                         int tileIndex = (localY * WorldGridConstants.LogicalChunkSize) + localX;
                         GeneratedTile tile = tiles[tileIndex];
+                        GeneratedResourceTile resource = resources[tileIndex];
                         float rockWallShadowOpacity =
                             currentMode == WorldGenerationDebugVisualizationMode.RockWall
                             && hasGenerationSettings
@@ -444,20 +483,28 @@ namespace Farmware.WorldGeneration.Presentation
                         GUI.color = GetVisualizationColor(
                             currentMode,
                             tile,
-                            rockWallShadowOpacity);
+                            rockWallShadowOpacity,
+                            resource.Type);
                         GUI.DrawTexture(CalculateTileGuiRect(tileX, tileY), Texture2D.whiteTexture);
 
                         if (tileX == centerTileCoordinate.x && tileY == centerTileCoordinate.y)
                         {
                             hasCenterTile = true;
                             centerTile = tile;
+                            centerResource = resource;
                         }
                     }
                 }
             }
 
             GUI.color = previousGuiColor;
-            DrawInformationPanel(hasCenterTile, centerTileCoordinate, centerTile, settings);
+            DrawInformationPanel(
+                hasCenterTile,
+                centerTileCoordinate,
+                centerTile,
+                centerResource,
+                settings,
+                resourceSettings);
         }
 
         /// <summary>
@@ -632,14 +679,18 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="hasCenterTile">中央タイルを生成済みBufferから取得できた場合はtrueです。</param>
         /// <param name="centerCoordinate">Camera中央の整数タイル座標です。</param>
         /// <param name="centerTile">取得できた中央GeneratedTileです。</param>
+        /// <param name="centerResource">取得できた中央GeneratedResourceTileです。</param>
         /// <param name="settings">現在の生成閾値を保持するSingleton値です。</param>
+        /// <param name="resourceSettings">現在の資源最低間隔と群半径を保持するSingleton値です。</param>
         private void DrawInformationPanel(
             bool hasCenterTile,
             Vector3Int centerCoordinate,
             GeneratedTile centerTile,
-            WorldGenerationSettings settings)
+            GeneratedResourceTile centerResource,
+            WorldGenerationSettings settings,
+            ResourceGenerationSettings resourceSettings)
         {
-            const int generatedTileInformationLineCount = 9;
+            const int generatedTileInformationLineCount = 12;
             const int waitingInformationLineCount = 1;
             const float informationStartY = 48f;
             const float bottomPadding = 6f;
@@ -662,11 +713,21 @@ namespace Farmware.WorldGeneration.Presentation
                         settings,
                         centerCoordinate.x,
                         centerCoordinate.y);
+                ResourceGenerationDebugInfo resourceInfo =
+                    DeterministicResourceGenerator.GetDebugInfo(
+                        settings,
+                        resourceSettings,
+                        centerTile,
+                        centerCoordinate.x,
+                        centerCoordinate.y);
                 string finalState = !rockWallInfo.FinalCandidate
                     ? "Outside"
                     : centerTile.Ground == GroundType.Water
                         ? "Water-suppressed"
                         : "Rock";
+                string resourceAnchor = resourceInfo.SelectedType == GeneratedResourceType.None
+                    ? "None"
+                    : $"({resourceInfo.AnchorTileX}, {resourceInfo.AnchorTileY})";
 
                 // 生密度・平滑化後・通路削り・連続影値を同時に表示し、生成規則変更時の食い違いをGameビューだけで診断できます。
                 centerInformation = $"Tile ({centerCoordinate.x}, {centerCoordinate.y})  "
@@ -686,6 +747,16 @@ namespace Farmware.WorldGeneration.Presentation
                     + $"Detail={settings.RockWallDetailCellSizeInTiles}  "
                     + $"Warp={settings.RockWallWarpAmplitudeInTiles}  "
                     + $"Corridor={settings.RockWallCorridorHalfWidth}\n"
+                    + $"Resource={centerResource.Type}  Variant={centerResource.VisualVariant}  "
+                    + $"Candidates={resourceInfo.EligibleCandidateCount}\n"
+                    + $"ResourceAnchor={resourceAnchor}  TileNoise={resourceInfo.TileNoise}  "
+                    + $"AnchorNoise={resourceInfo.AnchorNoise}\n"
+                    + $"ResourceSpacing/Radius: Tree={resourceSettings.TreeMinimumSpacingInTiles}/"
+                    + $"{resourceSettings.TreeClusterRadiusInTiles}  "
+                    + $"Stone={resourceSettings.StoneMinimumSpacingInTiles}/"
+                    + $"{resourceSettings.StoneClusterRadiusInTiles}  "
+                    + $"Sand={resourceSettings.SandMinimumSpacingInTiles}/"
+                    + $"{resourceSettings.SandClusterRadiusInTiles}\n"
                     + $"Hot={settings.HotTemperatureThreshold}  Dry={settings.DryMoistureThreshold}  "
                     + $"Wet={settings.WetMoistureThreshold}";
             }
@@ -750,6 +821,11 @@ namespace Farmware.WorldGeneration.Presentation
             if (mode == WorldGenerationDebugVisualizationMode.RockWall)
             {
                 return "Rock Wall";
+            }
+
+            if (mode == WorldGenerationDebugVisualizationMode.Resources)
+            {
+                return "Resources";
             }
 
             return mode == WorldGenerationDebugVisualizationMode.BiomeTransition
@@ -915,6 +991,44 @@ namespace Farmware.WorldGeneration.Presentation
                         "Deep shadow",
                         78f);
                     break;
+                case WorldGenerationDebugVisualizationMode.Resources:
+                    DrawLegendEntry(
+                        ref nextX,
+                        y,
+                        GetVisualizationColor(mode, default),
+                        "None",
+                        62f);
+                    DrawLegendEntry(
+                        ref nextX,
+                        y,
+                        GetVisualizationColor(
+                            mode,
+                            default,
+                            0f,
+                            GeneratedResourceType.Tree),
+                        "Tree",
+                        62f);
+                    DrawLegendEntry(
+                        ref nextX,
+                        y,
+                        GetVisualizationColor(
+                            mode,
+                            default,
+                            0f,
+                            GeneratedResourceType.Stone),
+                        "Stone",
+                        70f);
+                    DrawLegendEntry(
+                        ref nextX,
+                        y,
+                        GetVisualizationColor(
+                            mode,
+                            default,
+                            0f,
+                            GeneratedResourceType.Sand),
+                        "Sand",
+                        64f);
+                    break;
                 default:
                     GUI.Label(new Rect(nextX, y - 2f, 40f, 18f), "Off", informationStyle);
                     break;
@@ -1019,6 +1133,7 @@ namespace Farmware.WorldGeneration.Presentation
             {
                 chunkQuery.Dispose();
                 settingsQuery.Dispose();
+                resourceSettingsQuery.Dispose();
             }
 
             queriesAreCreated = false;

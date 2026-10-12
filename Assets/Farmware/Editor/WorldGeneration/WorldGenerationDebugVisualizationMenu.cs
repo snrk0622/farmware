@@ -1,4 +1,4 @@
-// このファイルは、PlayMode中のノイズ・バイオーム・水域・岩壁可視化をUnity Editorメニューから切り替えます。
+// このファイルは、PlayMode中のノイズ・バイオーム・水域・岩壁・資源可視化をUnity Editorメニューから切り替えます。
 // Editor Assemblyだけに属し、プレイヤー用入力や製品版ビルドへ開発者専用の操作UIを追加しません。
 
 using Farmware.WorldGeneration.Presentation;
@@ -43,6 +43,10 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>岩壁の最終形状と内部影濃度表示へ切り替えるメニューパスです。</summary>
         private const string RockWallMenuPath =
             "Farmware/World Generation/Debug Visualization/Rock Wall";
+
+        /// <summary>最低間隔と競合解決後の基礎資源表示へ切り替えるメニューパスです。</summary>
+        private const string ResourcesMenuPath =
+            "Farmware/World Generation/Debug Visualization/Resources";
 
         /// <summary>PlayMode中の開発者用可視化を通常表示へ戻します。</summary>
         [MenuItem(OffMenuPath, false, 200)]
@@ -105,6 +109,13 @@ namespace Farmware.WorldGeneration.Editor
         private static void SelectRockWall()
         {
             SelectMode(WorldGenerationDebugVisualizationMode.RockWall);
+        }
+
+        /// <summary>PlayMode中の最終資源配置を木・石・砂の固定色で表示します。</summary>
+        [MenuItem(ResourcesMenuPath, false, 209)]
+        private static void SelectResources()
+        {
+            SelectMode(WorldGenerationDebugVisualizationMode.Resources);
         }
 
         /// <summary>Off項目の有効状態とチェック表示を更新します。</summary>
@@ -181,6 +192,14 @@ namespace Farmware.WorldGeneration.Editor
         private static bool ValidateRockWall()
         {
             return ValidateMode(RockWallMenuPath, WorldGenerationDebugVisualizationMode.RockWall);
+        }
+
+        /// <summary>Resources項目の有効状態とチェック表示を更新します。</summary>
+        /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
+        [MenuItem(ResourcesMenuPath, true)]
+        private static bool ValidateResources()
+        {
+            return ValidateMode(ResourcesMenuPath, WorldGenerationDebugVisualizationMode.Resources);
         }
 
         /// <summary>
