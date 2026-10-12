@@ -7,7 +7,7 @@ using Unity.Entities;
 namespace Farmware.WorldGeneration
 {
     /// <summary>
-    /// 初期実装で生成する陸上バイオームの安定IDです。
+    /// 初回のランダムマップ生成で使用する7種類の陸上バイオームの安定IDです。
     /// セーブデータへ保存する値になるため、既存値の番号は将来も変更しません。
     /// </summary>
     public enum BiomeId : byte
@@ -22,7 +22,19 @@ namespace Farmware.WorldGeneration
         Forest = 2,
 
         /// <summary>高温かつ乾燥した砂漠です。</summary>
-        Desert = 3
+        Desert = 3,
+
+        /// <summary>中〜高標高で植生が少なく、鉱物資源に適する岩地です。</summary>
+        Rockland = 4,
+
+        /// <summary>低標高かつ非常に湿潤で、池と植生が多い湿地です。</summary>
+        Wetland = 5,
+
+        /// <summary>低温域に広がり、将来は凍結した水域表現を重ねられる雪原です。</summary>
+        Snowfield = 6,
+
+        /// <summary>高温・高標高・高Weirdnessが重なる希少な火山地帯です。</summary>
+        Volcanic = 7
     }
 
     /// <summary>
@@ -237,8 +249,20 @@ namespace Farmware.WorldGeneration
         /// <summary>湿度の最も低周波な格子サイズです。単位はタイルです。</summary>
         public int MoistureCellSizeInTiles;
 
+        /// <summary>火山などの特殊地域候補を決めるWeirdnessの最も低周波な格子サイズです。単位はタイルです。</summary>
+        public int WeirdnessCellSizeInTiles;
+
+        /// <summary>気候ノイズのサンプリング座標を曲げる低周波格子サイズです。単位はタイルです。</summary>
+        public int BiomeWarpCellSizeInTiles;
+
+        /// <summary>気候ノイズのサンプリング座標を最大何タイルずらすかを表します。</summary>
+        public int BiomeWarpAmplitudeInTiles;
+
         /// <summary>各気候値へ重ねるノイズ解像度の数です。</summary>
         public int OctaveCount;
+
+        /// <summary>7バイオームの適性が閾値付近で滑らかに入れ替わる帯のおおよその幅です。単位はタイルです。</summary>
+        public int BiomeClassificationTransitionWidthInTiles;
 
         /// <summary>バイオーム境界で隣接地面を混ぜる帯のおおよその幅です。単位はタイルです。</summary>
         public int BiomeTransitionWidthInTiles;
@@ -282,11 +306,29 @@ namespace Farmware.WorldGeneration
         /// <summary>これ以上を高温とみなす0〜65535の気温閾値です。</summary>
         public ushort HotTemperatureThreshold;
 
+        /// <summary>これ未満を低温とみなし、雪原適性を高める0〜65535の気温閾値です。</summary>
+        public ushort ColdTemperatureThreshold;
+
         /// <summary>これ未満を乾燥とみなす0〜65535の湿度閾値です。</summary>
         public ushort DryMoistureThreshold;
 
         /// <summary>これ以上を森林候補とみなす0〜65535の湿度閾値です。</summary>
         public ushort WetMoistureThreshold;
+
+        /// <summary>これ以上を湿地候補とみなす0〜65535の最高湿度閾値です。</summary>
+        public ushort WetlandMoistureThreshold;
+
+        /// <summary>これ以下を湿地候補にできる低地とみなす0〜65535の標高上限です。</summary>
+        public ushort WetlandMaximumElevation;
+
+        /// <summary>これ以上を岩地・火山候補にできる高地とみなす0〜65535の標高閾値です。</summary>
+        public ushort HighlandElevationThreshold;
+
+        /// <summary>これ以上を火山候補にできる異常度とみなす0〜65535のWeirdness閾値です。</summary>
+        public ushort VolcanicWeirdnessThreshold;
+
+        /// <summary>強く抑制する2バイオームの適性差がこの値以下なら緩衝バイオームへ置換します。</summary>
+        public ushort BiomeAdjacencyTransitionScoreMargin;
 
         /// <summary>
         /// Phase 1〜2の比較基準となる既定設定を作ります。
@@ -294,7 +336,7 @@ namespace Farmware.WorldGeneration
         /// </summary>
         /// <param name="worldSeed">文字列から変換済みのワールドシードです。</param>
         /// <param name="generatorVersion">保存対象の生成器バージョンです。</param>
-        /// <returns>3バイオームと水域・岩壁を生成できる設定です。</returns>
+        /// <returns>7バイオームと水域・岩壁を生成できる設定です。</returns>
         public static WorldGenerationSettings CreateDefault(ulong worldSeed, int generatorVersion)
         {
             return new WorldGenerationSettings
@@ -304,7 +346,11 @@ namespace Farmware.WorldGeneration
                 ElevationCellSizeInTiles = 192,
                 TemperatureCellSizeInTiles = 96,
                 MoistureCellSizeInTiles = 80,
+                WeirdnessCellSizeInTiles = 112,
+                BiomeWarpCellSizeInTiles = 192,
+                BiomeWarpAmplitudeInTiles = 12,
                 OctaveCount = 4,
+                BiomeClassificationTransitionWidthInTiles = 12,
                 BiomeTransitionWidthInTiles = 6,
                 SeaLevelThreshold = 20000,
                 RiverCellSizeInTiles = 96,
@@ -319,8 +365,14 @@ namespace Farmware.WorldGeneration
                 RockWallNoiseThreshold = 41000,
                 RockWallCorridorHalfWidth = 1100,
                 HotTemperatureThreshold = 40000,
+                ColdTemperatureThreshold = 23000,
                 DryMoistureThreshold = 28500,
-                WetMoistureThreshold = 39500
+                WetMoistureThreshold = 39500,
+                WetlandMoistureThreshold = 50000,
+                WetlandMaximumElevation = 36000,
+                HighlandElevationThreshold = 43000,
+                VolcanicWeirdnessThreshold = 47000,
+                BiomeAdjacencyTransitionScoreMargin = 18000
             };
         }
     }
@@ -559,6 +611,9 @@ namespace Farmware.WorldGeneration
 
         /// <summary>0〜65535へ正規化した連続湿度値です。</summary>
         public ushort Moisture;
+
+        /// <summary>0〜65535へ正規化した火山・特殊地域候補用の連続Weirdness値です。</summary>
+        public ushort Weirdness;
     }
 
     /// <summary>

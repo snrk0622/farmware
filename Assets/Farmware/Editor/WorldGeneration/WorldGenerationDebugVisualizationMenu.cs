@@ -28,6 +28,9 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>連続湿度表示へ切り替えるメニューパスです。</summary>
         private const string MoistureMenuPath = "Farmware/World Generation/Debug Visualization/Moisture";
 
+        /// <summary>連続Weirdness表示へ切り替えるメニューパスです。</summary>
+        private const string WeirdnessMenuPath = "Farmware/World Generation/Debug Visualization/Weirdness";
+
         /// <summary>淡水・海水表示へ切り替えるメニューパスです。</summary>
         private const string WaterSalinityMenuPath =
             "Farmware/World Generation/Debug Visualization/Water Salinity";
@@ -55,7 +58,7 @@ namespace Farmware.WorldGeneration.Editor
             SelectMode(WorldGenerationDebugVisualizationMode.None);
         }
 
-        /// <summary>PlayMode中の論理Biome IDを3色で表示します。</summary>
+        /// <summary>PlayMode中の論理Biome IDを7色で表示します。</summary>
         [MenuItem(BiomeMenuPath, false, 201)]
         private static void SelectBiome()
         {
@@ -81,6 +84,13 @@ namespace Farmware.WorldGeneration.Editor
         private static void SelectMoisture()
         {
             SelectMode(WorldGenerationDebugVisualizationMode.Moisture);
+        }
+
+        /// <summary>PlayMode中の連続Weirdness値を紫から黄のグラデーションで表示します。</summary>
+        [MenuItem(WeirdnessMenuPath, false, 205)]
+        private static void SelectWeirdness()
+        {
+            SelectMode(WorldGenerationDebugVisualizationMode.Weirdness);
         }
 
         /// <summary>PlayMode中の水域を陸地・淡水・海水の固定色で表示します。</summary>
@@ -156,6 +166,14 @@ namespace Farmware.WorldGeneration.Editor
         private static bool ValidateMoisture()
         {
             return ValidateMode(MoistureMenuPath, WorldGenerationDebugVisualizationMode.Moisture);
+        }
+
+        /// <summary>Weirdness項目の有効状態とチェック表示を更新します。</summary>
+        /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
+        [MenuItem(WeirdnessMenuPath, true)]
+        private static bool ValidateWeirdness()
+        {
+            return ValidateMode(WeirdnessMenuPath, WorldGenerationDebugVisualizationMode.Weirdness);
         }
 
         /// <summary>Water Salinity項目の有効状態とチェック表示を更新します。</summary>

@@ -4,7 +4,7 @@
 namespace Farmware.WorldGeneration
 {
     /// <summary>
-    /// 3種類の初期バイオーム、淡水・海水、水域の生成由来、岩壁を決定論的に分類します。
+    /// 7種類の陸上バイオーム、淡水・海水、水域の生成由来、岩壁を決定論的に分類します。
     /// UnityEngine.Objectやグローバル乱数を参照しないため、Burst Jobから並列に呼び出せます。
     /// </summary>
     public static class DeterministicChunkGenerator
@@ -70,11 +70,18 @@ namespace Farmware.WorldGeneration
                 settings.OctaveCount,
                 WorldGenerationPurposeSalts.Elevation);
 
+            CalculateWarpedBiomeCoordinate(
+                settings,
+                worldTileX,
+                worldTileY,
+                out int biomeSampleX,
+                out int biomeSampleY);
+
             ushort temperature = DeterministicNoise.SampleFractalNoise(
                 settings.WorldSeed,
                 settings.GeneratorVersion,
-                worldTileX,
-                worldTileY,
+                biomeSampleX,
+                biomeSampleY,
                 settings.TemperatureCellSizeInTiles,
                 settings.OctaveCount,
                 WorldGenerationPurposeSalts.Temperature);
@@ -82,13 +89,27 @@ namespace Farmware.WorldGeneration
             ushort moisture = DeterministicNoise.SampleFractalNoise(
                 settings.WorldSeed,
                 settings.GeneratorVersion,
-                worldTileX,
-                worldTileY,
+                biomeSampleX,
+                biomeSampleY,
                 settings.MoistureCellSizeInTiles,
                 settings.OctaveCount,
                 WorldGenerationPurposeSalts.Moisture);
 
-            BiomeId biome = ClassifyBiome(temperature, moisture, settings);
+            ushort weirdness = DeterministicNoise.SampleFractalNoise(
+                settings.WorldSeed,
+                settings.GeneratorVersion,
+                biomeSampleX,
+                biomeSampleY,
+                settings.WeirdnessCellSizeInTiles,
+                settings.OctaveCount,
+                WorldGenerationPurposeSalts.Weirdness);
+
+            BiomeId biome = ClassifyBiome(
+                elevation,
+                temperature,
+                moisture,
+                weirdness,
+                settings);
             WaterBodyType waterBodyType = ClassifyWaterBody(
                 elevation,
                 settings,
@@ -115,8 +136,49 @@ namespace Farmware.WorldGeneration
                 MovementCost = ClassifyMovementCost(ground),
                 Elevation = elevation,
                 Temperature = temperature,
-                Moisture = moisture
+                Moisture = moisture,
+                Weirdness = weirdness
             };
+        }
+
+        /// <summary>
+        /// 気候ノイズを読む座標へ低周波の歪みを加え、バイオーム境界が直線的・帯状になりすぎることを防ぎます。
+        /// 標高と水域は元座標で生成するため、この歪みは陸上バイオームの輪郭だけへ影響します。
+        /// </summary>
+        /// <param name="settings">歪みノイズの格子サイズと最大変位量を保持する生成設定です。</param>
+        /// <param name="worldTileX">歪ませる前の水平ワールドタイル座標です。</param>
+        /// <param name="worldTileY">歪ませる前の垂直ワールドタイル座標です。</param>
+        /// <param name="sampleX">気温・湿度・Weirdnessを読む水平座標を返します。</param>
+        /// <param name="sampleY">気温・湿度・Weirdnessを読む垂直座標を返します。</param>
+        private static void CalculateWarpedBiomeCoordinate(
+            in WorldGenerationSettings settings,
+            int worldTileX,
+            int worldTileY,
+            out int sampleX,
+            out int sampleY)
+        {
+            ushort horizontalWarp = DeterministicNoise.SampleFractalNoise(
+                settings.WorldSeed,
+                settings.GeneratorVersion,
+                worldTileX,
+                worldTileY,
+                settings.BiomeWarpCellSizeInTiles,
+                settings.OctaveCount,
+                WorldGenerationPurposeSalts.BiomeWarpX);
+            ushort verticalWarp = DeterministicNoise.SampleFractalNoise(
+                settings.WorldSeed,
+                settings.GeneratorVersion,
+                worldTileX,
+                worldTileY,
+                settings.BiomeWarpCellSizeInTiles,
+                settings.OctaveCount,
+                WorldGenerationPurposeSalts.BiomeWarpY);
+
+            // 0〜65535をおよそ-1〜+1へ中央寄せし、整数タイル単位の最大変位量へ変換します。
+            int horizontalOffset = ((horizontalWarp - 32768) * settings.BiomeWarpAmplitudeInTiles) / 32768;
+            int verticalOffset = ((verticalWarp - 32768) * settings.BiomeWarpAmplitudeInTiles) / 32768;
+            sampleX = worldTileX + horizontalOffset;
+            sampleY = worldTileY + verticalOffset;
         }
 
         /// <summary>
@@ -221,30 +283,180 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>
-        /// 気温と湿度から初期3バイオームを選びます。
-        /// 砂漠条件を先に評価し、乾燥高温地域が湿度だけで草原へ戻らないようにします。
+        /// 標高、気温、湿度、Weirdnessから7種類の陸上バイオームを選びます。
+        /// 各バイオームの適性スコアを比較し、強く隣接抑制する2候補が僅差の場合は草原または岩地を緩衝帯として挟みます。
         /// </summary>
+        /// <param name="elevation">0〜65535の標高です。</param>
         /// <param name="temperature">0〜65535の気温です。</param>
         /// <param name="moisture">0〜65535の湿度です。</param>
+        /// <param name="weirdness">0〜65535の特殊地形度です。高いほど火山候補が強くなります。</param>
         /// <param name="settings">判定閾値を保持する生成設定です。</param>
-        /// <returns>草原、森林、砂漠のいずれかです。</returns>
-        private static BiomeId ClassifyBiome(
+        /// <returns>草原、森林、砂漠、岩地、湿地、雪原、火山のいずれかです。</returns>
+        public static BiomeId ClassifyBiome(
+            ushort elevation,
             ushort temperature,
             ushort moisture,
+            ushort weirdness,
             in WorldGenerationSettings settings)
         {
-            if (temperature >= settings.HotTemperatureThreshold
-                && moisture < settings.DryMoistureThreshold)
+            ushort cold = InvertWeight(CalculateAboveThresholdWeight(
+                temperature,
+                settings.ColdTemperatureThreshold,
+                settings.BiomeClassificationTransitionWidthInTiles,
+                settings.TemperatureCellSizeInTiles));
+            ushort hot = CalculateAboveThresholdWeight(
+                temperature,
+                settings.HotTemperatureThreshold,
+                settings.BiomeClassificationTransitionWidthInTiles,
+                settings.TemperatureCellSizeInTiles);
+            ushort temperate = MinimumWeight(InvertWeight(cold), InvertWeight(hot));
+
+            ushort dry = InvertWeight(CalculateAboveThresholdWeight(
+                moisture,
+                settings.DryMoistureThreshold,
+                settings.BiomeClassificationTransitionWidthInTiles,
+                settings.MoistureCellSizeInTiles));
+            ushort wet = CalculateAboveThresholdWeight(
+                moisture,
+                settings.WetMoistureThreshold,
+                settings.BiomeClassificationTransitionWidthInTiles,
+                settings.MoistureCellSizeInTiles);
+            ushort saturated = CalculateAboveThresholdWeight(
+                moisture,
+                settings.WetlandMoistureThreshold,
+                settings.BiomeClassificationTransitionWidthInTiles,
+                settings.MoistureCellSizeInTiles);
+            ushort moderateMoisture = MinimumWeight(InvertWeight(dry), InvertWeight(wet));
+
+            ushort lowland = InvertWeight(CalculateAboveThresholdWeight(
+                elevation,
+                settings.WetlandMaximumElevation,
+                settings.BiomeClassificationTransitionWidthInTiles,
+                settings.ElevationCellSizeInTiles));
+            ushort highland = CalculateAboveThresholdWeight(
+                elevation,
+                settings.HighlandElevationThreshold,
+                settings.BiomeClassificationTransitionWidthInTiles,
+                settings.ElevationCellSizeInTiles);
+            ushort volcanic = CalculateAboveThresholdWeight(
+                weirdness,
+                settings.VolcanicWeirdnessThreshold,
+                settings.BiomeClassificationTransitionWidthInTiles,
+                settings.WeirdnessCellSizeInTiles);
+
+            // 係数は「どの気候要素を優先するか」を表します。すべて整数なので、実行環境による丸め差が発生しません。
+            long grasslandScore = (2L * temperate)
+                + (2L * moderateMoisture)
+                + InvertWeight(highland)
+                + 32768L;
+            long forestScore = (3L * wet)
+                + (2L * temperate)
+                + InvertWeight(highland);
+            long desertScore = (3L * hot)
+                + (3L * dry)
+                + InvertWeight(highland);
+            long rocklandScore = (4L * highland)
+                + dry
+                + 32768L;
+            long wetlandScore = (4L * saturated)
+                + (2L * lowland)
+                + temperate;
+            long snowfieldScore = (4L * cold)
+                + highland
+                + InvertWeight(hot);
+            long volcanicScore = (2L * hot)
+                + (2L * highland)
+                + (3L * volcanic)
+                + dry;
+
+            BiomeId bestBiome = BiomeId.Grassland;
+            long bestScore = grasslandScore;
+            BiomeId secondBiome = BiomeId.Grassland;
+            long secondScore = long.MinValue;
+            TrackBiomeCandidate(BiomeId.Forest, forestScore, ref bestBiome, ref bestScore, ref secondBiome, ref secondScore);
+            TrackBiomeCandidate(BiomeId.Desert, desertScore, ref bestBiome, ref bestScore, ref secondBiome, ref secondScore);
+            TrackBiomeCandidate(BiomeId.Rockland, rocklandScore, ref bestBiome, ref bestScore, ref secondBiome, ref secondScore);
+            TrackBiomeCandidate(BiomeId.Wetland, wetlandScore, ref bestBiome, ref bestScore, ref secondBiome, ref secondScore);
+            TrackBiomeCandidate(BiomeId.Snowfield, snowfieldScore, ref bestBiome, ref bestScore, ref secondBiome, ref secondScore);
+            TrackBiomeCandidate(BiomeId.Volcanic, volcanicScore, ref bestBiome, ref bestScore, ref secondBiome, ref secondScore);
+
+            // 強い抑制関係の境界を直接接続せず、低地は草原、高地は岩地へ置き換えて自然な遷移を作ります。
+            if (IsStronglySuppressedPair(bestBiome, secondBiome)
+                && bestScore - secondScore <= settings.BiomeAdjacencyTransitionScoreMargin)
             {
-                return BiomeId.Desert;
+                return highland >= (ushort.MaxValue / 2)
+                    ? BiomeId.Rockland
+                    : BiomeId.Grassland;
             }
 
-            if (moisture >= settings.WetMoistureThreshold)
+            return bestBiome;
+        }
+
+        /// <summary>
+        /// バイオーム候補を上位2件へ挿入します。同点時は呼び出し順を優先し、決定論的な結果を保ちます。
+        /// </summary>
+        /// <param name="candidateBiome">評価するバイオームです。</param>
+        /// <param name="candidateScore">気候条件から計算した適性スコアです。</param>
+        /// <param name="bestBiome">現在1位のバイオームで、必要なら更新します。</param>
+        /// <param name="bestScore">現在1位のスコアで、必要なら更新します。</param>
+        /// <param name="secondBiome">現在2位のバイオームで、必要なら更新します。</param>
+        /// <param name="secondScore">現在2位のスコアで、必要なら更新します。</param>
+        private static void TrackBiomeCandidate(
+            BiomeId candidateBiome,
+            long candidateScore,
+            ref BiomeId bestBiome,
+            ref long bestScore,
+            ref BiomeId secondBiome,
+            ref long secondScore)
+        {
+            if (candidateScore > bestScore)
             {
-                return BiomeId.Forest;
+                secondBiome = bestBiome;
+                secondScore = bestScore;
+                bestBiome = candidateBiome;
+                bestScore = candidateScore;
+                return;
             }
 
-            return BiomeId.Grassland;
+            if (candidateScore > secondScore)
+            {
+                secondBiome = candidateBiome;
+                secondScore = candidateScore;
+            }
+        }
+
+        /// <summary>
+        /// 仕様で直接接続を強く抑制したバイオームの組み合わせかを、順序に依存せず判定します。
+        /// </summary>
+        /// <param name="first">比較する1つ目のバイオームです。</param>
+        /// <param name="second">比較する2つ目のバイオームです。</param>
+        /// <returns>間に緩衝バイオームを挟む対象ならtrueです。</returns>
+        private static bool IsStronglySuppressedPair(BiomeId first, BiomeId second)
+        {
+            return IsBiomePair(first, second, BiomeId.Forest, BiomeId.Desert)
+                || IsBiomePair(first, second, BiomeId.Forest, BiomeId.Volcanic)
+                || IsBiomePair(first, second, BiomeId.Desert, BiomeId.Wetland)
+                || IsBiomePair(first, second, BiomeId.Desert, BiomeId.Snowfield)
+                || IsBiomePair(first, second, BiomeId.Wetland, BiomeId.Volcanic)
+                || IsBiomePair(first, second, BiomeId.Snowfield, BiomeId.Volcanic);
+        }
+
+        /// <summary>
+        /// 2つのバイオームが、指定した組み合わせと順不同で一致するかを返します。
+        /// </summary>
+        /// <param name="first">実際の1つ目のバイオームです。</param>
+        /// <param name="second">実際の2つ目のバイオームです。</param>
+        /// <param name="expectedFirst">期待する組み合わせの1つ目です。</param>
+        /// <param name="expectedSecond">期待する組み合わせの2つ目です。</param>
+        /// <returns>順序を無視して同じ組み合わせならtrueです。</returns>
+        private static bool IsBiomePair(
+            BiomeId first,
+            BiomeId second,
+            BiomeId expectedFirst,
+            BiomeId expectedSecond)
+        {
+            return (first == expectedFirst && second == expectedSecond)
+                || (first == expectedSecond && second == expectedFirst);
         }
 
         /// <summary>
@@ -337,7 +549,7 @@ namespace Farmware.WorldGeneration
         /// 移行帯を無効にした場合の、論理バイオームから地面への直接対応を返します。
         /// </summary>
         /// <param name="biome">気候閾値から決定済みの論理バイオームです。</param>
-        /// <returns>草原は通常地面、森林は植生地面、砂漠は砂地です。</returns>
+        /// <returns>森林と湿地は植生地面、砂漠は砂地、それ以外は通常地面です。</returns>
         private static GroundType ClassifyDiscreteBiomeGround(BiomeId biome)
         {
             if (biome == BiomeId.Desert)
@@ -345,7 +557,9 @@ namespace Farmware.WorldGeneration
                 return GroundType.Sand;
             }
 
-            return biome == BiomeId.Forest ? GroundType.Vegetation : GroundType.Normal;
+            return biome == BiomeId.Forest || biome == BiomeId.Wetland
+                ? GroundType.Vegetation
+                : GroundType.Normal;
         }
 
         /// <summary>
@@ -419,6 +633,17 @@ namespace Farmware.WorldGeneration
         private static ushort InvertWeight(ushort weight)
         {
             return (ushort)(ushort.MaxValue - weight);
+        }
+
+        /// <summary>
+        /// 2つの0〜65535重みの小さい方を返し、両条件を同時に満たす度合いとして利用します。
+        /// </summary>
+        /// <param name="first">比較する1つ目の重みです。</param>
+        /// <param name="second">比較する2つ目の重みです。</param>
+        /// <returns>2つのうち小さい重みです。</returns>
+        private static ushort MinimumWeight(ushort first, ushort second)
+        {
+            return first < second ? first : second;
         }
 
         /// <summary>
@@ -533,6 +758,11 @@ namespace Farmware.WorldGeneration
                 return ResourceSuitability.Tree | ResourceSuitability.Stone;
             }
 
+            if (biome == BiomeId.Rockland || biome == BiomeId.Volcanic)
+            {
+                return ResourceSuitability.Stone;
+            }
+
             return ResourceSuitability.Tree | ResourceSuitability.Stone;
         }
 
@@ -574,6 +804,7 @@ namespace Farmware.WorldGeneration
                 ulong packedClimate = tile.Elevation;
                 packedClimate |= (ulong)tile.Temperature << 16;
                 packedClimate |= (ulong)tile.Moisture << 32;
+                packedClimate |= (ulong)tile.Weirdness << 48;
 
                 ulong classificationsHash = WorldSeedUtility.Mix64(currentHash ^ packedClassifications);
                 return WorldSeedUtility.Mix64(classificationsHash ^ packedClimate);

@@ -20,6 +20,15 @@ namespace Farmware.WorldGeneration
         /// <summary>湿度ノイズ専用のソルトです。</summary>
         public const ulong Moisture = 0x8EBC6AF09C88C6E3UL;
 
+        /// <summary>火山などの特殊地域候補を決めるWeirdnessノイズ専用のソルトです。</summary>
+        public const ulong Weirdness = 0x589965CC75374CC3UL;
+
+        /// <summary>バイオーム用気候ノイズの水平サンプリング座標を歪ませるソルトです。</summary>
+        public const ulong BiomeWarpX = 0x243F6A8885A308D3UL;
+
+        /// <summary>バイオーム用気候ノイズの垂直サンプリング座標を歪ませるソルトです。</summary>
+        public const ulong BiomeWarpY = 0xEB44ACCAB455D165UL;
+
         /// <summary>バイオーム境界で地面種別を段階的に混ぜる座標抽選専用のソルトです。</summary>
         public const ulong BiomeTransition = 0x1D8E4E27C47D124FUL;
 

@@ -50,6 +50,22 @@ namespace Farmware.WorldGeneration.Presentation
         [Tooltip("砂漠バイオームの地面に表示するTileです。未指定の場合、そのセルは空表示になります。")]
         [SerializeField] private TileBase desertTile;
 
+        // 岩地の地面へ使用する表示専用Tileです。障害物の岩壁Tileとは別の、建築可能な地面を表します。
+        [Tooltip("岩地バイオームの地面に表示するTileです。岩壁とは異なり、通常地面として扱われます。")]
+        [SerializeField] private TileBase rocklandTile;
+
+        // 湿地の地面へ使用する表示専用Tileです。水域そのものはfreshWaterTileまたはsaltWaterTileを優先します。
+        [Tooltip("湿地バイオームの陸地に表示するTileです。川・池・海のセルには水域Tileが優先されます。")]
+        [SerializeField] private TileBase wetlandTile;
+
+        // 雪原の地面へ使用する表示専用Tileです。凍結水面は未実装のため水域表示には使用しません。
+        [Tooltip("雪原バイオームの陸地に表示するTileです。現在、水域は凍結させず通常の水域Tileを表示します。")]
+        [SerializeField] private TileBase snowfieldTile;
+
+        // 火山の地面へ使用する表示専用Tileです。マグマ地形は次段階で別のGroundTypeとして追加します。
+        [Tooltip("火山バイオームの陸地に表示するTileです。マグマ地形とは別の基礎地面です。")]
+        [SerializeField] private TileBase volcanicTile;
+
         // WaterSalinity.FreshWaterへ使用する表示専用Tileです。
         [Tooltip("川と池の淡水域に表示するTileです。採水種別はECSデータで判定し、この参照には依存しません。")]
         [SerializeField] private TileBase freshWaterTile;
@@ -160,6 +176,10 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="grassland">草原バイオームの通常地面に表示するTileです。</param>
         /// <param name="forest">森林バイオームの地面に表示するTileです。</param>
         /// <param name="desert">砂漠バイオームの地面に表示するTileです。</param>
+        /// <param name="rockland">岩地バイオームの地面に表示するTileです。</param>
+        /// <param name="wetland">湿地バイオームの地面に表示するTileです。</param>
+        /// <param name="snowfield">雪原バイオームの地面に表示するTileです。</param>
+        /// <param name="volcanic">火山バイオームの地面に表示するTileです。</param>
         /// <param name="freshWater">淡水の川と池に表示するTileです。</param>
         /// <param name="saltWater">海水の海に表示するTileです。</param>
         /// <param name="rockWall">GroundType.RockWallの全セルに表示する共通Tileです。</param>
@@ -172,6 +192,10 @@ namespace Farmware.WorldGeneration.Presentation
             TileBase grassland,
             TileBase forest,
             TileBase desert,
+            TileBase rockland,
+            TileBase wetland,
+            TileBase snowfield,
+            TileBase volcanic,
             TileBase freshWater,
             TileBase saltWater,
             TileBase rockWall,
@@ -184,6 +208,10 @@ namespace Farmware.WorldGeneration.Presentation
             grasslandTile = grassland;
             forestTile = forest;
             desertTile = desert;
+            rocklandTile = rockland;
+            wetlandTile = wetland;
+            snowfieldTile = snowfield;
+            volcanicTile = volcanic;
             freshWaterTile = freshWater;
             saltWaterTile = saltWater;
             rockWallTile = rockWall;
@@ -730,6 +758,26 @@ namespace Farmware.WorldGeneration.Presentation
             if (tile.Biome == BiomeId.Desert)
             {
                 return desertTile;
+            }
+
+            if (tile.Biome == BiomeId.Rockland)
+            {
+                return rocklandTile;
+            }
+
+            if (tile.Biome == BiomeId.Wetland)
+            {
+                return wetlandTile;
+            }
+
+            if (tile.Biome == BiomeId.Snowfield)
+            {
+                return snowfieldTile;
+            }
+
+            if (tile.Biome == BiomeId.Volcanic)
+            {
+                return volcanicTile;
             }
 
             return grasslandTile;

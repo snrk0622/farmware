@@ -36,10 +36,30 @@ namespace Farmware.WorldGeneration.Authoring
         [Min(16)]
         [SerializeField] private int moistureCellSizeInTiles = 80;
 
+        // 火山などの希少バイオーム候補を決める独立ノイズで、気温・湿度だけでは得られない分布差を作ります。
+        [Tooltip("火山など特殊地域の候補を決めるWeirdnessノイズの基準格子サイズです。単位はタイルです。大きくすると特殊地域が広く続きます。")]
+        [Min(16)]
+        [SerializeField] private int weirdnessCellSizeInTiles = 112;
+
+        // 気候ノイズを読む座標そのものを緩やかに曲げ、縦横の帯に見えるバイオーム境界を減らします。
+        [Tooltip("バイオーム境界を曲げる低周波ノイズの格子サイズです。単位はタイルです。大きくすると曲がり方が緩やかになります。")]
+        [Min(16)]
+        [SerializeField] private int biomeWarpCellSizeInTiles = 192;
+
+        // 座標歪みの最大幅で、0なら従来どおり気候ノイズを元の座標から読みます。
+        [Tooltip("気候ノイズを読む座標の最大変位量です。単位はタイルです。大きくするとバイオーム輪郭のうねりが強くなります。")]
+        [Range(0, 32)]
+        [SerializeField] private int biomeWarpAmplitudeInTiles = 12;
+
         // 低周波へ重ねる細部の段数で、Bake時にECS設定へコピーされます。
         [Tooltip("重ねるノイズ解像度の数です。増やすと細部が増えますが生成計算が重くなり、生成結果も変わります。初期候補は3〜5です。")]
         [Range(1, 6)]
         [SerializeField] private int octaveCount = 4;
+
+        // 7種類の適性スコアを閾値の前後で滑らかに入れ替え、一本線の境界や小さな飛び地を減らします。
+        [Tooltip("バイオーム適性が気候閾値付近で滑らかに入れ替わる帯のおおよその幅です。単位はタイルです。大きくすると緩衝的な地域が広がります。")]
+        [Range(0, 32)]
+        [SerializeField] private int biomeClassificationTransitionWidthInTiles = 12;
 
         // 論理Biome IDを変えず、境界付近の地面種別だけを座標ハッシュで段階的に混ぜる幅です。
         [Tooltip("バイオーム境界で草地・植生・砂地を混ぜる帯のおおよその幅です。単位はタイルです。0で無効、2〜8を推奨します。変更すると生成結果が変わります。")]
@@ -111,6 +131,11 @@ namespace Farmware.WorldGeneration.Authoring
         [Range(0f, 1f)]
         [SerializeField] private float hotTemperatureThreshold = 0.61f;
 
+        // 雪原判定に使う0〜1の低温境界で、高温境界より必ず低く保ちます。
+        [Tooltip("これ未満を低温とみなす気温閾値です。0〜1で指定し、大きくすると雪原候補が増えます。高温閾値より小さくしてください。")]
+        [Range(0f, 1f)]
+        [SerializeField] private float coldTemperatureThreshold = 23000f / ushort.MaxValue;
+
         // 砂漠判定に使う0〜1の乾燥境界で、湿潤境界より必ず低く保ちます。
         [Tooltip("これ未満を乾燥とみなす湿度閾値です。0〜1で指定し、大きくすると砂漠候補が増えます。森林閾値より小さくしてください。")]
         [Range(0f, 1f)]
@@ -120,6 +145,31 @@ namespace Farmware.WorldGeneration.Authoring
         [Tooltip("これ以上を森林候補とみなす湿度閾値です。0〜1で指定し、小さくすると森林が増えます。変更すると生成結果が変わります。")]
         [Range(0f, 1f)]
         [SerializeField] private float wetMoistureThreshold = 0.603f;
+
+        // 湿地判定に使う0〜1の非常に湿潤な境界で、森林閾値より必ず高く保ちます。
+        [Tooltip("これ以上を湿地候補とみなす湿度閾値です。0〜1で指定し、小さくすると湿地が増えます。森林閾値より大きくしてください。")]
+        [Range(0f, 1f)]
+        [SerializeField] private float wetlandMoistureThreshold = 50000f / ushort.MaxValue;
+
+        // 湿地を低地へ限定する0〜1の標高上限で、高地判定より低く保ちます。
+        [Tooltip("湿地候補にできる最大標高です。0〜1で指定し、大きくすると湿地が高い場所まで広がります。高地閾値より小さくしてください。")]
+        [Range(0f, 1f)]
+        [SerializeField] private float wetlandMaximumElevation = 36000f / ushort.MaxValue;
+
+        // 岩地と火山を高地へ寄せる0〜1の標高境界です。
+        [Tooltip("これ以上を岩地・火山候補とみなす高地閾値です。0〜1で指定し、小さくすると岩地が増えます。")]
+        [Range(0f, 1f)]
+        [SerializeField] private float highlandElevationThreshold = 43000f / ushort.MaxValue;
+
+        // 火山を希少な特殊地域へ限定する0〜1のWeirdness境界です。
+        [Tooltip("これ以上を火山候補とみなすWeirdness閾値です。0〜1で指定し、小さくすると火山が増えます。")]
+        [Range(0f, 1f)]
+        [SerializeField] private float volcanicWeirdnessThreshold = 47000f / ushort.MaxValue;
+
+        // 強く隣接抑制する候補が僅差のときに、草原または岩地へ置き換えるスコア差です。
+        [Tooltip("強く隣接抑制する2バイオームの適性差がこの値以下なら緩衝帯へ置き換えます。0〜65535の整数で、大きくすると緩衝帯が広がります。")]
+        [Range(0, ushort.MaxValue)]
+        [SerializeField] private int biomeAdjacencyTransitionScoreMargin = 18000;
 
         // 木・石・水・砂が1タイルずつ散らばらず、まとまった採取場所になるように使う低周波格子です。
         [Tooltip("基礎資源の群れを作るノイズ格子サイズです。単位はタイルです。大きくすると同じ資源が広くまとまり、変更すると資源配置が変わります。")]
@@ -216,7 +266,25 @@ namespace Farmware.WorldGeneration.Authoring
             // 乾燥と湿潤の領域が逆転しないよう、森林閾値を乾燥閾値より上へ保ちます。
             dryMoistureThreshold = Mathf.Min(dryMoistureThreshold, 1f - minimumGap);
             wetMoistureThreshold = Mathf.Max(wetMoistureThreshold, dryMoistureThreshold + minimumGap);
-            wetMoistureThreshold = Mathf.Clamp01(wetMoistureThreshold);
+            wetMoistureThreshold = Mathf.Min(wetMoistureThreshold, 1f - minimumGap);
+            wetlandMoistureThreshold = Mathf.Max(
+                wetlandMoistureThreshold,
+                wetMoistureThreshold + minimumGap);
+            wetlandMoistureThreshold = Mathf.Clamp01(wetlandMoistureThreshold);
+
+            // 雪原と高温域の基準が逆転しないよう、低温閾値を高温閾値より下へ保ちます。
+            hotTemperatureThreshold = Mathf.Max(hotTemperatureThreshold, minimumGap);
+            coldTemperatureThreshold = Mathf.Min(
+                coldTemperatureThreshold,
+                hotTemperatureThreshold - minimumGap);
+            coldTemperatureThreshold = Mathf.Clamp01(coldTemperatureThreshold);
+
+            // 湿地上限と高地下限を分け、湿地と岩地の両方が同じ標高条件で最大適性にならないようにします。
+            wetlandMaximumElevation = Mathf.Min(wetlandMaximumElevation, 1f - minimumGap);
+            highlandElevationThreshold = Mathf.Max(
+                highlandElevationThreshold,
+                wetlandMaximumElevation + minimumGap);
+            highlandElevationThreshold = Mathf.Clamp01(highlandElevationThreshold);
 
             // 群半径が中心間隔の半分を超えると同種の群が重なるため、Inspector上で安全な上限へ揃えます。
             treeResourceClusterRadiusInTiles = Mathf.Min(
@@ -260,7 +328,12 @@ namespace Farmware.WorldGeneration.Authoring
                     ElevationCellSizeInTiles = authoring.elevationCellSizeInTiles,
                     TemperatureCellSizeInTiles = authoring.temperatureCellSizeInTiles,
                     MoistureCellSizeInTiles = authoring.moistureCellSizeInTiles,
+                    WeirdnessCellSizeInTiles = authoring.weirdnessCellSizeInTiles,
+                    BiomeWarpCellSizeInTiles = authoring.biomeWarpCellSizeInTiles,
+                    BiomeWarpAmplitudeInTiles = authoring.biomeWarpAmplitudeInTiles,
                     OctaveCount = authoring.octaveCount,
+                    BiomeClassificationTransitionWidthInTiles =
+                        authoring.biomeClassificationTransitionWidthInTiles,
                     BiomeTransitionWidthInTiles = authoring.biomeTransitionWidthInTiles,
                     SeaLevelThreshold = ToNormalizedUShort(authoring.waterThreshold),
                     RiverCellSizeInTiles = authoring.riverCellSizeInTiles,
@@ -276,8 +349,15 @@ namespace Farmware.WorldGeneration.Authoring
                     RockWallCorridorHalfWidth =
                         ToNormalizedUShort(authoring.rockWallCorridorHalfWidth),
                     HotTemperatureThreshold = ToNormalizedUShort(authoring.hotTemperatureThreshold),
+                    ColdTemperatureThreshold = ToNormalizedUShort(authoring.coldTemperatureThreshold),
                     DryMoistureThreshold = ToNormalizedUShort(authoring.dryMoistureThreshold),
-                    WetMoistureThreshold = ToNormalizedUShort(authoring.wetMoistureThreshold)
+                    WetMoistureThreshold = ToNormalizedUShort(authoring.wetMoistureThreshold),
+                    WetlandMoistureThreshold = ToNormalizedUShort(authoring.wetlandMoistureThreshold),
+                    WetlandMaximumElevation = ToNormalizedUShort(authoring.wetlandMaximumElevation),
+                    HighlandElevationThreshold = ToNormalizedUShort(authoring.highlandElevationThreshold),
+                    VolcanicWeirdnessThreshold = ToNormalizedUShort(authoring.volcanicWeirdnessThreshold),
+                    BiomeAdjacencyTransitionScoreMargin =
+                        (ushort)authoring.biomeAdjacencyTransitionScoreMargin
                 });
                 AddComponent(entity, new ChunkStreamingSettings
                 {

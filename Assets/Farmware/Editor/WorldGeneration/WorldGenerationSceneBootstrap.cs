@@ -52,8 +52,38 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>約1.25論理チャンク以内で湿度帯が変化する試作格子サイズです。単位はタイルです。</summary>
         private const int PrototypeMoistureCellSizeInTiles = 80;
 
+        /// <summary>火山などの特殊地域候補をまとめる試作Weirdness格子サイズです。単位はタイルです。</summary>
+        private const int PrototypeWeirdnessCellSizeInTiles = 112;
+
+        /// <summary>バイオーム境界を曲げる試作ノイズ格子サイズです。単位はタイルです。</summary>
+        private const int PrototypeBiomeWarpCellSizeInTiles = 192;
+
+        /// <summary>気候ノイズのサンプリング座標を歪ませる最大幅です。単位はタイルです。</summary>
+        private const int PrototypeBiomeWarpAmplitudeInTiles = 12;
+
+        /// <summary>7バイオームの適性を気候閾値付近で滑らかに入れ替える試作幅です。単位はタイルです。</summary>
+        private const int PrototypeBiomeClassificationTransitionWidthInTiles = 12;
+
         /// <summary>隣接バイオームの地面を段階的に混ぜる試作幅です。単位はタイルです。</summary>
         private const int PrototypeBiomeTransitionWidthInTiles = 6;
+
+        /// <summary>低温とみなす固定小数点閾値をInspector表現へ戻した値です。</summary>
+        private const float PrototypeColdTemperatureThreshold = 23000f / ushort.MaxValue;
+
+        /// <summary>湿地候補とみなす固定小数点湿度閾値をInspector表現へ戻した値です。</summary>
+        private const float PrototypeWetlandMoistureThreshold = 50000f / ushort.MaxValue;
+
+        /// <summary>湿地候補にできる固定小数点標高上限をInspector表現へ戻した値です。</summary>
+        private const float PrototypeWetlandMaximumElevation = 36000f / ushort.MaxValue;
+
+        /// <summary>岩地・火山候補とみなす固定小数点高地閾値をInspector表現へ戻した値です。</summary>
+        private const float PrototypeHighlandElevationThreshold = 43000f / ushort.MaxValue;
+
+        /// <summary>火山候補とみなす固定小数点Weirdness閾値をInspector表現へ戻した値です。</summary>
+        private const float PrototypeVolcanicWeirdnessThreshold = 47000f / ushort.MaxValue;
+
+        /// <summary>強く隣接抑制する候補間に緩衝帯を挟む試作スコア差です。</summary>
+        private const int PrototypeBiomeAdjacencyTransitionScoreMargin = 18000;
 
         /// <summary>川の大きな蛇行を決める試作ノイズ格子サイズです。単位はタイルです。</summary>
         private const int PrototypeRiverCellSizeInTiles = 96;
@@ -149,6 +179,10 @@ namespace Farmware.WorldGeneration.Editor
             CreateOrUpdateFallbackTile("Grassland", new Color32(112, 169, 86, 255));
             CreateOrUpdateFallbackTile("Forest", new Color32(61, 112, 66, 255));
             CreateOrUpdateFallbackTile("Desert", new Color32(210, 177, 100, 255));
+            CreateOrUpdateFallbackTile("Rockland", new Color32(128, 123, 137, 255));
+            CreateOrUpdateFallbackTile("Wetland", new Color32(72, 128, 103, 255));
+            CreateOrUpdateFallbackTile("Snowfield", new Color32(198, 225, 232, 255));
+            CreateOrUpdateFallbackTile("Volcanic", new Color32(130, 67, 57, 255));
             CreateOrUpdateFallbackTile("FreshWater", new Color32(76, 157, 211, 255));
             CreateOrUpdateFallbackTile("SaltWater", new Color32(42, 101, 176, 255));
             CreateOrUpdateFallbackTile("RockWall", new Color32(101, 101, 109, 255));
@@ -162,12 +196,16 @@ namespace Farmware.WorldGeneration.Editor
             DeleteObsoleteFallbackTile("RockWallInterior");
 
             // PNGのSaveAndReimport中に以前読み込んだUnity Object参照が無効化される場合があります。
-            // 9種類をすべて生成した後、AssetDatabaseから最新のTileを読み直してSceneへ保存します。
+            // 13種類をすべて生成した後、AssetDatabaseから最新のTileを読み直してSceneへ保存します。
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
             Tile grasslandTile = LoadRequiredFallbackTile("Grassland");
             Tile forestTile = LoadRequiredFallbackTile("Forest");
             Tile desertTile = LoadRequiredFallbackTile("Desert");
+            Tile rocklandTile = LoadRequiredFallbackTile("Rockland");
+            Tile wetlandTile = LoadRequiredFallbackTile("Wetland");
+            Tile snowfieldTile = LoadRequiredFallbackTile("Snowfield");
+            Tile volcanicTile = LoadRequiredFallbackTile("Volcanic");
             Tile freshWaterTile = LoadRequiredFallbackTile("FreshWater");
             Tile saltWaterTile = LoadRequiredFallbackTile("SaltWater");
             Tile rockWallTile = LoadRequiredFallbackTile("RockWall");
@@ -181,6 +219,10 @@ namespace Farmware.WorldGeneration.Editor
                 grasslandTile,
                 forestTile,
                 desertTile,
+                rocklandTile,
+                wetlandTile,
+                snowfieldTile,
+                volcanicTile,
                 freshWaterTile,
                 saltWaterTile,
                 rockWallTile,
@@ -484,8 +526,28 @@ namespace Farmware.WorldGeneration.Editor
                 PrototypeTemperatureCellSizeInTiles;
             serializedAuthoring.FindProperty("moistureCellSizeInTiles").intValue =
                 PrototypeMoistureCellSizeInTiles;
+            serializedAuthoring.FindProperty("weirdnessCellSizeInTiles").intValue =
+                PrototypeWeirdnessCellSizeInTiles;
+            serializedAuthoring.FindProperty("biomeWarpCellSizeInTiles").intValue =
+                PrototypeBiomeWarpCellSizeInTiles;
+            serializedAuthoring.FindProperty("biomeWarpAmplitudeInTiles").intValue =
+                PrototypeBiomeWarpAmplitudeInTiles;
+            serializedAuthoring.FindProperty("biomeClassificationTransitionWidthInTiles").intValue =
+                PrototypeBiomeClassificationTransitionWidthInTiles;
             serializedAuthoring.FindProperty("biomeTransitionWidthInTiles").intValue =
                 PrototypeBiomeTransitionWidthInTiles;
+            serializedAuthoring.FindProperty("coldTemperatureThreshold").floatValue =
+                PrototypeColdTemperatureThreshold;
+            serializedAuthoring.FindProperty("wetlandMoistureThreshold").floatValue =
+                PrototypeWetlandMoistureThreshold;
+            serializedAuthoring.FindProperty("wetlandMaximumElevation").floatValue =
+                PrototypeWetlandMaximumElevation;
+            serializedAuthoring.FindProperty("highlandElevationThreshold").floatValue =
+                PrototypeHighlandElevationThreshold;
+            serializedAuthoring.FindProperty("volcanicWeirdnessThreshold").floatValue =
+                PrototypeVolcanicWeirdnessThreshold;
+            serializedAuthoring.FindProperty("biomeAdjacencyTransitionScoreMargin").intValue =
+                PrototypeBiomeAdjacencyTransitionScoreMargin;
             serializedAuthoring.FindProperty("riverCellSizeInTiles").intValue =
                 PrototypeRiverCellSizeInTiles;
             serializedAuthoring.FindProperty("pondCellSizeInTiles").intValue =
@@ -541,6 +603,10 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="grasslandTile">草原用の単色Tileです。</param>
         /// <param name="forestTile">森林用の単色Tileです。</param>
         /// <param name="desertTile">砂漠用の単色Tileです。</param>
+        /// <param name="rocklandTile">岩地用の単色Tileです。</param>
+        /// <param name="wetlandTile">湿地用の単色Tileです。</param>
+        /// <param name="snowfieldTile">雪原用の単色Tileです。</param>
+        /// <param name="volcanicTile">火山用の単色Tileです。</param>
         /// <param name="freshWaterTile">川と池の淡水域用の単色Tileです。</param>
         /// <param name="saltWaterTile">海の海水域用の単色Tileです。</param>
         /// <param name="rockWallTile">全岩壁へ共通で使用し、別の影Meshで内部グラデーションを後付けする単色Tileです。</param>
@@ -552,6 +618,10 @@ namespace Farmware.WorldGeneration.Editor
             TileBase grasslandTile,
             TileBase forestTile,
             TileBase desertTile,
+            TileBase rocklandTile,
+            TileBase wetlandTile,
+            TileBase snowfieldTile,
+            TileBase volcanicTile,
             TileBase freshWaterTile,
             TileBase saltWaterTile,
             TileBase rockWallTile,
@@ -596,6 +666,10 @@ namespace Farmware.WorldGeneration.Editor
                 grasslandTile,
                 forestTile,
                 desertTile,
+                rocklandTile,
+                wetlandTile,
+                snowfieldTile,
+                volcanicTile,
                 freshWaterTile,
                 saltWaterTile,
                 rockWallTile,
@@ -614,7 +688,7 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>
-        /// ChunkTilemapPresenterへ、地形・資源の専用Tilemapと9種類の仮Tileをまとめて設定します。
+        /// ChunkTilemapPresenterへ、地形・資源の専用Tilemapと13種類の仮Tileをまとめて設定します。
         /// </summary>
         /// <param name="presenter">設定対象のPresentation Componentです。</param>
         /// <param name="tilemap">生成地形だけを表示する専用Tilemapです。</param>
@@ -622,6 +696,10 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="grasslandTile">草原用の単色Tileです。</param>
         /// <param name="forestTile">森林用の単色Tileです。</param>
         /// <param name="desertTile">砂漠用の単色Tileです。</param>
+        /// <param name="rocklandTile">岩地用の単色Tileです。</param>
+        /// <param name="wetlandTile">湿地用の単色Tileです。</param>
+        /// <param name="snowfieldTile">雪原用の単色Tileです。</param>
+        /// <param name="volcanicTile">火山用の単色Tileです。</param>
         /// <param name="freshWaterTile">川と池の淡水域用の単色Tileです。</param>
         /// <param name="saltWaterTile">海の海水域用の単色Tileです。</param>
         /// <param name="rockWallTile">全岩壁へ共通で使用し、別の影Meshで内部グラデーションを後付けする単色Tileです。</param>
@@ -635,6 +713,10 @@ namespace Farmware.WorldGeneration.Editor
             TileBase grasslandTile,
             TileBase forestTile,
             TileBase desertTile,
+            TileBase rocklandTile,
+            TileBase wetlandTile,
+            TileBase snowfieldTile,
+            TileBase volcanicTile,
             TileBase freshWaterTile,
             TileBase saltWaterTile,
             TileBase rockWallTile,
@@ -648,6 +730,10 @@ namespace Farmware.WorldGeneration.Editor
                 grasslandTile,
                 forestTile,
                 desertTile,
+                rocklandTile,
+                wetlandTile,
+                snowfieldTile,
+                volcanicTile,
                 freshWaterTile,
                 saltWaterTile,
                 rockWallTile,
@@ -929,10 +1015,10 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>
-        /// Presenterの地形・資源Tilemapと9種類のTile参照が、保存後もすべて設定されているか検証します。
+        /// Presenterの地形・資源Tilemapと13種類のTile参照が、保存後もすべて設定されているか検証します。
         /// </summary>
         /// <param name="presenter">保存済みSampleSceneから読み込んだPresenterです。</param>
-        /// <returns>必要な11参照がすべて非nullならtrueです。</returns>
+        /// <returns>必要な15参照がすべて非nullならtrueです。</returns>
         private static bool PresenterHasAllReferences(ChunkTilemapPresenter presenter)
         {
             SerializedObject serializedPresenter = new SerializedObject(presenter);
@@ -943,6 +1029,10 @@ namespace Farmware.WorldGeneration.Editor
                 "grasslandTile",
                 "forestTile",
                 "desertTile",
+                "rocklandTile",
+                "wetlandTile",
+                "snowfieldTile",
+                "volcanicTile",
                 "freshWaterTile",
                 "saltWaterTile",
                 "rockWallTile",

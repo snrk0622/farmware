@@ -153,7 +153,11 @@ MonoBehaviour:
   elevationCellSizeInTiles: 192
   temperatureCellSizeInTiles: 96
   moistureCellSizeInTiles: 80
+  weirdnessCellSizeInTiles: 112
+  biomeWarpCellSizeInTiles: 192
+  biomeWarpAmplitudeInTiles: 12
   octaveCount: 4
+  biomeClassificationTransitionWidthInTiles: 12
   biomeTransitionWidthInTiles: 6
   waterThreshold: 0.305
   riverCellSizeInTiles: 96
@@ -168,8 +172,14 @@ MonoBehaviour:
   rockWallNoiseThreshold: 0.6256199
   rockWallCorridorHalfWidth: 0.016784925
   hotTemperatureThreshold: 0.61
+  coldTemperatureThreshold: 0.3509575
   dryMoistureThreshold: 0.435
   wetMoistureThreshold: 0.603
+  wetlandMoistureThreshold: 0.7629511
+  wetlandMaximumElevation: 0.5493248
+  highlandElevationThreshold: 0.65613794
+  volcanicWeirdnessThreshold: 0.71717405
+  biomeAdjacencyTransitionScoreMargin: 18000
   resourceClusterCellSizeInTiles: 24
   resourceOctaveCount: 2
   treeResourceThreshold: 0.7629511

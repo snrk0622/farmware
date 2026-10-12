@@ -18,7 +18,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// <summary>開発者用の色分けを表示しません。</summary>
         None = 0,
 
-        /// <summary>論理Biome IDを草原・森林・砂漠の固定色で表示します。</summary>
+        /// <summary>論理Biome IDを7種類の固定色で表示します。</summary>
         Biome = 1,
 
         /// <summary>0〜65535の連続標高値を黒から白の濃淡で表示します。</summary>
@@ -43,7 +43,10 @@ namespace Farmware.WorldGeneration.Presentation
         RockWall = 8,
 
         /// <summary>最低間隔と配置競合を適用した後の木・石・砂を固定色で表示します。</summary>
-        Resources = 9
+        Resources = 9,
+
+        /// <summary>0〜65535の連続Weirdness値を紫から黄のグラデーションで表示します。</summary>
+        Weirdness = 10
     }
 
     /// <summary>
@@ -226,6 +229,26 @@ namespace Farmware.WorldGeneration.Presentation
                         return new Color32(224, 174, 70, 238);
                     }
 
+                    if (tile.Biome == BiomeId.Rockland)
+                    {
+                        return new Color32(130, 126, 145, 238);
+                    }
+
+                    if (tile.Biome == BiomeId.Wetland)
+                    {
+                        return new Color32(45, 135, 112, 238);
+                    }
+
+                    if (tile.Biome == BiomeId.Snowfield)
+                    {
+                        return new Color32(198, 230, 238, 238);
+                    }
+
+                    if (tile.Biome == BiomeId.Volcanic)
+                    {
+                        return new Color32(154, 62, 48, 238);
+                    }
+
                     return new Color32(104, 190, 85, 238);
 
                 case WorldGenerationDebugVisualizationMode.Elevation:
@@ -248,6 +271,13 @@ namespace Farmware.WorldGeneration.Presentation
                         new Color32(176, 116, 52, 238),
                         new Color32(50, 185, 225, 238),
                         moisture);
+
+                case WorldGenerationDebugVisualizationMode.Weirdness:
+                    float weirdness = tile.Weirdness / (float)ushort.MaxValue;
+                    return Color.Lerp(
+                        new Color32(69, 48, 112, 238),
+                        new Color32(246, 208, 72, 238),
+                        weirdness);
 
                 case WorldGenerationDebugVisualizationMode.WaterSalinity:
                     // 通常地形でも淡水と海水を見分けられますが、専用表示では地表色を消して境界判定だけを確認しやすくします。
@@ -342,7 +372,7 @@ namespace Farmware.WorldGeneration.Presentation
             }
 
             GroundType representativeGround = GroundType.Normal;
-            if (tile.Biome == BiomeId.Forest)
+            if (tile.Biome == BiomeId.Forest || tile.Biome == BiomeId.Wetland)
             {
                 representativeGround = GroundType.Vegetation;
             }
@@ -690,10 +720,12 @@ namespace Farmware.WorldGeneration.Presentation
             WorldGenerationSettings settings,
             ResourceGenerationSettings resourceSettings)
         {
-            const int generatedTileInformationLineCount = 12;
+            const int generatedTileInformationLineCount = 14;
             const int waitingInformationLineCount = 1;
-            const float informationStartY = 48f;
             const float bottomPadding = 6f;
+            float informationStartY = currentMode == WorldGenerationDebugVisualizationMode.Biome
+                ? 66f
+                : 48f;
 
             string centerInformation = "Center tile is waiting for generation.";
             if (hasCenterTile)
@@ -733,8 +765,8 @@ namespace Farmware.WorldGeneration.Presentation
                 centerInformation = $"Tile ({centerCoordinate.x}, {centerCoordinate.y})  "
                     + $"Biome={centerTile.Biome}  Ground={centerTile.Ground}\n"
                     + $"Water={centerTile.WaterSalinity} / {centerTile.WaterBodyType}\n"
-                    + $"Elevation={centerTile.Elevation}  Temperature={centerTile.Temperature}  "
-                    + $"Moisture={centerTile.Moisture}\n"
+                    + $"Elevation={centerTile.Elevation}  Temperature={centerTile.Temperature}\n"
+                    + $"Moisture={centerTile.Moisture}  Weirdness={centerTile.Weirdness}\n"
                     + $"Transition={(IsBiomeTransitionTile(centerTile) ? "Yes" : "No")}\n"
                     + $"RockDensity={rockWallInfo.Density} / {settings.RockWallNoiseThreshold}  "
                     + $"Raw={(rockWallInfo.RawCandidate ? "Yes" : "No")}\n"
@@ -757,8 +789,12 @@ namespace Farmware.WorldGeneration.Presentation
                     + $"{resourceSettings.StoneClusterRadiusInTiles}  "
                     + $"Sand={resourceSettings.SandMinimumSpacingInTiles}/"
                     + $"{resourceSettings.SandClusterRadiusInTiles}\n"
-                    + $"Hot={settings.HotTemperatureThreshold}  Dry={settings.DryMoistureThreshold}  "
-                    + $"Wet={settings.WetMoistureThreshold}";
+                    + $"Cold={settings.ColdTemperatureThreshold}  Hot={settings.HotTemperatureThreshold}  "
+                    + $"Dry={settings.DryMoistureThreshold}  Wet={settings.WetMoistureThreshold}\n"
+                    + $"Wetland={settings.WetlandMoistureThreshold}/"
+                    + $"{settings.WetlandMaximumElevation}  "
+                    + $"Highland={settings.HighlandElevationThreshold}  "
+                    + $"Volcanic={settings.VolcanicWeirdnessThreshold}";
             }
             int informationLineCount = hasCenterTile
                 ? generatedTileInformationLineCount
@@ -866,6 +902,32 @@ namespace Farmware.WorldGeneration.Presentation
                         GetVisualizationColor(mode, new GeneratedTile { Biome = BiomeId.Desert }),
                         "Desert",
                         74f);
+                    DrawLegendEntry(
+                        ref nextX,
+                        y,
+                        GetVisualizationColor(mode, new GeneratedTile { Biome = BiomeId.Rockland }),
+                        "Rockland",
+                        84f);
+                    nextX = startX + 48f;
+                    float secondBiomeLegendY = y + 18f;
+                    DrawLegendEntry(
+                        ref nextX,
+                        secondBiomeLegendY,
+                        GetVisualizationColor(mode, new GeneratedTile { Biome = BiomeId.Wetland }),
+                        "Wetland",
+                        82f);
+                    DrawLegendEntry(
+                        ref nextX,
+                        secondBiomeLegendY,
+                        GetVisualizationColor(mode, new GeneratedTile { Biome = BiomeId.Snowfield }),
+                        "Snowfield",
+                        90f);
+                    DrawLegendEntry(
+                        ref nextX,
+                        secondBiomeLegendY,
+                        GetVisualizationColor(mode, new GeneratedTile { Biome = BiomeId.Volcanic }),
+                        "Volcanic",
+                        88f);
                     break;
                 case WorldGenerationDebugVisualizationMode.Elevation:
                     DrawContinuousValueLegend(mode, ref nextX, y, "0 (Low)", "65535 (High)");
@@ -875,6 +937,9 @@ namespace Farmware.WorldGeneration.Presentation
                     break;
                 case WorldGenerationDebugVisualizationMode.Moisture:
                     DrawContinuousValueLegend(mode, ref nextX, y, "0 (Dry)", "65535 (Wet)");
+                    break;
+                case WorldGenerationDebugVisualizationMode.Weirdness:
+                    DrawContinuousValueLegend(mode, ref nextX, y, "0 (Common)", "65535 (Weird)");
                     break;
                 case WorldGenerationDebugVisualizationMode.WaterSalinity:
                     DrawLegendEntry(
@@ -1038,7 +1103,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// <summary>
         /// 連続値モードの最小値と最大値を、対象フィールドだけ設定したGeneratedTileから描きます。
         /// </summary>
-        /// <param name="mode">Elevation、Temperature、Moistureのいずれかです。</param>
+        /// <param name="mode">Elevation、Temperature、Moisture、Weirdnessのいずれかです。</param>
         /// <param name="nextX">次の凡例要素を描くX座標です。描画後は右端へ進めます。</param>
         /// <param name="y">色見本の上端Y座標です。</param>
         /// <param name="minimumLabel">最小値側に表示する説明です。</param>
@@ -1064,6 +1129,9 @@ namespace Farmware.WorldGeneration.Presentation
                     break;
                 case WorldGenerationDebugVisualizationMode.Moisture:
                     maximumTile.Moisture = ushort.MaxValue;
+                    break;
+                case WorldGenerationDebugVisualizationMode.Weirdness:
+                    maximumTile.Weirdness = ushort.MaxValue;
                     break;
             }
 

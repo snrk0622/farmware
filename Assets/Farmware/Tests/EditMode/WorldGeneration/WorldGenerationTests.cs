@@ -322,7 +322,17 @@ namespace Farmware.WorldGeneration.Tests
 
             Assert.That(settings.TemperatureCellSizeInTiles, Is.EqualTo(96));
             Assert.That(settings.MoistureCellSizeInTiles, Is.EqualTo(80));
+            Assert.That(settings.WeirdnessCellSizeInTiles, Is.EqualTo(112));
+            Assert.That(settings.BiomeWarpCellSizeInTiles, Is.EqualTo(192));
+            Assert.That(settings.BiomeWarpAmplitudeInTiles, Is.EqualTo(12));
+            Assert.That(settings.BiomeClassificationTransitionWidthInTiles, Is.EqualTo(12));
             Assert.That(settings.BiomeTransitionWidthInTiles, Is.EqualTo(6));
+            Assert.That(settings.ColdTemperatureThreshold, Is.EqualTo(23000));
+            Assert.That(settings.WetlandMoistureThreshold, Is.EqualTo(50000));
+            Assert.That(settings.WetlandMaximumElevation, Is.EqualTo(36000));
+            Assert.That(settings.HighlandElevationThreshold, Is.EqualTo(43000));
+            Assert.That(settings.VolcanicWeirdnessThreshold, Is.EqualTo(47000));
+            Assert.That(settings.BiomeAdjacencyTransitionScoreMargin, Is.EqualTo(18000));
             Assert.That(settings.RiverCellSizeInTiles, Is.EqualTo(96));
             Assert.That(settings.PondCellSizeInTiles, Is.EqualTo(48));
             Assert.That(settings.FreshWaterOctaveCount, Is.EqualTo(2));
@@ -331,6 +341,87 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(settings.RockWallWarpAmplitudeInTiles, Is.EqualTo(6));
             Assert.That(settings.RockWallNoiseThreshold, Is.EqualTo(41000));
             Assert.That(settings.RockWallCorridorHalfWidth, Is.EqualTo(1100));
+        }
+
+        /// <summary>
+        /// 7種類を代表する気候値を純粋な分類関数へ渡し、各バイオームが意図した標高・気温・湿度・Weirdness条件で選ばれることを保証します。
+        /// 広域ワールド探索を行わないため、日常的な修正後にも短時間で実行できる回帰テストです。
+        /// </summary>
+        [Test]
+        public void BiomeClassifier_SelectsAllSevenBiomesFromRepresentativeClimateProfiles()
+        {
+            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.FromString("seven-biome-classification-test"),
+                1);
+
+            // 中標高・温暖・中湿度は、極端な気候条件を持たない基準の草原になります。
+            Assert.That(
+                DeterministicChunkGenerator.ClassifyBiome(35000, 32000, 34000, 30000, settings),
+                Is.EqualTo(BiomeId.Grassland));
+
+            // 温暖かつ湿潤でも、湿地閾値には届かない地域は森林になります。
+            Assert.That(
+                DeterministicChunkGenerator.ClassifyBiome(35000, 32000, 45000, 30000, settings),
+                Is.EqualTo(BiomeId.Forest));
+
+            // 高温かつ乾燥した低〜中標高域は砂漠になります。
+            Assert.That(
+                DeterministicChunkGenerator.ClassifyBiome(35000, 50000, 15000, 30000, settings),
+                Is.EqualTo(BiomeId.Desert));
+
+            // 高標高かつ乾燥した地域は、通常地面を持つ岩地になります。
+            Assert.That(
+                DeterministicChunkGenerator.ClassifyBiome(52000, 32000, 25000, 30000, settings),
+                Is.EqualTo(BiomeId.Rockland));
+
+            // 低標高かつ非常に湿潤な地域は森林より湿地を優先します。
+            Assert.That(
+                DeterministicChunkGenerator.ClassifyBiome(28000, 32000, 60000, 30000, settings),
+                Is.EqualTo(BiomeId.Wetland));
+
+            // 気温が十分低い地域は、標高が高地閾値未満でも雪原になります。
+            Assert.That(
+                DeterministicChunkGenerator.ClassifyBiome(40000, 10000, 34000, 30000, settings),
+                Is.EqualTo(BiomeId.Snowfield));
+
+            // 高温・高標高・高Weirdnessが重なる地域は希少な火山になります。
+            Assert.That(
+                DeterministicChunkGenerator.ClassifyBiome(52000, 50000, 25000, 60000, settings),
+                Is.EqualTo(BiomeId.Volcanic));
+        }
+
+        /// <summary>
+        /// 1つの固定シードについて広い範囲を32タイル間隔で軽量サンプリングし、実際のノイズ生成経路から7バイオームすべてへ到達できることを保証します。
+        /// 全タイルや多数シードを総当たりせず4,225地点だけを調べるため、通常の修正サイクルでも短時間で実行できます。
+        /// </summary>
+        [Test]
+        public void GeneratedWorld_ContainsAllSevenBiomesInLightweightSample()
+        {
+            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.FromString("seven-biome-world-sample"),
+                1);
+            HashSet<BiomeId> discoveredBiomes = new HashSet<BiomeId>();
+
+            // 生成範囲の全セルではなく一定間隔だけを読むことで、分布の到達性を確認しつつテスト時間を抑えます。
+            for (int tileY = -1024; tileY <= 1024; tileY += 32)
+            {
+                for (int tileX = -1024; tileX <= 1024; tileX += 32)
+                {
+                    GeneratedTile tile = DeterministicChunkGenerator.GenerateTile(
+                        settings,
+                        tileX,
+                        tileY);
+                    discoveredBiomes.Add(tile.Biome);
+                }
+            }
+
+            Assert.That(discoveredBiomes, Does.Contain(BiomeId.Grassland));
+            Assert.That(discoveredBiomes, Does.Contain(BiomeId.Forest));
+            Assert.That(discoveredBiomes, Does.Contain(BiomeId.Desert));
+            Assert.That(discoveredBiomes, Does.Contain(BiomeId.Rockland));
+            Assert.That(discoveredBiomes, Does.Contain(BiomeId.Wetland));
+            Assert.That(discoveredBiomes, Does.Contain(BiomeId.Snowfield));
+            Assert.That(discoveredBiomes, Does.Contain(BiomeId.Volcanic));
         }
 
         /// <summary>
@@ -389,6 +480,7 @@ namespace Farmware.WorldGeneration.Tests
                     Assert.That(transitioned.Elevation, Is.EqualTo(discrete.Elevation));
                     Assert.That(transitioned.Temperature, Is.EqualTo(discrete.Temperature));
                     Assert.That(transitioned.Moisture, Is.EqualTo(discrete.Moisture));
+                    Assert.That(transitioned.Weirdness, Is.EqualTo(discrete.Weirdness));
 
                     if (transitioned.Ground != discrete.Ground)
                     {
@@ -1396,6 +1488,7 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(actual.Elevation, Is.EqualTo(expected.Elevation));
             Assert.That(actual.Temperature, Is.EqualTo(expected.Temperature));
             Assert.That(actual.Moisture, Is.EqualTo(expected.Moisture));
+            Assert.That(actual.Weirdness, Is.EqualTo(expected.Weirdness));
         }
 
         /// <summary>

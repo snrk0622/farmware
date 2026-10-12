@@ -144,7 +144,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
         }
 
         /// <summary>
-        /// 開発者用可視化がBiome、連続ノイズ、水域、移行帯、資源を異なる色へ写像し、論理BiomeとGroundの差を正しく判定することを検証します。
+        /// 開発者用可視化が7種Biome、連続ノイズ、水域、移行帯、資源を異なる色へ写像し、論理BiomeとGroundの差を正しく判定することを検証します。
         /// SceneやECS Worldを作らない純粋計算として、表示色の両端、水域分類、水域除外、最終資源分類をまとめて保証します。
         /// </summary>
         [Test]
@@ -156,7 +156,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Ground = GroundType.Normal,
                 Elevation = ushort.MaxValue,
                 Temperature = 0,
-                Moisture = ushort.MaxValue
+                Moisture = ushort.MaxValue,
+                Weirdness = ushort.MaxValue
             };
 
             Assert.That(
@@ -176,6 +177,25 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 highElevationColor.r,
                 Is.GreaterThan(0.9f),
                 "最高標高は凡例どおり白に近い必要があります。");
+
+            Color highWeirdnessColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.Weirdness,
+                forestTransitionTile);
+            Assert.That(
+                highWeirdnessColor.r,
+                Is.GreaterThan(highWeirdnessColor.b),
+                "最高Weirdnessは凡例どおり紫より黄に近い必要があります。");
+
+            Color wetlandColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.Biome,
+                new GeneratedTile { Biome = BiomeId.Wetland });
+            Color volcanicColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.Biome,
+                new GeneratedTile { Biome = BiomeId.Volcanic });
+            Assert.That(
+                wetlandColor,
+                Is.Not.EqualTo(volcanicColor),
+                "7バイオーム表示では湿地と火山を別色で判別できる必要があります。");
 
             Color transitionColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
                 WorldGenerationDebugVisualizationMode.BiomeTransition,
@@ -805,6 +825,10 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 actual.MovementCost,
                 Is.EqualTo(expected.MovementCost),
                 $"MovementCostが一致しません。Index={tileIndex}");
+            Assert.That(actual.Elevation, Is.EqualTo(expected.Elevation), $"Elevationが一致しません。Index={tileIndex}");
+            Assert.That(actual.Temperature, Is.EqualTo(expected.Temperature), $"Temperatureが一致しません。Index={tileIndex}");
+            Assert.That(actual.Moisture, Is.EqualTo(expected.Moisture), $"Moistureが一致しません。Index={tileIndex}");
+            Assert.That(actual.Weirdness, Is.EqualTo(expected.Weirdness), $"Weirdnessが一致しません。Index={tileIndex}");
         }
 
         /// <summary>
