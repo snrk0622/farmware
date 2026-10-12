@@ -720,7 +720,7 @@ namespace Farmware.WorldGeneration.Presentation
             WorldGenerationSettings settings,
             ResourceGenerationSettings resourceSettings)
         {
-            const int generatedTileInformationLineCount = 14;
+            const int generatedTileInformationLineCount = 17;
             const int waitingInformationLineCount = 1;
             const float bottomPadding = 6f;
             float informationStartY = currentMode == WorldGenerationDebugVisualizationMode.Biome
@@ -752,6 +752,15 @@ namespace Farmware.WorldGeneration.Presentation
                         centerTile,
                         centerCoordinate.x,
                         centerCoordinate.y);
+                WaterGenerationDebugInfo waterInfo =
+                    DeterministicChunkGenerator.GetWaterGenerationDebugInfo(
+                        centerTile.Elevation,
+                        centerTile.Temperature,
+                        centerTile.Moisture,
+                        centerTile.Weirdness,
+                        settings,
+                        centerCoordinate.x,
+                        centerCoordinate.y);
                 string finalState = !rockWallInfo.FinalCandidate
                     ? "Outside"
                     : centerTile.Ground == GroundType.Water
@@ -775,6 +784,12 @@ namespace Farmware.WorldGeneration.Presentation
                     + $"Shadow={rockWallShadowOpacity:F2}\n"
                     + $"WaterSettings: Sea={settings.SeaLevelThreshold}  "
                     + $"FreshMax={settings.FreshWaterMaximumElevation}\n"
+                    + $"Pond: Noise={waterInfo.PondSample} / {waterInfo.EffectivePondThreshold}  "
+                    + $"Wet={waterInfo.WetClimateInfluence}  Wetland={waterInfo.WetlandInfluence}\n"
+                    + $"PondSuppress: Desert={waterInfo.DesertInfluence}  "
+                    + $"Highland={waterInfo.HighlandInfluence}  Volcanic={waterInfo.VolcanicInfluence}\n"
+                    + $"River: Distance={waterInfo.RiverDistanceFromCenterLine} / "
+                    + $"{waterInfo.EffectiveRiverHalfWidth}\n"
                     + $"RockSettings: Mass={settings.RockWallMassCellSizeInTiles}  "
                     + $"Detail={settings.RockWallDetailCellSizeInTiles}  "
                     + $"Warp={settings.RockWallWarpAmplitudeInTiles}  "

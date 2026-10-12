@@ -336,11 +336,66 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(settings.RiverCellSizeInTiles, Is.EqualTo(96));
             Assert.That(settings.PondCellSizeInTiles, Is.EqualTo(48));
             Assert.That(settings.FreshWaterOctaveCount, Is.EqualTo(2));
+            Assert.That(settings.WetClimatePondThresholdReduction, Is.EqualTo(8500));
+            Assert.That(settings.WetlandPondThresholdReduction, Is.EqualTo(8500));
+            Assert.That(settings.DesertPondThresholdIncrease, Is.EqualTo(5000));
+            Assert.That(settings.HighlandPondThresholdIncrease, Is.EqualTo(3500));
+            Assert.That(settings.VolcanicPondThresholdIncrease, Is.EqualTo(16000));
+            Assert.That(settings.WetlandRiverHalfWidthIncrease, Is.EqualTo(500));
+            Assert.That(settings.VolcanicRiverHalfWidthReduction, Is.EqualTo(450));
             Assert.That(settings.RockWallMassCellSizeInTiles, Is.EqualTo(24));
             Assert.That(settings.RockWallDetailCellSizeInTiles, Is.EqualTo(8));
             Assert.That(settings.RockWallWarpAmplitudeInTiles, Is.EqualTo(6));
             Assert.That(settings.RockWallNoiseThreshold, Is.EqualTo(41000));
             Assert.That(settings.RockWallCorridorHalfWidth, Is.EqualTo(1100));
+        }
+
+        /// <summary>
+        /// 同じ水域形状ノイズ座標へ代表的な気候値だけを渡し、湿潤域では池と川が増え、乾燥・高地・火山では池が減る連続補正を検証します。
+        /// 広域マップを走査せず7回の純粋計算だけで、バイオーム別の水域方針と火山中心部の池禁止を日常的に確認できます。
+        /// </summary>
+        [Test]
+        public void WaterClimateModifier_AdjustsPondsAndRiversWithoutDiscreteBiomeChecks()
+        {
+            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.FromString("water-climate-modifier-test"),
+                1);
+            const int sampleTileX = 17;
+            const int sampleTileY = -23;
+
+            WaterGenerationDebugInfo grassland = DeterministicChunkGenerator.GetWaterGenerationDebugInfo(
+                35000, 32000, 34000, 30000, settings, sampleTileX, sampleTileY);
+            WaterGenerationDebugInfo forest = DeterministicChunkGenerator.GetWaterGenerationDebugInfo(
+                35000, 32000, 45000, 30000, settings, sampleTileX, sampleTileY);
+            WaterGenerationDebugInfo wetland = DeterministicChunkGenerator.GetWaterGenerationDebugInfo(
+                28000, 32000, 60000, 30000, settings, sampleTileX, sampleTileY);
+            WaterGenerationDebugInfo desert = DeterministicChunkGenerator.GetWaterGenerationDebugInfo(
+                35000, 50000, 15000, 30000, settings, sampleTileX, sampleTileY);
+            WaterGenerationDebugInfo rockland = DeterministicChunkGenerator.GetWaterGenerationDebugInfo(
+                46000, 32000, 25000, 30000, settings, sampleTileX, sampleTileY);
+            WaterGenerationDebugInfo snowfield = DeterministicChunkGenerator.GetWaterGenerationDebugInfo(
+                40000, 10000, 34000, 30000, settings, sampleTileX, sampleTileY);
+            WaterGenerationDebugInfo volcanic = DeterministicChunkGenerator.GetWaterGenerationDebugInfo(
+                46000, 50000, 25000, 60000, settings, sampleTileX, sampleTileY);
+
+            // 池下限が低いほど池になりやすいため、森林より湿地を強く優遇し、砂漠と岩地では基準草原より抑制されることを比較します。
+            Assert.That(forest.EffectivePondThreshold, Is.LessThan(grassland.EffectivePondThreshold));
+            Assert.That(wetland.EffectivePondThreshold, Is.LessThan(forest.EffectivePondThreshold));
+            Assert.That(desert.EffectivePondThreshold, Is.GreaterThan(grassland.EffectivePondThreshold));
+            Assert.That(rockland.EffectivePondThreshold, Is.GreaterThan(grassland.EffectivePondThreshold));
+
+            // 雪原は初期仕様で通常の淡水を保つため、気温だけを下げても草原と同じ池下限・川幅になります。
+            Assert.That(snowfield.EffectivePondThreshold, Is.EqualTo(grassland.EffectivePondThreshold));
+            Assert.That(snowfield.EffectiveRiverHalfWidth, Is.EqualTo(grassland.EffectiveRiverHalfWidth));
+
+            // 湿地では川を広げ、火山では細くしつつ、連続する川をバイオーム境界で完全には切らない最小幅を残します。
+            Assert.That(wetland.EffectiveRiverHalfWidth, Is.GreaterThan(settings.RiverCenterLineHalfWidth));
+            Assert.That(volcanic.EffectiveRiverHalfWidth, Is.LessThan(settings.RiverCenterLineHalfWidth));
+            Assert.That(volcanic.EffectiveRiverHalfWidth, Is.GreaterThan(0));
+
+            // 火山中心部では補正後下限を無効値65535へ飽和させ、池ノイズが最大でも池を作らない規則を表します。
+            Assert.That(volcanic.VolcanicInfluence, Is.EqualTo(ushort.MaxValue));
+            Assert.That(volcanic.EffectivePondThreshold, Is.EqualTo(ushort.MaxValue));
         }
 
         /// <summary>
@@ -422,6 +477,72 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(discoveredBiomes, Does.Contain(BiomeId.Wetland));
             Assert.That(discoveredBiomes, Does.Contain(BiomeId.Snowfield));
             Assert.That(discoveredBiomes, Does.Contain(BiomeId.Volcanic));
+        }
+
+        /// <summary>
+        /// 固定シードの16,641地点だけを等間隔で調べ、淡水生成可能な森林・湿地に池が視認できる割合で存在することを検証します。
+        /// 全タイル走査や多数シードを避けながら、気候補正量が池ノイズの実分布に対して弱すぎる退行を検出します。
+        /// </summary>
+        [Test]
+        public void PondDistribution_ForestAndWetlandRemainVisiblyPopulated()
+        {
+            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.FromString("water-biome-distribution-test"),
+                1);
+            const int scanRadiusInTiles = 2048;
+            const int sampleIntervalInTiles = 32;
+            int forestEligibleTileCount = 0;
+            int forestPondTileCount = 0;
+            int wetlandEligibleTileCount = 0;
+            int wetlandPondTileCount = 0;
+
+            // 池ノイズ格子48タイルに対して32タイル間隔で読み、同じ池を過剰に数えず広い気候分布を短時間で比較します。
+            for (int tileY = -scanRadiusInTiles; tileY <= scanRadiusInTiles; tileY += sampleIntervalInTiles)
+            {
+                for (int tileX = -scanRadiusInTiles; tileX <= scanRadiusInTiles; tileX += sampleIntervalInTiles)
+                {
+                    GeneratedTile tile = DeterministicChunkGenerator.GenerateTile(
+                        settings,
+                        tileX,
+                        tileY);
+                    bool canGenerateFreshWater = tile.Elevation >= settings.SeaLevelThreshold
+                        && tile.Elevation <= settings.FreshWaterMaximumElevation;
+                    if (!canGenerateFreshWater)
+                    {
+                        continue;
+                    }
+
+                    if (tile.Biome == BiomeId.Forest)
+                    {
+                        forestEligibleTileCount++;
+                        if (tile.WaterBodyType == WaterBodyType.Pond)
+                        {
+                            forestPondTileCount++;
+                        }
+                    }
+                    else if (tile.Biome == BiomeId.Wetland)
+                    {
+                        wetlandEligibleTileCount++;
+                        if (tile.WaterBodyType == WaterBodyType.Pond)
+                        {
+                            wetlandPondTileCount++;
+                        }
+                    }
+                }
+            }
+
+            float forestPondRatio = forestPondTileCount / (float)forestEligibleTileCount;
+            float wetlandPondRatio = wetlandPondTileCount / (float)wetlandEligibleTileCount;
+            TestContext.WriteLine(
+                $"森林の池率={forestPondRatio:P2} ({forestPondTileCount}/{forestEligibleTileCount}), "
+                + $"湿地の池率={wetlandPondRatio:P2} ({wetlandPondTileCount}/{wetlandEligibleTileCount})");
+
+            // 森林は池が明確に見つかる5%以上、湿地は仕様の初期目標10〜25%を少し余裕を持つ30%以下で保証します。
+            Assert.That(forestEligibleTileCount, Is.GreaterThanOrEqualTo(100));
+            Assert.That(wetlandEligibleTileCount, Is.GreaterThanOrEqualTo(80));
+            Assert.That(forestPondRatio, Is.InRange(0.05f, 0.15f));
+            Assert.That(wetlandPondRatio, Is.InRange(0.10f, 0.30f));
+            Assert.That(wetlandPondRatio, Is.GreaterThan(forestPondRatio));
         }
 
         /// <summary>

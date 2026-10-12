@@ -165,6 +165,13 @@ MonoBehaviour:
   freshWaterOctaveCount: 2
   riverCenterLineHalfWidth: 0.009155413
   pondThreshold: 0.86976427
+  wetClimatePondThresholdReduction: 0.12970169
+  wetlandPondThresholdReduction: 0.12970169
+  desertPondThresholdIncrease: 0.07629511
+  highlandPondThresholdIncrease: 0.053406578
+  volcanicPondThresholdIncrease: 0.24414435
+  wetlandRiverHalfWidthIncrease: 0.007629511
+  volcanicRiverHalfWidthReduction: 0.00686656
   freshWaterMaximumElevation: 0.71717405
   rockWallMassCellSizeInTiles: 24
   rockWallDetailCellSizeInTiles: 8

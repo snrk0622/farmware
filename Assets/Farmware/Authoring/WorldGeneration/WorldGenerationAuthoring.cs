@@ -96,6 +96,41 @@ namespace Farmware.WorldGeneration.Authoring
         [Range(0f, 1f)]
         [SerializeField] private float pondThreshold = 57000f / ushort.MaxValue;
 
+        // 森林のような湿潤域では池を少し増やすため、湿度に応じて池ノイズ下限を連続的に下げます。
+        [Tooltip("森林に近い湿潤条件で池ノイズ下限を最大どれだけ下げるかを0〜1で指定します。大きくすると森林内の池が増えます。")]
+        [Range(0f, 0.5f)]
+        [SerializeField] private float wetClimatePondThresholdReduction = 8500f / ushort.MaxValue;
+
+        // 湿地では森林分に加えて池を増やし、陸地を残しながら水面が点在する分布を作ります。
+        [Tooltip("低地かつ高湿度の湿地条件で、森林分に追加して池ノイズ下限を最大どれだけ下げるかを0〜1で指定します。")]
+        [Range(0f, 0.5f)]
+        [SerializeField] private float wetlandPondThresholdReduction = 8500f / ushort.MaxValue;
+
+        // 砂漠では池を希少にするため、高温と乾燥の両方が強いほど池ノイズ下限を上げます。
+        [Tooltip("高温かつ乾燥した砂漠条件で池ノイズ下限を最大どれだけ上げるかを0〜1で指定します。大きくすると砂漠の池が減ります。")]
+        [Range(0f, 0.5f)]
+        [SerializeField] private float desertPondThresholdIncrease = 5000f / ushort.MaxValue;
+
+        // 岩地では池を希少にするため、標高が高地条件へ近づくほど池ノイズ下限を上げます。
+        [Tooltip("高地の岩地条件で池ノイズ下限を最大どれだけ上げるかを0〜1で指定します。大きくすると岩地の池が減ります。")]
+        [Range(0f, 0.5f)]
+        [SerializeField] private float highlandPondThresholdIncrease = 3500f / ushort.MaxValue;
+
+        // 火山中心部では池を禁止し、周縁では急に途切れないよう火山適性に比例して抑制します。
+        [Tooltip("高温・高地・高Weirdnessの火山条件で池ノイズ下限を最大どれだけ上げるかを0〜1で指定します。既定値では火山中心部の池を禁止します。")]
+        [Range(0f, 0.5f)]
+        [SerializeField] private float volcanicPondThresholdIncrease = 16000f / ushort.MaxValue;
+
+        // 湿地内の川を見つけやすくするため、低地かつ高湿度の連続重みに応じて川幅を広げます。
+        [Tooltip("低地かつ高湿度の湿地条件で川の中心線半幅へ最大どれだけ加えるかを0〜1で指定します。大きくすると湿地の川が太くなります。")]
+        [Range(0f, 0.1f)]
+        [SerializeField] private float wetlandRiverHalfWidthIncrease = 500f / ushort.MaxValue;
+
+        // 火山でも川を完全には切らず、自然に横断できるよう最小幅を残しながら細くします。
+        [Tooltip("高温・高地・高Weirdnessの火山条件で川の中心線半幅から最大どれだけ引くかを0〜1で指定します。川を完全には消しません。")]
+        [Range(0f, 0.1f)]
+        [SerializeField] private float volcanicRiverHalfWidthReduction = 450f / ushort.MaxValue;
+
         // 淡水を生成できる標高上限で、山頂まで川や池が伸びることを防ぎます。
         [Tooltip("川と池を生成できる最大標高です。0〜1で指定し、小さくすると淡水が低地へ限定されます。海面より高くしてください。")]
         [Range(0f, 1f)]
@@ -341,6 +376,20 @@ namespace Farmware.WorldGeneration.Authoring
                     FreshWaterOctaveCount = authoring.freshWaterOctaveCount,
                     RiverCenterLineHalfWidth = ToNormalizedUShort(authoring.riverCenterLineHalfWidth),
                     PondThreshold = ToNormalizedUShort(authoring.pondThreshold),
+                    WetClimatePondThresholdReduction =
+                        ToNormalizedUShort(authoring.wetClimatePondThresholdReduction),
+                    WetlandPondThresholdReduction =
+                        ToNormalizedUShort(authoring.wetlandPondThresholdReduction),
+                    DesertPondThresholdIncrease =
+                        ToNormalizedUShort(authoring.desertPondThresholdIncrease),
+                    HighlandPondThresholdIncrease =
+                        ToNormalizedUShort(authoring.highlandPondThresholdIncrease),
+                    VolcanicPondThresholdIncrease =
+                        ToNormalizedUShort(authoring.volcanicPondThresholdIncrease),
+                    WetlandRiverHalfWidthIncrease =
+                        ToNormalizedUShort(authoring.wetlandRiverHalfWidthIncrease),
+                    VolcanicRiverHalfWidthReduction =
+                        ToNormalizedUShort(authoring.volcanicRiverHalfWidthReduction),
                     FreshWaterMaximumElevation = ToNormalizedUShort(authoring.freshWaterMaximumElevation),
                     RockWallMassCellSizeInTiles = authoring.rockWallMassCellSizeInTiles,
                     RockWallDetailCellSizeInTiles = authoring.rockWallDetailCellSizeInTiles,

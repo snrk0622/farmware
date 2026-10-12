@@ -40,9 +40,20 @@ namespace Farmware.WorldGeneration
                 settings.OctaveCount,
                 WorldGenerationPurposeSalts.Elevation);
 
+            SampleBiomeClimate(
+                settings,
+                worldTileX,
+                worldTileY,
+                out ushort temperature,
+                out ushort moisture,
+                out ushort weirdness);
+
             // 地形生成では水域を岩壁より先に分類します。同じ優先順位を使い、表示だけがSimulation結果と食い違うことを防ぎます。
             WaterBodyType waterBodyType = ClassifyWaterBody(
                 elevation,
+                temperature,
+                moisture,
+                weirdness,
                 settings,
                 worldTileX,
                 worldTileY);
@@ -70,39 +81,13 @@ namespace Farmware.WorldGeneration
                 settings.OctaveCount,
                 WorldGenerationPurposeSalts.Elevation);
 
-            CalculateWarpedBiomeCoordinate(
+            SampleBiomeClimate(
                 settings,
                 worldTileX,
                 worldTileY,
-                out int biomeSampleX,
-                out int biomeSampleY);
-
-            ushort temperature = DeterministicNoise.SampleFractalNoise(
-                settings.WorldSeed,
-                settings.GeneratorVersion,
-                biomeSampleX,
-                biomeSampleY,
-                settings.TemperatureCellSizeInTiles,
-                settings.OctaveCount,
-                WorldGenerationPurposeSalts.Temperature);
-
-            ushort moisture = DeterministicNoise.SampleFractalNoise(
-                settings.WorldSeed,
-                settings.GeneratorVersion,
-                biomeSampleX,
-                biomeSampleY,
-                settings.MoistureCellSizeInTiles,
-                settings.OctaveCount,
-                WorldGenerationPurposeSalts.Moisture);
-
-            ushort weirdness = DeterministicNoise.SampleFractalNoise(
-                settings.WorldSeed,
-                settings.GeneratorVersion,
-                biomeSampleX,
-                biomeSampleY,
-                settings.WeirdnessCellSizeInTiles,
-                settings.OctaveCount,
-                WorldGenerationPurposeSalts.Weirdness);
+                out ushort temperature,
+                out ushort moisture,
+                out ushort weirdness);
 
             BiomeId biome = ClassifyBiome(
                 elevation,
@@ -112,6 +97,9 @@ namespace Farmware.WorldGeneration
                 settings);
             WaterBodyType waterBodyType = ClassifyWaterBody(
                 elevation,
+                temperature,
+                moisture,
+                weirdness,
                 settings,
                 worldTileX,
                 worldTileY);
@@ -142,8 +130,59 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>
+        /// 歪ませた共通座標から気温・湿度・Weirdnessをまとめて取得します。
+        /// 通常生成と外周岩壁判定が同じ気候値を使い、水域優先順位の結果を一致させるために共有します。
+        /// </summary>
+        /// <param name="settings">気候ノイズと座標歪みの設定です。</param>
+        /// <param name="worldTileX">元の水平ワールドタイル座標です。</param>
+        /// <param name="worldTileY">元の垂直ワールドタイル座標です。</param>
+        /// <param name="temperature">0〜65535の気温を返します。</param>
+        /// <param name="moisture">0〜65535の湿度を返します。</param>
+        /// <param name="weirdness">0〜65535の特殊地形度を返します。</param>
+        private static void SampleBiomeClimate(
+            in WorldGenerationSettings settings,
+            int worldTileX,
+            int worldTileY,
+            out ushort temperature,
+            out ushort moisture,
+            out ushort weirdness)
+        {
+            CalculateWarpedBiomeCoordinate(
+                settings,
+                worldTileX,
+                worldTileY,
+                out int biomeSampleX,
+                out int biomeSampleY);
+
+            temperature = DeterministicNoise.SampleFractalNoise(
+                settings.WorldSeed,
+                settings.GeneratorVersion,
+                biomeSampleX,
+                biomeSampleY,
+                settings.TemperatureCellSizeInTiles,
+                settings.OctaveCount,
+                WorldGenerationPurposeSalts.Temperature);
+            moisture = DeterministicNoise.SampleFractalNoise(
+                settings.WorldSeed,
+                settings.GeneratorVersion,
+                biomeSampleX,
+                biomeSampleY,
+                settings.MoistureCellSizeInTiles,
+                settings.OctaveCount,
+                WorldGenerationPurposeSalts.Moisture);
+            weirdness = DeterministicNoise.SampleFractalNoise(
+                settings.WorldSeed,
+                settings.GeneratorVersion,
+                biomeSampleX,
+                biomeSampleY,
+                settings.WeirdnessCellSizeInTiles,
+                settings.OctaveCount,
+                WorldGenerationPurposeSalts.Weirdness);
+        }
+
+        /// <summary>
         /// 気候ノイズを読む座標へ低周波の歪みを加え、バイオーム境界が直線的・帯状になりすぎることを防ぎます。
-        /// 標高と水域は元座標で生成するため、この歪みは陸上バイオームの輪郭だけへ影響します。
+        /// 標高と水域の形状ノイズは元座標で生成し、水域の気候補正だけがこの歪ませた気候値を参照します。
         /// </summary>
         /// <param name="settings">歪みノイズの格子サイズと最大変位量を保持する生成設定です。</param>
         /// <param name="worldTileX">歪ませる前の水平ワールドタイル座標です。</param>
@@ -182,59 +221,226 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>
-        /// 標高から海を先に決め、残る陸上へ独立した連続ノイズで池と川を生成します。
-        /// 川は連続ノイズの中心等高線を細い帯として使うためチャンク境界で途切れず、海へ達した場所では海水域へ隙間なく接続します。
+        /// 標高から海を先に決め、残る陸上へ気候補正した連続ノイズで池と川を生成します。
+        /// 補正はBiomeIdではなく連続気候値から求めるため、バイオーム境界で川や池が不自然に切れません。
         /// </summary>
         /// <param name="elevation">0〜65535の標高です。</param>
+        /// <param name="temperature">0〜65535の気温です。</param>
+        /// <param name="moisture">0〜65535の湿度です。</param>
+        /// <param name="weirdness">0〜65535の特殊地形度です。</param>
         /// <param name="settings">海面と淡水形状の設定です。</param>
         /// <param name="worldTileX">淡水ノイズをサンプリングする水平ワールドタイル座標です。</param>
         /// <param name="worldTileY">淡水ノイズをサンプリングする垂直ワールドタイル座標です。</param>
         /// <returns>川、池、海のいずれか、または水域でなければNoneです。</returns>
         private static WaterBodyType ClassifyWaterBody(
             ushort elevation,
+            ushort temperature,
+            ushort moisture,
+            ushort weirdness,
             in WorldGenerationSettings settings,
             int worldTileX,
             int worldTileY)
         {
-            // 海は広域標高の最低部を占め、陸上バイオームIDとは独立した海水地形として最優先します。
+            WaterGenerationDebugInfo debugInfo = GetWaterGenerationDebugInfo(
+                elevation,
+                temperature,
+                moisture,
+                weirdness,
+                settings,
+                worldTileX,
+                worldTileY);
+            return debugInfo.WaterBodyType;
+        }
+
+        /// <summary>
+        /// 連続気候値から池の下限と川幅を補正し、最終水域種別と診断値を返します。
+        /// Simulation、開発者HUD、EditModeテストがこの1つの計算を共有し、アルゴリズム変更時の表示ずれを防ぎます。
+        /// </summary>
+        /// <param name="elevation">0〜65535の標高です。</param>
+        /// <param name="temperature">0〜65535の気温です。</param>
+        /// <param name="moisture">0〜65535の湿度です。</param>
+        /// <param name="weirdness">0〜65535の特殊地形度です。</param>
+        /// <param name="settings">水域と気候境界の設定です。</param>
+        /// <param name="worldTileX">水域ノイズを読む水平ワールドタイル座標です。</param>
+        /// <param name="worldTileY">水域ノイズを読む垂直ワールドタイル座標です。</param>
+        /// <returns>気候影響、補正後閾値、ノイズ値、最終水域種別をまとめた診断値です。</returns>
+        public static WaterGenerationDebugInfo GetWaterGenerationDebugInfo(
+            ushort elevation,
+            ushort temperature,
+            ushort moisture,
+            ushort weirdness,
+            in WorldGenerationSettings settings,
+            int worldTileX,
+            int worldTileY)
+        {
+            ushort wetClimateInfluence = CalculateAboveThresholdWeight(
+                moisture,
+                settings.WetMoistureThreshold,
+                settings.BiomeClassificationTransitionWidthInTiles,
+                settings.MoistureCellSizeInTiles);
+            ushort saturatedInfluence = CalculateAboveThresholdWeight(
+                moisture,
+                settings.WetlandMoistureThreshold,
+                settings.BiomeClassificationTransitionWidthInTiles,
+                settings.MoistureCellSizeInTiles);
+            ushort lowlandInfluence = InvertWeight(CalculateAboveThresholdWeight(
+                elevation,
+                settings.WetlandMaximumElevation,
+                settings.BiomeClassificationTransitionWidthInTiles,
+                settings.ElevationCellSizeInTiles));
+            ushort wetlandInfluence = MultiplyWeights(saturatedInfluence, lowlandInfluence);
+            ushort hotInfluence = CalculateAboveThresholdWeight(
+                temperature,
+                settings.HotTemperatureThreshold,
+                settings.BiomeClassificationTransitionWidthInTiles,
+                settings.TemperatureCellSizeInTiles);
+            ushort dryInfluence = InvertWeight(CalculateAboveThresholdWeight(
+                moisture,
+                settings.DryMoistureThreshold,
+                settings.BiomeClassificationTransitionWidthInTiles,
+                settings.MoistureCellSizeInTiles));
+            ushort desertInfluence = MultiplyWeights(hotInfluence, dryInfluence);
+            ushort highlandInfluence = CalculateAboveThresholdWeight(
+                elevation,
+                settings.HighlandElevationThreshold,
+                settings.BiomeClassificationTransitionWidthInTiles,
+                settings.ElevationCellSizeInTiles);
+            ushort unusualInfluence = CalculateAboveThresholdWeight(
+                weirdness,
+                settings.VolcanicWeirdnessThreshold,
+                settings.BiomeClassificationTransitionWidthInTiles,
+                settings.WeirdnessCellSizeInTiles);
+            ushort volcanicInfluence = MultiplyWeights(
+                MultiplyWeights(hotInfluence, highlandInfluence),
+                unusualInfluence);
+
+            // 池を増やす補正は下限から引き、減らす補正は足します。longで計算して途中の符号と範囲を安全に保ちます。
+            long effectivePondThreshold = settings.PondThreshold;
+            effectivePondThreshold -= ScaleAdjustment(
+                settings.WetClimatePondThresholdReduction,
+                wetClimateInfluence);
+            effectivePondThreshold -= ScaleAdjustment(
+                settings.WetlandPondThresholdReduction,
+                wetlandInfluence);
+            effectivePondThreshold += ScaleAdjustment(
+                settings.DesertPondThresholdIncrease,
+                desertInfluence);
+            effectivePondThreshold += ScaleAdjustment(
+                settings.HighlandPondThresholdIncrease,
+                highlandInfluence);
+            effectivePondThreshold += ScaleAdjustment(
+                settings.VolcanicPondThresholdIncrease,
+                volcanicInfluence);
+            ushort clampedPondThreshold = ClampToUShort(effectivePondThreshold);
+
+            // 川は湿地で太く、火山で細くします。基準幅が正なら最低1を残し、バイオーム境界で川が完全に分断されないようにします。
+            long effectiveRiverHalfWidth = settings.RiverCenterLineHalfWidth;
+            effectiveRiverHalfWidth += ScaleAdjustment(
+                settings.WetlandRiverHalfWidthIncrease,
+                wetlandInfluence);
+            effectiveRiverHalfWidth -= ScaleAdjustment(
+                settings.VolcanicRiverHalfWidthReduction,
+                volcanicInfluence);
+            long minimumRiverHalfWidth = settings.RiverCenterLineHalfWidth > 0 ? 1L : 0L;
+            if (effectiveRiverHalfWidth < minimumRiverHalfWidth)
+            {
+                effectiveRiverHalfWidth = minimumRiverHalfWidth;
+            }
+
+            ushort clampedRiverHalfWidth = ClampToUShort(effectiveRiverHalfWidth);
+            ushort pondSample = 0;
+            ushort riverSample = 0;
+            int riverDistance = 32768;
+
+            WaterBodyType waterBodyType;
             if (elevation < settings.SeaLevelThreshold)
             {
-                return WaterBodyType.Sea;
+                // 海は広域標高の最低部を占め、気候補正の影響を受けない海水地形として最優先します。
+                waterBodyType = WaterBodyType.Sea;
             }
-
-            // 山頂まで淡水ノイズが貫通すると不自然なため、淡水を生成できる標高上限を明示します。
-            if (elevation > settings.FreshWaterMaximumElevation)
+            else if (elevation > settings.FreshWaterMaximumElevation)
             {
-                return WaterBodyType.None;
+                // 山頂まで淡水ノイズが貫通すると不自然なため、淡水を生成できる標高上限を明示します。
+                waterBodyType = WaterBodyType.None;
             }
-
-            ushort pondSample = DeterministicNoise.SampleFractalNoise(
-                settings.WorldSeed,
-                settings.GeneratorVersion,
-                worldTileX,
-                worldTileY,
-                settings.PondCellSizeInTiles,
-                settings.FreshWaterOctaveCount,
-                WorldGenerationPurposeSalts.Pond);
-            if (pondSample >= settings.PondThreshold)
+            else
             {
-                return WaterBodyType.Pond;
+                // 海と高地では不要な淡水ノイズを読まず、広域チャンク生成時の計算量を抑えます。
+                pondSample = DeterministicNoise.SampleFractalNoise(
+                    settings.WorldSeed,
+                    settings.GeneratorVersion,
+                    worldTileX,
+                    worldTileY,
+                    settings.PondCellSizeInTiles,
+                    settings.FreshWaterOctaveCount,
+                    WorldGenerationPurposeSalts.Pond);
+                if (clampedPondThreshold < ushort.MaxValue
+                    && pondSample >= clampedPondThreshold)
+                {
+                    // 下限が最大値へ達した火山中心部は、ノイズが偶然最大になっても池を生成しません。
+                    waterBodyType = WaterBodyType.Pond;
+                }
+                else
+                {
+                    riverSample = DeterministicNoise.SampleFractalNoise(
+                        settings.WorldSeed,
+                        settings.GeneratorVersion,
+                        worldTileX,
+                        worldTileY,
+                        settings.RiverCellSizeInTiles,
+                        settings.FreshWaterOctaveCount,
+                        WorldGenerationPurposeSalts.River);
+                    riverDistance = riverSample >= 32768
+                        ? riverSample - 32768
+                        : 32768 - riverSample;
+                    waterBodyType = riverDistance <= clampedRiverHalfWidth
+                        ? WaterBodyType.River
+                        : WaterBodyType.None;
+                }
             }
 
-            ushort riverSample = DeterministicNoise.SampleFractalNoise(
-                settings.WorldSeed,
-                settings.GeneratorVersion,
-                worldTileX,
-                worldTileY,
-                settings.RiverCellSizeInTiles,
-                settings.FreshWaterOctaveCount,
-                WorldGenerationPurposeSalts.River);
-            int distanceFromCenterLine = riverSample >= 32768
-                ? riverSample - 32768
-                : 32768 - riverSample;
-            return distanceFromCenterLine <= settings.RiverCenterLineHalfWidth
-                ? WaterBodyType.River
-                : WaterBodyType.None;
+            return new WaterGenerationDebugInfo
+            {
+                PondSample = pondSample,
+                EffectivePondThreshold = clampedPondThreshold,
+                RiverSample = riverSample,
+                RiverDistanceFromCenterLine = (ushort)riverDistance,
+                EffectiveRiverHalfWidth = clampedRiverHalfWidth,
+                WetClimateInfluence = wetClimateInfluence,
+                WetlandInfluence = wetlandInfluence,
+                DesertInfluence = desertInfluence,
+                HighlandInfluence = highlandInfluence,
+                VolcanicInfluence = volcanicInfluence,
+                WaterBodyType = waterBodyType
+            };
+        }
+
+        /// <summary>
+        /// 0〜65535の連続重みに応じて、設定された最大補正量の一部を整数演算で求めます。
+        /// </summary>
+        /// <param name="maximumAdjustment">重みが最大のときに適用する補正量です。</param>
+        /// <param name="influence">適用割合を表す0〜65535の連続重みです。</param>
+        /// <returns>0から最大補正量までの整数値です。</returns>
+        private static long ScaleAdjustment(ushort maximumAdjustment, ushort influence)
+        {
+            return ((long)maximumAdjustment * influence) / ushort.MaxValue;
+        }
+
+        /// <summary>
+        /// 符号付きの補正結果を0〜65535へ収め、設定Componentへ格納できる固定小数点値へ変換します。
+        /// </summary>
+        /// <param name="value">加減算を終えた補正値です。</param>
+        /// <returns>ushortの範囲へ収めた値です。</returns>
+        private static ushort ClampToUShort(long value)
+        {
+            if (value <= 0)
+            {
+                return 0;
+            }
+
+            return value >= ushort.MaxValue
+                ? ushort.MaxValue
+                : (ushort)value;
         }
 
         /// <summary>

@@ -100,6 +100,27 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>池を生成する固定小数点下限をInspector表現へ戻した値です。</summary>
         private const float PrototypePondThreshold = 57000f / ushort.MaxValue;
 
+        /// <summary>湿潤な森林条件で池下限から引く最大試作補正量です。</summary>
+        private const float PrototypeWetClimatePondThresholdReduction = 8500f / ushort.MaxValue;
+
+        /// <summary>低地かつ高湿度の湿地条件で池下限から追加で引く最大試作補正量です。</summary>
+        private const float PrototypeWetlandPondThresholdReduction = 8500f / ushort.MaxValue;
+
+        /// <summary>高温かつ乾燥した砂漠条件で池下限へ足す最大試作補正量です。</summary>
+        private const float PrototypeDesertPondThresholdIncrease = 5000f / ushort.MaxValue;
+
+        /// <summary>高地の岩地条件で池下限へ足す最大試作補正量です。</summary>
+        private const float PrototypeHighlandPondThresholdIncrease = 3500f / ushort.MaxValue;
+
+        /// <summary>火山条件で池下限へ足し、中心部の池を禁止する最大試作補正量です。</summary>
+        private const float PrototypeVolcanicPondThresholdIncrease = 16000f / ushort.MaxValue;
+
+        /// <summary>湿地条件で川の中心線半幅へ足す最大試作補正量です。</summary>
+        private const float PrototypeWetlandRiverHalfWidthIncrease = 500f / ushort.MaxValue;
+
+        /// <summary>火山条件で川の中心線半幅から引く最大試作補正量です。</summary>
+        private const float PrototypeVolcanicRiverHalfWidthReduction = 450f / ushort.MaxValue;
+
         /// <summary>淡水を生成できる固定小数点標高上限をInspector表現へ戻した値です。</summary>
         private const float PrototypeFreshWaterMaximumElevation = 47000f / ushort.MaxValue;
 
@@ -558,6 +579,20 @@ namespace Farmware.WorldGeneration.Editor
                 PrototypeRiverCenterLineHalfWidth;
             serializedAuthoring.FindProperty("pondThreshold").floatValue =
                 PrototypePondThreshold;
+            serializedAuthoring.FindProperty("wetClimatePondThresholdReduction").floatValue =
+                PrototypeWetClimatePondThresholdReduction;
+            serializedAuthoring.FindProperty("wetlandPondThresholdReduction").floatValue =
+                PrototypeWetlandPondThresholdReduction;
+            serializedAuthoring.FindProperty("desertPondThresholdIncrease").floatValue =
+                PrototypeDesertPondThresholdIncrease;
+            serializedAuthoring.FindProperty("highlandPondThresholdIncrease").floatValue =
+                PrototypeHighlandPondThresholdIncrease;
+            serializedAuthoring.FindProperty("volcanicPondThresholdIncrease").floatValue =
+                PrototypeVolcanicPondThresholdIncrease;
+            serializedAuthoring.FindProperty("wetlandRiverHalfWidthIncrease").floatValue =
+                PrototypeWetlandRiverHalfWidthIncrease;
+            serializedAuthoring.FindProperty("volcanicRiverHalfWidthReduction").floatValue =
+                PrototypeVolcanicRiverHalfWidthReduction;
             serializedAuthoring.FindProperty("freshWaterMaximumElevation").floatValue =
                 PrototypeFreshWaterMaximumElevation;
             serializedAuthoring.FindProperty("rockWallMassCellSizeInTiles").intValue =

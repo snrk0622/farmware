@@ -285,6 +285,27 @@ namespace Farmware.WorldGeneration
         /// <summary>池を生成する0〜65535のノイズ下限です。大きいほど池が減ります。</summary>
         public ushort PondThreshold;
 
+        /// <summary>森林に近い湿潤度で池の下限を最大いくつ下げるかを表す0〜65535の補正量です。</summary>
+        public ushort WetClimatePondThresholdReduction;
+
+        /// <summary>低地かつ高湿度の湿地条件で、森林分に追加して池の下限を最大いくつ下げるかを表します。</summary>
+        public ushort WetlandPondThresholdReduction;
+
+        /// <summary>高温かつ乾燥した砂漠条件で、池の下限を最大いくつ上げるかを表します。</summary>
+        public ushort DesertPondThresholdIncrease;
+
+        /// <summary>高地の岩地条件で、池の下限を最大いくつ上げるかを表します。</summary>
+        public ushort HighlandPondThresholdIncrease;
+
+        /// <summary>高温・高地・高Weirdnessの火山条件で、池の下限を最大いくつ上げるかを表します。</summary>
+        public ushort VolcanicPondThresholdIncrease;
+
+        /// <summary>低地かつ高湿度の湿地条件で、川の中心線半幅へ最大いくつ加えるかを表します。</summary>
+        public ushort WetlandRiverHalfWidthIncrease;
+
+        /// <summary>高温・高地・高Weirdnessの火山条件で、川の中心線半幅から最大いくつ引くかを表します。</summary>
+        public ushort VolcanicRiverHalfWidthReduction;
+
         /// <summary>川と池を生成できる0〜65535の最大標高です。山頂まで淡水が伸びることを防ぎます。</summary>
         public ushort FreshWaterMaximumElevation;
 
@@ -358,6 +379,13 @@ namespace Farmware.WorldGeneration
                 FreshWaterOctaveCount = 2,
                 RiverCenterLineHalfWidth = 600,
                 PondThreshold = 57000,
+                WetClimatePondThresholdReduction = 8500,
+                WetlandPondThresholdReduction = 8500,
+                DesertPondThresholdIncrease = 5000,
+                HighlandPondThresholdIncrease = 3500,
+                VolcanicPondThresholdIncrease = 16000,
+                WetlandRiverHalfWidthIncrease = 500,
+                VolcanicRiverHalfWidthReduction = 450,
                 FreshWaterMaximumElevation = 47000,
                 RockWallMassCellSizeInTiles = 24,
                 RockWallDetailCellSizeInTiles = 8,
@@ -375,6 +403,46 @@ namespace Farmware.WorldGeneration
                 BiomeAdjacencyTransitionScoreMargin = 18000
             };
         }
+    }
+
+    /// <summary>
+    /// 1タイルの淡水判定で使った連続補正値とノイズ値です。
+    /// 開発者用HUDとEditModeテストがSimulationと同じ計算結果を読み、表示だけの再実装を防ぎます。
+    /// </summary>
+    public struct WaterGenerationDebugInfo
+    {
+        /// <summary>池の形状ノイズです。0〜65535で、大きいほど池候補になりやすい値です。</summary>
+        public ushort PondSample;
+
+        /// <summary>気候補正後の池判定下限です。65535のときは池生成を無効として扱います。</summary>
+        public ushort EffectivePondThreshold;
+
+        /// <summary>川の形状ノイズです。中心値32768へ近いほど川候補になりやすい値です。</summary>
+        public ushort RiverSample;
+
+        /// <summary>川ノイズの中心値32768からの絶対距離です。</summary>
+        public ushort RiverDistanceFromCenterLine;
+
+        /// <summary>気候補正後に許容する川中心線からの距離です。</summary>
+        public ushort EffectiveRiverHalfWidth;
+
+        /// <summary>森林に近い湿潤条件の0〜65535連続重みです。</summary>
+        public ushort WetClimateInfluence;
+
+        /// <summary>低地かつ高湿度の湿地条件の0〜65535連続重みです。</summary>
+        public ushort WetlandInfluence;
+
+        /// <summary>高温かつ乾燥した砂漠条件の0〜65535連続重みです。</summary>
+        public ushort DesertInfluence;
+
+        /// <summary>高地の岩地条件の0〜65535連続重みです。</summary>
+        public ushort HighlandInfluence;
+
+        /// <summary>高温・高地・高Weirdnessの火山条件の0〜65535連続重みです。</summary>
+        public ushort VolcanicInfluence;
+
+        /// <summary>海、池、川、陸地の優先判定を終えた最終水域種別です。</summary>
+        public WaterBodyType WaterBodyType;
     }
 
     /// <summary>
