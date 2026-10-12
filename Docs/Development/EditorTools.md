@@ -1,0 +1,141 @@
+# Unity Editorツール
+
+- 最終更新日: 2026-10-12
+- 対象: `Assets/Farmware/Editor/WorldGeneration/`
+
+## 1. 用途
+
+開発者専用のUnity Editorツールは、ワールド生成結果の調査、調整前後の比較、確認用Sceneとフォールバック素材の構築に使用する。
+これらは製品版のプレイヤー操作へ含めず、ランタイムのゲーム状態を変更するデバッグ操作にも使用しない。
+
+プレイヤーへ提供するF3座標表示とF4グリッド表示はEditorツールではない。
+両機能の仕様は[ランダムマップ生成仕様](../GameSpecification/RandomMapGenerationSpecification.md)を参照する。
+
+## 2. ツール一覧
+
+### 2.1 Build Fallback Map Prototype
+
+- メニュー: `Farmware > World Generation > Build Fallback Map Prototype`
+- 実装: `WorldGenerationSceneBootstrap`
+- PlayMode: 不要。EditModeで実行する。
+
+#### 用途
+
+- 16×16ピクセルの仮色地形Tileと仮資源Tileを生成または更新する。
+- `WorldGenerationSettingsSubScene`へ生成設定のAuthoringを配置する。
+- `SampleScene`へCamera、Grid、Tilemap、表示用Component、SubScene参照を接続する。
+- Pixel Perfect Cameraの基準解像度480×270を含む、再現可能な確認環境を構築する。
+
+#### 実行後の注意
+
+このツールはアセットとSceneを保存する。実行後は必ずGit差分を確認し、意図しないScene全体の書き換え、不要アセット、`.meta`のGUID変更がないことを確認する。
+
+#### 次の修正をしたら確認する
+
+- `WorldGenerationAuthoring`の設定項目、既定値、Baker変換を変更した。
+- バイオーム、地面、水域、マグマ、岩壁、資源の種類またはフォールバック色を変更した。
+- Ground、ResourceなどTilemapレイヤーの構成、Sorting Order、参照関係を変更した。
+- Camera、Pixel Perfect Camera、480×270の基準解像度、黒帯処理を変更した。
+- `SampleScene`または`WorldGenerationSettingsSubScene`の生成構成を変更した。
+
+#### 確認内容
+
+1. Consoleに例外または新規警告が出ていない。
+2. 必要なPNG、Tile、`.meta`が揃っている。
+3. SampleSceneとSubSceneの参照がMissingになっていない。
+4. PlayModeで地面、岩壁、マグマ、淡水、海水、資源が対応するレイヤーへ表示される。
+5. Gameビューの地形描画領域が480×270基準の黒帯内へ収まり、HUDとF4表示も同じ領域を使用する。
+
+### 2.2 Debug Visualization
+
+- メニュー: `Farmware > World Generation > Debug Visualization`
+- 実装: `WorldGenerationDebugVisualizationMenu`
+- PlayMode: 必須。対象Overlayが存在するSampleSceneの再生中だけ選択できる。
+
+#### 用途
+
+ワールド生成の内部値を色で表示し、通常の地形色だけでは発見しにくい分類ミス、境界、分布の偏りを調べる。
+可視化は生成済みデータを読むだけで、ECS Simulationや生成結果を変更しない。
+
+| モード | 確認できる内容 |
+| --- | --- |
+| `Off` | 開発者用着色を解除した通常表示 |
+| `Biome` | 草原、森林、砂漠、岩地、湿地、雪原、火山の論理バイオーム |
+| `Elevation` | 標高の連続値 |
+| `Temperature` | 気温の連続値 |
+| `Moisture` | 湿度の連続値 |
+| `Weirdness` | 特殊地形の候補を決める連続値 |
+| `Water Salinity` | 陸地、淡水、海水 |
+| `Water Body` | 陸地、川、池、海 |
+| `Biome Transition` | 論理バイオームと表示地面が異なる陸上移行帯 |
+| `Rock Wall` | 非岩壁、露出面、内部影の濃度 |
+| `Magma` | マグマ本体と淡水を抑制する火山影響域 |
+| `Resources` | 配置なし、木、石、砂の最終配置 |
+
+#### 次の修正をしたら確認する
+
+- ノイズ、バイオーム分類、移行帯、標高、気温、湿度、Weirdnessを変更した。
+- 川、池、海、淡水・海水、マグマ、岩壁、資源の生成規則または列挙値を変更した。
+- `GeneratedTile`、ECS Buffer、Presentationへ渡すデータを変更した。
+- 可視化の色、凡例、HUD、Tilemap、Camera、黒帯、表示範囲を変更した。
+- 新しい生成要素を追加し、通常表示だけでは内部判定を確認できなくなった。
+
+#### 確認内容
+
+1. すべてのモードが例外なく切り替わり、選択中メニューへチェックが付く。
+2. 凡例の色とマップ上の色が一致し、文字が欠けない。
+3. 黒帯へ着色や凡例がはみ出さない。
+4. チャンク境界をまたいでも分類やグラデーションが不自然に途切れない。
+5. `Off`へ戻すと通常表示へ完全に戻る。
+
+### 2.3 Analyze Distribution
+
+- メニュー: `Farmware > World Generation > Analyze Distribution`
+- 実装: `WorldGenerationDistributionAuditMenu`、`WorldGenerationDistributionAnalyzer`
+- PlayMode: 不要。EditModeとPlayModeのどちらからでも開始できるが、比較条件を揃えるためEditModeを推奨する。
+
+#### 用途
+
+固定した3シードを32タイル間隔の129×129地点で調べ、調整前後の広域分布を同じ条件で比較する。
+重い純粋計算はバックグラウンドで実行し、Unity Editorの操作停止を避ける。
+
+Consoleレポートには、次の比較材料を出力する。
+
+- バイオーム、Ground、水域の件数と比率。
+- 直接隣接するバイオームの組み合わせ。
+- 強く隣接抑制する組み合わせが直接接した件数。
+- 32タイル間隔で見た概算領域数、平均面積、孤立領域数。
+- 64×64論理チャンク境界でバイオームが変化した比率。
+- 同じ入力から同じ結果が得られたか比較する署名。
+
+このレポートはバランスの合否を自動決定しない。変更前後の差と、Gameビューで見た地形の遊びやすさを合わせて判断する。
+
+#### 次の修正をしたら確認する
+
+- バイオームのノイズ、スコア、閾値、隣接推奨・隣接抑制、移行帯を変更した。
+- 川、池、海、マグマ、岩壁、資源など、地形面積へ影響する生成規則を変更した。
+- シード、GeneratorVersion、PurposeSalt、座標ハッシュ、チャンクサイズを変更した。
+- 生成アルゴリズムの性能または決定性へ影響する処理を変更した。
+
+#### 確認内容
+
+1. Consoleへ開始ログと完了レポートが1回ずつ出る。
+2. すべての想定バイオームと地形が0件になっていないか確認する。
+3. 強い隣接抑制の直接接続、孤立領域、領域サイズが変更意図に沿う。
+4. 同一コード・同一条件で再実行した署名が一致する。
+5. 大きな比率変化がある場合は、ランダムマップ生成仕様の調整値と説明も更新する。
+
+## 3. 変更時の選び方
+
+| 変更内容 | 最低限確認するEditorツール |
+| --- | --- |
+| Authoring、Scene、Tileアセット、Camera、Tilemapレイヤー | Build Fallback Map Prototype |
+| 個別タイルの分類、色、境界、凡例 | Debug Visualization |
+| バイオームや地形の広域分布、隣接関係、決定性 | Analyze Distribution |
+| 生成規則と表示の両方 | Analyze Distributionの後にDebug Visualization |
+
+Editorツールだけで検証を完了しない。対応する自動テストは[テスト](./Testing.md)に従って実行し、見た目に関係する変更はGameビューでも確認する。
+
+## 4. このドキュメントの更新条件
+
+Editorメニューの追加、削除、名称変更、実行条件変更、出力項目変更、確認対象変更を行った場合は、同じcommitにこの文書の更新を含める。

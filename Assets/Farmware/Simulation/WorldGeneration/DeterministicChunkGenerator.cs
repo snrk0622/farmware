@@ -791,7 +791,7 @@ namespace Farmware.WorldGeneration
             TrackBiomeCandidate(BiomeId.Volcanic, volcanicScore, ref bestBiome, ref bestScore, ref secondBiome, ref secondScore);
 
             // 強い抑制関係の境界を直接接続せず、低地は草原、高地は岩地へ置き換えて自然な遷移を作ります。
-            if (IsStronglySuppressedPair(bestBiome, secondBiome)
+            if (IsStronglySuppressedBiomePair(bestBiome, secondBiome)
                 && bestScore - secondScore <= settings.BiomeAdjacencyTransitionScoreMargin)
             {
                 return highland >= (ushort.MaxValue / 2)
@@ -841,7 +841,7 @@ namespace Farmware.WorldGeneration
         /// <param name="first">比較する1つ目のバイオームです。</param>
         /// <param name="second">比較する2つ目のバイオームです。</param>
         /// <returns>間に緩衝バイオームを挟む対象ならtrueです。</returns>
-        private static bool IsStronglySuppressedPair(BiomeId first, BiomeId second)
+        public static bool IsStronglySuppressedBiomePair(BiomeId first, BiomeId second)
         {
             return IsBiomePair(first, second, BiomeId.Forest, BiomeId.Desert)
                 || IsBiomePair(first, second, BiomeId.Forest, BiomeId.Volcanic)

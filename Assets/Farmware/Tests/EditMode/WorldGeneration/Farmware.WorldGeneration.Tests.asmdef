@@ -3,6 +3,7 @@
   "rootNamespace": "Farmware.WorldGeneration.Tests",
   "references": [
     "Farmware.WorldGeneration.Runtime",
+    "Farmware.WorldGeneration.Editor",
     "Unity.Collections",
     "Unity.Entities",
     "Unity.Mathematics"
