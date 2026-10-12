@@ -4,7 +4,7 @@
 namespace Farmware.WorldGeneration
 {
     /// <summary>
-    /// 7種類の陸上バイオーム、淡水・海水、水域の生成由来、岩壁を決定論的に分類します。
+    /// 7種類の陸上バイオーム、淡水・海水、水域の生成由来、マグマ、岩壁を決定論的に分類します。
     /// UnityEngine.Objectやグローバル乱数を参照しないため、Burst Jobから並列に呼び出せます。
     /// </summary>
     public static class DeterministicChunkGenerator
@@ -16,7 +16,7 @@ namespace Farmware.WorldGeneration
         /// <param name="settings">ワールド作成時に固定した生成設定です。</param>
         /// <param name="worldTileX">符号付きワールド水平タイル座標です。</param>
         /// <param name="worldTileY">符号付きワールド垂直タイル座標です。</param>
-        /// <returns>水域の優先判定後もGroundType.RockWallになる場合はtrueです。</returns>
+        /// <returns>水域とマグマの優先判定後もGroundType.RockWallになる場合はtrueです。</returns>
         public static bool IsRockWall(
             in WorldGenerationSettings settings,
             int worldTileX,
@@ -48,16 +48,33 @@ namespace Farmware.WorldGeneration
                 out ushort moisture,
                 out ushort weirdness);
 
-            // 地形生成では水域を岩壁より先に分類します。同じ優先順位を使い、表示だけがSimulation結果と食い違うことを防ぎます。
-            WaterBodyType waterBodyType = ClassifyWaterBody(
+            BiomeId biome = ClassifyBiome(
                 elevation,
                 temperature,
                 moisture,
                 weirdness,
+                settings);
+            MagmaGenerationDebugInfo magmaInfo = GetMagmaGenerationDebugInfo(
+                elevation,
+                temperature,
+                weirdness,
+                biome,
                 settings,
                 worldTileX,
                 worldTileY);
-            return waterBodyType == WaterBodyType.None;
+
+            // 地形生成と同じ「海 > マグマ > 淡水 > 岩壁」の優先順位を使い、外周影だけが異なる結果にならないようにします。
+            WaterGenerationDebugInfo waterInfo = GetWaterGenerationDebugInfo(
+                elevation,
+                temperature,
+                moisture,
+                weirdness,
+                magmaInfo.IsInfluenceArea,
+                settings,
+                worldTileX,
+                worldTileY);
+            WaterBodyType waterBodyType = waterInfo.WaterBodyType;
+            return waterBodyType == WaterBodyType.None && !magmaInfo.IsMagma;
         }
 
         /// <summary>
@@ -95,19 +112,30 @@ namespace Farmware.WorldGeneration
                 moisture,
                 weirdness,
                 settings);
-            WaterBodyType waterBodyType = ClassifyWaterBody(
+            MagmaGenerationDebugInfo magmaInfo = GetMagmaGenerationDebugInfo(
+                elevation,
+                temperature,
+                weirdness,
+                biome,
+                settings,
+                worldTileX,
+                worldTileY);
+            WaterGenerationDebugInfo waterInfo = GetWaterGenerationDebugInfo(
                 elevation,
                 temperature,
                 moisture,
                 weirdness,
+                magmaInfo.IsInfluenceArea,
                 settings,
                 worldTileX,
                 worldTileY);
+            WaterBodyType waterBodyType = waterInfo.WaterBodyType;
             GroundType ground = ClassifyGround(
                 temperature,
                 moisture,
                 biome,
                 waterBodyType,
+                magmaInfo.IsMagma,
                 settings,
                 worldTileX,
                 worldTileY);
@@ -221,35 +249,124 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>
-        /// 標高から海を先に決め、残る陸上へ気候補正した連続ノイズで池と川を生成します。
-        /// 補正はBiomeIdではなく連続気候値から求めるため、バイオーム境界で川や池が不自然に切れません。
+        /// 火山適性と合成密度から、マグマ本体とそれを囲む淡水抑制域を判定します。
+        /// 岩地では火山と異なり、従来どおり小さく希少な溜まり向けの専用ノイズを使用します。
+        /// 火山では広く、岩地では別の細かな高閾値ノイズで稀かつ小さくなるよう、バイオーム別プロファイルを使います。
         /// </summary>
         /// <param name="elevation">0〜65535の標高です。</param>
         /// <param name="temperature">0〜65535の気温です。</param>
-        /// <param name="moisture">0〜65535の湿度です。</param>
         /// <param name="weirdness">0〜65535の特殊地形度です。</param>
-        /// <param name="settings">海面と淡水形状の設定です。</param>
-        /// <param name="worldTileX">淡水ノイズをサンプリングする水平ワールドタイル座標です。</param>
-        /// <param name="worldTileY">淡水ノイズをサンプリングする垂直ワールドタイル座標です。</param>
-        /// <returns>川、池、海のいずれか、または水域でなければNoneです。</returns>
-        private static WaterBodyType ClassifyWaterBody(
+        /// <param name="biome">連続気候値から分類済みの陸上バイオームです。</param>
+        /// <param name="settings">マグマ形状と火山適性の閾値です。</param>
+        /// <param name="worldTileX">マグマノイズを読む水平ワールドタイル座標です。</param>
+        /// <param name="worldTileY">マグマノイズを読む垂直ワールドタイル座標です。</param>
+        /// <returns>火山適性、専用ノイズ、影響域、マグマ本体判定をまとめた診断値です。</returns>
+        public static MagmaGenerationDebugInfo GetMagmaGenerationDebugInfo(
             ushort elevation,
             ushort temperature,
-            ushort moisture,
             ushort weirdness,
+            BiomeId biome,
             in WorldGenerationSettings settings,
             int worldTileX,
             int worldTileY)
         {
-            WaterGenerationDebugInfo debugInfo = GetWaterGenerationDebugInfo(
+            ushort volcanicInfluence = CalculateVolcanicInfluence(
                 elevation,
                 temperature,
-                moisture,
                 weirdness,
-                settings,
-                worldTileX,
-                worldTileY);
-            return debugInfo.WaterBodyType;
+                settings);
+            bool usesRocklandProfile = biome == BiomeId.Rockland;
+            bool isEligibleBiome = biome == BiomeId.Volcanic || usesRocklandProfile;
+            if (!isEligibleBiome)
+            {
+                // 対象外バイオームでは専用ノイズ自体を読まず、広域チャンク生成の不要な計算を避けます。
+                return new MagmaGenerationDebugInfo
+                {
+                    VolcanicInfluence = volcanicInfluence,
+                    MagmaSample = 0,
+                    RawInfluenceArea = false,
+                    RawMagmaCandidate = false,
+                    IsEligibleBiome = false,
+                    UsesRocklandProfile = false,
+                    IsInfluenceArea = false,
+                    IsMagma = false
+                };
+            }
+
+            ushort magmaNoiseThreshold = usesRocklandProfile
+                ? settings.RocklandMagmaNoiseThreshold
+                : settings.MagmaNoiseThreshold;
+            ushort influenceNoiseThreshold = usesRocklandProfile
+                ? settings.RocklandMagmaInfluenceNoiseThreshold
+                : settings.MagmaInfluenceNoiseThreshold;
+            ushort minimumVolcanicInfluence = usesRocklandProfile
+                ? settings.RocklandMagmaMinimumVolcanicInfluence
+                : settings.MagmaMinimumVolcanicInfluence;
+            ushort influenceMinimumVolcanicInfluence = usesRocklandProfile
+                ? settings.RocklandMagmaInfluenceMinimumVolcanicInfluence
+                : settings.MagmaInfluenceMinimumVolcanicInfluence;
+
+            ushort magmaSample;
+            bool rawInfluenceArea;
+            bool rawMagmaCandidate;
+            bool smoothedInfluenceArea;
+            bool smoothedMagmaCandidate;
+            if (usesRocklandProfile)
+            {
+                // 岩地は従来の小さな単一ノイズを維持し、火山の広い不規則形状が岩地へ流出することを防ぎます。
+                magmaSample = DeterministicNoise.SampleFractalNoise(
+                    settings.WorldSeed,
+                    settings.GeneratorVersion,
+                    worldTileX,
+                    worldTileY,
+                    settings.RocklandMagmaCellSizeInTiles,
+                    settings.MagmaOctaveCount,
+                    WorldGenerationPurposeSalts.RocklandMagma);
+                rawInfluenceArea = magmaSample >= influenceNoiseThreshold;
+                rawMagmaCandidate = magmaSample >= magmaNoiseThreshold;
+                smoothedInfluenceArea = rawInfluenceArea;
+                smoothedMagmaCandidate = rawMagmaCandidate;
+            }
+            else
+            {
+                // 火山では大域・細部・座標ワープを合成し、単純な丸い塊ではなく入り江や半島を持つ輪郭を作ります。
+                magmaSample = DeterministicMagmaGenerator.SampleDensity(
+                    settings,
+                    worldTileX,
+                    worldTileY);
+                rawInfluenceArea = magmaSample >= influenceNoiseThreshold;
+                rawMagmaCandidate = magmaSample >= magmaNoiseThreshold;
+                smoothedInfluenceArea = DeterministicMagmaGenerator.IsSmoothedCandidate(
+                    settings,
+                    worldTileX,
+                    worldTileY,
+                    influenceNoiseThreshold,
+                    magmaSample);
+                smoothedMagmaCandidate = DeterministicMagmaGenerator.IsSmoothedCandidate(
+                    settings,
+                    worldTileX,
+                    worldTileY,
+                    magmaNoiseThreshold,
+                    magmaSample);
+            }
+
+            // 本体より低い2つの閾値で広めの影響域を作り、川・池との間に火山性の陸地を残します。
+            bool isInfluenceArea = volcanicInfluence >= influenceMinimumVolcanicInfluence
+                && smoothedInfluenceArea;
+            bool isMagma = volcanicInfluence >= minimumVolcanicInfluence
+                && smoothedMagmaCandidate;
+
+            return new MagmaGenerationDebugInfo
+            {
+                VolcanicInfluence = volcanicInfluence,
+                MagmaSample = magmaSample,
+                RawInfluenceArea = rawInfluenceArea,
+                RawMagmaCandidate = rawMagmaCandidate,
+                IsEligibleBiome = isEligibleBiome,
+                UsesRocklandProfile = usesRocklandProfile,
+                IsInfluenceArea = isInfluenceArea,
+                IsMagma = isMagma
+            };
         }
 
         /// <summary>
@@ -269,6 +386,53 @@ namespace Farmware.WorldGeneration
             ushort temperature,
             ushort moisture,
             ushort weirdness,
+            in WorldGenerationSettings settings,
+            int worldTileX,
+            int worldTileY)
+        {
+            BiomeId biome = ClassifyBiome(
+                elevation,
+                temperature,
+                moisture,
+                weirdness,
+                settings);
+            MagmaGenerationDebugInfo magmaInfo = GetMagmaGenerationDebugInfo(
+                elevation,
+                temperature,
+                weirdness,
+                biome,
+                settings,
+                worldTileX,
+                worldTileY);
+            return GetWaterGenerationDebugInfo(
+                elevation,
+                temperature,
+                moisture,
+                weirdness,
+                magmaInfo.IsInfluenceArea,
+                settings,
+                worldTileX,
+                worldTileY);
+        }
+
+        /// <summary>
+        /// 呼び出し側で計算済みのマグマ影響域を使い、海と淡水の優先判定を重複ノイズ計算なしで行います。
+        /// </summary>
+        /// <param name="elevation">0〜65535の標高です。</param>
+        /// <param name="temperature">0〜65535の気温です。</param>
+        /// <param name="moisture">0〜65535の湿度です。</param>
+        /// <param name="weirdness">0〜65535の特殊地形度です。</param>
+        /// <param name="suppressFreshWater">マグマ周辺として川と池を生成しない場合はtrueです。</param>
+        /// <param name="settings">水域と気候境界の設定です。</param>
+        /// <param name="worldTileX">水域ノイズを読む水平ワールドタイル座標です。</param>
+        /// <param name="worldTileY">水域ノイズを読む垂直ワールドタイル座標です。</param>
+        /// <returns>気候補正と優先判定を終えた水域診断値です。</returns>
+        private static WaterGenerationDebugInfo GetWaterGenerationDebugInfo(
+            ushort elevation,
+            ushort temperature,
+            ushort moisture,
+            ushort weirdness,
+            bool suppressFreshWater,
             in WorldGenerationSettings settings,
             int worldTileX,
             int worldTileY)
@@ -358,6 +522,11 @@ namespace Farmware.WorldGeneration
                 // 海は広域標高の最低部を占め、気候補正の影響を受けない海水地形として最優先します。
                 waterBodyType = WaterBodyType.Sea;
             }
+            else if (suppressFreshWater)
+            {
+                // 海はマグマへ直接接してよい一方、川と池は広めの火山影響域から排除して不自然な1タイル接触を減らします。
+                waterBodyType = WaterBodyType.None;
+            }
             else if (elevation > settings.FreshWaterMaximumElevation)
             {
                 // 山頂まで淡水ノイズが貫通すると不自然なため、淡水を生成できる標高上限を明示します。
@@ -424,6 +593,41 @@ namespace Farmware.WorldGeneration
         private static long ScaleAdjustment(ushort maximumAdjustment, ushort influence)
         {
             return ((long)maximumAdjustment * influence) / ushort.MaxValue;
+        }
+
+        /// <summary>
+        /// 高温・高地・高Weirdnessの連続重みを掛け合わせ、火山中心への近さを0〜65535で求めます。
+        /// 水域補正とマグマ生成が同じ定義を共有し、片方だけ火山境界がずれることを防ぎます。
+        /// </summary>
+        /// <param name="elevation">0〜65535の標高です。</param>
+        /// <param name="temperature">0〜65535の気温です。</param>
+        /// <param name="weirdness">0〜65535の特殊地形度です。</param>
+        /// <param name="settings">気候閾値、移行幅、各ノイズ格子サイズです。</param>
+        /// <returns>3条件すべてが強い場合だけ大きくなる0〜65535の連続火山適性です。</returns>
+        private static ushort CalculateVolcanicInfluence(
+            ushort elevation,
+            ushort temperature,
+            ushort weirdness,
+            in WorldGenerationSettings settings)
+        {
+            ushort hotInfluence = CalculateAboveThresholdWeight(
+                temperature,
+                settings.HotTemperatureThreshold,
+                settings.BiomeClassificationTransitionWidthInTiles,
+                settings.TemperatureCellSizeInTiles);
+            ushort highlandInfluence = CalculateAboveThresholdWeight(
+                elevation,
+                settings.HighlandElevationThreshold,
+                settings.BiomeClassificationTransitionWidthInTiles,
+                settings.ElevationCellSizeInTiles);
+            ushort unusualInfluence = CalculateAboveThresholdWeight(
+                weirdness,
+                settings.VolcanicWeirdnessThreshold,
+                settings.BiomeClassificationTransitionWidthInTiles,
+                settings.WeirdnessCellSizeInTiles);
+            return MultiplyWeights(
+                MultiplyWeights(hotInfluence, highlandInfluence),
+                unusualInfluence);
         }
 
         /// <summary>
@@ -666,13 +870,14 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>
-        /// 水域と独立岩壁群を優先し、その後に気候値と座標ハッシュから陸上の地面種別を決めます。
+        /// 水域、マグマ、独立岩壁群を優先し、その後に気候値と座標ハッシュから陸上の地面種別を決めます。
         /// 論理Biome IDは閾値で一意に保ち、境界付近の地面だけを段階的に混ぜて見た目とゲームルールをなじませます。
         /// </summary>
         /// <param name="temperature">0〜65535の気温です。</param>
         /// <param name="moisture">0〜65535の湿度です。</param>
         /// <param name="biome">気候から決めた陸上バイオームです。</param>
         /// <param name="waterBodyType">先に分類済みの川・池・海です。</param>
+        /// <param name="isMagma">専用ノイズと火山適性からマグマ本体に選ばれた場合はtrueです。</param>
         /// <param name="settings">水面、岩壁群、バイオーム移行の設定です。</param>
         /// <param name="worldTileX">決定論的な移行タイル抽選に使う水平ワールドタイル座標です。</param>
         /// <param name="worldTileY">決定論的な移行タイル抽選に使う垂直ワールドタイル座標です。</param>
@@ -682,6 +887,7 @@ namespace Farmware.WorldGeneration
             ushort moisture,
             BiomeId biome,
             WaterBodyType waterBodyType,
+            bool isMagma,
             in WorldGenerationSettings settings,
             int worldTileX,
             int worldTileY)
@@ -689,6 +895,12 @@ namespace Farmware.WorldGeneration
             if (waterBodyType != WaterBodyType.None)
             {
                 return GroundType.Water;
+            }
+
+            if (isMagma)
+            {
+                // 海以外の水域を抑制した後、岩壁より先にマグマを確定して両者が同じセルを占有しないようにします。
+                return GroundType.Magma;
             }
 
             // 岩壁候補と水域が重なる場合は、直前の水域判定が先にreturnするため海・川・池が必ず優先されます。
@@ -917,7 +1129,7 @@ namespace Farmware.WorldGeneration
 
         /// <summary>
         /// 地面種別から建築可否と通常リンク遮断を決めます。
-        /// 水は建築不可でもリンクを通し、岩壁だけがリンクを遮る仕様をここで明示します。
+        /// 水は建築不可でもリンクを通し、岩壁とマグマがリンクを遮る仕様をここで明示します。
         /// </summary>
         /// <param name="ground">分類済みの地面種別です。</param>
         /// <returns>建築・リンク判定のビットフラグです。</returns>
@@ -928,6 +1140,7 @@ namespace Farmware.WorldGeneration
                 case GroundType.Water:
                     return TileGameplayFlags.None;
                 case GroundType.RockWall:
+                case GroundType.Magma:
                     return TileGameplayFlags.BlocksNormalLink;
                 default:
                     return TileGameplayFlags.IsBuildable;
@@ -943,9 +1156,9 @@ namespace Farmware.WorldGeneration
         /// <returns>配置可能な資源種別の組み合わせです。</returns>
         private static ResourceSuitability ClassifyResourceSuitability(GroundType ground, BiomeId biome)
         {
-            if (ground == GroundType.Water)
+            if (ground == GroundType.Water || ground == GroundType.Magma)
             {
-                // 水は全水域タイルから直接採取できる地形属性なので、別の配置資源候補にはしません。
+                // 水は地形自体から採取し、マグマは通常資源を置かないため、どちらも別の配置資源候補にはしません。
                 return ResourceSuitability.None;
             }
 
@@ -974,13 +1187,13 @@ namespace Farmware.WorldGeneration
 
         /// <summary>
         /// 地面種別から初期の相対移動コストを決めます。
-        /// 岩壁は通行不可の0、水域は陸地より重い2、通常陸地は1とします。
+        /// 岩壁とマグマは通行不可の0、水域は陸地より重い2、通常陸地は1とします。
         /// </summary>
         /// <param name="ground">分類済みの地面種別です。</param>
         /// <returns>0〜2の移動コストです。</returns>
         private static byte ClassifyMovementCost(GroundType ground)
         {
-            if (ground == GroundType.RockWall)
+            if (ground == GroundType.RockWall || ground == GroundType.Magma)
             {
                 return 0;
             }

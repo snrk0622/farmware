@@ -173,6 +173,19 @@ MonoBehaviour:
   wetlandRiverHalfWidthIncrease: 0.007629511
   volcanicRiverHalfWidthReduction: 0.00686656
   freshWaterMaximumElevation: 0.71717405
+  magmaCellSizeInTiles: 24
+  magmaDetailCellSizeInTiles: 8
+  magmaWarpAmplitudeInTiles: 6
+  magmaOctaveCount: 3
+  magmaNoiseThreshold: 0.51880676
+  magmaInfluenceNoiseThreshold: 0.45777065
+  magmaMinimumVolcanicInfluence: 0
+  magmaInfluenceMinimumVolcanicInfluence: 0
+  rocklandMagmaCellSizeInTiles: 12
+  rocklandMagmaNoiseThreshold: 0.71717405
+  rocklandMagmaInfluenceNoiseThreshold: 0.671397
+  rocklandMagmaMinimumVolcanicInfluence: 0.0015259022
+  rocklandMagmaInfluenceMinimumVolcanicInfluence: 0.0007629511
   rockWallMassCellSizeInTiles: 24
   rockWallDetailCellSizeInTiles: 8
   rockWallWarpAmplitudeInTiles: 6

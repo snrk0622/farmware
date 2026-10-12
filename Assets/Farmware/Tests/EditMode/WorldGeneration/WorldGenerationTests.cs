@@ -343,6 +343,19 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(settings.VolcanicPondThresholdIncrease, Is.EqualTo(16000));
             Assert.That(settings.WetlandRiverHalfWidthIncrease, Is.EqualTo(500));
             Assert.That(settings.VolcanicRiverHalfWidthReduction, Is.EqualTo(450));
+            Assert.That(settings.MagmaCellSizeInTiles, Is.EqualTo(24));
+            Assert.That(settings.MagmaDetailCellSizeInTiles, Is.EqualTo(8));
+            Assert.That(settings.MagmaWarpAmplitudeInTiles, Is.EqualTo(6));
+            Assert.That(settings.MagmaOctaveCount, Is.EqualTo(3));
+            Assert.That(settings.MagmaNoiseThreshold, Is.EqualTo(34000));
+            Assert.That(settings.MagmaInfluenceNoiseThreshold, Is.EqualTo(30000));
+            Assert.That(settings.MagmaMinimumVolcanicInfluence, Is.EqualTo(0));
+            Assert.That(settings.MagmaInfluenceMinimumVolcanicInfluence, Is.EqualTo(0));
+            Assert.That(settings.RocklandMagmaCellSizeInTiles, Is.EqualTo(12));
+            Assert.That(settings.RocklandMagmaNoiseThreshold, Is.EqualTo(47000));
+            Assert.That(settings.RocklandMagmaInfluenceNoiseThreshold, Is.EqualTo(44000));
+            Assert.That(settings.RocklandMagmaMinimumVolcanicInfluence, Is.EqualTo(100));
+            Assert.That(settings.RocklandMagmaInfluenceMinimumVolcanicInfluence, Is.EqualTo(50));
             Assert.That(settings.RockWallMassCellSizeInTiles, Is.EqualTo(24));
             Assert.That(settings.RockWallDetailCellSizeInTiles, Is.EqualTo(8));
             Assert.That(settings.RockWallWarpAmplitudeInTiles, Is.EqualTo(6));
@@ -571,6 +584,245 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// 固定シードの広域を粗く走査し、火山のおよそ半分がマグマになり、岩地では稀にだけ生成されることを確認します。
+        /// 各候補では水属性・建築・リンク・資源適性も調べ、海以外の水域、岩壁、通常資源と同じセルを共有しないことを保証します。
+        /// </summary>
+        [Test]
+        public void MagmaGeneration_CreatesVolcanicBasinsAndSuppressesFreshWater()
+        {
+            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.FromString("magma-generation-test"),
+                1);
+            int volcanicLandTileCount = 0;
+            int volcanicMagmaTileCount = 0;
+            int rocklandLandTileCount = 0;
+            int rocklandMagmaTileCount = 0;
+            int forbiddenBiomeMagmaTileCount = 0;
+            int overlappingRockWallCandidateCount = 0;
+
+            // 257×257地点を32タイル間隔で調べ、毎回の修正時にも現実的な時間で広域傾向を確認します。
+            for (int worldY = -4096; worldY <= 4096; worldY += 32)
+            {
+                for (int worldX = -4096; worldX <= 4096; worldX += 32)
+                {
+                    GeneratedTile tile = DeterministicChunkGenerator.GenerateTile(
+                        settings,
+                        worldX,
+                        worldY);
+                    MagmaGenerationDebugInfo magmaInfo =
+                        DeterministicChunkGenerator.GetMagmaGenerationDebugInfo(
+                            tile.Elevation,
+                            tile.Temperature,
+                            tile.Weirdness,
+                            tile.Biome,
+                            settings,
+                            worldX,
+                            worldY);
+
+                    // 海は最優先なので例外ですが、陸上の火山影響域では川と池が生成されてはいけません。
+                    if (magmaInfo.IsInfluenceArea && tile.WaterBodyType != WaterBodyType.Sea)
+                    {
+                        Assert.That(tile.WaterBodyType, Is.EqualTo(WaterBodyType.None));
+                    }
+
+                    if (tile.Biome == BiomeId.Volcanic
+                        && tile.WaterBodyType != WaterBodyType.Sea)
+                    {
+                        volcanicLandTileCount++;
+                    }
+                    else if (tile.Biome == BiomeId.Rockland
+                        && tile.WaterBodyType != WaterBodyType.Sea)
+                    {
+                        rocklandLandTileCount++;
+                    }
+
+                    if (tile.Ground != GroundType.Magma)
+                    {
+                        continue;
+                    }
+
+                    Assert.That(tile.WaterSalinity, Is.EqualTo(WaterSalinity.None));
+                    Assert.That(tile.WaterBodyType, Is.EqualTo(WaterBodyType.None));
+                    Assert.That(tile.ResourceSuitability, Is.EqualTo(ResourceSuitability.None));
+                    Assert.That(tile.MovementCost, Is.EqualTo(0));
+                    Assert.That(
+                        tile.GameplayFlags,
+                        Is.EqualTo(TileGameplayFlags.BlocksNormalLink));
+                    if (overlappingRockWallCandidateCount == 0
+                        && DeterministicRockWallGenerator.IsRockWallCandidate(
+                            settings,
+                            worldX,
+                            worldY))
+                    {
+                        // 重複候補を1件だけ最終判定まで再確認し、全マグマで重い岩壁ノイズを二重生成しないようにします。
+                        overlappingRockWallCandidateCount++;
+                        Assert.That(
+                            DeterministicChunkGenerator.IsRockWall(settings, worldX, worldY),
+                            Is.False,
+                            "マグマと同じタイルへ最終岩壁判定を重ねてはいけません。");
+                    }
+
+                    if (tile.Biome == BiomeId.Volcanic)
+                    {
+                        Assert.That(
+                            magmaInfo.UsesRocklandProfile,
+                            Is.False,
+                            "火山マグマは広域の火山用プロファイルで生成する必要があります。");
+                        volcanicMagmaTileCount++;
+                    }
+                    else if (tile.Biome == BiomeId.Rockland)
+                    {
+                        Assert.That(
+                            magmaInfo.UsesRocklandProfile,
+                            Is.True,
+                            "岩地マグマは小規模・低頻度の岩地用プロファイルで生成する必要があります。");
+                        rocklandMagmaTileCount++;
+                    }
+                    else
+                    {
+                        forbiddenBiomeMagmaTileCount++;
+                    }
+                }
+            }
+
+            float volcanicMagmaRatio = volcanicMagmaTileCount / (float)volcanicLandTileCount;
+            float rocklandMagmaRatio = rocklandMagmaTileCount / (float)rocklandLandTileCount;
+            Assert.That(volcanicLandTileCount, Is.GreaterThanOrEqualTo(100));
+            Assert.That(volcanicMagmaRatio, Is.InRange(0.40f, 0.60f));
+            Assert.That(rocklandLandTileCount, Is.GreaterThanOrEqualTo(100));
+            Assert.That(rocklandMagmaRatio, Is.InRange(0.001f, 0.03f));
+            Assert.That(rocklandMagmaTileCount, Is.GreaterThan(0));
+            Assert.That(forbiddenBiomeMagmaTileCount, Is.EqualTo(0));
+            Assert.That(overlappingRockWallCandidateCount, Is.GreaterThan(0));
+        }
+
+        /// <summary>
+        /// 実際に全域がマグマに見えた固定座標の周辺を調べ、1つの局所的な火山領域にもマグマと陸地の両方が残ることを確認します。
+        /// 広域の平均比率だけでは小さな火山が同じ低周波ノイズ値へ覆われる不具合を検出できないため、報告座標を回帰条件として固定します。
+        /// </summary>
+        [Test]
+        public void MagmaGeneration_KeepsLandInReportedVolcanicRegion()
+        {
+            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.FromString("Farmware"),
+                1);
+            const int reportedTileX = -3698;
+            const int reportedTileY = 2422;
+            const int sampleRadiusInTiles = 64;
+            int volcanicTileCount = 0;
+            int volcanicMagmaTileCount = 0;
+
+            // 報告地点を中心とする129×129タイルだけを走査し、修正ごとに実行しても短時間で局所分布を検証できるようにします。
+            for (int worldY = reportedTileY - sampleRadiusInTiles;
+                 worldY <= reportedTileY + sampleRadiusInTiles;
+                 worldY++)
+            {
+                for (int worldX = reportedTileX - sampleRadiusInTiles;
+                     worldX <= reportedTileX + sampleRadiusInTiles;
+                     worldX++)
+                {
+                    GeneratedTile tile = DeterministicChunkGenerator.GenerateTile(
+                        settings,
+                        worldX,
+                        worldY);
+                    if (tile.Biome != BiomeId.Volcanic
+                        || tile.WaterBodyType == WaterBodyType.Sea)
+                    {
+                        continue;
+                    }
+
+                    volcanicTileCount++;
+                    if (tile.Ground == GroundType.Magma)
+                    {
+                        volcanicMagmaTileCount++;
+                    }
+                }
+            }
+
+            Assert.That(
+                volcanicTileCount,
+                Is.GreaterThanOrEqualTo(500),
+                "報告地点周辺に十分な火山タイルが存在し、局所比率を評価できる必要があります。");
+            float localMagmaRatio = volcanicMagmaTileCount / (float)volcanicTileCount;
+            Assert.That(
+                localMagmaRatio,
+                Is.InRange(0.20f, 0.80f),
+                "局所的な火山領域にも、マグマと建築可能な火山性陸地の両方を残す必要があります。");
+        }
+
+        /// <summary>
+        /// 火山マグマの合成密度を固定範囲で比較し、細部ノイズ、座標ワープ、境界平滑化が実際の形状へ反映されることを確認します。
+        /// 単一の低周波ノイズへ退行すると丸く単純な塊へ戻るため、各段階を個別に無効化した密度との差を回帰条件にします。
+        /// </summary>
+        [Test]
+        public void MagmaGeneration_IrregularShapeUsesDetailWarpAndBoundarySmoothing()
+        {
+            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.FromString("Farmware"),
+                1);
+            WorldGenerationSettings noWarpSettings = settings;
+            noWarpSettings.MagmaWarpAmplitudeInTiles = 0;
+            WorldGenerationSettings coarseDetailSettings = settings;
+            coarseDetailSettings.MagmaDetailCellSizeInTiles = 16;
+            const int centerTileX = -3698;
+            const int centerTileY = 2422;
+            const int sampleRadiusInTiles = 64;
+            int sampleCount = 0;
+            int warpDifferenceCount = 0;
+            int detailDifferenceCount = 0;
+            int smoothingDifferenceCount = 0;
+
+            // 2タイル間隔の4,225地点だけを調べ、輪郭生成の各段階を確認しながら毎回実行できる負荷へ抑えます。
+            for (int worldY = centerTileY - sampleRadiusInTiles;
+                 worldY <= centerTileY + sampleRadiusInTiles;
+                 worldY += 2)
+            {
+                for (int worldX = centerTileX - sampleRadiusInTiles;
+                     worldX <= centerTileX + sampleRadiusInTiles;
+                     worldX += 2)
+                {
+                    ushort density = DeterministicMagmaGenerator.SampleDensity(
+                        settings,
+                        worldX,
+                        worldY);
+                    ushort noWarpDensity = DeterministicMagmaGenerator.SampleDensity(
+                        noWarpSettings,
+                        worldX,
+                        worldY);
+                    ushort coarseDetailDensity = DeterministicMagmaGenerator.SampleDensity(
+                        coarseDetailSettings,
+                        worldX,
+                        worldY);
+                    bool rawCandidate = density >= settings.MagmaNoiseThreshold;
+                    bool smoothedCandidate = DeterministicMagmaGenerator.IsSmoothedCandidate(
+                        settings,
+                        worldX,
+                        worldY,
+                        settings.MagmaNoiseThreshold,
+                        density);
+
+                    sampleCount++;
+                    warpDifferenceCount += density != noWarpDensity ? 1 : 0;
+                    detailDifferenceCount += density != coarseDetailDensity ? 1 : 0;
+                    smoothingDifferenceCount += rawCandidate != smoothedCandidate ? 1 : 0;
+                }
+            }
+
+            Assert.That(
+                warpDifferenceCount,
+                Is.GreaterThan(sampleCount / 2),
+                "座標ワープは十分な範囲の密度を変化させ、規則的な輪郭を崩す必要があります。");
+            Assert.That(
+                detailDifferenceCount,
+                Is.GreaterThan(sampleCount * 3 / 4),
+                "細部ノイズは大半の地点へ影響し、入り江や半島を作る必要があります。");
+            Assert.That(
+                smoothingDifferenceCount,
+                Is.GreaterThan(0),
+                "境界多数決は少なくとも一部の孤立タイルまたは1タイル穴を補正する必要があります。");
+        }
+
+        /// <summary>
         /// 同じシードを移行帯あり・なしで生成し、論理Biomeと気候値を維持したまま境界付近の陸上地面だけが混ざることを保証します。
         /// </summary>
         [Test]
@@ -605,8 +857,9 @@ namespace Farmware.WorldGeneration.Tests
 
                     if (transitioned.Ground != discrete.Ground)
                     {
-                        // 水域と岩壁はバイオーム移行の対象外であり、地形ルールを変えてはならないため明示的に除外を保証します。
+                        // 水域・マグマ・岩壁はバイオーム移行の対象外であり、地形ルールを変えてはならないため明示的に除外を保証します。
                         Assert.That(discrete.Ground, Is.Not.EqualTo(GroundType.Water));
+                        Assert.That(discrete.Ground, Is.Not.EqualTo(GroundType.Magma));
                         Assert.That(discrete.Ground, Is.Not.EqualTo(GroundType.RockWall));
                         changedGroundTileCount++;
                     }

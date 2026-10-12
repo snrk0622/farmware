@@ -243,6 +243,33 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(pondColor, Is.Not.EqualTo(seaColor), "池と海は別の色で判別できる必要があります。");
             Assert.That(riverColor, Is.Not.EqualTo(seaColor), "川と海は別の色で判別できる必要があります。");
 
+            GeneratedTile magmaTile = forestTransitionTile;
+            magmaTile.Biome = BiomeId.Volcanic;
+            magmaTile.Ground = GroundType.Magma;
+            Assert.That(
+                WorldGenerationDebugVisualizationOverlay.IsBiomeTransitionTile(magmaTile),
+                Is.False,
+                "独立生成されるマグマはバイオーム移行帯へ数えません。");
+            Color magmaColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.Magma,
+                magmaTile,
+                0f,
+                GeneratedResourceType.None,
+                true);
+            Color magmaInfluenceColor =
+                WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                    WorldGenerationDebugVisualizationMode.Magma,
+                    forestTransitionTile,
+                    0f,
+                    GeneratedResourceType.None,
+                    true);
+            Color magmaOutsideColor =
+                WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                    WorldGenerationDebugVisualizationMode.Magma,
+                    forestTransitionTile);
+            Assert.That(magmaColor, Is.Not.EqualTo(magmaInfluenceColor));
+            Assert.That(magmaInfluenceColor, Is.Not.EqualTo(magmaOutsideColor));
+
             Color treeResourceColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
                 WorldGenerationDebugVisualizationMode.Resources,
                 forestTransitionTile,

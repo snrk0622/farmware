@@ -56,7 +56,10 @@ namespace Farmware.WorldGeneration
         Vegetation = 3,
 
         /// <summary>砂資源に適する砂地です。</summary>
-        Sand = 4
+        Sand = 4,
+
+        /// <summary>建築・通常移動・通常リンクを遮断する高温のマグマ地形です。</summary>
+        Magma = 5
     }
 
     /// <summary>
@@ -309,6 +312,45 @@ namespace Farmware.WorldGeneration
         /// <summary>川と池を生成できる0〜65535の最大標高です。山頂まで淡水が伸びることを防ぎます。</summary>
         public ushort FreshWaterMaximumElevation;
 
+        /// <summary>火山バイオームの広いマグマ海を決める大域ノイズ格子サイズです。単位はタイルです。</summary>
+        public int MagmaCellSizeInTiles;
+
+        /// <summary>火山マグマの入り江、半島、島を作る細部ノイズ格子サイズです。単位はタイルです。</summary>
+        public int MagmaDetailCellSizeInTiles;
+
+        /// <summary>火山マグマ密度をサンプリングする座標の最大歪み幅です。単位はタイルです。</summary>
+        public int MagmaWarpAmplitudeInTiles;
+
+        /// <summary>火山マグマの大域形状へ重ねるノイズ解像度の数です。</summary>
+        public int MagmaOctaveCount;
+
+        /// <summary>火山バイオームをマグマ本体へ変換する0〜65535の専用ノイズ下限です。大きいほど陸地が増えます。</summary>
+        public ushort MagmaNoiseThreshold;
+
+        /// <summary>淡水を遠ざける火山影響域を生成する0〜65535の専用ノイズ下限です。マグマ本体より低く設定します。</summary>
+        public ushort MagmaInfluenceNoiseThreshold;
+
+        /// <summary>火山内でマグマを追加制限する0〜65535の連続火山適性下限です。既定値0では離散火山全域を許可します。</summary>
+        public ushort MagmaMinimumVolcanicInfluence;
+
+        /// <summary>火山内の淡水抑制域を追加制限する0〜65535の連続火山適性下限です。マグマ本体以下に設定します。</summary>
+        public ushort MagmaInfluenceMinimumVolcanicInfluence;
+
+        /// <summary>岩地バイオームの小さなマグマ溜まりを決めるノイズ格子サイズです。単位はタイルです。</summary>
+        public int RocklandMagmaCellSizeInTiles;
+
+        /// <summary>岩地バイオームへ稀にマグマを生成する0〜65535の専用ノイズ下限です。</summary>
+        public ushort RocklandMagmaNoiseThreshold;
+
+        /// <summary>岩地の小規模マグマ周囲で淡水を抑制する0〜65535の専用ノイズ下限です。</summary>
+        public ushort RocklandMagmaInfluenceNoiseThreshold;
+
+        /// <summary>岩地マグマを火山との移行域へ限定する0〜65535の連続火山適性下限です。</summary>
+        public ushort RocklandMagmaMinimumVolcanicInfluence;
+
+        /// <summary>岩地マグマの淡水抑制域を許可する0〜65535の連続火山適性下限です。</summary>
+        public ushort RocklandMagmaInfluenceMinimumVolcanicInfluence;
+
         /// <summary>岩壁の大きな塊を決めるノイズ格子の1辺です。単位はタイルです。</summary>
         public int RockWallMassCellSizeInTiles;
 
@@ -387,6 +429,19 @@ namespace Farmware.WorldGeneration
                 WetlandRiverHalfWidthIncrease = 500,
                 VolcanicRiverHalfWidthReduction = 450,
                 FreshWaterMaximumElevation = 47000,
+                MagmaCellSizeInTiles = 24,
+                MagmaDetailCellSizeInTiles = 8,
+                MagmaWarpAmplitudeInTiles = 6,
+                MagmaOctaveCount = 3,
+                MagmaNoiseThreshold = 34000,
+                MagmaInfluenceNoiseThreshold = 30000,
+                MagmaMinimumVolcanicInfluence = 0,
+                MagmaInfluenceMinimumVolcanicInfluence = 0,
+                RocklandMagmaCellSizeInTiles = 12,
+                RocklandMagmaNoiseThreshold = 47000,
+                RocklandMagmaInfluenceNoiseThreshold = 44000,
+                RocklandMagmaMinimumVolcanicInfluence = 100,
+                RocklandMagmaInfluenceMinimumVolcanicInfluence = 50,
                 RockWallMassCellSizeInTiles = 24,
                 RockWallDetailCellSizeInTiles = 8,
                 RockWallWarpAmplitudeInTiles = 6,
@@ -443,6 +498,37 @@ namespace Farmware.WorldGeneration
 
         /// <summary>海、池、川、陸地の優先判定を終えた最終水域種別です。</summary>
         public WaterBodyType WaterBodyType;
+    }
+
+    /// <summary>
+    /// 1タイルのマグマ判定に使った火山適性と専用ノイズ値です。
+    /// Simulation、開発者HUD、EditModeテストが同じ判定結果を読み、淡水抑制域を含む生成規則のずれを防ぎます。
+    /// </summary>
+    public struct MagmaGenerationDebugInfo
+    {
+        /// <summary>高温・高地・高Weirdnessを掛け合わせた0〜65535の連続火山適性です。</summary>
+        public ushort VolcanicInfluence;
+
+        /// <summary>火山では大域形状・細部形状・座標ワープを合成した密度、岩地では小規模溜まり用ノイズを0〜65535で保持します。</summary>
+        public ushort MagmaSample;
+
+        /// <summary>火山適性を適用する前の生密度が淡水抑制域の閾値以上ならtrueです。</summary>
+        public bool RawInfluenceArea;
+
+        /// <summary>火山適性と境界平滑化を適用する前の生密度がマグマ本体の閾値以上ならtrueです。</summary>
+        public bool RawMagmaCandidate;
+
+        /// <summary>離散バイオームが火山または火山境界の岩地で、マグマ本体を置ける場合はtrueです。</summary>
+        public bool IsEligibleBiome;
+
+        /// <summary>岩地専用の小規模・低頻度プロファイルで判定した場合はtrueです。</summary>
+        public bool UsesRocklandProfile;
+
+        /// <summary>淡水を生成しない火山・マグマ影響域に含まれる場合はtrueです。</summary>
+        public bool IsInfluenceArea;
+
+        /// <summary>海の優先判定前に、このタイルがマグマ本体の候補になった場合はtrueです。</summary>
+        public bool IsMagma;
     }
 
     /// <summary>

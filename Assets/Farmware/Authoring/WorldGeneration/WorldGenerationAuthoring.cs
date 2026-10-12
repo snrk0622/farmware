@@ -136,6 +136,71 @@ namespace Farmware.WorldGeneration.Authoring
         [Range(0f, 1f)]
         [SerializeField] private float freshWaterMaximumElevation = 47000f / ushort.MaxValue;
 
+        // 火山バイオームの約半分を占めるマグマ海と陸地を決めます。火山領域より格子が大きいと局所的に全域がマグマになるため、24タイルへ抑えます。
+        [Tooltip("火山バイオームのマグマ海を作るノイズ格子サイズです。単位はタイルです。大きくすると塊は広がりますが、小さな火山全域がマグマになる場合があります。")]
+        [Min(8)]
+        [SerializeField] private int magmaCellSizeInTiles = 24;
+
+        // 大域形状より細かな独立ノイズを混ぜ、単純な円形ではなく入り江、半島、島を作ります。
+        [Tooltip("火山マグマの入り江、半島、島を作る細部ノイズ格子サイズです。単位はタイルです。小さくすると輪郭が細かくなります。")]
+        [Min(4)]
+        [SerializeField] private int magmaDetailCellSizeInTiles = 8;
+
+        // 大域・細部ノイズを読む座標自体を曲げ、格子方向へ揃った輪郭や似た形の繰り返しを減らします。
+        [Tooltip("火山マグマのノイズ座標を歪ませる最大幅です。単位はタイルです。大きくすると輪郭が不規則になりますが、過大にすると細い飛び地が増えます。")]
+        [Range(0, 16)]
+        [SerializeField] private int magmaWarpAmplitudeInTiles = 6;
+
+        // マグマ輪郭へ重ねる細部の段数で、地形全体より少なめにして細かな穴や点在を抑えます。
+        [Tooltip("マグマ形状へ重ねるノイズ解像度数です。増やすと輪郭が細かくなりますが、生成負荷も増えます。")]
+        [Range(1, 5)]
+        [SerializeField] private int magmaOctaveCount = 3;
+
+        // 中央値に近い下限で火山のおよそ半分をマグマへ変換し、陸上設備を置ける島も残します。
+        [Tooltip("火山バイオームをマグマへ変換する専用ノイズ下限です。0〜1で指定し、小さくすると火山内のマグマが増えます。")]
+        [Range(0f, 1f)]
+        [SerializeField] private float magmaNoiseThreshold = 34000f / ushort.MaxValue;
+
+        // 本体より低い閾値で周囲へ淡水抑制域を作り、川・池とマグマが直接接しにくくします。
+        [Tooltip("マグマ周囲で川と池を抑制する専用ノイズ下限です。0〜1で指定し、マグマ本体の下限以下にしてください。")]
+        [Range(0f, 1f)]
+        [SerializeField] private float magmaInfluenceNoiseThreshold = 30000f / ushort.MaxValue;
+
+        // 離散火山内でさらに中心部へ絞りたい場合の追加下限です。既定値0では火山全域を面積比の母集団にします。
+        [Tooltip("火山内でマグマ本体を追加制限する連続火山適性の下限です。0〜1で指定し、既定値0では火山全域を許可します。")]
+        [Range(0f, 1f)]
+        [SerializeField] private float magmaMinimumVolcanicInfluence;
+
+        // 本体より緩い追加下限で淡水抑制域を作ります。既定値0では専用ノイズだけで外周を決めます。
+        [Tooltip("火山内で川と池を抑制する影響域の連続適性下限です。0〜1で指定し、マグマ本体の追加下限以下にしてください。")]
+        [Range(0f, 1f)]
+        [SerializeField] private float magmaInfluenceMinimumVolcanicInfluence;
+
+        // 岩地では火山と別の細かなノイズを使い、広いマグマ海ではなく小さな溜まりに限定します。
+        [Tooltip("岩地バイオームの小さなマグマ溜まりを作るノイズ格子サイズです。単位はタイルです。小さくすると各溜まりも小さくなります。")]
+        [Min(8)]
+        [SerializeField] private int rocklandMagmaCellSizeInTiles = 12;
+
+        // 高い下限を超えたピークだけを採用し、岩地でのマグマを稀な障害物として扱います。
+        [Tooltip("岩地バイオームへマグマを生成する専用ノイズ下限です。0〜1で指定し、大きくすると発生がより稀になります。")]
+        [Range(0f, 1f)]
+        [SerializeField] private float rocklandMagmaNoiseThreshold = 47000f / ushort.MaxValue;
+
+        // 本体の少し外側だけ淡水を抑え、小規模なマグマへ川や池が直接重なることを防ぎます。
+        [Tooltip("岩地マグマ周囲で川と池を抑制する専用ノイズ下限です。0〜1で指定し、岩地マグマ本体の下限以下にしてください。")]
+        [Range(0f, 1f)]
+        [SerializeField] private float rocklandMagmaInfluenceNoiseThreshold = 44000f / ushort.MaxValue;
+
+        // 火山性が少し残る岩地移行域だけを許可し、通常の岩地全域へマグマが散ることを防ぎます。
+        [Tooltip("岩地マグマを火山との移行域へ限定する連続火山適性の下限です。0〜1で指定します。")]
+        [Range(0f, 1f)]
+        [SerializeField] private float rocklandMagmaMinimumVolcanicInfluence = 100f / ushort.MaxValue;
+
+        // 淡水抑制域は本体より緩い火山適性にし、マグマ周囲へ細い陸地の余白を作ります。
+        [Tooltip("岩地マグマ周囲の淡水抑制域を許可する連続火山適性下限です。0〜1で指定し、本体の下限以下にしてください。")]
+        [Range(0f, 1f)]
+        [SerializeField] private float rocklandMagmaInfluenceMinimumVolcanicInfluence = 50f / ushort.MaxValue;
+
         // 岩壁の大きなまとまりを作る低周波格子で、論理チャンク境界とは独立して連続します。
         [Tooltip("岩壁の大きな塊を作るノイズ格子サイズです。単位はタイルです。大きくすると1つの岩壁域が広がります。")]
         [Range(16, 64)]
@@ -298,6 +363,20 @@ namespace Farmware.WorldGeneration.Authoring
                 waterThreshold + minimumGap);
             freshWaterMaximumElevation = Mathf.Clamp01(freshWaterMaximumElevation);
 
+            // 火山用・岩地用の両方で影響域を本体より広く保ち、マグマの直前まで淡水が入り込む逆転設定を防ぎます。
+            magmaInfluenceNoiseThreshold = Mathf.Min(
+                magmaInfluenceNoiseThreshold,
+                magmaNoiseThreshold);
+            magmaInfluenceMinimumVolcanicInfluence = Mathf.Min(
+                magmaInfluenceMinimumVolcanicInfluence,
+                magmaMinimumVolcanicInfluence);
+            rocklandMagmaInfluenceNoiseThreshold = Mathf.Min(
+                rocklandMagmaInfluenceNoiseThreshold,
+                rocklandMagmaNoiseThreshold);
+            rocklandMagmaInfluenceMinimumVolcanicInfluence = Mathf.Min(
+                rocklandMagmaInfluenceMinimumVolcanicInfluence,
+                rocklandMagmaMinimumVolcanicInfluence);
+
             // 乾燥と湿潤の領域が逆転しないよう、森林閾値を乾燥閾値より上へ保ちます。
             dryMoistureThreshold = Mathf.Min(dryMoistureThreshold, 1f - minimumGap);
             wetMoistureThreshold = Mathf.Max(wetMoistureThreshold, dryMoistureThreshold + minimumGap);
@@ -391,6 +470,26 @@ namespace Farmware.WorldGeneration.Authoring
                     VolcanicRiverHalfWidthReduction =
                         ToNormalizedUShort(authoring.volcanicRiverHalfWidthReduction),
                     FreshWaterMaximumElevation = ToNormalizedUShort(authoring.freshWaterMaximumElevation),
+                    MagmaCellSizeInTiles = authoring.magmaCellSizeInTiles,
+                    MagmaDetailCellSizeInTiles = authoring.magmaDetailCellSizeInTiles,
+                    MagmaWarpAmplitudeInTiles = authoring.magmaWarpAmplitudeInTiles,
+                    MagmaOctaveCount = authoring.magmaOctaveCount,
+                    MagmaNoiseThreshold = ToNormalizedUShort(authoring.magmaNoiseThreshold),
+                    MagmaInfluenceNoiseThreshold =
+                        ToNormalizedUShort(authoring.magmaInfluenceNoiseThreshold),
+                    MagmaMinimumVolcanicInfluence =
+                        ToNormalizedUShort(authoring.magmaMinimumVolcanicInfluence),
+                    MagmaInfluenceMinimumVolcanicInfluence =
+                        ToNormalizedUShort(authoring.magmaInfluenceMinimumVolcanicInfluence),
+                    RocklandMagmaCellSizeInTiles = authoring.rocklandMagmaCellSizeInTiles,
+                    RocklandMagmaNoiseThreshold =
+                        ToNormalizedUShort(authoring.rocklandMagmaNoiseThreshold),
+                    RocklandMagmaInfluenceNoiseThreshold =
+                        ToNormalizedUShort(authoring.rocklandMagmaInfluenceNoiseThreshold),
+                    RocklandMagmaMinimumVolcanicInfluence =
+                        ToNormalizedUShort(authoring.rocklandMagmaMinimumVolcanicInfluence),
+                    RocklandMagmaInfluenceMinimumVolcanicInfluence =
+                        ToNormalizedUShort(authoring.rocklandMagmaInfluenceMinimumVolcanicInfluence),
                     RockWallMassCellSizeInTiles = authoring.rockWallMassCellSizeInTiles,
                     RockWallDetailCellSizeInTiles = authoring.rockWallDetailCellSizeInTiles,
                     RockWallWarpAmplitudeInTiles = authoring.rockWallWarpAmplitudeInTiles,

@@ -736,6 +736,7 @@ MonoBehaviour:
   wetlandTile: {fileID: 11400000, guid: 8b6f7b43ea44847c0bf416cf082dd686, type: 2}
   snowfieldTile: {fileID: 11400000, guid: 5838f9305788f44c2b5b2ecad424cd7a, type: 2}
   volcanicTile: {fileID: 11400000, guid: a039821f4f05940be90c2fb487e2cbcb, type: 2}
+  magmaTile: {fileID: 11400000, guid: 6a015ba4629a2470990ef874ec171e33, type: 2}
   freshWaterTile: {fileID: 11400000, guid: 0c8767b14ec794733bf2093f1c6b8c2f, type: 2}
   saltWaterTile: {fileID: 11400000, guid: 06507ec0f78364046ab6c0ec235d8bcf, type: 2}
   rockWallTile: {fileID: 11400000, guid: 1efd85541c8714c359c7e09eea3ffb12, type: 2}

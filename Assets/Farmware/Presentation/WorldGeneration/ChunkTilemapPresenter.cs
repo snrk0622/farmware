@@ -62,9 +62,13 @@ namespace Farmware.WorldGeneration.Presentation
         [Tooltip("雪原バイオームの陸地に表示するTileです。現在、水域は凍結させず通常の水域Tileを表示します。")]
         [SerializeField] private TileBase snowfieldTile;
 
-        // 火山の地面へ使用する表示専用Tileです。マグマ地形は次段階で別のGroundTypeとして追加します。
+        // 火山の通常地面へ使用する表示専用Tileです。マグマ本体は次の専用Tileを優先します。
         [Tooltip("火山バイオームの陸地に表示するTileです。マグマ地形とは別の基礎地面です。")]
         [SerializeField] private TileBase volcanicTile;
+
+        // GroundType.Magmaへ使用する表示専用Tileで、水域や火山地面とは別のゲームルールを視覚化します。
+        [Tooltip("マグマ地形に表示するTileです。建築・通常移動・通常リンクを遮断する判定はECSデータで行います。")]
+        [SerializeField] private TileBase magmaTile;
 
         // WaterSalinity.FreshWaterへ使用する表示専用Tileです。
         [Tooltip("川と池の淡水域に表示するTileです。採水種別はECSデータで判定し、この参照には依存しません。")]
@@ -180,6 +184,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="wetland">湿地バイオームの地面に表示するTileです。</param>
         /// <param name="snowfield">雪原バイオームの地面に表示するTileです。</param>
         /// <param name="volcanic">火山バイオームの地面に表示するTileです。</param>
+        /// <param name="magma">GroundType.Magmaの全セルに表示するTileです。</param>
         /// <param name="freshWater">淡水の川と池に表示するTileです。</param>
         /// <param name="saltWater">海水の海に表示するTileです。</param>
         /// <param name="rockWall">GroundType.RockWallの全セルに表示する共通Tileです。</param>
@@ -196,6 +201,7 @@ namespace Farmware.WorldGeneration.Presentation
             TileBase wetland,
             TileBase snowfield,
             TileBase volcanic,
+            TileBase magma,
             TileBase freshWater,
             TileBase saltWater,
             TileBase rockWall,
@@ -212,6 +218,7 @@ namespace Farmware.WorldGeneration.Presentation
             wetlandTile = wetland;
             snowfieldTile = snowfield;
             volcanicTile = volcanic;
+            magmaTile = magma;
             freshWaterTile = freshWater;
             saltWaterTile = saltWater;
             rockWallTile = rockWall;
@@ -734,7 +741,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// ゲームルール用GeneratedTileを、Inspectorで割り当てた表示専用Tileへ変換します。
         /// </summary>
         /// <param name="tile">ECSを正とする1タイル分の基礎地形データです。</param>
-        /// <returns>水域・岩壁を優先し、それ以外はバイオームに対応するTileです。</returns>
+        /// <returns>水域・マグマ・岩壁を優先し、それ以外はバイオームに対応するTileです。</returns>
         private TileBase SelectTile(GeneratedTile tile)
         {
             if (tile.Ground == GroundType.Water)
@@ -743,6 +750,11 @@ namespace Farmware.WorldGeneration.Presentation
                 return tile.WaterSalinity == WaterSalinity.FreshWater && freshWaterTile != null
                     ? freshWaterTile
                     : saltWaterTile;
+            }
+
+            if (tile.Ground == GroundType.Magma)
+            {
+                return magmaTile;
             }
 
             if (tile.Ground == GroundType.RockWall)

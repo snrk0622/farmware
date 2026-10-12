@@ -38,6 +38,21 @@ namespace Farmware.WorldGeneration
         /// <summary>内陸へまとまって生成する池の形状ノイズ専用のソルトです。</summary>
         public const ulong Pond = 0xDB4F0B9175AE2165UL;
 
+        /// <summary>火山地帯のマグマ湾と流路を作る連続ノイズ専用のソルトです。</summary>
+        public const ulong Magma = 0x9E3779B185EBCA87UL;
+
+        /// <summary>火山マグマの入り江、半島、島を作る細部ノイズ専用のソルトです。</summary>
+        public const ulong MagmaDetail = 0x94D049BB133111EBUL;
+
+        /// <summary>火山マグマ密度の水平サンプリング座標を歪ませるノイズ専用のソルトです。</summary>
+        public const ulong MagmaWarpX = 0xD1B54A32D192ED03UL;
+
+        /// <summary>火山マグマ密度の垂直サンプリング座標を歪ませるノイズ専用のソルトです。</summary>
+        public const ulong MagmaWarpY = 0xABC98388FB8FAC03UL;
+
+        /// <summary>岩地へ稀に現れる小さなマグマ溜まり専用のソルトです。</summary>
+        public const ulong RocklandMagma = 0xC2B2AE3D27D4EB4FUL;
+
         /// <summary>岩壁の広域的な塊を作る連続ノイズ専用のソルトです。</summary>
         public const ulong RockWallMass = 0x6A09E667F3BCC909UL;
 

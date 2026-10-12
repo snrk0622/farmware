@@ -46,7 +46,10 @@ namespace Farmware.WorldGeneration.Presentation
         Resources = 9,
 
         /// <summary>0〜65535の連続Weirdness値を紫から黄のグラデーションで表示します。</summary>
-        Weirdness = 10
+        Weirdness = 10,
+
+        /// <summary>マグマ本体、淡水抑制用の火山影響域、それ以外を固定色で表示します。</summary>
+        Magma = 11
     }
 
     /// <summary>
@@ -202,19 +205,21 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// 指定モード、GeneratedTile、岩壁影不透明度、最終資源IDからGameビューへ重ねる色を純粋計算します。
+        /// 指定モード、GeneratedTile、岩壁影不透明度、最終資源ID、マグマ影響域からGameビューへ重ねる色を純粋計算します。
         /// PlayModeテストも同じ入口を使い、凡例と実描画の対応が変わっていないことを保証します。
         /// </summary>
         /// <param name="mode">色の意味を決める可視化モードです。</param>
         /// <param name="tile">ECS Dynamic Bufferから読み取った1タイルの生成結果です。</param>
         /// <param name="rockWallShadowOpacity">RockWallモードで使う0〜1の連続影不透明度です。他モードでは参照しません。</param>
         /// <param name="resourceType">Resourcesモードで色分けする競合解決後の資源IDです。</param>
+        /// <param name="isMagmaInfluenceArea">Magmaモードで淡水抑制域を暗赤色表示する場合はtrueです。</param>
         /// <returns>IMGUIへ設定するRGBA色です。Noneの場合は完全な透明色です。</returns>
         public static Color GetVisualizationColor(
             WorldGenerationDebugVisualizationMode mode,
             GeneratedTile tile,
             float rockWallShadowOpacity = 0f,
-            GeneratedResourceType resourceType = GeneratedResourceType.None)
+            GeneratedResourceType resourceType = GeneratedResourceType.None,
+            bool isMagmaInfluenceArea = false)
         {
             switch (mode)
             {
@@ -334,6 +339,16 @@ namespace Farmware.WorldGeneration.Presentation
                         new Color32(5, 5, 8, 248),
                         normalizedShadow);
 
+                case WorldGenerationDebugVisualizationMode.Magma:
+                    if (tile.Ground == GroundType.Magma)
+                    {
+                        return new Color32(255, 92, 18, 245);
+                    }
+
+                    return isMagmaInfluenceArea
+                        ? new Color32(136, 38, 30, 226)
+                        : new Color32(24, 24, 30, 165);
+
                 case WorldGenerationDebugVisualizationMode.Resources:
                     // 最終Bufferと同じ1種類だけを描き、候補ノイズではなく実際の配置競合結果をGameビューで確認します。
                     if (resourceType == GeneratedResourceType.Tree)
@@ -366,7 +381,9 @@ namespace Farmware.WorldGeneration.Presentation
         /// <returns>陸上で論理Biomeと異なるGroundが選択されている場合はtrueです。</returns>
         public static bool IsBiomeTransitionTile(GeneratedTile tile)
         {
-            if (tile.Ground == GroundType.Water || tile.Ground == GroundType.RockWall)
+            if (tile.Ground == GroundType.Water
+                || tile.Ground == GroundType.RockWall
+                || tile.Ground == GroundType.Magma)
             {
                 return false;
             }
@@ -510,11 +527,28 @@ namespace Farmware.WorldGeneration.Presentation
                                     tileX,
                                     tileY)
                                 : 0f;
+                        bool isMagmaInfluenceArea = false;
+                        if (currentMode == WorldGenerationDebugVisualizationMode.Magma
+                            && hasGenerationSettings)
+                        {
+                            // 専用モードのときだけ追加ノイズを読み、通常表示や他のデバッグ表示へ計算負荷を持ち込みません。
+                            MagmaGenerationDebugInfo magmaInfo =
+                                DeterministicChunkGenerator.GetMagmaGenerationDebugInfo(
+                                    tile.Elevation,
+                                    tile.Temperature,
+                                    tile.Weirdness,
+                                    tile.Biome,
+                                    settings,
+                                    tileX,
+                                    tileY);
+                            isMagmaInfluenceArea = magmaInfo.IsInfluenceArea;
+                        }
                         GUI.color = GetVisualizationColor(
                             currentMode,
                             tile,
                             rockWallShadowOpacity,
-                            resource.Type);
+                            resource.Type,
+                            isMagmaInfluenceArea);
                         GUI.DrawTexture(CalculateTileGuiRect(tileX, tileY), Texture2D.whiteTexture);
 
                         if (tileX == centerTileCoordinate.x && tileY == centerTileCoordinate.y)
@@ -720,7 +754,7 @@ namespace Farmware.WorldGeneration.Presentation
             WorldGenerationSettings settings,
             ResourceGenerationSettings resourceSettings)
         {
-            const int generatedTileInformationLineCount = 17;
+            const int generatedTileInformationLineCount = 19;
             const int waitingInformationLineCount = 1;
             const float bottomPadding = 6f;
             float informationStartY = currentMode == WorldGenerationDebugVisualizationMode.Biome
@@ -761,14 +795,54 @@ namespace Farmware.WorldGeneration.Presentation
                         settings,
                         centerCoordinate.x,
                         centerCoordinate.y);
+                MagmaGenerationDebugInfo magmaInfo =
+                    DeterministicChunkGenerator.GetMagmaGenerationDebugInfo(
+                        centerTile.Elevation,
+                        centerTile.Temperature,
+                        centerTile.Weirdness,
+                        centerTile.Biome,
+                        settings,
+                        centerCoordinate.x,
+                        centerCoordinate.y);
                 string finalState = !rockWallInfo.FinalCandidate
                     ? "Outside"
                     : centerTile.Ground == GroundType.Water
                         ? "Water-suppressed"
+                        : centerTile.Ground == GroundType.Magma
+                            ? "Magma-suppressed"
                         : "Rock";
                 string resourceAnchor = resourceInfo.SelectedType == GeneratedResourceType.None
                     ? "None"
                     : $"({resourceInfo.AnchorTileX}, {resourceInfo.AnchorTileY})";
+                ushort displayedMagmaNoiseThreshold = magmaInfo.UsesRocklandProfile
+                    ? settings.RocklandMagmaNoiseThreshold
+                    : settings.MagmaNoiseThreshold;
+                int displayedMagmaCellSize = magmaInfo.UsesRocklandProfile
+                    ? settings.RocklandMagmaCellSizeInTiles
+                    : settings.MagmaCellSizeInTiles;
+                int displayedMagmaDetailCellSize = magmaInfo.UsesRocklandProfile
+                    ? 0
+                    : settings.MagmaDetailCellSizeInTiles;
+                int displayedMagmaWarpAmplitude = magmaInfo.UsesRocklandProfile
+                    ? 0
+                    : settings.MagmaWarpAmplitudeInTiles;
+                ushort displayedMagmaInfluenceThreshold = magmaInfo.UsesRocklandProfile
+                    ? settings.RocklandMagmaMinimumVolcanicInfluence
+                    : settings.MagmaMinimumVolcanicInfluence;
+                string magmaProfile;
+                if (!magmaInfo.IsEligibleBiome)
+                {
+                    // 対象外バイオームを火山用設定と誤認しないよう、診断HUDへ明示します。
+                    magmaProfile = "Outside";
+                }
+                else if (magmaInfo.UsesRocklandProfile)
+                {
+                    magmaProfile = "Rockland";
+                }
+                else
+                {
+                    magmaProfile = "Volcanic";
+                }
 
                 // 生密度・平滑化後・通路削り・連続影値を同時に表示し、生成規則変更時の食い違いをGameビューだけで診断できます。
                 centerInformation = $"Tile ({centerCoordinate.x}, {centerCoordinate.y})  "
@@ -790,6 +864,14 @@ namespace Farmware.WorldGeneration.Presentation
                     + $"Highland={waterInfo.HighlandInfluence}  Volcanic={waterInfo.VolcanicInfluence}\n"
                     + $"River: Distance={waterInfo.RiverDistanceFromCenterLine} / "
                     + $"{waterInfo.EffectiveRiverHalfWidth}\n"
+                    + $"Magma[{magmaProfile}]: Cell={displayedMagmaCellSize}/{displayedMagmaDetailCellSize}  "
+                    + $"Warp={displayedMagmaWarpAmplitude}  "
+                    + $"Noise={magmaInfo.MagmaSample} / {displayedMagmaNoiseThreshold}  "
+                    + $"Volcanic={magmaInfo.VolcanicInfluence} / {displayedMagmaInfluenceThreshold}\n"
+                    + $"MagmaState: Raw={(magmaInfo.RawMagmaCandidate ? "Yes" : "No")}  "
+                    + $"Eligible={(magmaInfo.IsEligibleBiome ? "Yes" : "No")}  "
+                    + $"Influence={(magmaInfo.IsInfluenceArea ? "Yes" : "No")}  "
+                    + $"Magma={(magmaInfo.IsMagma ? "Yes" : "No")}\n"
                     + $"RockSettings: Mass={settings.RockWallMassCellSizeInTiles}  "
                     + $"Detail={settings.RockWallDetailCellSizeInTiles}  "
                     + $"Warp={settings.RockWallWarpAmplitudeInTiles}  "
@@ -872,6 +954,11 @@ namespace Farmware.WorldGeneration.Presentation
             if (mode == WorldGenerationDebugVisualizationMode.RockWall)
             {
                 return "Rock Wall";
+            }
+
+            if (mode == WorldGenerationDebugVisualizationMode.Magma)
+            {
+                return "Magma";
             }
 
             if (mode == WorldGenerationDebugVisualizationMode.Resources)
@@ -1070,6 +1157,31 @@ namespace Farmware.WorldGeneration.Presentation
                             RockWallAppearanceUtility.MaximumShadowOpacity),
                         "Deep shadow",
                         78f);
+                    break;
+                case WorldGenerationDebugVisualizationMode.Magma:
+                    DrawLegendEntry(
+                        ref nextX,
+                        y,
+                        GetVisualizationColor(mode, new GeneratedTile()),
+                        "Outside",
+                        74f);
+                    DrawLegendEntry(
+                        ref nextX,
+                        y,
+                        GetVisualizationColor(mode, new GeneratedTile(), 0f, GeneratedResourceType.None, true),
+                        "Freshwater suppressed",
+                        142f);
+                    DrawLegendEntry(
+                        ref nextX,
+                        y,
+                        GetVisualizationColor(
+                            mode,
+                            new GeneratedTile { Ground = GroundType.Magma },
+                            0f,
+                            GeneratedResourceType.None,
+                            true),
+                        "Magma",
+                        72f);
                     break;
                 case WorldGenerationDebugVisualizationMode.Resources:
                     DrawLegendEntry(

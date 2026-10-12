@@ -1,4 +1,4 @@
-// このファイルは、PlayMode中のノイズ・バイオーム・水域・岩壁・資源可視化をUnity Editorメニューから切り替えます。
+// このファイルは、PlayMode中のノイズ・バイオーム・水域・マグマ・岩壁・資源可視化をUnity Editorメニューから切り替えます。
 // Editor Assemblyだけに属し、プレイヤー用入力や製品版ビルドへ開発者専用の操作UIを追加しません。
 
 using Farmware.WorldGeneration.Presentation;
@@ -46,6 +46,10 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>岩壁の最終形状と内部影濃度表示へ切り替えるメニューパスです。</summary>
         private const string RockWallMenuPath =
             "Farmware/World Generation/Debug Visualization/Rock Wall";
+
+        /// <summary>マグマ本体と淡水抑制用の火山影響域表示へ切り替えるメニューパスです。</summary>
+        private const string MagmaMenuPath =
+            "Farmware/World Generation/Debug Visualization/Magma";
 
         /// <summary>最低間隔と競合解決後の基礎資源表示へ切り替えるメニューパスです。</summary>
         private const string ResourcesMenuPath =
@@ -121,8 +125,15 @@ namespace Farmware.WorldGeneration.Editor
             SelectMode(WorldGenerationDebugVisualizationMode.RockWall);
         }
 
+        /// <summary>PlayMode中のマグマ本体と周囲の淡水抑制域を固定色で表示します。</summary>
+        [MenuItem(MagmaMenuPath, false, 209)]
+        private static void SelectMagma()
+        {
+            SelectMode(WorldGenerationDebugVisualizationMode.Magma);
+        }
+
         /// <summary>PlayMode中の最終資源配置を木・石・砂の固定色で表示します。</summary>
-        [MenuItem(ResourcesMenuPath, false, 209)]
+        [MenuItem(ResourcesMenuPath, false, 210)]
         private static void SelectResources()
         {
             SelectMode(WorldGenerationDebugVisualizationMode.Resources);
@@ -210,6 +221,14 @@ namespace Farmware.WorldGeneration.Editor
         private static bool ValidateRockWall()
         {
             return ValidateMode(RockWallMenuPath, WorldGenerationDebugVisualizationMode.RockWall);
+        }
+
+        /// <summary>Magma項目の有効状態とチェック表示を更新します。</summary>
+        /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
+        [MenuItem(MagmaMenuPath, true)]
+        private static bool ValidateMagma()
+        {
+            return ValidateMode(MagmaMenuPath, WorldGenerationDebugVisualizationMode.Magma);
         }
 
         /// <summary>Resources項目の有効状態とチェック表示を更新します。</summary>
