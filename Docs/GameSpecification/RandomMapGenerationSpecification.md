@@ -365,6 +365,30 @@ WorldSeed
 - 16×16サブチャンクを土地、静止液面、液面アニメーション、岩壁背面資源、岩壁、通常前面資源、岩壁上資源の共通更新単位とし、同じフレーム予算で7枚のTilemapへ一括反映・消去する。
 - 将来のノード、リンク、搬送アイテム、動物、敵、粒子、選択表示は現在の生成Tilemapへ混在させず、それぞれのPresentation責務と前後関係を決めて追加する。
 
+### 7.10 完成形のタイルマップ・描画レイヤー構成
+
+現在の7枚構成は縦切り試作の実装状態として維持するが、製品向けの完成形では次の5枚をTilemapとして使用する。液面は静止した16差分と、共用できる透明アニメーションを独立させる。これにより、全Base差分へ同じアニメーションフレームを複製せず、遠距離や負荷設定では表面アニメーションだけを停止できる。木・岩などの自然資源、動物、プレイヤー配置設備は、相互に接地点Yで前後関係を解決する必要があるためTilemapへ混在させず、共通のWorld Object Presentationで表示する。
+
+| 表示帯 | Scene上の名前 | 描画方式 | 完成形での責務 |
+|---|---|---|---|
+| Terrain | `Liquid Base Tilemap` | Tilemap / TilemapRenderer | 淡水、海水、マグマの静止した16差分を、論理セルから画面下へ8 px投影する |
+| Terrain | `Liquid Surface Animation Tilemap` | Tilemap / AnimatedTile | Baseと同じ位置へ透明な波紋・明暗の4フレームLoopを重ねる |
+| Terrain | `Ground Tilemap` | Tilemap / TilemapRenderer Individual | 16×24の土地ブロックを表示する |
+| Terrain | `Ground Overlay Tilemap` | Tilemap / TilemapRenderer | プレイヤーが配置する床、道、模様、舗装、耕地など、厚みを持たない地表装飾を土地より前、全立体物より後ろへ表示する |
+| RockWall | `Rock Wall Tilemap` | Tilemap / TilemapRenderer Individual | 16×28の岩壁ブロックを表示する |
+| BehindRockWall | World Object Presentation | 可視範囲だけを生成・再利用するSpriteまたは行単位Batch | 直前方の岩壁に隠れる自然資源、動物、配置設備を表示する |
+| RockWall | `Rock Wall Shadow` | チャンク単位Mesh | 岩壁内部の連続影を表示する |
+| SurfaceObjects | World Object Presentation | 可視範囲だけを生成・再利用するSpriteまたは行単位Batch | 通常の自然資源、動物、配置設備、プレイヤーを共通の接地点Y順で表示する |
+| RaisedSurface | World Object Presentation | 表示位置を基準面より12 px上げる | 岩壁上面に存在できる資源などを表示する |
+| Effects | Placement / Selection Presentation | Sprite、MeshまたはUI | 配置プレビュー、選択輪郭、範囲、稼働エフェクトを表示する |
+
+- `Ground Overlay Tilemap`へ置くのは地表と同じ高さの平面的な装飾だけとする。柵、作業台、機械、樹木など、厚み、状態、アニメーション、複数セル占有を持つものは置かない。
+- 地表装飾の種類、所有者、配置座標、回転、セーブ差分はECSまたはセーブデータを正とし、`Ground Overlay Tilemap`は表示キャッシュとして再構築できるようにする。
+- 地表装飾は`GroundType`、建築可否、経路、資源、配置済み設備を暗黙に変更しない。ゲームルールへ影響する床や耕地は、見た目とは別のComponentで効果を保持する。
+- 同じセルには地表装飾、自然資源、配置設備を仕様上許可された組み合わせで共存させられる。表示順は地表装飾、自然資源、配置設備の順とし、表示の都合で下層の論理データを削除しない。
+- `Liquid Surface Animation Tilemap`のフレームは透明背景の波紋・明暗だけとし、岸に接する外周1 pxとセル境界を全フレームで動かさない。アニメーションを停止または非表示にしても、`Liquid Base Tilemap`だけで液体種別と岸を判別できるようにする。
+- 現在の3枚のResource Tilemapは、完成形のWorld Object Presentationへ段階移行するまでの互換レイヤーとして扱う。移行が実装・検証されるまでは削除しない。
+
 ## 8. 建設可能領域と初期位置選択
 
 開始地点だけ地形や資源を上書きせず、マップ全体の生成規則と配置規則から自然に条件を満たす場所を選ぶ。
