@@ -2,7 +2,7 @@
 
 - 作成日: 2026-10-11
 - 最終更新日: 2026-10-13
-- 対象: ランダムマップ生成の地形・資源と、後続のドローン・開始コア
+- 対象: ランダムマップ生成の地形・資源と、後続のドローン、設備、ベルト、橋、柵、施設表示
 - 関連仕様: [ランダムマップ生成仕様](../GameSpecification/RandomMapGenerationSpecification.md)
 - 関連仕様: [ゲームコンセプト仕様](../GameSpecification/2026-10-11_casual_factory_concept_v0.1.md)
 - 基準解像度: 1タイル = 16×16 px、Gameビュー = 480×270 px
@@ -46,7 +46,7 @@ Editorの構築メニューが `Assets/Farmware/Art/WorldGeneration/Fallback/` �
 
 - [ ] 草原を16差分生成し、12枚の基本差分が十分に静かであることを確認
 - [ ] 4×4に並べた草原だけで、タイル境界と市松模様が見えないことを確認
-- [ ] 木、設備、物流リンク、配置表示を重ねられる背景密度であることを確認
+- [ ] 木、複数タイル設備、ベルト、柵、施設領域表示を重ねられる背景密度であることを確認
 - [ ] 採用した草原画像、Seed、PixelLab設定をマスタースタイルとして制作記録へ登録
 - [ ] 以降の全地形で、採用した草原画像をStyle referenceへ指定
 
@@ -120,8 +120,8 @@ Base地形は合計11種類×16差分の176 Spriteとなる。段階Aの世界�
 - 岩壁は上面16×16 pxと側面16×12 pxを縦に結合した16×28 pxとする。上面16 px：側面12 pxを1：0.75の基準比率とし、Sprite Pivotで基準面から上へ積まれた一段を表す。
 - 通常地面には側面、外周線、タイル境界線、投影影を描かない。
 - 土地と岩壁の前面は全Spriteへ含める。奥側の前面は画面手前側のブロックがYソートで隠し、隣接判定や専用断面Tilemapでは出し分けない。岩壁内部は同じ岩壁Tileの上へPresentationが連続アルファの黒い影Meshを重ねる。
-- 木、岩、設備などは1×1タイルを論理的に占有しても、接地点をセル内へ置いたまま、上部を画面上方向のセルへ視覚的にはみ出してよい。ゲーム上の占有範囲とは分離する。
-- 1×1物体の標準キャンバスは16×24 pxまたは16×32 pxを候補とする。横幅も必要な木や主要設備は24×32 pxまたは32×32 pxを使用できるが、論理占有は別途指定する。
+- 木、岩、1×1設備は、接地点をセル内へ置いたまま、上部を画面上方向のセルへ視覚的にはみ出してよい。複数タイル設備も論理占有範囲と描画範囲を分離し、全占有セルと基準接地点を制作記録へ残す。
+- 1×1物体の標準キャンバスは16×24 pxまたは16×32 pxを候補とする。1×2、2×2などの設備は占有形状に応じた16 px単位の幅を基準とし、上方向へのはみ出しを追加できる。横幅や高さが必要でも、Sprite寸法から論理占有を推測せず別途指定する。
 - 立体物の基準点は、幹、脚、土台などが地面へ接する位置の中央とする。前後関係はこの接地点のワールドY座標で決める。
 - 上方向へのはみ出し量、左右へのはみ出し量、接地点を制作記録へ残す。サブチャンク境界や画面端で欠けないことを検品する。
 
@@ -132,7 +132,7 @@ Base地形は合計11種類×16差分の176 Spriteとなる。段階Aの世界�
 - 配色の基準関係は、草原を明るい自然な緑、海を草原と明確に分離する鮮やかな青、前面断面を両者より暗い暖色の土色とする。個別のRGB値は採用画像から決め、既存作品のパレットをそのまま抽出しない。
 - 1枚のBase Tileでは主色に加えて2〜3段階の近似色を使い、平坦さを抑える。黒に近い輪郭は地形外周や前面断面の下端などシルエットを読む箇所へ限定し、地面模様の一つ一つには付けない。
 - 草原は自然光の下の若草色を基準とし、黄緑へ寄せすぎない緑主体の中高明度・中彩度にする。蛍光ライム、蛍光黄色、白に近い広い色面、全画面へ灰色や茶色を重ねたようなくすんだ色調、暗いオリーブ色、陰鬱な照明は避ける。
-- 明るさは白飛び、蛍光色、高コントラストを意味しない。地面の広い色面を明るく保ち、模様のコントラストと密度を抑えることで、工業設備、資源、物流リンクを読みやすくする。
+- 明るさは白飛び、蛍光色、高コントラストを意味しない。地面の広い色面を明るく保ち、模様のコントラストと密度を抑えることで、工業設備、資源、ベルト、柵を読みやすくする。
 - バイオームは色だけに依存せず、草、落ち葉、砂粒などの模様でも区別する。
 - 同じ地形の差分は平均明度と主色を近づけ、ランダム配置時に市松模様を作らない。
 - 目立つ花、ひび、大石などは通常地面へ大量に焼き込まず、低密度の装飾オーバーレイへ分離する。
@@ -691,13 +691,14 @@ Three separate mineable sand-resource overlays for a top-down 16 by 16 pixel til
 
 ### 7.4 水資源表示
 
-淡水・海水は地形属性そのものを固定資源として扱うため、第1段階では専用オブジェクトを追加しない。採取可能地点と水種別を示す必要が生じた場合は、採取ノードの配置プレビューまたはUIアイコンで示し、常時表示のマーカーを地形へ焼き込まない。
+淡水・海水は地形属性そのものを固定資源として扱うため、第1段階では専用オブジェクトを追加しない。採取可能地点と水種別を示す必要が生じた場合は、採取設備の配置プレビューまたはUIアイコンで示し、常時表示のマーカーを地形へ焼き込まない。
 
 - [ ] 専用スプライト不要であることを実装と確認
 
 ### 7.5 ドローン `player_drone`
 
 - 必要数: 8方向の待機画像、待機4フレーム、移動4フレームを初期値とする
+- 用途: 人型キャラクターの代わりとなる視覚的な作業主体。操作範囲はカメラ内全域であり、ドローンの到着をゲーム処理の条件にはしない
 - PixelLabツール: 基準絵は`Create character`、方向差分は同ツールの8方向生成、動きは`Animate with text`
 - 設定: Canvas `24×32`または`32×32`で比較、Top-downの斜め見下ろし、Transparent background、Outline Thin、Shading Medium、Details Medium
 - Base Prompt（全文をそのまま入力）:
@@ -724,29 +725,31 @@ Create a seamless four-frame movement loop in the current direction. Show a rest
 - [ ] 移動アニメーションを生成
 - [ ] 取込
 - [ ] Animatorまたは表示システムへ設定
+- [ ] 建築、撤去、設定変更、修理、自然資源の手動採取では、共通のライトまたは投影エフェクトを重ね、専用アニメーションを増やさなくても作業対象を判別できる
+- [ ] 連続操作時は最新の対象への追従を優先し、ドローン演出が終わるまで次の操作を待たせない
 - [ ] 全地形とズーム段階で確認
 
 ### 7.6 開始コア `node_starting_core`
 
-- 必要数: 待機4フレーム、稼働4フレーム。占有は1×1タイル、描画枠は24×24または32×32 px
+- 必要数: 待機4フレーム、稼働4フレーム。論理占有は3×3タイル、描画枠は48×56または64×64 px
 - PixelLabツール: 基準絵は`Create object` → `1 direction`、動きは`Animate with text`
 - 設定: Top-downの斜め見下ろし、Transparent background、Outline Thin、Shading Medium、Details Medium
 - Base Prompt（全文をそのまま入力）:
 
 ```text
-A compact starting core machine for a cozy agricultural and industrial automation game, top-down oblique pixel art on an orthogonal square grid, showing its top surface and readable front face. Its base logically occupies one 16 by 16 ground cell while the upper body extends upward into the tile above. Place the ground contact point near the lower center of the canvas. Warm off-white painted metal, muted teal panels, one amber energy window, four readable logical connection sides, friendly repaired technology rather than military machinery, crisp pixel clusters, transparent background. No isometric diamond base, text, logo, weapon, painted ground tile, long shadow, or cable attached.
+A central core machine for a cozy agricultural and industrial automation game, top-down oblique pixel art on an orthogonal square grid, showing its top surface and readable front face. Its square base logically occupies three by three 16-pixel ground cells while the upper body may extend upward beyond the footprint. Place the ground contact area across the lower part of the canvas. Warm off-white painted metal, muted teal panels, one amber energy window, twelve readable flat connection edges around the four sides for adjacent conveyor belts, friendly dormant technology being restored rather than military machinery, crisp pixel clusters, transparent background. No isometric diamond base, text, logo, weapon, painted ground tile, long shadow, or conveyor attached.
 ```
 
 - Idle Animation Prompt（全文をそのまま入力）:
 
 ```text
-Create a subtle seamless four-frame powered idle loop. Animate only a soft amber pulse and one small mechanical breathing motion. Keep the machine footprint, ports, outline, palette, center, and transparent background perfectly stable.
+Create a subtle seamless four-frame powered idle loop. Animate only a soft amber pulse and one small mechanical breathing motion. Keep the machine footprint, connection edges, outline, palette, center, and transparent background perfectly stable.
 ```
 
 - Active Animation Prompt（全文をそのまま入力）:
 
 ```text
-Create a readable seamless four-frame active production loop with a brighter amber pulse and a small rotating or reciprocating top component. Keep all four connection sides, footprint, palette, outline, and center fixed. No sparks, smoke, text, or camera movement.
+Create a readable seamless four-frame active production loop with a brighter amber pulse and a small rotating or reciprocating top component. Keep all connection edges, footprint, palette, outline, and center fixed. No sparks, smoke, text, or camera movement.
 ```
 
 - [ ] 基準絵を生成
@@ -754,7 +757,7 @@ Create a readable seamless four-frame active production loop with a brighter amb
 - [ ] 稼働アニメーションを生成
 - [ ] 取込
 - [ ] Prefabまたは表示定義へ設定
-- [ ] 配置プレビューとポート可読性を確認
+- [ ] 初期スポーンへの固定配置と、外周へ接続する複数ベルトの搬入方向を読み取れることを確認
 
 ## 8. Unityインポート設定
 
@@ -837,7 +840,7 @@ Editor構築ツールとPlayerビルド前処理は、土地7種を`GroundTerrai
 - [x] 液面アニメーションを無効化しても地形分類と岸の位置が変わらない
 - [ ] 平面的な地表装飾を`Ground Overlay Tilemap`へ表示し、土地より前、全立体物より後ろへ描画できる
 - [ ] 地表装飾をECSまたはセーブ差分から再構築でき、Tilemapを配置状態の正にしていない
-- [ ] 論理占有1×1と、上方向へはみ出す描画Boundsを別々に保持できる
+- [ ] 1×1および複数タイルの論理占有と、上方向へはみ出す描画Boundsを別々に保持できる
 - [ ] 画面下側のセルに接地する物体を手前へ描くYソートが機能する
 - [ ] サブチャンクとカメラのカリング範囲が最大描画はみ出し量を含む
 - [ ] 木、石、砂をECS状態からResource Tilemapへ反映できる
@@ -861,7 +864,7 @@ Editor構築ツールとPlayerビルド前処理は、土地7種を`GroundTerrai
 - [ ] 淡水、海水、マグマの4フレームを確認し、外周1 px、土地断面、岩壁側面の位置が動かないことを確認
 - [ ] 液面の波紋が上下に動いて見えても、隣接Tileとの継ぎ目や白いフラッシュが出ないことを確認
 - [ ] 木、石、砂資源を全地形背景に重ね、輪郭を識別できることを確認
-- [ ] 1×1占有物を上下に隣接配置し、上方向へのはみ出しとYソートが自然に見えることを確認
+- [ ] 1×1占有物と複数タイル設備を上下に隣接配置し、上方向へのはみ出しとYソートが自然に見えることを確認
 - [ ] 接地点は画面外だが上部だけ画面内に見える物体が、カリングで消えないことを確認
 - [ ] 立体物が16×16サブチャンク境界をまたいでも欠けないことを確認
 - [ ] ドローン、開始コア、配置可能・不可表示を各地形へ重ねて確認
@@ -884,10 +887,12 @@ Editor構築ツールとPlayerビルド前処理は、土地7種を`GroundTerrai
 - [ ] 小麦、牛など草原固有資源
 - [ ] 硬木、樹液、薬草など森林固有資源
 - [ ] サボテン、塩など砂漠固有資源
-- [ ] 採取機、加工機、保管箱、分配器
-- [ ] 物流リンク、リレー点、搬送アイテム
+- [ ] 1×1および複数タイルの採取設備、加工設備、保管箱、分配設備
+- [ ] 直線・曲がり・分岐・合流ベルト、方向表示、搬送アイテム、水・マグマ用の橋
+- [ ] 柵、壁、扉、通常境界から自動変形する搬入口・搬出口
+- [ ] 不定形施設の領域輪郭、成立・条件不足・境界破損の各表示
 - [ ] 稼働、停止、詰まり、破損の各設備状態
-- [ ] 敵オートマトンと防衛ノード
+- [ ] 敵オートマトンと防衛設備
 - [ ] バイオーム固有の粒子、環境演出、希少資源変異
 
 ## 13. PixelLab参照資料
