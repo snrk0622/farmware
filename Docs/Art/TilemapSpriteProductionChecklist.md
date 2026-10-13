@@ -549,13 +549,15 @@ Gameビューで高さが読めない場合だけ、チャンク単位のMeshま
 
 静止した水・マグマは`Ground Tilemap`から分けた`Liquid Base Tilemap`へ、透明アニメーションは`Liquid Surface Animation Tilemap`へ反映し、両方を画面下へ8 px移動する。16×24土地は`Ground Tilemap`、16×28岩壁は`Rock Wall Tilemap`へ同じ論理座標で反映する。
 
-`Ground Tilemap`と`Rock Wall Tilemap`は、セルごとの重なりをY座標で解決するため`TilemapRenderer.Mode.Individual`を使用する。Sort Orderは`Top Left`とし、画面奥に当たる大きいワールドYから先に描いて、画面手前の小さいワールドYを後から重ねる。別断面Tilemapと画面下側セルの隣接判定は不要である。液体セルではGroundを空にし、土地・岩壁セルでは一体型Spriteの前面が手前側へはみ出す。
+`Ground Tilemap`と`Rock Wall Tilemap`は、セルごとの重なりをY座標で解決するため`TilemapRenderer.Mode.Individual`を使用する。Sort Orderは`Top Left`とし、画面奥に当たる大きいワールドYから先に描いて、画面手前の小さいワールドYを後から重ねる。通常資源は、直前方に当たるワールドYが1小さいセルが岩壁なら`Resource Behind Rock Wall Tilemap`へ置き、岩壁より小さいSorting Orderで先に描く。それ以外は`Resource Tilemap`へ置き、岩壁より大きいSorting Orderで後から描く。これにより遠方の大きな絶対座標を透明ソート値へ使わず、奥の木・石・砂を手前岩壁で隠せる。別断面Tilemapは不要である。液体セルではGroundを空にし、土地・岩壁セルでは一体型Spriteの前面が手前側へはみ出す。
 
-- [ ] Ground、Liquid Base、Liquid Surface Animation、Rock Wall、Resource、Rock Wall Resourceの各Tilemapが分離されている
+- [ ] Ground、Liquid Base、Liquid Surface Animation、Rock Wall、Resource Behind Rock Wall、Resource、Rock Wall Resourceの各Tilemapが分離されている
 - [ ] 静止液面とアニメーションが同じ`-8/16セル`へ移動し、Ground Tilemapの同一論理セルへ液体Tileが重複していない
 - [ ] 移動後の液面上辺と8 px断面下辺に隙間や重なりがない
 - [ ] 液面下辺が手前の土地セルへ重なる場所では、土地上面が前に描かれて液面を隠している
 - [ ] GroundとRock WallがIndividual ModeかつTop Left順で、連続するブロックの奥側前面を手前ブロックが隠している
+- [ ] 直前方が岩壁の通常資源だけがResource Behind Rock Wallへ入り、岩壁より先に描かれて重なる下部が隠れる
+- [ ] それ以外の通常資源がResourceへ入り、岩壁より後に描かれて前面へ見える
 - [ ] 岩壁セルの同じ論理座標にBiome由来の土地ブロックも残っている
 - [ ] 土地16×24と岩壁16×28のはみ出しをTilemapRendererとカリング範囲が含む
 - [ ] チャンクのアンロード時に土地・岩壁を同じサブチャンク単位で消去する
@@ -807,7 +809,7 @@ player_drone_idle_south.png
 node_starting_core_active.png
 ```
 
-現在の`ChunkTilemapPresenter`は、7バイオームの16×24土地を`Ground Tilemap`、淡水・海水・マグマを`Liquid Base Tilemap`へ排他的に表示する。静止液面と透明アニメーションは論理セルを変えず画面下へ8 px移動する。岩壁セルにもBiome由来の土地ブロックを残し、16×28岩壁を`Rock Wall Tilemap`へ同じ論理座標で重ねる。GroundとRock WallはIndividual ModeかつTop Left順でセルごとにYソートし、画面奥を先、手前を後に描いて奥側の断面・側面を手前ブロックで隠す。岩壁の内部影と露出資源は岩壁上面に合わせて12 px上へ表示する。
+現在の`ChunkTilemapPresenter`は、7バイオームの16×24土地を`Ground Tilemap`、淡水・海水・マグマを`Liquid Base Tilemap`へ排他的に表示する。静止液面と透明アニメーションは論理セルを変えず画面下へ8 px移動する。岩壁セルにもBiome由来の土地ブロックを残し、16×28岩壁を`Rock Wall Tilemap`へ同じ論理座標で重ねる。GroundとRock WallはIndividual ModeかつTop Left順でセルごとにYソートし、画面奥を先、手前を後に描いて奥側の断面・側面を手前ブロックで隠す。通常Resourceは直前方の岩壁有無から背面用と前面用の固定Tilemapへ振り分け、遠方座標でも手前岩壁との前後関係を維持する。岩壁の内部影と露出資源は岩壁上面に合わせて12 px上へ表示する。
 
 Editor構築ツールとPlayerビルド前処理は、土地7種を`GroundTerrainAtlas`の1ページ、岩壁を`RockWallAtlas`へ自動登録・再パックする。元TextureをPackableにするため、各PNGを将来4×4へSliceして16差分へ増やしても、同じPNG内の全Spriteが自動的にAtlasへ含まれる。土地が複数ページへ分割された場合は、バイオーム境界の描画順が保証できないためテストまたはビルドを失敗させる。
 
@@ -817,6 +819,7 @@ Editor構築ツールとPlayerビルド前処理は、土地7種を`GroundTerrai
 - [x] 16×24土地TileをGround Tilemapへ同じ論理セル座標で表示・消去できる
 - [x] 16×28岩壁TileをRock Wall Tilemapへ同じ論理セル座標で表示・消去できる
 - [x] GroundとRock WallをIndividual ModeかつTop Left順で描画し、奥側の前面を手前ブロックで隠せる
+- [x] 通常Resourceを直前方の岩壁有無から背面用Order 2と前面用Order 10へ振り分け、奥の資源を手前岩壁で隠せる
 - [x] 土地7種を同じ`GroundTerrainAtlas`ページへ、岩壁を別の`RockWallAtlas`へパックできる
 - [x] 岩壁セルにもBiome由来の土地ブロックを残せる
 - [x] Terrain Front Edge、Rock Wall Front Face、Rock Wall Topの旧TilemapをSceneから削除済みである

@@ -1271,14 +1271,18 @@ namespace Farmware.WorldGeneration.Editor
                 mode: TilemapRenderer.Mode.Individual,
                 sortOrder: TilemapRenderer.SortOrder.TopLeft);
 
+            // 直前方が岩壁の資源だけを壁より先に描き、岩壁Spriteと重なる下部を確実に隠します。
+            // 固定レイヤーへ振り分けるため、無限ワールドの大きな絶対Y座標を透明ソート値に使いません。
+            GameObject resourceBehindRockWallTilemapObject =
+                FindOrCreateDirectChild(gridObject.transform, "Resource Behind Rock Wall Tilemap");
+            Tilemap resourceBehindRockWallTilemap =
+                GetOrAddComponent<Tilemap>(resourceBehindRockWallTilemapObject);
+            ConfigureTilemapRenderer(resourceBehindRockWallTilemapObject, sortingOrder: 2);
+
             GameObject resourceTilemapObject =
                 FindOrCreateDirectChild(gridObject.transform, "Resource Tilemap");
             Tilemap resourceTilemap = GetOrAddComponent<Tilemap>(resourceTilemapObject);
-            TilemapRenderer resourceTilemapRenderer =
-                GetOrAddComponent<TilemapRenderer>(resourceTilemapObject);
-            resourceTilemapRenderer.mode = TilemapRenderer.Mode.Chunk;
-            resourceTilemapRenderer.sortOrder = TilemapRenderer.SortOrder.BottomLeft;
-            resourceTilemapRenderer.sortingOrder = 10;
+            ConfigureTilemapRenderer(resourceTilemapObject, sortingOrder: 10);
 
             GameObject rockWallResourceTilemapObject =
                 FindOrCreateDirectChild(gridObject.transform, "Rock Wall Resource Tilemap");
@@ -1293,6 +1297,7 @@ namespace Farmware.WorldGeneration.Editor
                 presenter,
                 tilemap,
                 resourceTilemap,
+                resourceBehindRockWallTilemap,
                 grasslandTile,
                 forestTile,
                 desertTile,
@@ -1330,7 +1335,8 @@ namespace Farmware.WorldGeneration.Editor
         /// </summary>
         /// <param name="presenter">設定対象のPresentation Componentです。</param>
         /// <param name="tilemap">生成地形だけを表示する専用Tilemapです。</param>
-        /// <param name="resourceTilemap">生成資源だけを表示する専用Tilemapです。</param>
+        /// <param name="resourceTilemap">岩壁に隠れない生成資源を、岩壁より前へ表示する専用Tilemapです。</param>
+        /// <param name="resourceBehindRockWallTilemap">直前方の岩壁に隠す生成資源を、岩壁より後ろへ表示する専用Tilemapです。</param>
         /// <param name="grasslandTile">草原用の単色Tileです。</param>
         /// <param name="forestTile">森林用の単色Tileです。</param>
         /// <param name="desertTile">砂漠用の単色Tileです。</param>
@@ -1356,6 +1362,7 @@ namespace Farmware.WorldGeneration.Editor
             ChunkTilemapPresenter presenter,
             Tilemap tilemap,
             Tilemap resourceTilemap,
+            Tilemap resourceBehindRockWallTilemap,
             TileBase grasslandTile,
             TileBase forestTile,
             TileBase desertTile,
@@ -1395,6 +1402,7 @@ namespace Farmware.WorldGeneration.Editor
                 treeResourceTile,
                 stoneResourceTile,
                 sandResourceTile);
+            presenter.ConfigureResourceOcclusion(resourceBehindRockWallTilemap);
             presenter.ConfigureTerrainEffects(
                 liquidBaseTilemap,
                 liquidAnimationTilemap,
@@ -1722,6 +1730,8 @@ namespace Farmware.WorldGeneration.Editor
             GameObject gridObject = FindOrCreateRoot(mainScene, "World Grid");
             Transform tilemapTransform = gridObject.transform.Find("Ground Tilemap");
             Transform resourceTilemapTransform = gridObject.transform.Find("Resource Tilemap");
+            Transform resourceBehindRockWallTilemapTransform =
+                gridObject.transform.Find("Resource Behind Rock Wall Tilemap");
             Transform liquidBaseTilemapTransform =
                 gridObject.transform.Find("Liquid Base Tilemap");
             Transform liquidAnimationTilemapTransform =
@@ -1772,6 +1782,9 @@ namespace Farmware.WorldGeneration.Editor
                 || resourceTilemapTransform == null
                 || resourceTilemapTransform.GetComponent<Tilemap>() == null
                 || resourceTilemapTransform.GetComponent<TilemapRenderer>() == null
+                || resourceBehindRockWallTilemapTransform == null
+                || resourceBehindRockWallTilemapTransform.GetComponent<Tilemap>() == null
+                || resourceBehindRockWallTilemapTransform.GetComponent<TilemapRenderer>() == null
                 || liquidBaseTilemapTransform == null
                 || liquidBaseTilemapTransform.GetComponent<Tilemap>() == null
                 || liquidBaseTilemapTransform.GetComponent<TilemapRenderer>() == null
@@ -1794,6 +1807,10 @@ namespace Farmware.WorldGeneration.Editor
                     != TilemapRenderer.Mode.Individual
                 || rockWallTilemapTransform.GetComponent<TilemapRenderer>().sortOrder
                     != TilemapRenderer.SortOrder.TopLeft
+                || resourceBehindRockWallTilemapTransform.GetComponent<TilemapRenderer>().sortingOrder
+                    >= rockWallTilemapTransform.GetComponent<TilemapRenderer>().sortingOrder
+                || resourceTilemapTransform.GetComponent<TilemapRenderer>().sortingOrder
+                    <= rockWallTilemapTransform.GetComponent<TilemapRenderer>().sortingOrder
                 || !Mathf.Approximately(
                     rockWallTilemapTransform.localPosition.y,
                     0f)
@@ -1870,6 +1887,7 @@ namespace Farmware.WorldGeneration.Editor
             {
                 "targetTilemap",
                 "resourceTilemap",
+                "resourceBehindRockWallTilemap",
                 "liquidBaseTilemap",
                 "liquidAnimationTilemap",
                 "rockWallTilemap",

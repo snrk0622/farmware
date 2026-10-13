@@ -38,9 +38,13 @@ namespace Farmware.WorldGeneration.Presentation
         [Tooltip("淡水・海水・マグマの基礎Tile専用Tilemapです。Scene側のTransform Yを-8/16セルへ設定してください。")]
         [SerializeField] private Tilemap liquidBaseTilemap;
 
-        // 基礎資源アイコンだけを地形の上へ描画する専用Tilemapです。採取状態の正には使用しません。
-        [Tooltip("木・石・砂の仮アイコンを描画する専用Tilemapです。地形Tilemapより手前のSorting Orderへ設定してください。")]
+        // 岩壁に隠れない通常地面の資源を、岩壁より前へ描画する専用Tilemapです。採取状態の正には使用しません。
+        [Tooltip("通常地面の木・石・砂のうち、直前方に岩壁がない資源を描画する専用Tilemapです。岩壁より前のSorting Orderへ設定してください。")]
         [SerializeField] private Tilemap resourceTilemap;
+
+        // 直前方が岩壁の通常資源だけを岩壁より先に描き、壁Spriteと重なる下部を隠す専用Tilemapです。
+        [Tooltip("直前方のセルが岩壁である通常資源を描画する専用Tilemapです。岩壁より後ろのSorting Orderへ設定してください。")]
+        [SerializeField] private Tilemap resourceBehindRockWallTilemap;
 
         // 水面とマグマ面の透明アニメーションだけを描画し、静止した基礎色やゲーム状態から分離します。
         [Tooltip("淡水・海水・マグマへ透明な4フレームアニメーションを重ねる専用Tilemapです。静止液面と同じ-8px位置へ設定してください。")]
@@ -173,6 +177,9 @@ namespace Farmware.WorldGeneration.Presentation
         // 資源Tilemapへ渡す256要素の再利用配列です。地形配列と分け、透明セルも同時更新します。
         private TileBase[] resourceSubChunkTileBuffer;
 
+        // 手前岩壁に隠す資源Tilemapへ渡す256要素の再利用配列です。遠方座標でも透明ソート値に依存しません。
+        private TileBase[] resourceBehindRockWallSubChunkTileBuffer;
+
         // 8px下げた静止液面Tilemapへ渡す256要素の再利用配列です。土地セルにはnullを設定します。
         private TileBase[] liquidBaseSubChunkTileBuffer;
 
@@ -269,6 +276,15 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
+        /// 直前方の岩壁に隠す通常資源専用Tilemapを設定します。
+        /// </summary>
+        /// <param name="behindRockWallTilemap">岩壁より小さいSorting Orderで描画する資源Tilemapです。</param>
+        public void ConfigureResourceOcclusion(Tilemap behindRockWallTilemap)
+        {
+            resourceBehindRockWallTilemap = behindRockWallTilemap;
+        }
+
+        /// <summary>
         /// Editor構築ツールまたはテストから、低い液面、一体型岩壁、液面アニメーション用の表示レイヤー・Tileを設定します。
         /// ECSのGeneratedTileは変更せず、表示の高さだけを組み立てるPresentation設定を保存します。
         /// </summary>
@@ -306,6 +322,7 @@ namespace Farmware.WorldGeneration.Presentation
             subChunkTileBuffer = new TileBase[tileCount];
             emptySubChunkTileBuffer = new TileBase[tileCount];
             resourceSubChunkTileBuffer = new TileBase[tileCount];
+            resourceBehindRockWallSubChunkTileBuffer = new TileBase[tileCount];
             liquidBaseSubChunkTileBuffer = new TileBase[tileCount];
             liquidAnimationSubChunkTileBuffer = new TileBase[tileCount];
             rockWallSubChunkTileBuffer = new TileBase[tileCount];
@@ -396,6 +413,7 @@ namespace Farmware.WorldGeneration.Presentation
                 if (targetTilemap == null
                     || liquidBaseTilemap == null
                     || resourceTilemap == null
+                    || resourceBehindRockWallTilemap == null
                     || !TryEnsureQueries())
                 {
                     return;
@@ -421,7 +439,10 @@ namespace Farmware.WorldGeneration.Presentation
         /// </summary>
         private void OnDisable()
         {
-            if (targetTilemap != null || liquidBaseTilemap != null || resourceTilemap != null)
+            if (targetTilemap != null
+                || liquidBaseTilemap != null
+                || resourceTilemap != null
+                || resourceBehindRockWallTilemap != null)
             {
                 coordinateScratch.Clear();
                 foreach (ChunkCoordinate coordinate in displayedCoordinates)
@@ -763,9 +784,31 @@ namespace Farmware.WorldGeneration.Presentation
                         RockWallAppearanceUtility.ShouldDisplayResource(rockWallAppearance)
                             ? SelectResourceTile(resources[sourceIndex])
                             : null;
-                    resourceSubChunkTileBuffer[destinationIndex] = isRockWall
-                        ? null
-                        : selectedResource;
+                    // TilemapRendererの行順は別Tilemap間を交互に並べないため、遠方座標でも確実な固定レイヤーへ振り分けます。
+                    // 画面手前はワールドYが小さい方向なので、直下1セルが岩壁なら資源を壁より先に描いて重なる部分を隠します。
+                    bool isBehindFrontRockWall = false;
+                    if (!isRockWall && selectedResource != null)
+                    {
+                        GeneratedTile frontTerrainTile = GetGeneratedTile(
+                            coordinate,
+                            tileLocalX,
+                            tileLocalY - 1,
+                            tiles,
+                            generationSettings);
+                        isBehindFrontRockWall =
+                            TerrainLayerPresentationUtility.ShouldRenderResourceBehindRockWall(
+                                resources[sourceIndex],
+                                tile,
+                                frontTerrainTile);
+                    }
+                    resourceSubChunkTileBuffer[destinationIndex] = !isRockWall
+                        && !isBehindFrontRockWall
+                            ? selectedResource
+                            : null;
+                    resourceBehindRockWallSubChunkTileBuffer[destinationIndex] =
+                        isBehindFrontRockWall
+                            ? selectedResource
+                            : null;
                     rockWallResourceSubChunkTileBuffer[destinationIndex] = isRockWall
                         ? selectedResource
                         : null;
@@ -776,6 +819,9 @@ namespace Farmware.WorldGeneration.Presentation
             targetTilemap.SetTilesBlock(bounds, subChunkTileBuffer);
             liquidBaseTilemap.SetTilesBlock(bounds, liquidBaseSubChunkTileBuffer);
             resourceTilemap.SetTilesBlock(bounds, resourceSubChunkTileBuffer);
+            resourceBehindRockWallTilemap.SetTilesBlock(
+                bounds,
+                resourceBehindRockWallSubChunkTileBuffer);
             if (liquidAnimationTilemap != null)
             {
                 liquidAnimationTilemap.SetTilesBlock(bounds, liquidAnimationSubChunkTileBuffer);
@@ -814,6 +860,11 @@ namespace Farmware.WorldGeneration.Presentation
             if (resourceTilemap != null)
             {
                 resourceTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
+            }
+
+            if (resourceBehindRockWallTilemap != null)
+            {
+                resourceBehindRockWallTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
             }
 
             if (liquidBaseTilemap != null)

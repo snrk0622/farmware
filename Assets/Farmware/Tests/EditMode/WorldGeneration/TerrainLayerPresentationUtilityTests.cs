@@ -1,4 +1,4 @@
-// このファイルは、一体型の土地・岩壁Spriteと液面アニメーションに共通する表示寸法をSceneなしのEditModeで検証します。
+// このファイルは、一体型の土地・岩壁Sprite、液面アニメーション、岩壁際の資源レイヤー分類をSceneなしのEditModeで検証します。
 // ChunkTilemapPresenterとEditor構築ツールが同じ定数を使い、Pivotや表示高がずれないことを素早く保証します。
 
 using Farmware.WorldGeneration.Presentation;
@@ -7,7 +7,7 @@ using NUnit.Framework;
 namespace Farmware.WorldGeneration.Tests
 {
     /// <summary>
-    /// 16×24土地、16×28岩壁、8px低い液面の寸法規則と液面分類を保証します。
+    /// 16×24土地、16×28岩壁、8px低い液面の寸法規則、液面分類、岩壁際の資源描画分類を保証します。
     /// </summary>
     public sealed class TerrainLayerPresentationUtilityTests
     {
@@ -82,6 +82,50 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(
                 TerrainLayerPresentationUtility.ClassifyLiquidAnimation(land),
                 Is.EqualTo(LiquidAnimationKind.None));
+        }
+
+        /// <summary>
+        /// 通常地面の資源だけが、画面手前方向の隣接岩壁によって背面レイヤーへ振り分けられることを検証します。
+        /// </summary>
+        [Test]
+        public void ShouldRenderResourceBehindRockWall_RequiresResourceOnLandAndFrontWall()
+        {
+            GeneratedResourceTile tree = new GeneratedResourceTile
+            {
+                Type = GeneratedResourceType.Tree
+            };
+            GeneratedResourceTile noResource = default;
+            GeneratedTile land = new GeneratedTile { Ground = GroundType.Normal };
+            GeneratedTile rockWall = new GeneratedTile { Ground = GroundType.RockWall };
+
+            Assert.That(
+                TerrainLayerPresentationUtility.ShouldRenderResourceBehindRockWall(
+                    tree,
+                    land,
+                    rockWall),
+                Is.True,
+                "通常地面の木は、直前方の岩壁より後ろへ描画する必要があります。");
+            Assert.That(
+                TerrainLayerPresentationUtility.ShouldRenderResourceBehindRockWall(
+                    tree,
+                    land,
+                    land),
+                Is.False,
+                "直前方が通常地面なら、資源を岩壁背面レイヤーへ移してはいけません。");
+            Assert.That(
+                TerrainLayerPresentationUtility.ShouldRenderResourceBehindRockWall(
+                    noResource,
+                    land,
+                    rockWall),
+                Is.False,
+                "資源のないセルを背面レイヤーへ分類してはいけません。");
+            Assert.That(
+                TerrainLayerPresentationUtility.ShouldRenderResourceBehindRockWall(
+                    tree,
+                    rockWall,
+                    rockWall),
+                Is.False,
+                "岩壁上資源は高さ12pxの専用レイヤーを使うため、通常資源の背面レイヤーへ分類してはいけません。");
         }
 
     }

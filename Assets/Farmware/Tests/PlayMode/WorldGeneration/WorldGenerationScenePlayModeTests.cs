@@ -422,6 +422,15 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 ? null
                 : resourceTilemapObject.GetComponent<Tilemap>();
             Assert.That(resourceTilemap, Is.Not.Null, "SampleSceneに資源表示用Resource Tilemapがありません。");
+            GameObject resourceBehindRockWallTilemapObject =
+                GameObject.Find("World Grid/Resource Behind Rock Wall Tilemap");
+            Tilemap resourceBehindRockWallTilemap = resourceBehindRockWallTilemapObject == null
+                ? null
+                : resourceBehindRockWallTilemapObject.GetComponent<Tilemap>();
+            Assert.That(
+                resourceBehindRockWallTilemap,
+                Is.Not.Null,
+                "SampleSceneに手前岩壁で隠す資源専用Tilemapがありません。");
             GameObject liquidBaseTilemapObject =
                 GameObject.Find("World Grid/Liquid Base Tilemap");
             Tilemap liquidBaseTilemap = liquidBaseTilemapObject == null
@@ -496,11 +505,19 @@ namespace Farmware.WorldGeneration.PlayModeTests
             // 液面の下半分を手前土地で隠す前後関係はTransform位置だけでは決まらないため、Rendererの描画順もScene実体から確認します。
             TilemapRenderer groundRenderer = tilemap.GetComponent<TilemapRenderer>();
             TilemapRenderer rockWallRenderer = rockWallTilemap.GetComponent<TilemapRenderer>();
+            TilemapRenderer resourceRenderer = resourceTilemap.GetComponent<TilemapRenderer>();
+            TilemapRenderer resourceBehindRockWallRenderer =
+                resourceBehindRockWallTilemap.GetComponent<TilemapRenderer>();
             TilemapRenderer liquidBaseRenderer = liquidBaseTilemap.GetComponent<TilemapRenderer>();
             TilemapRenderer liquidAnimationRenderer =
                 liquidAnimationTilemap.GetComponent<TilemapRenderer>();
             Assert.That(groundRenderer, Is.Not.Null, "Ground TilemapにTilemapRendererがありません。");
             Assert.That(rockWallRenderer, Is.Not.Null, "Rock Wall TilemapにTilemapRendererがありません。");
+            Assert.That(resourceRenderer, Is.Not.Null, "Resource TilemapにTilemapRendererがありません。");
+            Assert.That(
+                resourceBehindRockWallRenderer,
+                Is.Not.Null,
+                "Resource Behind Rock Wall TilemapにTilemapRendererがありません。");
             Assert.That(
                 groundRenderer.mode,
                 Is.EqualTo(TilemapRenderer.Mode.Individual),
@@ -517,6 +534,14 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 rockWallRenderer.sortOrder,
                 Is.EqualTo(TilemapRenderer.SortOrder.TopLeft),
                 "16×28岩壁は奥の高いYから先に描き、手前の低いYを後から重ねてください。");
+            Assert.That(
+                resourceBehindRockWallRenderer.sortingOrder,
+                Is.LessThan(rockWallRenderer.sortingOrder),
+                "直前方が岩壁の通常資源は、岩壁より先に描いて重なる下部を隠してください。");
+            Assert.That(
+                resourceRenderer.sortingOrder,
+                Is.GreaterThan(rockWallRenderer.sortingOrder),
+                "岩壁に隠れない通常資源は、岩壁より後から描いて前面へ表示してください。");
             Assert.That(
                 liquidBaseRenderer,
                 Is.Not.Null,
@@ -648,6 +673,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                             originalChunkEntity,
                             initialSpawnChunk,
                             resourceTilemap,
+                            resourceBehindRockWallTilemap,
                             out originalResourceCell))
                     {
                         initialLoadCompleted = true;
@@ -749,7 +775,9 @@ namespace Farmware.WorldGeneration.PlayModeTests
                         initialSpawnLocation.TileX,
                         initialSpawnLocation.TileY,
                         0)) == null;
-                bool originalResourceWasCleared = resourceTilemap.GetTile(originalResourceCell) == null;
+                bool originalResourceWasCleared =
+                    resourceTilemap.GetTile(originalResourceCell) == null
+                    && resourceBehindRockWallTilemap.GetTile(originalResourceCell) == null;
                 bool farChunkIsActive = TryGetActiveCompleteChunk(
                     world.EntityManager,
                     chunkQuery,
@@ -831,8 +859,9 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 regeneratedResources[WorldGridConstants.TilesPerChunk - 1],
                 WorldGridConstants.TilesPerChunk - 1);
             Assert.That(
-                resourceTilemap.GetTile(originalResourceCell),
-                Is.Not.Null,
+                resourceTilemap.GetTile(originalResourceCell) != null
+                    || resourceBehindRockWallTilemap.GetTile(originalResourceCell) != null,
+                Is.True,
                 "原点へ戻った後、決定論的に再生成された資源アイコンが再表示される必要があります。");
 
             // 初期スポーン周辺は安全な陸地として選ばれるため、水が偶然あることへ依存せず、生成規則から液体セルを探して表示先へ移動します。
@@ -993,12 +1022,13 @@ namespace Farmware.WorldGeneration.PlayModeTests
         }
 
         /// <summary>
-        /// 指定チャンクの資源Bufferから最初の配置済みセルを探し、Resource Tilemapにも同じワールドセルが表示されたか確認します。
+        /// 指定チャンクの資源Bufferから最初の配置済みセルを探し、前面または岩壁背面のResource Tilemapへ表示されたか確認します。
         /// </summary>
         /// <param name="entityManager">Default WorldのEntityManagerです。</param>
         /// <param name="chunkEntity">検査対象チャンクを表す完全生成済みEntityです。</param>
         /// <param name="chunkCoordinate">ローカルBuffer Indexをワールドセルへ戻す論理チャンク座標です。</param>
-        /// <param name="resourceTilemap">資源だけを重ね描画するTilemapです。</param>
+        /// <param name="resourceTilemap">岩壁に隠れない資源を重ね描画するTilemapです。</param>
+        /// <param name="resourceBehindRockWallTilemap">直前方の岩壁に隠す資源を描画するTilemapです。</param>
         /// <param name="resourceCell">成功時に、表示済み資源のワールドセル座標を返します。</param>
         /// <returns>配置済み資源が1件以上あり、そのTileが表示済みならtrueです。</returns>
         private static bool TryGetDisplayedResourceCell(
@@ -1006,6 +1036,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Entity chunkEntity,
             ChunkCoordinate chunkCoordinate,
             Tilemap resourceTilemap,
+            Tilemap resourceBehindRockWallTilemap,
             out Vector3Int resourceCell)
         {
             DynamicBuffer<GeneratedResourceTile> resources =
@@ -1025,7 +1056,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     WorldGrid.ToWorldTileX(chunkCoordinate.X, localX),
                     WorldGrid.ToWorldTileY(chunkCoordinate.Y, localY),
                     0);
-                return resourceTilemap.GetTile(resourceCell) != null;
+                return resourceTilemap.GetTile(resourceCell) != null
+                    || resourceBehindRockWallTilemap.GetTile(resourceCell) != null;
             }
 
             resourceCell = default;

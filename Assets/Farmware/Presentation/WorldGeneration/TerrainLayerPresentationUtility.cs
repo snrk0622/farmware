@@ -1,4 +1,4 @@
-// このファイルは、16×24の土地ブロック、16×28の岩壁ブロック、液面アニメーションに共通する表示寸法を定義します。
+// このファイルは、16×24の土地ブロック、16×28の岩壁ブロック、液面アニメーション、岩壁際の資源レイヤー分類に共通する表示規則を定義します。
 // Tilemapへ実際に描画するChunkTilemapPresenterと数値を分離し、Sceneを開かないEditModeテストでも高さ規則を検証できるようにします。
 
 namespace Farmware.WorldGeneration.Presentation
@@ -23,7 +23,7 @@ namespace Farmware.WorldGeneration.Presentation
     }
 
     /// <summary>
-    /// 一体型ブロックSpriteの寸法と、GeneratedTileに対応する液面オーバーレイを定義します。
+    /// 一体型ブロックSpriteの寸法、液面オーバーレイ、岩壁際の通常資源を固定描画レイヤーへ振り分ける規則を定義します。
     /// すべて純粋計算であり、ECSデータ、Tilemap、アセットを変更しません。
     /// </summary>
     public static class TerrainLayerPresentationUtility
@@ -112,6 +112,23 @@ namespace Farmware.WorldGeneration.Presentation
             return tile.WaterSalinity == WaterSalinity.FreshWater
                 ? LiquidAnimationKind.FreshWater
                 : LiquidAnimationKind.SaltWater;
+        }
+
+        /// <summary>
+        /// 通常地面の資源を、直前方にある岩壁より後ろへ描画する必要があるか判定します。
+        /// </summary>
+        /// <param name="resourceTile">現在セルの資源データです。配置なしなら背面へ分けません。</param>
+        /// <param name="currentTerrainTile">資源の接地セルです。岩壁上資源は専用レイヤーを使うため対象外です。</param>
+        /// <param name="frontTerrainTile">画面手前方向に隣接する、ワールドYが1小さいセルです。</param>
+        /// <returns>通常地面に資源があり、直前方が岩壁ならtrueです。</returns>
+        public static bool ShouldRenderResourceBehindRockWall(
+            GeneratedResourceTile resourceTile,
+            GeneratedTile currentTerrainTile,
+            GeneratedTile frontTerrainTile)
+        {
+            return resourceTile.Type != GeneratedResourceType.None
+                && currentTerrainTile.Ground != GroundType.RockWall
+                && frontTerrainTile.Ground == GroundType.RockWall;
         }
 
     }

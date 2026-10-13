@@ -25,7 +25,7 @@
 - 上面16pxと側面12pxを結合した16×28岩壁Tile、淡水・海水・マグマ各4枚の透明フレームとAnimatedTileを生成または更新する。Sprite PivotはSprite Editor Data Provider経由で設定する。
 - 土地7種を同じTextureページへ収める`GroundTerrainAtlas.spriteatlasv2`と、岩壁用の`RockWallAtlas.spriteatlasv2`を生成または更新し、現在のBuild Target向けにパックする。
 - `WorldGenerationSettingsSubScene`へ生成設定のAuthoringを配置する。
-- `SampleScene`へCamera、Grid、Ground・静止液面・液面アニメーション・岩壁・通常資源・岩壁上資源の6枚のTilemap、表示用Component、SubScene参照を接続する。静止液面と液面アニメーションは土地より8px下、岩壁上資源は土地基準面より12px上へ設定する。GroundとRock WallはIndividual ModeかつTop Left順で描画し、画面奥から手前へ重ねる。
+- `SampleScene`へCamera、Grid、Ground・静止液面・液面アニメーション・岩壁・岩壁背面資源・通常前面資源・岩壁上資源の7枚のTilemap、表示用Component、SubScene参照を接続する。静止液面と液面アニメーションは土地より8px下、岩壁上資源は土地基準面より12px上へ設定する。GroundとRock WallはIndividual ModeかつTop Left順で描画する。通常資源は直前方の岩壁有無からOrder 2の背面用TilemapとOrder 10の前面用Tilemapへ振り分け、遠方座標でも岩壁との前後関係を固定レイヤーで保証する。
 - Pixel Perfect Cameraの基準解像度480×270を含む、再現可能な確認環境を構築する。
 
 #### 実行後の注意
@@ -46,7 +46,7 @@
 1. Consoleに例外または新規警告が出ていない。
 2. 必要なPNG、Tile、AnimatedTile、Sprite Atlas、`.meta`が揃っている。全土地Spriteが`GroundTerrainAtlas`の同じパック後Textureを参照し、岩壁が`RockWallAtlas`へ分離されている。
 3. SampleSceneとSubSceneの参照がMissingになっていない。
-4. PlayModeで土地が16×24、岩壁が16×28の一体型ブロックとして表示される。静止液面と透明アニメーションは同じ8px下、岩壁内部影・露出資源は12px上へ表示される。液体はGround Tilemapへ重複せず、液面下辺と奥側ブロックの断面・側面は手前ブロックに隠れる。岩壁セルでも下層の土地断面が欠けない。
+4. PlayModeで土地が16×24、岩壁が16×28の一体型ブロックとして表示される。静止液面と透明アニメーションは同じ8px下、岩壁内部影・露出資源は12px上へ表示される。液体はGround Tilemapへ重複せず、液面下辺と奥側ブロックの断面・側面は手前ブロックに隠れる。岩壁セルでも下層の土地断面が欠けない。直前方が岩壁の通常資源は背面用Tilemapへ入り岩壁に隠れ、それ以外は前面用Tilemapへ入って岩壁より前に見える。
 5. Gameビューの地形描画領域が480×270基準の黒帯内へ収まり、HUDとF4表示も同じ領域を使用する。
 
 ### 2.2 World Generation Sprite Atlas Prebuild
