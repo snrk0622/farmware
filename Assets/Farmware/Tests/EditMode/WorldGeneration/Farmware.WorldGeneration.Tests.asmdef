@@ -5,6 +5,7 @@
     "Farmware.WorldGeneration.Runtime",
     "Farmware.WorldGeneration.Authoring",
     "Farmware.WorldGeneration.Editor",
+    "Farmware.WorldGeneration.Presentation",
     "Unity.Collections",
     "Unity.Entities",
     "Unity.Mathematics"

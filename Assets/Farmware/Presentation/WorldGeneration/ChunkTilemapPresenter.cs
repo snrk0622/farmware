@@ -1,4 +1,4 @@
-// このファイルは、ECSで生成済みの地形・資源チャンクデータを16×16サブチャンク単位でTilemapへ反映・消去します。
+// このファイルは、ECSで生成済みの地形・資源チャンクデータを、高さ別の地面・液面・断面を含む複数Tilemapへ16×16サブチャンク単位で反映・消去します。
 // Tilemapは表示専用キャッシュであり、地形はGeneratedTile、資源はGeneratedResourceTileをゲーム状態の正として参照します。
 
 using System.Collections.Generic;
@@ -30,13 +30,37 @@ namespace Farmware.WorldGeneration.Presentation
         // URP固有Shaderが見つからない場合にも、黒い頂点色を透明合成できる標準Sprite Shader名です。
         private const string FallbackRockWallShadowShaderName = "Sprites/Default";
 
-        // 地形だけを描画する専用Tilemapです。このComponentは担当範囲のセルを書き換えます。
-        [Tooltip("生成地形を描画する専用Tilemapです。このComponentが表示・消去するため、手描きタイルとは分けてください。")]
+        // 土地の基準面だけを描画する専用Tilemapです。液体は半セル下げる必要があるため別Tilemapへ分けます。
+        [Tooltip("水・マグマを除く生成地形を描画する専用Tilemapです。このComponentが表示・消去するため、手描きタイルとは分けてください。")]
         [SerializeField] private Tilemap targetTilemap;
+
+        // 水・マグマの静止した基礎色を描画し、論理セルは変えずに表示だけ8px下げます。
+        [Tooltip("淡水・海水・マグマの基礎Tile専用Tilemapです。Scene側のTransform Yを-8/16セルへ設定してください。")]
+        [SerializeField] private Tilemap liquidBaseTilemap;
 
         // 基礎資源アイコンだけを地形の上へ描画する専用Tilemapです。採取状態の正には使用しません。
         [Tooltip("木・石・砂の仮アイコンを描画する専用Tilemapです。地形Tilemapより手前のSorting Orderへ設定してください。")]
         [SerializeField] private Tilemap resourceTilemap;
+
+        // 水面とマグマ面の透明アニメーションだけを描画し、静止した基礎色やゲーム状態から分離します。
+        [Tooltip("淡水・海水・マグマへ透明な4フレームアニメーションを重ねる専用Tilemapです。静止液面と同じ-8px位置へ設定してください。")]
+        [SerializeField] private Tilemap liquidAnimationTilemap;
+
+        // 通常地形の手前が水またはマグマの場合だけ、土・砂・岩・雪の直線的な断面を描画します。
+        [Tooltip("水・マグマへ落ちる通常地形の手前断面だけを描画する専用Tilemapです。オートタイルには使用しません。")]
+        [SerializeField] private Tilemap terrainFrontEdgeTilemap;
+
+        // 岩壁の手前が岩壁でない場合だけ、通常地形の断面より高い側面を描画します。
+        [Tooltip("岩壁の最前列へ直線的な側面だけを描画する専用Tilemapです。岩壁内部の影とは別レイヤーです。")]
+        [SerializeField] private Tilemap rockWallFrontFaceTilemap;
+
+        // 岩壁上面だけを土地基準面より12px上へ描画し、液面の-8px投影とは独立した上段を表します。
+        [Tooltip("岩壁上面を基準面より12px上へ表示する専用Tilemapです。Scene側のTransform Yも12/16セルへ設定してください。")]
+        [SerializeField] private Tilemap rockWallTopTilemap;
+
+        // 岩壁上に生成された資源だけを上面と同じ高さへ持ち上げ、側面へ埋まる表示を防ぎます。
+        [Tooltip("露出した岩壁上の資源を岩壁上面と同じ12px上へ表示する専用Tilemapです。ゲーム状態の正には使用しません。")]
+        [SerializeField] private Tilemap rockWallResourceTilemap;
 
         // 草原の通常地面へ使用する表示専用Tileです。ゲームルール判定には使いません。
         [Tooltip("草原バイオームの通常地面に表示するTileです。未指定の場合、そのセルは空表示になります。")]
@@ -79,9 +103,41 @@ namespace Farmware.WorldGeneration.Presentation
         [Tooltip("海の海水域に表示するTileです。採水種別はECSデータで判定し、この参照には依存しません。")]
         [SerializeField] private TileBase saltWaterTile;
 
-        // GroundType.RockWallの全セルへ共通で使用し、内部の暗さは別の連続グラデーションメッシュで後付けします。
-        [Tooltip("すべての岩壁に表示する共通Tileです。内部の暗さは別Tileやセル色ではなく影メッシュで後付けし、建築・リンク遮断判定はECSデータで行います。")]
+        // GroundType.RockWallの全セルへ、専用Tilemapで12px持ち上げて表示する共通上面Tileです。
+        [Tooltip("すべての岩壁上面に表示する共通Tileです。専用Tilemapで12px持ち上げ、内部の暗さは影メッシュで後付けします。")]
         [SerializeField] private TileBase rockWallTile;
+
+        // 草原・森林・湿地の通常地形から低地へ落ちる位置に使用する土断面Tileです。
+        [Tooltip("草原・森林・湿地の手前が水またはマグマの場合に重ねる、表示専用の土断面Tileです。")]
+        [SerializeField] private TileBase soilFrontEdgeTile;
+
+        // 砂漠または砂地から低地へ落ちる位置に使用する砂断面Tileです。
+        [Tooltip("砂漠または砂地の手前が水またはマグマの場合に重ねる、表示専用の砂断面Tileです。")]
+        [SerializeField] private TileBase sandFrontEdgeTile;
+
+        // 岩地・火山の通常地形から低地へ落ちる位置に使用する岩断面Tileです。
+        [Tooltip("岩地・火山の手前が水またはマグマの場合に重ねる、表示専用の岩断面Tileです。")]
+        [SerializeField] private TileBase rockFrontEdgeTile;
+
+        // 雪原の通常地形から低地へ落ちる位置に使用する雪断面Tileです。
+        [Tooltip("雪原の手前が水またはマグマの場合に重ねる、表示専用の雪断面Tileです。")]
+        [SerializeField] private TileBase snowFrontEdgeTile;
+
+        // 岩壁の最前列へ重ね、地面断面より高い岩の側面を表すTileです。
+        [Tooltip("手前が岩壁ではない岩壁セルへ重ねる、表示専用の岩壁側面Tileです。")]
+        [SerializeField] private TileBase rockWallFrontFaceTile;
+
+        // 淡水セルへ重ねる透明なAnimatedTileです。基礎のFreshWater Tileは下層に残します。
+        [Tooltip("淡水セルへ重ねる透明なAnimatedTileです。未設定なら淡水は静止表示のままです。")]
+        [SerializeField] private TileBase freshWaterAnimationTile;
+
+        // 海水セルへ重ねる透明なAnimatedTileです。基礎のSaltWater Tileは下層に残します。
+        [Tooltip("海水セルへ重ねる透明なAnimatedTileです。未設定なら海水は静止表示のままです。")]
+        [SerializeField] private TileBase saltWaterAnimationTile;
+
+        // マグマセルへ重ねる透明なAnimatedTileです。基礎のMagma Tileは下層に残します。
+        [Tooltip("マグマセルへ重ねる透明なAnimatedTileです。未設定ならマグマは静止表示のままです。")]
+        [SerializeField] private TileBase magmaAnimationTile;
 
         // GeneratedResourceType.Treeへ使用する透明背景の表示専用Tileです。
         [Tooltip("樹木資源に表示する仮Tileです。資源の種類と存在はECSバッファを正とします。")]
@@ -144,6 +200,24 @@ namespace Farmware.WorldGeneration.Presentation
         // 資源Tilemapへ渡す256要素の再利用配列です。地形配列と分け、透明セルも同時更新します。
         private TileBase[] resourceSubChunkTileBuffer;
 
+        // 8px下げた静止液面Tilemapへ渡す256要素の再利用配列です。土地セルにはnullを設定します。
+        private TileBase[] liquidBaseSubChunkTileBuffer;
+
+        // 液面アニメーションTilemapへ渡す256要素の再利用配列です。通常地形セルにはnullを設定します。
+        private TileBase[] liquidAnimationSubChunkTileBuffer;
+
+        // 通常地形の手前断面Tilemapへ渡す256要素の再利用配列です。低地へ接しないセルにはnullを設定します。
+        private TileBase[] terrainFrontEdgeSubChunkTileBuffer;
+
+        // 岩壁側面Tilemapへ渡す256要素の再利用配列です。最前列でない岩壁にはnullを設定します。
+        private TileBase[] rockWallFrontFaceSubChunkTileBuffer;
+
+        // 岩壁セルだけへ上面Tileを置く256要素の再利用配列です。基準面の地形はGround Tilemapへ残します。
+        private TileBase[] rockWallTopSubChunkTileBuffer;
+
+        // 露出した岩壁上の資源だけを12px上へ描画する256要素の再利用配列です。
+        private TileBase[] rockWallResourceSubChunkTileBuffer;
+
         // 表示済みチャンクへ重ねた影GameObjectとMeshを座標別に保持し、アンロード時に同じ単位で破棄します。
         private readonly Dictionary<ChunkCoordinate, RockWallShadowChunkPresentation>
             rockWallShadowByCoordinate =
@@ -175,7 +249,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// Editor構築ツールまたはテストから、地形・資源Tilemapと分類ごとの表示Tileをまとめて設定します。
         /// ゲームルールは変更せず、ECSバッファをどのTileBaseで見せるかだけを更新します。
         /// </summary>
-        /// <param name="terrainTilemap">生成地形だけを描画する専用Tilemapです。</param>
+        /// <param name="terrainTilemap">水・マグマを除く生成地形だけを描画する専用Tilemapです。</param>
         /// <param name="generatedResourceTilemap">生成資源だけを描画する専用Tilemapです。</param>
         /// <param name="grassland">草原バイオームの通常地面に表示するTileです。</param>
         /// <param name="forest">森林バイオームの地面に表示するTileです。</param>
@@ -187,7 +261,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="magma">GroundType.Magmaの全セルに表示するTileです。</param>
         /// <param name="freshWater">淡水の川と池に表示するTileです。</param>
         /// <param name="saltWater">海水の海に表示するTileです。</param>
-        /// <param name="rockWall">GroundType.RockWallの全セルに表示する共通Tileです。</param>
+        /// <param name="rockWall">GroundType.RockWallの全セルで、専用上面Tilemapへ表示する共通Tileです。</param>
         /// <param name="treeResource">樹木資源に表示するTileです。</param>
         /// <param name="stoneResource">石資源に表示するTileです。</param>
         /// <param name="sandResource">砂資源に表示するTileです。</param>
@@ -228,6 +302,56 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
+        /// Editor構築ツールまたはテストから、低い液面、手前断面、液面アニメーション用の表示レイヤー・Tileを設定します。
+        /// ECSのGeneratedTileは変更せず、隣接セルから追加表示を組み立てるPresentation設定だけを保存します。
+        /// </summary>
+        /// <param name="baseLiquidTilemap">淡水・海水・マグマの静止した基礎Tile専用Tilemapです。</param>
+        /// <param name="animatedLiquidTilemap">淡水・海水・マグマの透明アニメーション専用Tilemapです。</param>
+        /// <param name="frontEdgeTilemap">通常地形から低地へ落ちる手前断面専用Tilemapです。</param>
+        /// <param name="rockFrontFaceTilemap">岩壁最前列の側面専用Tilemapです。</param>
+        /// <param name="raisedRockWallTopTilemap">岩壁上面を12px持ち上げる専用Tilemapです。</param>
+        /// <param name="raisedRockWallResourceTilemap">露出した岩壁上の資源を12px持ち上げる専用Tilemapです。</param>
+        /// <param name="soilFrontEdge">草原・森林・湿地へ使用する土断面Tileです。</param>
+        /// <param name="sandFrontEdge">砂漠・砂地へ使用する砂断面Tileです。</param>
+        /// <param name="rockFrontEdge">岩地・火山へ使用する岩断面Tileです。</param>
+        /// <param name="snowFrontEdge">雪原へ使用する雪断面Tileです。</param>
+        /// <param name="rockWallFrontFace">岩壁の最前列へ使用する側面Tileです。</param>
+        /// <param name="freshWaterAnimation">淡水へ重ねる透明AnimatedTileです。</param>
+        /// <param name="saltWaterAnimation">海水へ重ねる透明AnimatedTileです。</param>
+        /// <param name="magmaAnimation">マグマへ重ねる透明AnimatedTileです。</param>
+        public void ConfigureTerrainEffects(
+            Tilemap baseLiquidTilemap,
+            Tilemap animatedLiquidTilemap,
+            Tilemap frontEdgeTilemap,
+            Tilemap rockFrontFaceTilemap,
+            Tilemap raisedRockWallTopTilemap,
+            Tilemap raisedRockWallResourceTilemap,
+            TileBase soilFrontEdge,
+            TileBase sandFrontEdge,
+            TileBase rockFrontEdge,
+            TileBase snowFrontEdge,
+            TileBase rockWallFrontFace,
+            TileBase freshWaterAnimation,
+            TileBase saltWaterAnimation,
+            TileBase magmaAnimation)
+        {
+            liquidBaseTilemap = baseLiquidTilemap;
+            liquidAnimationTilemap = animatedLiquidTilemap;
+            terrainFrontEdgeTilemap = frontEdgeTilemap;
+            rockWallFrontFaceTilemap = rockFrontFaceTilemap;
+            rockWallTopTilemap = raisedRockWallTopTilemap;
+            rockWallResourceTilemap = raisedRockWallResourceTilemap;
+            soilFrontEdgeTile = soilFrontEdge;
+            sandFrontEdgeTile = sandFrontEdge;
+            rockFrontEdgeTile = rockFrontEdge;
+            snowFrontEdgeTile = snowFrontEdge;
+            rockWallFrontFaceTile = rockWallFrontFace;
+            freshWaterAnimationTile = freshWaterAnimation;
+            saltWaterAnimationTile = saltWaterAnimation;
+            magmaAnimationTile = magmaAnimation;
+        }
+
+        /// <summary>
         /// Component読み込み直後にUnityから呼ばれ、16×16タイルの再利用配列を1回だけ確保します。
         /// </summary>
         private void Awake()
@@ -236,6 +360,12 @@ namespace Farmware.WorldGeneration.Presentation
             subChunkTileBuffer = new TileBase[tileCount];
             emptySubChunkTileBuffer = new TileBase[tileCount];
             resourceSubChunkTileBuffer = new TileBase[tileCount];
+            liquidBaseSubChunkTileBuffer = new TileBase[tileCount];
+            liquidAnimationSubChunkTileBuffer = new TileBase[tileCount];
+            terrainFrontEdgeSubChunkTileBuffer = new TileBase[tileCount];
+            rockWallFrontFaceSubChunkTileBuffer = new TileBase[tileCount];
+            rockWallTopSubChunkTileBuffer = new TileBase[tileCount];
+            rockWallResourceSubChunkTileBuffer = new TileBase[tileCount];
             AllocateRockWallShadowBuffers();
             EnsureFreshWaterFallbackTile();
         }
@@ -319,7 +449,10 @@ namespace Farmware.WorldGeneration.Presentation
         {
             using (PresentationProfilerMarker.Auto())
             {
-                if (targetTilemap == null || resourceTilemap == null || !TryEnsureQueries())
+                if (targetTilemap == null
+                    || liquidBaseTilemap == null
+                    || resourceTilemap == null
+                    || !TryEnsureQueries())
                 {
                     return;
                 }
@@ -344,7 +477,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// </summary>
         private void OnDisable()
         {
-            if (targetTilemap != null || resourceTilemap != null)
+            if (targetTilemap != null || liquidBaseTilemap != null || resourceTilemap != null)
             {
                 coordinateScratch.Clear();
                 foreach (ChunkCoordinate coordinate in displayedCoordinates)
@@ -649,27 +782,93 @@ namespace Farmware.WorldGeneration.Presentation
                 {
                     int sourceIndex = WorldGrid.ToTileIndex(localStartX + localX, localStartY + localY);
                     int destinationIndex = (localY * WorldGridConstants.SubChunkSize) + localX;
+                    int tileLocalX = localStartX + localX;
+                    int tileLocalY = localStartY + localY;
                     GeneratedTile tile = tiles[sourceIndex];
+                    GeneratedTile frontTile = GetGeneratedTile(
+                        coordinate,
+                        tileLocalX,
+                        tileLocalY - 1,
+                        tiles,
+                        generationSettings);
                     RockWallAppearance rockWallAppearance = ClassifyRockWallAppearance(
                         coordinate,
-                        localStartX + localX,
-                        localStartY + localY,
+                        tileLocalX,
+                        tileLocalY,
                         tile,
                         tiles,
                         generationSettings);
-                    subChunkTileBuffer[destinationIndex] = SelectTile(tile);
+                    bool isLiquid = tile.Ground == GroundType.Water
+                        || tile.Ground == GroundType.Magma;
+
+                    // 土地と液体を別Tilemapへ分けることで、ECSの論理セルを変えずに液面だけ8px下へ投影できます。
+                    // 下げた液面の下辺は手前の土地上面と重なりますが、土地レイヤーを手前に描いて正しく遮蔽します。
+                    subChunkTileBuffer[destinationIndex] = isLiquid
+                        ? null
+                        : SelectLandTile(tile);
+                    liquidBaseSubChunkTileBuffer[destinationIndex] = isLiquid
+                        ? SelectLiquidBaseTile(tile)
+                        : null;
+                    liquidAnimationSubChunkTileBuffer[destinationIndex] =
+                        SelectLiquidAnimationTile(tile);
+                    terrainFrontEdgeSubChunkTileBuffer[destinationIndex] =
+                        SelectTerrainFrontEdgeTile(tile, frontTile);
+                    rockWallFrontFaceSubChunkTileBuffer[destinationIndex] =
+                        TerrainLayerPresentationUtility.ShouldDisplayRockWallFrontFace(
+                            tile,
+                            frontTile)
+                            ? rockWallFrontFaceTile
+                            : null;
+
+                    // 岩壁セルにもBiome由来の基準面をGround Tilemapへ残し、上面だけを12px持ち上げます。
+                    // 手前が水・マグマなら土地断面も別レイヤーへ残るため、岩壁の下だけ岸が欠けません。
+                    bool isRockWall = tile.Ground == GroundType.RockWall;
+                    rockWallTopSubChunkTileBuffer[destinationIndex] = isRockWall
+                        ? rockWallTile
+                        : null;
 
                     // 内部影に覆われる資源アイコンだけを隠します。ECSの資源データと露出面の表示は維持します。
-                    resourceSubChunkTileBuffer[destinationIndex] =
+                    TileBase selectedResource =
                         RockWallAppearanceUtility.ShouldDisplayResource(rockWallAppearance)
                             ? SelectResourceTile(resources[sourceIndex])
                             : null;
+                    resourceSubChunkTileBuffer[destinationIndex] = isRockWall
+                        ? null
+                        : selectedResource;
+                    rockWallResourceSubChunkTileBuffer[destinationIndex] = isRockWall
+                        ? selectedResource
+                        : null;
                 }
             }
 
             BoundsInt bounds = CreateSubChunkBounds(coordinate, subChunkIndex);
             targetTilemap.SetTilesBlock(bounds, subChunkTileBuffer);
+            liquidBaseTilemap.SetTilesBlock(bounds, liquidBaseSubChunkTileBuffer);
             resourceTilemap.SetTilesBlock(bounds, resourceSubChunkTileBuffer);
+            if (liquidAnimationTilemap != null)
+            {
+                liquidAnimationTilemap.SetTilesBlock(bounds, liquidAnimationSubChunkTileBuffer);
+            }
+
+            if (terrainFrontEdgeTilemap != null)
+            {
+                terrainFrontEdgeTilemap.SetTilesBlock(bounds, terrainFrontEdgeSubChunkTileBuffer);
+            }
+
+            if (rockWallFrontFaceTilemap != null)
+            {
+                rockWallFrontFaceTilemap.SetTilesBlock(bounds, rockWallFrontFaceSubChunkTileBuffer);
+            }
+
+            if (rockWallTopTilemap != null)
+            {
+                rockWallTopTilemap.SetTilesBlock(bounds, rockWallTopSubChunkTileBuffer);
+            }
+
+            if (rockWallResourceTilemap != null)
+            {
+                rockWallResourceTilemap.SetTilesBlock(bounds, rockWallResourceSubChunkTileBuffer);
+            }
         }
 
         /// <summary>
@@ -694,6 +893,36 @@ namespace Farmware.WorldGeneration.Presentation
             if (resourceTilemap != null)
             {
                 resourceTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
+            }
+
+            if (liquidBaseTilemap != null)
+            {
+                liquidBaseTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
+            }
+
+            if (liquidAnimationTilemap != null)
+            {
+                liquidAnimationTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
+            }
+
+            if (terrainFrontEdgeTilemap != null)
+            {
+                terrainFrontEdgeTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
+            }
+
+            if (rockWallFrontFaceTilemap != null)
+            {
+                rockWallFrontFaceTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
+            }
+
+            if (rockWallTopTilemap != null)
+            {
+                rockWallTopTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
+            }
+
+            if (rockWallResourceTilemap != null)
+            {
+                rockWallResourceTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
             }
         }
 
@@ -738,11 +967,91 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// ゲームルール用GeneratedTileを、Inspectorで割り当てた表示専用Tileへ変換します。
+        /// 同一チャンク内では生成済みBufferを読み、チャンク外ではSimulationと同じ生成器で1セルだけ再生成します。
         /// </summary>
-        /// <param name="tile">ECSを正とする1タイル分の基礎地形データです。</param>
-        /// <returns>水域・マグマ・岩壁を優先し、それ以外はバイオームに対応するTileです。</returns>
-        private TileBase SelectTile(GeneratedTile tile)
+        /// <param name="coordinate">中心チャンクの論理座標です。</param>
+        /// <param name="localTileX">読み取る水平チャンク内座標です。境界外の値も許可します。</param>
+        /// <param name="localTileY">読み取る垂直チャンク内座標です。境界外の値も許可します。</param>
+        /// <param name="tiles">中心チャンクの4096件の生成済み地形Bufferです。</param>
+        /// <param name="generationSettings">境界外セルを同じ結果へ再生成する設定です。</param>
+        /// <returns>指定ワールド座標の最終的なGeneratedTileです。</returns>
+        private static GeneratedTile GetGeneratedTile(
+            ChunkCoordinate coordinate,
+            int localTileX,
+            int localTileY,
+            DynamicBuffer<GeneratedTile> tiles,
+            in WorldGenerationSettings generationSettings)
+        {
+            bool isInsideChunk = localTileX >= 0
+                && localTileX < WorldGridConstants.LogicalChunkSize
+                && localTileY >= 0
+                && localTileY < WorldGridConstants.LogicalChunkSize;
+            if (isInsideChunk)
+            {
+                return tiles[WorldGrid.ToTileIndex(localTileX, localTileY)];
+            }
+
+            int worldTileX = WorldGrid.ToWorldTileX(coordinate.X, localTileX);
+            int worldTileY = WorldGrid.ToWorldTileY(coordinate.Y, localTileY);
+            return DeterministicChunkGenerator.GenerateTile(
+                generationSettings,
+                worldTileX,
+                worldTileY);
+        }
+
+        /// <summary>
+        /// ECS地形から、液面アニメーション専用Tilemapへ重ねるTileを選択します。
+        /// </summary>
+        /// <param name="tile">ECSを正とする1セル分の生成地形です。</param>
+        /// <returns>淡水・海水・マグマのAnimatedTileです。通常地形ならnullです。</returns>
+        private TileBase SelectLiquidAnimationTile(GeneratedTile tile)
+        {
+            switch (TerrainLayerPresentationUtility.ClassifyLiquidAnimation(tile))
+            {
+                case LiquidAnimationKind.FreshWater:
+                    return freshWaterAnimationTile;
+                case LiquidAnimationKind.SaltWater:
+                    return saltWaterAnimationTile;
+                case LiquidAnimationKind.Magma:
+                    return magmaAnimationTile;
+                default:
+                    return null;
+            }
+        }
+
+        /// <summary>
+        /// 中心地形と手前セルから、低地へ落ちる通常地形の断面Tileを選択します。
+        /// </summary>
+        /// <param name="centerTile">断面候補となる中心セルです。</param>
+        /// <param name="frontTile">画面手前に相当するワールドY-1のセルです。</param>
+        /// <returns>土・砂・岩・雪の断面Tileです。条件外ならnullです。</returns>
+        private TileBase SelectTerrainFrontEdgeTile(
+            GeneratedTile centerTile,
+            GeneratedTile frontTile)
+        {
+            switch (TerrainLayerPresentationUtility.ClassifyTerrainFrontEdge(
+                        centerTile,
+                        frontTile))
+            {
+                case TerrainFrontEdgeKind.Soil:
+                    return soilFrontEdgeTile;
+                case TerrainFrontEdgeKind.Sand:
+                    return sandFrontEdgeTile;
+                case TerrainFrontEdgeKind.Rock:
+                    return rockFrontEdgeTile;
+                case TerrainFrontEdgeKind.Snow:
+                    return snowFrontEdgeTile;
+                default:
+                    return null;
+            }
+        }
+
+        /// <summary>
+        /// 液体のゲームルール用GeneratedTileを、8px下げる静止液面Tileへ変換します。
+        /// </summary>
+        /// <param name="tile">ECSを正とする水またはマグマ1セル分の生成地形です。</param>
+        /// <returns>淡水・海水・マグマの基礎Tileです。液体でなければnullです。</returns>
+        private TileBase SelectLiquidBaseTile(GeneratedTile tile)
         {
             if (tile.Ground == GroundType.Water)
             {
@@ -752,16 +1061,18 @@ namespace Farmware.WorldGeneration.Presentation
                     : saltWaterTile;
             }
 
-            if (tile.Ground == GroundType.Magma)
-            {
-                return magmaTile;
-            }
+            return tile.Ground == GroundType.Magma
+                ? magmaTile
+                : null;
+        }
 
-            if (tile.Ground == GroundType.RockWall)
-            {
-                return rockWallTile;
-            }
-
+        /// <summary>
+        /// 液体を除くゲームルール用GeneratedTileを、Inspectorで割り当てた土地の基準面Tileへ変換します。
+        /// </summary>
+        /// <param name="tile">ECSを正とする1タイル分の土地地形データです。</param>
+        /// <returns>岩壁セルを含めてバイオームに対応する土地の基準面Tileです。</returns>
+        private TileBase SelectLandTile(GeneratedTile tile)
+        {
             if (tile.Biome == BiomeId.Forest)
             {
                 return forestTile;
@@ -949,7 +1260,9 @@ namespace Farmware.WorldGeneration.Presentation
                 return;
             }
 
-            presentation.GameObject.transform.localPosition = meshOrigin;
+            // 岩壁上面Tilemapと同じ12px上へ移し、基準面に影だけ残るずれを防ぎます。
+            presentation.GameObject.transform.localPosition = meshOrigin
+                + (Vector3.up * TerrainLayerPresentationUtility.RockWallElevationInCells);
             presentation.Mesh.Clear();
             presentation.Mesh.vertices = rockWallShadowVertexBuffer;
             presentation.Mesh.colors32 = rockWallShadowColorBuffer;
@@ -1087,12 +1400,13 @@ namespace Farmware.WorldGeneration.Presentation
             shadowRenderer.reflectionProbeUsage = ReflectionProbeUsage.Off;
             shadowRenderer.allowOcclusionWhenDynamic = false;
 
-            // 地形より手前、資源Tilemapより奥へ置き、岩壁内部の暗さがHUDや資源表示全体を覆わないようにします。
+            // 持ち上げた岩壁上面より手前、資源Tilemapより奥へ置き、内部の暗さがHUDや資源表示全体を覆わないようにします。
             TilemapRenderer terrainRenderer = targetTilemap.GetComponent<TilemapRenderer>();
             if (terrainRenderer != null)
             {
                 shadowRenderer.sortingLayerID = terrainRenderer.sortingLayerID;
-                shadowRenderer.sortingOrder = terrainRenderer.sortingOrder + 1;
+                // 岩壁上面より手前、資源より奥に置き、持ち上げた岩盤内部だけを暗くします。
+                shadowRenderer.sortingOrder = terrainRenderer.sortingOrder + 5;
             }
 
             RockWallShadowChunkPresentation presentation =

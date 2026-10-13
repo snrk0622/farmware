@@ -22,8 +22,9 @@
 #### 用途
 
 - 16×16ピクセルの仮色地形Tileと仮資源Tileを生成または更新する。
+- 上側16×16を完全透明にしてその直下8pxを描く、土、砂、岩、雪の24px高前面断面、16×16内の下部12pxだけを使う岩壁側面、淡水・海水・マグマ各4枚の透明フレームとAnimatedTileを生成または更新する。
 - `WorldGenerationSettingsSubScene`へ生成設定のAuthoringを配置する。
-- `SampleScene`へCamera、Grid、Tilemap、表示用Component、SubScene参照を接続する。
+- `SampleScene`へCamera、Grid、Ground・静止液面・液面アニメーション・断面・岩壁側面・岩壁上面・通常資源・岩壁上資源の8枚のTilemap、表示用Component、SubScene参照を接続する。静止液面と液面アニメーションは土地より8px下、岩壁上面と岩壁上資源は土地基準面より12px上へ設定する。
 - Pixel Perfect Cameraの基準解像度480×270を含む、再現可能な確認環境を構築する。
 
 #### 実行後の注意
@@ -34,16 +35,16 @@
 
 - `WorldGenerationAuthoring`の設定項目、既定値、Baker変換を変更した。
 - バイオーム、地面、水域、マグマ、岩壁、資源の種類またはフォールバック色を変更した。
-- Ground、ResourceなどTilemapレイヤーの構成、Sorting Order、参照関係を変更した。
+- Ground、Liquid Base、Liquid Surface Animation、Terrain Front Edge、Rock Wall Front Face、Rock Wall Top、Resource、Rock Wall ResourceのTilemapレイヤー構成、Transform、Sorting Order、参照関係を変更した。
 - Camera、Pixel Perfect Camera、480×270の基準解像度、黒帯処理を変更した。
 - `SampleScene`または`WorldGenerationSettingsSubScene`の生成構成を変更した。
 
 #### 確認内容
 
 1. Consoleに例外または新規警告が出ていない。
-2. 必要なPNG、Tile、`.meta`が揃っている。
+2. 必要なPNG、Tile、AnimatedTile、`.meta`が揃っている。
 3. SampleSceneとSubSceneの参照がMissingになっていない。
-4. PlayModeで地面、岩壁、マグマ、淡水、海水、資源が対応するレイヤーへ表示される。
+4. PlayModeで地面、マグマ、淡水、海水、資源に加え、静止液面と透明アニメーションが同じ8px下、ワールドY-1条件の土地断面が上面へ重ならずセル直下から8px、岩壁側面がセル下端から上へ12px、岩壁上面・内部影・露出資源が12px上へ表示される。液体はGround Tilemapへ重複せず、液面下辺は手前土地に隠れる。岩壁が低地へ面する場所では土地断面と岩壁側面が両方表示される。
 5. Gameビューの地形描画領域が480×270基準の黒帯内へ収まり、HUDとF4表示も同じ領域を使用する。
 
 ### 2.2 Debug Visualization

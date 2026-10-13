@@ -421,6 +421,105 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 ? null
                 : resourceTilemapObject.GetComponent<Tilemap>();
             Assert.That(resourceTilemap, Is.Not.Null, "SampleSceneに資源表示用Resource Tilemapがありません。");
+            GameObject liquidBaseTilemapObject =
+                GameObject.Find("World Grid/Liquid Base Tilemap");
+            Tilemap liquidBaseTilemap = liquidBaseTilemapObject == null
+                ? null
+                : liquidBaseTilemapObject.GetComponent<Tilemap>();
+            Assert.That(
+                liquidBaseTilemap,
+                Is.Not.Null,
+                "SampleSceneに8px下げた静止液面専用Tilemapがありません。");
+            Assert.That(
+                liquidBaseTilemap.transform.localPosition.y,
+                Is.EqualTo(TerrainLayerPresentationUtility.LiquidSurfaceOffsetInCells)
+                    .Within(0.0001f),
+                "静止した水・マグマ面は論理セルを変えず、表示だけ8px下へ移動する必要があります。");
+            GameObject liquidAnimationTilemapObject =
+                GameObject.Find("World Grid/Liquid Surface Animation Tilemap");
+            Tilemap liquidAnimationTilemap = liquidAnimationTilemapObject == null
+                ? null
+                : liquidAnimationTilemapObject.GetComponent<Tilemap>();
+            Assert.That(
+                liquidAnimationTilemap,
+                Is.Not.Null,
+                "SampleSceneに液面アニメーション専用Tilemapがありません。");
+            Assert.That(
+                liquidAnimationTilemap.animationFrameRate,
+                Is.EqualTo(4f),
+                "液面アニメーションは仮素材の4fps設定を保持する必要があります。");
+            Assert.That(
+                liquidAnimationTilemap.transform.localPosition.y,
+                Is.EqualTo(TerrainLayerPresentationUtility.LiquidSurfaceOffsetInCells)
+                    .Within(0.0001f),
+                "波・気泡は静止液面と同じ8px下へ移動し、上下へ分離してはいけません。");
+            GameObject terrainFrontEdgeTilemapObject =
+                GameObject.Find("World Grid/Terrain Front Edge Tilemap");
+            Tilemap terrainFrontEdgeTilemap = terrainFrontEdgeTilemapObject == null
+                ? null
+                : terrainFrontEdgeTilemapObject.GetComponent<Tilemap>();
+            Assert.That(
+                terrainFrontEdgeTilemap,
+                Is.Not.Null,
+                "SampleSceneに通常地形の手前断面専用Tilemapがありません。");
+            GameObject rockWallFrontFaceTilemapObject =
+                GameObject.Find("World Grid/Rock Wall Front Face Tilemap");
+            Tilemap rockWallFrontFaceTilemap = rockWallFrontFaceTilemapObject == null
+                ? null
+                : rockWallFrontFaceTilemapObject.GetComponent<Tilemap>();
+            Assert.That(
+                rockWallFrontFaceTilemap,
+                Is.Not.Null,
+                "SampleSceneに岩壁側面専用Tilemapがありません。");
+            GameObject rockWallTopTilemapObject =
+                GameObject.Find("World Grid/Rock Wall Top Tilemap");
+            Tilemap rockWallTopTilemap = rockWallTopTilemapObject == null
+                ? null
+                : rockWallTopTilemapObject.GetComponent<Tilemap>();
+            Assert.That(
+                rockWallTopTilemap,
+                Is.Not.Null,
+                "SampleSceneに基準面より上へ持ち上げる岩壁上面専用Tilemapがありません。");
+            Assert.That(
+                rockWallTopTilemap.transform.localPosition.y,
+                Is.EqualTo(TerrainLayerPresentationUtility.RockWallElevationInCells).Within(0.0001f),
+                "岩壁上面は基準面から12px上へ移動している必要があります。");
+            GameObject rockWallResourceTilemapObject =
+                GameObject.Find("World Grid/Rock Wall Resource Tilemap");
+            Tilemap rockWallResourceTilemap = rockWallResourceTilemapObject == null
+                ? null
+                : rockWallResourceTilemapObject.GetComponent<Tilemap>();
+            Assert.That(
+                rockWallResourceTilemap,
+                Is.Not.Null,
+                "SampleSceneに岩壁上資源専用Tilemapがありません。");
+            Assert.That(
+                rockWallResourceTilemap.transform.localPosition.y,
+                Is.EqualTo(TerrainLayerPresentationUtility.RockWallElevationInCells).Within(0.0001f),
+                "岩壁上資源は岩壁上面と同じ12px上へ移動している必要があります。");
+
+            // 液面の下半分を手前土地で隠す前後関係はTransform位置だけでは決まらないため、Rendererの描画順もScene実体から確認します。
+            TilemapRenderer groundRenderer = tilemap.GetComponent<TilemapRenderer>();
+            TilemapRenderer liquidBaseRenderer = liquidBaseTilemap.GetComponent<TilemapRenderer>();
+            TilemapRenderer liquidAnimationRenderer =
+                liquidAnimationTilemap.GetComponent<TilemapRenderer>();
+            Assert.That(groundRenderer, Is.Not.Null, "Ground TilemapにTilemapRendererがありません。");
+            Assert.That(
+                liquidBaseRenderer,
+                Is.Not.Null,
+                "Liquid Base TilemapにTilemapRendererがありません。");
+            Assert.That(
+                liquidAnimationRenderer,
+                Is.Not.Null,
+                "Liquid Surface Animation TilemapにTilemapRendererがありません。");
+            Assert.That(
+                liquidBaseRenderer.sortingOrder,
+                Is.LessThan(liquidAnimationRenderer.sortingOrder),
+                "静止液面は透明な波アニメーションより奥へ描画する必要があります。");
+            Assert.That(
+                liquidAnimationRenderer.sortingOrder,
+                Is.LessThan(groundRenderer.sortingOrder),
+                "8px下げた液面の下辺は、手前にある土地上面より奥へ描画する必要があります。");
             CameraPanController cameraPanController = Object.FindFirstObjectByType<CameraPanController>();
             Assert.That(cameraPanController, Is.Not.Null, "Main CameraにCameraPanControllerがありません。");
             InitialCameraPositionController initialPositionController =
@@ -550,6 +649,33 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 initialLoadCompleted,
                 Is.True,
                 $"{MaximumWaitFrames}フレーム以内に初回生成と表示が完了しませんでした。");
+
+            // 岩壁上面が存在するセルを実際の表示結果から探し、同じ論理セルに基準面も残る二段構成を保証します。
+            // Transformの設定だけを検査すると、Presenterが上面を書き忘れてもテストが通るため、Tilemapの内容まで確認します。
+            bool foundDisplayedRockWall = false;
+            foreach (Vector3Int cellPosition in rockWallTopTilemap.cellBounds.allPositionsWithin)
+            {
+                if (!rockWallTopTilemap.HasTile(cellPosition))
+                {
+                    continue;
+                }
+
+                foundDisplayedRockWall = true;
+                Assert.That(
+                    tilemap.HasTile(cellPosition),
+                    Is.True,
+                    $"岩壁上面セル {cellPosition} の下に、Biome由来の基準面が残っていません。");
+            }
+
+            Assert.That(
+                foundDisplayedRockWall,
+                Is.True,
+                "初回表示範囲に岩壁上面が1枚もなく、二段構成を実表示で検証できませんでした。");
+
+            Assert.That(
+                rockWallFrontFaceTilemap.GetUsedTilesCount(),
+                Is.GreaterThan(0),
+                "初回表示範囲に岩壁の最前列側面が描画されていません。");
             Assert.That(
                 cameraPanController.transform.position.x,
                 Is.EqualTo(initialCameraWorldPosition.x).Within(0.00001f),
@@ -701,6 +827,42 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Is.Not.Null,
                 "原点へ戻った後、決定論的に再生成された資源アイコンが再表示される必要があります。");
 
+            // 初期スポーン周辺は安全な陸地として選ばれるため、水が偶然あることへ依存せず、生成規則から液体セルを探して表示先へ移動します。
+            bool foundLiquidCell = TryFindLiquidCell(
+                runtimeGenerationSettings,
+                initialSpawnLocation.TileX,
+                initialSpawnLocation.TileY,
+                out Vector3Int liquidCell);
+            Assert.That(
+                foundLiquidCell,
+                Is.True,
+                "初期スポーンから2048タイル以内に、液面レイヤーを実表示検証できる水・マグマが見つかりませんでした。");
+
+            cameraPanController.SetWorldPosition(
+                new Vector2(liquidCell.x + 0.5f, liquidCell.y + 0.5f));
+            bool liquidDisplayCompleted = false;
+            for (int frame = 0; frame < MaximumWaitFrames; frame++)
+            {
+                // 静止面とアニメーションが同じ論理セルへそろって初めて、実際の液面表示が完成したと判断します。
+                if (liquidBaseTilemap.HasTile(liquidCell)
+                    && liquidAnimationTilemap.HasTile(liquidCell))
+                {
+                    liquidDisplayCompleted = true;
+                    break;
+                }
+
+                yield return null;
+            }
+
+            Assert.That(
+                liquidDisplayCompleted,
+                Is.True,
+                $"液体セル {liquidCell} の静止面とアニメーションが{MaximumWaitFrames}フレーム以内に表示されませんでした。");
+            Assert.That(
+                tilemap.HasTile(liquidCell),
+                Is.False,
+                $"液体セル {liquidCell} がGround Tilemapにも重複し、元の高さの液面が残っています。");
+
             if (queriesCreated && world != null && world.IsCreated)
             {
                 settingsQuery.Dispose();
@@ -729,6 +891,50 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 }
             }
 
+            return false;
+        }
+
+        /// <summary>
+        /// 初期スポーンを中心とする一定範囲を粗く走査し、実表示テストに使う水またはマグマの論理セルを決定論的に探します。
+        /// </summary>
+        /// <param name="settings">実行中Worldが使用している地形生成設定です。</param>
+        /// <param name="centerTileX">探索中心となる水平ワールドタイル座標です。</param>
+        /// <param name="centerTileY">探索中心となる垂直ワールドタイル座標です。</param>
+        /// <param name="liquidCell">成功時に、見つかった液体セルのワールド座標を返します。</param>
+        /// <returns>探索範囲内に水またはマグマが見つかった場合はtrueです。</returns>
+        private static bool TryFindLiquidCell(
+            in WorldGenerationSettings settings,
+            int centerTileX,
+            int centerTileY,
+            out Vector3Int liquidCell)
+        {
+            // 無限ワールド全体を走査せず、32タイル刻みで最大2048タイル四方を調べれば、テスト時間を抑えつつ低地を確実に探せます。
+            const int searchRadiusInTiles = 2048;
+            const int searchStrideInTiles = 32;
+            for (int offsetY = -searchRadiusInTiles;
+                 offsetY <= searchRadiusInTiles;
+                 offsetY += searchStrideInTiles)
+            {
+                for (int offsetX = -searchRadiusInTiles;
+                     offsetX <= searchRadiusInTiles;
+                     offsetX += searchStrideInTiles)
+                {
+                    int tileX = centerTileX + offsetX;
+                    int tileY = centerTileY + offsetY;
+                    GeneratedTile generatedTile =
+                        DeterministicChunkGenerator.GenerateTile(settings, tileX, tileY);
+                    if (generatedTile.Ground != GroundType.Water
+                        && generatedTile.Ground != GroundType.Magma)
+                    {
+                        continue;
+                    }
+
+                    liquidCell = new Vector3Int(tileX, tileY, 0);
+                    return true;
+                }
+            }
+
+            liquidCell = default;
             return false;
         }
 
