@@ -1,5 +1,5 @@
-// このファイルは、仮色の地形・資源・手前断面・液面アニメーション素材と、マップ生成を確認できるSampleScene構成をUnity Editor APIで再現可能に作ります。
-// Runtimeの生成規則には関与せず、フォールバック表示素材、SubScene、Camera、Grid、TilemapのAuthoring接続だけを担当します。
+// このファイルは、一体型の土地・岩壁、共通Sprite Atlas、資源、液面アニメーションの仮素材と、マップ生成を確認できるSampleScene構成をUnity Editor APIで再現可能に作ります。
+// Runtimeの生成規則には関与せず、フォールバック表示素材、Sprite Atlas、SubScene、Camera、Grid、TilemapのAuthoring接続だけを担当します。
 
 using System;
 using System.IO;
@@ -8,6 +8,7 @@ using Farmware.WorldGeneration.Presentation;
 using Unity.Scenes;
 using UnityEditor;
 using UnityEditor.SceneManagement;
+using UnityEditor.U2D.Sprites;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
@@ -17,7 +18,7 @@ using UnityEngine.Tilemaps;
 namespace Farmware.WorldGeneration.Editor
 {
     /// <summary>
-    /// フォールバック地形Tileと資源アイコンを生成し、SampleSceneと設定用SubSceneを安全に構築するEditor専用ツールです。
+    /// フォールバック地形Tile、共通Sprite Atlas、資源アイコンを生成し、SampleSceneと設定用SubSceneを安全に構築するEditor専用ツールです。
     /// メニューまたはバッチモードのexecuteMethodから呼び出し、同じ名前の構成は再利用して重複作成を防ぎます。
     /// </summary>
     public static class WorldGenerationSceneBootstrap
@@ -33,12 +34,6 @@ namespace Farmware.WorldGeneration.Editor
 
         /// <summary>フォールバック画像の1辺のピクセル数で、全Tileを偶数寸法へ統一します。</summary>
         private const int FallbackTilePixelSize = 16;
-
-        /// <summary>通常地形の16px本体と下側8pxの断面を持つ、手前断面画像の高さです。</summary>
-        private const int TerrainFrontEdgePixelHeight = 24;
-
-        /// <summary>水・マグマへ面した土地ブロックで、論理セル直下へ露出させる断面高です。</summary>
-        private const int TerrainFrontEdgeVisiblePixelHeight = 8;
 
         /// <summary>淡水・海水・マグマの仮アニメーションに使用するフレーム数です。</summary>
         private const int LiquidAnimationFrameCount = 4;
@@ -248,48 +243,53 @@ namespace Farmware.WorldGeneration.Editor
             ValidateUniversalRenderPipeline();
             EnsureFolderHierarchy(FallbackAssetFolder);
 
-            CreateOrUpdateFallbackTile("Grassland", new Color32(112, 169, 86, 255));
-            CreateOrUpdateFallbackTile("Forest", new Color32(61, 112, 66, 255));
-            CreateOrUpdateFallbackTile("Desert", new Color32(210, 177, 100, 255));
-            CreateOrUpdateFallbackTile("Rockland", new Color32(128, 123, 137, 255));
-            CreateOrUpdateFallbackTile("Wetland", new Color32(72, 128, 103, 255));
-            CreateOrUpdateFallbackTile("Snowfield", new Color32(198, 225, 232, 255));
-            CreateOrUpdateFallbackTile("Volcanic", new Color32(130, 67, 57, 255));
+            // 各土地は上面16pxと断面8pxを1枚へまとめます。行ソートで隠れるため、隣接セルごとの断面生成は不要です。
+            CreateOrUpdateFallbackTerrainTile(
+                "Grassland",
+                new Color32(112, 169, 86, 255),
+                new Color32(92, 63, 40, 255),
+                new Color32(139, 92, 53, 255));
+            CreateOrUpdateFallbackTerrainTile(
+                "Forest",
+                new Color32(61, 112, 66, 255),
+                new Color32(92, 63, 40, 255),
+                new Color32(139, 92, 53, 255));
+            CreateOrUpdateFallbackTerrainTile(
+                "Desert",
+                new Color32(210, 177, 100, 255),
+                new Color32(174, 130, 66, 255),
+                new Color32(213, 170, 91, 255));
+            CreateOrUpdateFallbackTerrainTile(
+                "Rockland",
+                new Color32(128, 123, 137, 255),
+                new Color32(75, 72, 81, 255),
+                new Color32(113, 108, 120, 255));
+            CreateOrUpdateFallbackTerrainTile(
+                "Wetland",
+                new Color32(72, 128, 103, 255),
+                new Color32(92, 63, 40, 255),
+                new Color32(139, 92, 53, 255));
+            CreateOrUpdateFallbackTerrainTile(
+                "Snowfield",
+                new Color32(198, 225, 232, 255),
+                new Color32(159, 190, 201, 255),
+                new Color32(112, 83, 62, 255));
+            CreateOrUpdateFallbackTerrainTile(
+                "Volcanic",
+                new Color32(130, 67, 57, 255),
+                new Color32(75, 72, 81, 255),
+                new Color32(113, 108, 120, 255));
             CreateOrUpdateFallbackTile("Magma", new Color32(238, 82, 24, 255));
             CreateOrUpdateFallbackTile("FreshWater", new Color32(76, 157, 211, 255));
             CreateOrUpdateFallbackTile("SaltWater", new Color32(42, 101, 176, 255));
-            CreateOrUpdateFallbackTile("RockWall", new Color32(101, 101, 109, 255));
+            CreateOrUpdateFallbackRockWallTile(
+                "RockWall",
+                new Color32(101, 101, 109, 255),
+                new Color32(69, 68, 76, 255),
+                new Color32(91, 88, 99, 255));
             CreateOrUpdateFallbackResourceTile("TreeResource", GeneratedResourceType.Tree);
             CreateOrUpdateFallbackResourceTile("StoneResource", GeneratedResourceType.Stone);
             CreateOrUpdateFallbackResourceTile("SandResource", GeneratedResourceType.Sand);
-            CreateOrUpdateFallbackFrontEdgeTile(
-                "SoilFrontEdge",
-                TerrainFrontEdgePixelHeight,
-                new Color32(92, 63, 40, 255),
-                new Color32(139, 92, 53, 255),
-                TerrainFrontEdgeVisiblePixelHeight - 1);
-            CreateOrUpdateFallbackFrontEdgeTile(
-                "SandFrontEdge",
-                TerrainFrontEdgePixelHeight,
-                new Color32(174, 130, 66, 255),
-                new Color32(213, 170, 91, 255),
-                TerrainFrontEdgeVisiblePixelHeight - 1);
-            CreateOrUpdateFallbackFrontEdgeTile(
-                "RockFrontEdge",
-                TerrainFrontEdgePixelHeight,
-                new Color32(75, 72, 81, 255),
-                new Color32(113, 108, 120, 255),
-                TerrainFrontEdgeVisiblePixelHeight - 1);
-            CreateOrUpdateFallbackFrontEdgeTile(
-                "SnowFrontEdge",
-                TerrainFrontEdgePixelHeight,
-                new Color32(159, 190, 201, 255),
-                new Color32(112, 83, 62, 255),
-                TerrainFrontEdgeVisiblePixelHeight - 1);
-            CreateOrUpdateFallbackRockWallFrontFaceTile(
-                "RockWallFrontFace",
-                new Color32(69, 68, 76, 255),
-                new Color32(91, 88, 99, 255));
             CreateOrUpdateFallbackLiquidAnimationTile(
                 "FreshWaterAnimation",
                 new Color32(186, 231, 255, 190),
@@ -307,11 +307,21 @@ namespace Farmware.WorldGeneration.Editor
             DeleteObsoleteFallbackTile("Water");
             DeleteObsoleteFallbackTile("WaterResource");
             DeleteObsoleteFallbackTile("RockWallInterior");
+            DeleteObsoleteFallbackTile("SoilFrontEdge");
+            DeleteObsoleteFallbackTile("SandFrontEdge");
+            DeleteObsoleteFallbackTile("RockFrontEdge");
+            DeleteObsoleteFallbackTile("SnowFrontEdge");
+            DeleteObsoleteFallbackTile("RockWallFrontFace");
 
             // PNGのSaveAndReimport中に以前読み込んだUnity Object参照が無効化される場合があります。
             // 14種類をすべて生成した後、AssetDatabaseから最新のTileを読み直してSceneへ保存します。
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+
+            // 一体型土地はセル同士を8px重ねるため、元PNGが異なっても行ソートを維持できる共通Atlasへまとめます。
+            // 岩壁も同じ制作・ビルド手順で管理し、将来差分が増えたときのTexture分割を防ぎます。
+            WorldGenerationSpriteAtlasBuilder.GenerateOrUpdateAtlases();
+
             Tile grasslandTile = LoadRequiredFallbackTile("Grassland");
             Tile forestTile = LoadRequiredFallbackTile("Forest");
             Tile desertTile = LoadRequiredFallbackTile("Desert");
@@ -326,11 +336,6 @@ namespace Farmware.WorldGeneration.Editor
             Tile treeResourceTile = LoadRequiredFallbackTile("TreeResource");
             Tile stoneResourceTile = LoadRequiredFallbackTile("StoneResource");
             Tile sandResourceTile = LoadRequiredFallbackTile("SandResource");
-            Tile soilFrontEdgeTile = LoadRequiredFallbackTile("SoilFrontEdge");
-            Tile sandFrontEdgeTile = LoadRequiredFallbackTile("SandFrontEdge");
-            Tile rockFrontEdgeTile = LoadRequiredFallbackTile("RockFrontEdge");
-            Tile snowFrontEdgeTile = LoadRequiredFallbackTile("SnowFrontEdge");
-            Tile rockWallFrontFaceTile = LoadRequiredFallbackTile("RockWallFrontFace");
             AnimatedTile freshWaterAnimationTile =
                 LoadRequiredFallbackAnimatedTile("FreshWaterAnimation");
             AnimatedTile saltWaterAnimationTile =
@@ -355,11 +360,6 @@ namespace Farmware.WorldGeneration.Editor
                 treeResourceTile,
                 stoneResourceTile,
                 sandResourceTile,
-                soilFrontEdgeTile,
-                sandFrontEdgeTile,
-                rockFrontEdgeTile,
-                snowFrontEdgeTile,
-                rockWallFrontFaceTile,
                 freshWaterAnimationTile,
                 saltWaterAnimationTile,
                 magmaAnimationTile);
@@ -472,75 +472,32 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>
-        /// 16px地形本体には重ならず、その直下だけへ透明余白と直線的な縁・側面を持つPNGとTileを作成または更新します。
+        /// 上面16pxと前面断面8pxを一枚へ結合した16×24土地Tileを作成または更新します。
         /// </summary>
         /// <param name="assetName">PNGとTileアセットに使用する英語名です。</param>
-        /// <param name="pixelHeight">画像全体の高さです。現在は通常地形の低地断面に使用する24pxです。</param>
-        /// <param name="rimColor">地面との境界を示す1pxの上端色です。</param>
-        /// <param name="faceColor">縦方向の厚みを示す側面色です。</param>
-        /// <param name="faceHeight">上端の下へ描く側面の高さです。単位はピクセルです。</param>
-        /// <returns>作成または更新された断面表示専用Tileアセットです。</returns>
-        private static Tile CreateOrUpdateFallbackFrontEdgeTile(
+        /// <param name="surfaceColor">上側16pxの地形上面色です。</param>
+        /// <param name="rimColor">断面上端の1pxへ使う影色です。</param>
+        /// <param name="faceColor">断面の地盤色です。</param>
+        /// <returns>作成または更新された一体型土地Tileアセットです。</returns>
+        private static Tile CreateOrUpdateFallbackTerrainTile(
             string assetName,
-            int pixelHeight,
-            Color32 rimColor,
-            Color32 faceColor,
-            int faceHeight)
-        {
-            Color32[] pixels = new Color32[FallbackTilePixelSize * pixelHeight];
-            int logicalTileBottomY = pixelHeight - FallbackTilePixelSize;
-            int frontEdgeTopY = logicalTileBottomY - 1;
-
-            // 上側16pxは完全透明にしてBase Tileを1pxも塗り替えず、その直下8pxを縁と側面で埋めます。
-            // 可視高を8pxへ固定すると、水・マグマに面した土地ブロックの厚みを半セル分だけ明確に見せられます。
-            for (int x = 0; x < FallbackTilePixelSize; x++)
-            {
-                pixels[(frontEdgeTopY * FallbackTilePixelSize) + x] = rimColor;
-                for (int faceOffset = 1; faceOffset <= faceHeight; faceOffset++)
-                {
-                    int y = frontEdgeTopY - faceOffset;
-                    Color32 shadedFaceColor = ((x + faceOffset) % 5 == 0)
-                        ? DarkenFallbackColor(faceColor, 18)
-                        : faceColor;
-                    pixels[(y * FallbackTilePixelSize) + x] = shadedFaceColor;
-                }
-            }
-
-            Vector2 pivot = new Vector2(
-                0.5f,
-                (logicalTileBottomY + (FallbackTilePixelSize * 0.5f)) / pixelHeight);
-            return CreateOrUpdateFallbackTileAsset(
-                assetName,
-                pixels,
-                FallbackTilePixelSize,
-                pixelHeight,
-                pivot,
-                hasTransparency: true);
-        }
-
-        /// <summary>
-        /// 16×16セルの下部12pxだけへ岩壁側面を描き、上へ移動した別Tilemapの岩壁上面へ接続します。
-        /// 土地断面のようにセル下へはみ出させず、基準面から上へ1段積まれたブロックとして見せます。
-        /// </summary>
-        /// <param name="assetName">PNGとTileアセットに使用する英語名です。</param>
-        /// <param name="rimColor">岩壁上面との境界を示す1pxの上端色です。</param>
-        /// <param name="faceColor">岩壁の縦方向の厚みを示す側面色です。</param>
-        /// <returns>作成または更新された岩壁側面専用Tileアセットです。</returns>
-        private static Tile CreateOrUpdateFallbackRockWallFrontFaceTile(
-            string assetName,
+            Color32 surfaceColor,
             Color32 rimColor,
             Color32 faceColor)
         {
-            Color32[] pixels = new Color32[FallbackTilePixelSize * FallbackTilePixelSize];
-            int rimY = TerrainLayerPresentationUtility.RockWallElevationInPixels - 1;
+            int pixelHeight = TerrainLayerPresentationUtility.CombinedTerrainSpriteHeightInPixels;
+            Color32[] pixels = new Color32[FallbackTilePixelSize * pixelHeight];
 
-            // セル下端から上へ側面を積み、上面Tilemapの12pxオフセットと1pxも空かずに接続します。
-            for (int x = 0; x < FallbackTilePixelSize; x++)
+            for (int y = 0; y < pixelHeight; y++)
             {
-                for (int y = 0; y < TerrainLayerPresentationUtility.RockWallElevationInPixels; y++)
+                for (int x = 0; x < FallbackTilePixelSize; x++)
                 {
                     Color32 selectedColor;
-                    if (y == rimY)
+                    if (y >= TerrainLayerPresentationUtility.TerrainFrontFaceHeightInPixels)
+                    {
+                        selectedColor = surfaceColor;
+                    }
+                    else if (y == TerrainLayerPresentationUtility.TerrainFrontFaceHeightInPixels - 1)
                     {
                         selectedColor = rimColor;
                     }
@@ -555,7 +512,63 @@ namespace Farmware.WorldGeneration.Editor
                 }
             }
 
-            return CreateOrUpdateFallbackTileAsset(assetName, pixels, hasTransparency: true);
+            return CreateOrUpdateFallbackTileAsset(
+                assetName,
+                pixels,
+                FallbackTilePixelSize,
+                pixelHeight,
+                new Vector2(0.5f, TerrainLayerPresentationUtility.CombinedTerrainPivotY),
+                hasTransparency: false);
+        }
+
+        /// <summary>
+        /// 上面16pxと側面12pxを一枚へ結合した16×28岩壁Tileを作成または更新します。
+        /// </summary>
+        /// <param name="assetName">PNGとTileアセットに使用する英語名です。</param>
+        /// <param name="surfaceColor">上側16pxの岩壁上面色です。</param>
+        /// <param name="rimColor">側面上端の1pxへ使う影色です。</param>
+        /// <param name="faceColor">岩壁側面の地盤色です。</param>
+        /// <returns>作成または更新された一体型岩壁Tileアセットです。</returns>
+        private static Tile CreateOrUpdateFallbackRockWallTile(
+            string assetName,
+            Color32 surfaceColor,
+            Color32 rimColor,
+            Color32 faceColor)
+        {
+            int pixelHeight = TerrainLayerPresentationUtility.CombinedRockWallSpriteHeightInPixels;
+            Color32[] pixels = new Color32[FallbackTilePixelSize * pixelHeight];
+
+            for (int y = 0; y < pixelHeight; y++)
+            {
+                for (int x = 0; x < FallbackTilePixelSize; x++)
+                {
+                    Color32 selectedColor;
+                    if (y >= TerrainLayerPresentationUtility.RockWallElevationInPixels)
+                    {
+                        selectedColor = surfaceColor;
+                    }
+                    else if (y == TerrainLayerPresentationUtility.RockWallElevationInPixels - 1)
+                    {
+                        selectedColor = rimColor;
+                    }
+                    else
+                    {
+                        selectedColor = ((x + y) % 5 == 0)
+                            ? DarkenFallbackColor(faceColor, 18)
+                            : faceColor;
+                    }
+
+                    pixels[(y * FallbackTilePixelSize) + x] = selectedColor;
+                }
+            }
+
+            return CreateOrUpdateFallbackTileAsset(
+                assetName,
+                pixels,
+                FallbackTilePixelSize,
+                pixelHeight,
+                new Vector2(0.5f, TerrainLayerPresentationUtility.CombinedRockWallPivotY),
+                hasTransparency: false);
         }
 
         /// <summary>
@@ -889,18 +902,10 @@ namespace Farmware.WorldGeneration.Editor
             importer.alphaIsTransparency = hasTransparency;
             importer.wrapMode = TextureWrapMode.Clamp;
 
-            // 通常の低地断面だけは16pxの論理セル中心へPivotを置き、下側の追加ピクセルを低地セルへはみ出させます。
-            // 岩壁側面は16×16内へ収めるためCenter Pivotとなり、岩壁上面側のTilemap Transformだけを上へ動かします。
-            TextureImporterSettings textureSettings = new TextureImporterSettings();
-            importer.ReadTextureSettings(textureSettings);
-            bool usesCenterPivot = Mathf.Approximately(pivot.x, 0.5f)
-                && Mathf.Approximately(pivot.y, 0.5f);
-            textureSettings.spriteAlignment = usesCenterPivot
-                ? (int)SpriteAlignment.Center
-                : (int)SpriteAlignment.Custom;
-            textureSettings.spritePivot = pivot;
-            importer.SetTextureSettings(textureSettings);
+            // FilterやPPUなどTexture全体の設定を先に確定し、その後Sprite固有のPivotを公式Data Providerで変更します。
+            // Importer固有フィールドへ直接書くと将来のSprite Editor実装と食い違うため、Pivotは必ず能力確認後に設定します。
             importer.SaveAndReimport();
+            ApplySpritePivot(textureAssetPath, pivot);
 
             Sprite sprite = AssetDatabase.LoadAssetAtPath<Sprite>(textureAssetPath);
             if (sprite == null)
@@ -909,6 +914,54 @@ namespace Farmware.WorldGeneration.Editor
             }
 
             return sprite;
+        }
+
+        /// <summary>
+        /// 単一SpriteのPivotをSprite Editor Data Provider経由で設定します。
+        /// </summary>
+        /// <param name="textureAssetPath">Assetsから始まる対象PNGのプロジェクト相対パスです。</param>
+        /// <param name="pivot">画像左下を0、右上を1とする正規化Pivotです。</param>
+        /// <exception cref="InvalidOperationException">ImporterがPivot編集に対応しない場合、または単一Spriteでない場合に送出します。</exception>
+        private static void ApplySpritePivot(string textureAssetPath, Vector2 pivot)
+        {
+            AssetImporter importer = AssetImporter.GetAtPath(textureAssetPath);
+            SpriteDataProviderFactories factories = new SpriteDataProviderFactories();
+            factories.Init();
+            ISpriteEditorDataProvider dataProvider =
+                factories.GetSpriteEditorDataProviderFromObject(importer);
+            if (dataProvider == null)
+            {
+                throw new InvalidOperationException(
+                    $"Sprite Editor Data Providerを取得できませんでした: {textureAssetPath}");
+            }
+
+            dataProvider.InitSpriteEditorDataProvider();
+            ISpriteFrameEditCapability editCapability =
+                dataProvider.GetDataProvider<ISpriteFrameEditCapability>();
+            if (editCapability == null
+                || !editCapability.GetEditCapability().HasCapability(EEditCapability.EditPivot))
+            {
+                // 対応能力を確認せずにSpriteRectを変更すると、Importerごとのデータ契約を壊す可能性があるため中断します。
+                throw new InvalidOperationException(
+                    $"Sprite Pivotの編集に対応していないImporterです: {textureAssetPath}");
+            }
+
+            SpriteRect[] spriteRects = dataProvider.GetSpriteRects();
+            if (spriteRects == null || spriteRects.Length != 1)
+            {
+                throw new InvalidOperationException(
+                    $"単一SpriteとしてPivotを設定できませんでした: {textureAssetPath}");
+            }
+
+            bool usesCenterPivot = Mathf.Approximately(pivot.x, 0.5f)
+                && Mathf.Approximately(pivot.y, 0.5f);
+            spriteRects[0].alignment = usesCenterPivot
+                ? SpriteAlignment.Center
+                : SpriteAlignment.Custom;
+            spriteRects[0].pivot = pivot;
+            dataProvider.SetSpriteRects(spriteRects);
+            dataProvider.Apply();
+            importer.SaveAndReimport();
         }
 
         /// <summary>
@@ -1136,11 +1189,6 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="treeResourceTile">樹木資源用の透明背景Tileです。</param>
         /// <param name="stoneResourceTile">石資源用の透明背景Tileです。</param>
         /// <param name="sandResourceTile">砂資源用の透明背景Tileです。</param>
-        /// <param name="soilFrontEdgeTile">草原・森林・湿地へ使用する土断面Tileです。</param>
-        /// <param name="sandFrontEdgeTile">砂漠・砂地へ使用する砂断面Tileです。</param>
-        /// <param name="rockFrontEdgeTile">岩地・火山へ使用する岩断面Tileです。</param>
-        /// <param name="snowFrontEdgeTile">雪原へ使用する雪断面Tileです。</param>
-        /// <param name="rockWallFrontFaceTile">岩壁最前列へ使用する側面Tileです。</param>
         /// <param name="freshWaterAnimationTile">淡水へ重ねる透明AnimatedTileです。</param>
         /// <param name="saltWaterAnimationTile">海水へ重ねる透明AnimatedTileです。</param>
         /// <param name="magmaAnimationTile">マグマへ重ねる透明AnimatedTileです。</param>
@@ -1160,11 +1208,6 @@ namespace Farmware.WorldGeneration.Editor
             TileBase treeResourceTile,
             TileBase stoneResourceTile,
             TileBase sandResourceTile,
-            TileBase soilFrontEdgeTile,
-            TileBase sandFrontEdgeTile,
-            TileBase rockFrontEdgeTile,
-            TileBase snowFrontEdgeTile,
-            TileBase rockWallFrontFaceTile,
             TileBase freshWaterAnimationTile,
             TileBase saltWaterAnimationTile,
             TileBase magmaAnimationTile)
@@ -1185,10 +1228,12 @@ namespace Farmware.WorldGeneration.Editor
 
             GameObject tilemapObject = FindOrCreateDirectChild(gridObject.transform, "Ground Tilemap");
             Tilemap tilemap = GetOrAddComponent<Tilemap>(tilemapObject);
-            TilemapRenderer tilemapRenderer = GetOrAddComponent<TilemapRenderer>(tilemapObject);
-            tilemapRenderer.mode = TilemapRenderer.Mode.Chunk;
-            tilemapRenderer.sortOrder = TilemapRenderer.SortOrder.BottomLeft;
-            tilemapRenderer.sortingOrder = 0;
+            tilemapObject.transform.localPosition = Vector3.zero;
+            ConfigureTilemapRenderer(
+                tilemapObject,
+                sortingOrder: 0,
+                mode: TilemapRenderer.Mode.Individual,
+                sortOrder: TilemapRenderer.SortOrder.TopLeft);
             ChunkTilemapPresenter presenter = GetOrAddComponent<ChunkTilemapPresenter>(tilemapObject);
 
             GameObject liquidBaseTilemapObject =
@@ -1210,25 +1255,21 @@ namespace Farmware.WorldGeneration.Editor
                 0f);
             ConfigureTilemapRenderer(liquidAnimationTilemapObject, sortingOrder: -1);
 
-            GameObject terrainFrontEdgeTilemapObject =
-                FindOrCreateDirectChild(gridObject.transform, "Terrain Front Edge Tilemap");
-            Tilemap terrainFrontEdgeTilemap = GetOrAddComponent<Tilemap>(terrainFrontEdgeTilemapObject);
-            ConfigureTilemapRenderer(terrainFrontEdgeTilemapObject, sortingOrder: 1);
+            // 旧分離レイヤーは参照が切れた状態で残さず、Sceneから明示的に取り除きます。
+            DeleteDirectChildIfPresent(gridObject.transform, "Terrain Front Edge Tilemap");
+            DeleteDirectChildIfPresent(gridObject.transform, "Rock Wall Front Face Tilemap");
 
-            GameObject rockWallFrontFaceTilemapObject =
-                FindOrCreateDirectChild(gridObject.transform, "Rock Wall Front Face Tilemap");
-            Tilemap rockWallFrontFaceTilemap =
-                GetOrAddComponent<Tilemap>(rockWallFrontFaceTilemapObject);
-            ConfigureTilemapRenderer(rockWallFrontFaceTilemapObject, sortingOrder: 2);
-
-            GameObject rockWallTopTilemapObject =
-                FindOrCreateDirectChild(gridObject.transform, "Rock Wall Top Tilemap");
-            Tilemap rockWallTopTilemap = GetOrAddComponent<Tilemap>(rockWallTopTilemapObject);
-            rockWallTopTilemapObject.transform.localPosition = new Vector3(
-                0f,
-                TerrainLayerPresentationUtility.RockWallElevationInCells,
-                0f);
-            ConfigureTilemapRenderer(rockWallTopTilemapObject, sortingOrder: 3);
+            GameObject rockWallTilemapObject = FindOrCreateRenamedDirectChild(
+                gridObject.transform,
+                "Rock Wall Tilemap",
+                "Rock Wall Top Tilemap");
+            Tilemap rockWallTilemap = GetOrAddComponent<Tilemap>(rockWallTilemapObject);
+            rockWallTilemapObject.transform.localPosition = Vector3.zero;
+            ConfigureTilemapRenderer(
+                rockWallTilemapObject,
+                sortingOrder: 3,
+                mode: TilemapRenderer.Mode.Individual,
+                sortOrder: TilemapRenderer.SortOrder.TopLeft);
 
             GameObject resourceTilemapObject =
                 FindOrCreateDirectChild(gridObject.transform, "Resource Tilemap");
@@ -1268,15 +1309,8 @@ namespace Farmware.WorldGeneration.Editor
                 sandResourceTile,
                 liquidBaseTilemap,
                 liquidAnimationTilemap,
-                terrainFrontEdgeTilemap,
-                rockWallFrontFaceTilemap,
-                rockWallTopTilemap,
+                rockWallTilemap,
                 rockWallResourceTilemap,
-                soilFrontEdgeTile,
-                sandFrontEdgeTile,
-                rockFrontEdgeTile,
-                snowFrontEdgeTile,
-                rockWallFrontFaceTile,
                 freshWaterAnimationTile,
                 saltWaterAnimationTile,
                 magmaAnimationTile);
@@ -1292,7 +1326,7 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>
-        /// ChunkTilemapPresenterへ、地形・資源の専用Tilemapと14種類の仮Tileをまとめて設定します。
+        /// ChunkTilemapPresenterへ、地形・資源の専用Tilemapと一体型の仮Tileをまとめて設定します。
         /// </summary>
         /// <param name="presenter">設定対象のPresentation Componentです。</param>
         /// <param name="tilemap">生成地形だけを表示する専用Tilemapです。</param>
@@ -1313,15 +1347,8 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="sandResourceTile">砂資源用の透明背景Tileです。</param>
         /// <param name="liquidBaseTilemap">静止した液面を土地より8px下へ描画するTilemapです。</param>
         /// <param name="liquidAnimationTilemap">液面アニメーションを静止液面と同じ8px下へ描画するTilemapです。</param>
-        /// <param name="terrainFrontEdgeTilemap">通常地形の手前断面だけを描画するTilemapです。</param>
-        /// <param name="rockWallFrontFaceTilemap">岩壁の手前側面だけを描画するTilemapです。</param>
-        /// <param name="rockWallTopTilemap">岩壁上面を基準面より12px上へ描画するTilemapです。</param>
+        /// <param name="rockWallTilemap">16×28の岩壁ブロックを基準セルへ描画するTilemapです。</param>
         /// <param name="rockWallResourceTilemap">露出した岩壁上の資源を12px上へ描画するTilemapです。</param>
-        /// <param name="soilFrontEdgeTile">草原・森林・湿地へ使用する土断面Tileです。</param>
-        /// <param name="sandFrontEdgeTile">砂漠・砂地へ使用する砂断面Tileです。</param>
-        /// <param name="rockFrontEdgeTile">岩地・火山へ使用する岩断面Tileです。</param>
-        /// <param name="snowFrontEdgeTile">雪原へ使用する雪断面Tileです。</param>
-        /// <param name="rockWallFrontFaceTile">岩壁最前列へ使用する側面Tileです。</param>
         /// <param name="freshWaterAnimationTile">淡水へ重ねる透明AnimatedTileです。</param>
         /// <param name="saltWaterAnimationTile">海水へ重ねる透明AnimatedTileです。</param>
         /// <param name="magmaAnimationTile">マグマへ重ねる透明AnimatedTileです。</param>
@@ -1345,15 +1372,8 @@ namespace Farmware.WorldGeneration.Editor
             TileBase sandResourceTile,
             Tilemap liquidBaseTilemap,
             Tilemap liquidAnimationTilemap,
-            Tilemap terrainFrontEdgeTilemap,
-            Tilemap rockWallFrontFaceTilemap,
-            Tilemap rockWallTopTilemap,
+            Tilemap rockWallTilemap,
             Tilemap rockWallResourceTilemap,
-            TileBase soilFrontEdgeTile,
-            TileBase sandFrontEdgeTile,
-            TileBase rockFrontEdgeTile,
-            TileBase snowFrontEdgeTile,
-            TileBase rockWallFrontFaceTile,
             TileBase freshWaterAnimationTile,
             TileBase saltWaterAnimationTile,
             TileBase magmaAnimationTile)
@@ -1378,15 +1398,8 @@ namespace Farmware.WorldGeneration.Editor
             presenter.ConfigureTerrainEffects(
                 liquidBaseTilemap,
                 liquidAnimationTilemap,
-                terrainFrontEdgeTilemap,
-                rockWallFrontFaceTilemap,
-                rockWallTopTilemap,
+                rockWallTilemap,
                 rockWallResourceTilemap,
-                soilFrontEdgeTile,
-                sandFrontEdgeTile,
-                rockFrontEdgeTile,
-                snowFrontEdgeTile,
-                rockWallFrontFaceTile,
                 freshWaterAnimationTile,
                 saltWaterAnimationTile,
                 magmaAnimationTile);
@@ -1394,15 +1407,21 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>
-        /// 追加Tilemapへ地形と同じチャンク描画・左下順ソートを設定し、指定順序で重ねます。
+        /// 追加Tilemapへセルの走査方向、描画モード、レイヤー間の描画順を設定します。
         /// </summary>
         /// <param name="tilemapObject">TilemapRendererを持たせる追加レイヤーのGameObjectです。</param>
         /// <param name="sortingOrder">Ground Tilemapを0とした描画順序です。</param>
-        private static void ConfigureTilemapRenderer(GameObject tilemapObject, int sortingOrder)
+        /// <param name="mode">Spriteをチャンク一括またはセル単位でソートする描画モードです。</param>
+        /// <param name="sortOrder">Tilemap内のセルを描き始める方向です。背のあるSpriteは画面奥から描くためTopLeftを指定します。</param>
+        private static void ConfigureTilemapRenderer(
+            GameObject tilemapObject,
+            int sortingOrder,
+            TilemapRenderer.Mode mode = TilemapRenderer.Mode.Chunk,
+            TilemapRenderer.SortOrder sortOrder = TilemapRenderer.SortOrder.BottomLeft)
         {
             TilemapRenderer renderer = GetOrAddComponent<TilemapRenderer>(tilemapObject);
-            renderer.mode = TilemapRenderer.Mode.Chunk;
-            renderer.sortOrder = TilemapRenderer.SortOrder.BottomLeft;
+            renderer.mode = mode;
+            renderer.sortOrder = sortOrder;
             renderer.sortingOrder = sortingOrder;
         }
 
@@ -1521,6 +1540,48 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>
+        /// 現在名の子を優先して取得し、存在しなければ旧名の子を改名して再利用します。
+        /// </summary>
+        /// <param name="parent">検索・作成先となる親Transformです。</param>
+        /// <param name="objectName">移行後に使用するGameObject名です。</param>
+        /// <param name="legacyObjectName">旧Sceneに保存されている可能性があるGameObject名です。</param>
+        /// <returns>現在名へ統一された既存または新規の子GameObjectです。</returns>
+        private static GameObject FindOrCreateRenamedDirectChild(
+            Transform parent,
+            string objectName,
+            string legacyObjectName)
+        {
+            Transform currentTransform = parent.Find(objectName);
+            if (currentTransform != null && currentTransform.parent == parent)
+            {
+                return currentTransform.gameObject;
+            }
+
+            Transform legacyTransform = parent.Find(legacyObjectName);
+            if (legacyTransform != null && legacyTransform.parent == parent)
+            {
+                legacyTransform.name = objectName;
+                return legacyTransform.gameObject;
+            }
+
+            return FindOrCreateDirectChild(parent, objectName);
+        }
+
+        /// <summary>
+        /// 旧仕様だけで使用した直下GameObjectをSceneから削除します。
+        /// </summary>
+        /// <param name="parent">削除候補を探す親Transformです。</param>
+        /// <param name="objectName">削除する直下GameObject名です。</param>
+        private static void DeleteDirectChildIfPresent(Transform parent, string objectName)
+        {
+            Transform child = parent.Find(objectName);
+            if (child != null && child.parent == parent)
+            {
+                UnityEngine.Object.DestroyImmediate(child.gameObject);
+            }
+        }
+
+        /// <summary>
         /// GameObjectから指定Componentを取得し、存在しない場合だけ追加します。
         /// </summary>
         /// <typeparam name="T">取得または追加するUnity Component型です。</typeparam>
@@ -1597,12 +1658,7 @@ namespace Farmware.WorldGeneration.Editor
                 "RockWall",
                 "TreeResource",
                 "StoneResource",
-                "SandResource",
-                "SoilFrontEdge",
-                "SandFrontEdge",
-                "RockFrontEdge",
-                "SnowFrontEdge",
-                "RockWallFrontFace"
+                "SandResource"
             };
             for (int index = 0; index < tileNames.Length; index++)
             {
@@ -1623,6 +1679,31 @@ namespace Farmware.WorldGeneration.Editor
                     throw new InvalidOperationException($"フォールバックTileの検証に失敗しました: {tileNames[index]}");
                 }
             }
+
+            string[] terrainTileNames =
+            {
+                "Grassland",
+                "Forest",
+                "Desert",
+                "Rockland",
+                "Wetland",
+                "Snowfield",
+                "Volcanic"
+            };
+            for (int index = 0; index < terrainTileNames.Length; index++)
+            {
+                ValidateFallbackSpriteGeometry(
+                    terrainTileNames[index],
+                    FallbackTilePixelSize,
+                    TerrainLayerPresentationUtility.CombinedTerrainSpriteHeightInPixels,
+                    new Vector2(0.5f, TerrainLayerPresentationUtility.CombinedTerrainPivotY));
+            }
+
+            ValidateFallbackSpriteGeometry(
+                "RockWall",
+                FallbackTilePixelSize,
+                TerrainLayerPresentationUtility.CombinedRockWallSpriteHeightInPixels,
+                new Vector2(0.5f, TerrainLayerPresentationUtility.CombinedRockWallPivotY));
 
             string[] animatedTileNames =
             {
@@ -1645,12 +1726,8 @@ namespace Farmware.WorldGeneration.Editor
                 gridObject.transform.Find("Liquid Base Tilemap");
             Transform liquidAnimationTilemapTransform =
                 gridObject.transform.Find("Liquid Surface Animation Tilemap");
-            Transform terrainFrontEdgeTilemapTransform =
-                gridObject.transform.Find("Terrain Front Edge Tilemap");
-            Transform rockWallFrontFaceTilemapTransform =
-                gridObject.transform.Find("Rock Wall Front Face Tilemap");
-            Transform rockWallTopTilemapTransform =
-                gridObject.transform.Find("Rock Wall Top Tilemap");
+            Transform rockWallTilemapTransform =
+                gridObject.transform.Find("Rock Wall Tilemap");
             Transform rockWallResourceTilemapTransform =
                 gridObject.transform.Find("Rock Wall Resource Tilemap");
             GameObject subSceneObject = FindOrCreateRoot(mainScene, "World Generation SubScene");
@@ -1687,6 +1764,11 @@ namespace Farmware.WorldGeneration.Editor
                 || gridObject.GetComponent<Grid>() == null
                 || tilemapTransform == null
                 || tilemapTransform.GetComponent<Tilemap>() == null
+                || tilemapTransform.GetComponent<TilemapRenderer>() == null
+                || tilemapTransform.GetComponent<TilemapRenderer>().mode
+                    != TilemapRenderer.Mode.Individual
+                || tilemapTransform.GetComponent<TilemapRenderer>().sortOrder
+                    != TilemapRenderer.SortOrder.TopLeft
                 || resourceTilemapTransform == null
                 || resourceTilemapTransform.GetComponent<Tilemap>() == null
                 || resourceTilemapTransform.GetComponent<TilemapRenderer>() == null
@@ -1702,18 +1784,19 @@ namespace Farmware.WorldGeneration.Editor
                 || !Mathf.Approximately(
                     liquidAnimationTilemapTransform.localPosition.y,
                     TerrainLayerPresentationUtility.LiquidSurfaceOffsetInCells)
-                || terrainFrontEdgeTilemapTransform == null
-                || terrainFrontEdgeTilemapTransform.GetComponent<Tilemap>() == null
-                || terrainFrontEdgeTilemapTransform.GetComponent<TilemapRenderer>() == null
-                || rockWallFrontFaceTilemapTransform == null
-                || rockWallFrontFaceTilemapTransform.GetComponent<Tilemap>() == null
-                || rockWallFrontFaceTilemapTransform.GetComponent<TilemapRenderer>() == null
-                || rockWallTopTilemapTransform == null
-                || rockWallTopTilemapTransform.GetComponent<Tilemap>() == null
-                || rockWallTopTilemapTransform.GetComponent<TilemapRenderer>() == null
+                || gridObject.transform.Find("Terrain Front Edge Tilemap") != null
+                || gridObject.transform.Find("Rock Wall Front Face Tilemap") != null
+                || gridObject.transform.Find("Rock Wall Top Tilemap") != null
+                || rockWallTilemapTransform == null
+                || rockWallTilemapTransform.GetComponent<Tilemap>() == null
+                || rockWallTilemapTransform.GetComponent<TilemapRenderer>() == null
+                || rockWallTilemapTransform.GetComponent<TilemapRenderer>().mode
+                    != TilemapRenderer.Mode.Individual
+                || rockWallTilemapTransform.GetComponent<TilemapRenderer>().sortOrder
+                    != TilemapRenderer.SortOrder.TopLeft
                 || !Mathf.Approximately(
-                    rockWallTopTilemapTransform.localPosition.y,
-                    TerrainLayerPresentationUtility.RockWallElevationInCells)
+                    rockWallTilemapTransform.localPosition.y,
+                    0f)
                 || rockWallResourceTilemapTransform == null
                 || rockWallResourceTilemapTransform.GetComponent<Tilemap>() == null
                 || rockWallResourceTilemapTransform.GetComponent<TilemapRenderer>() == null
@@ -1725,6 +1808,40 @@ namespace Farmware.WorldGeneration.Editor
                 || subSceneObject.GetComponent<SubScene>().SceneAsset == null)
             {
                 throw new InvalidOperationException("SampleSceneのマップ生成Component接続を検証できませんでした。");
+            }
+        }
+
+        /// <summary>
+        /// 保存済みフォールバックSpriteの画像寸法とPivotを読み戻して検証します。
+        /// </summary>
+        /// <param name="assetName">拡張子を除いたSprite名です。</param>
+        /// <param name="expectedWidth">期待する画像幅です。単位はピクセルです。</param>
+        /// <param name="expectedHeight">期待する画像高です。単位はピクセルです。</param>
+        /// <param name="expectedNormalizedPivot">画像左下を0、右上を1とする期待Pivotです。</param>
+        private static void ValidateFallbackSpriteGeometry(
+            string assetName,
+            int expectedWidth,
+            int expectedHeight,
+            Vector2 expectedNormalizedPivot)
+        {
+            string texturePath = $"{FallbackAssetFolder}/{assetName}.png";
+            Sprite sprite = AssetDatabase.LoadAssetAtPath<Sprite>(texturePath);
+            if (sprite == null
+                || !Mathf.Approximately(sprite.rect.width, expectedWidth)
+                || !Mathf.Approximately(sprite.rect.height, expectedHeight))
+            {
+                throw new InvalidOperationException(
+                    $"フォールバックSpriteの寸法が不正です: {texturePath}");
+            }
+
+            Vector2 expectedPixelPivot = new Vector2(
+                expectedWidth * expectedNormalizedPivot.x,
+                expectedHeight * expectedNormalizedPivot.y);
+            if (!Mathf.Approximately(sprite.pivot.x, expectedPixelPivot.x)
+                || !Mathf.Approximately(sprite.pivot.y, expectedPixelPivot.y))
+            {
+                throw new InvalidOperationException(
+                    $"フォールバックSpriteのPivotが不正です: {texturePath}");
             }
         }
 
@@ -1755,9 +1872,7 @@ namespace Farmware.WorldGeneration.Editor
                 "resourceTilemap",
                 "liquidBaseTilemap",
                 "liquidAnimationTilemap",
-                "terrainFrontEdgeTilemap",
-                "rockWallFrontFaceTilemap",
-                "rockWallTopTilemap",
+                "rockWallTilemap",
                 "rockWallResourceTilemap",
                 "grasslandTile",
                 "forestTile",
@@ -1773,11 +1888,6 @@ namespace Farmware.WorldGeneration.Editor
                 "treeResourceTile",
                 "stoneResourceTile",
                 "sandResourceTile",
-                "soilFrontEdgeTile",
-                "sandFrontEdgeTile",
-                "rockFrontEdgeTile",
-                "snowFrontEdgeTile",
-                "rockWallFrontFaceTile",
                 "freshWaterAnimationTile",
                 "saltWaterAnimationTile",
                 "magmaAnimationTile"

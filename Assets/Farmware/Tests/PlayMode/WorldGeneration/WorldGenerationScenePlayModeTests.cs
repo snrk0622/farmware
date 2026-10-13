@@ -26,6 +26,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
         /// <summary>初期スポーンチャンクが保持範囲外へ確実に出る、テスト用カメラ水平移動量です。</summary>
         private const int FarCameraOffsetInTiles = WorldGridConstants.LogicalChunkSize * 8;
 
+
         /// <summary>
         /// Windowboxの基準解像度を整数倍して中央配置し、余ったGameビュー領域が黒帯として除外されることを検証します。
         /// F4グリッドとHUDが参照する純粋な矩形計算なので、Sceneロード前に複数アスペクト比をまとめて確認します。
@@ -453,37 +454,31 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Is.EqualTo(TerrainLayerPresentationUtility.LiquidSurfaceOffsetInCells)
                     .Within(0.0001f),
                 "波・気泡は静止液面と同じ8px下へ移動し、上下へ分離してはいけません。");
-            GameObject terrainFrontEdgeTilemapObject =
-                GameObject.Find("World Grid/Terrain Front Edge Tilemap");
-            Tilemap terrainFrontEdgeTilemap = terrainFrontEdgeTilemapObject == null
+            Assert.That(
+                GameObject.Find("World Grid/Terrain Front Edge Tilemap"),
+                Is.Null,
+                "土地断面を一体化したため、旧Terrain Front Edge Tilemapを残してはいけません。");
+            Assert.That(
+                GameObject.Find("World Grid/Rock Wall Front Face Tilemap"),
+                Is.Null,
+                "岩壁側面を一体化したため、旧Rock Wall Front Face Tilemapを残してはいけません。");
+            Assert.That(
+                GameObject.Find("World Grid/Rock Wall Top Tilemap"),
+                Is.Null,
+                "一体型岩壁へ改名したため、旧Rock Wall Top Tilemapを残してはいけません。");
+            GameObject rockWallTilemapObject =
+                GameObject.Find("World Grid/Rock Wall Tilemap");
+            Tilemap rockWallTilemap = rockWallTilemapObject == null
                 ? null
-                : terrainFrontEdgeTilemapObject.GetComponent<Tilemap>();
+                : rockWallTilemapObject.GetComponent<Tilemap>();
             Assert.That(
-                terrainFrontEdgeTilemap,
+                rockWallTilemap,
                 Is.Not.Null,
-                "SampleSceneに通常地形の手前断面専用Tilemapがありません。");
-            GameObject rockWallFrontFaceTilemapObject =
-                GameObject.Find("World Grid/Rock Wall Front Face Tilemap");
-            Tilemap rockWallFrontFaceTilemap = rockWallFrontFaceTilemapObject == null
-                ? null
-                : rockWallFrontFaceTilemapObject.GetComponent<Tilemap>();
+                "SampleSceneに16×28の一体型岩壁専用Tilemapがありません。");
             Assert.That(
-                rockWallFrontFaceTilemap,
-                Is.Not.Null,
-                "SampleSceneに岩壁側面専用Tilemapがありません。");
-            GameObject rockWallTopTilemapObject =
-                GameObject.Find("World Grid/Rock Wall Top Tilemap");
-            Tilemap rockWallTopTilemap = rockWallTopTilemapObject == null
-                ? null
-                : rockWallTopTilemapObject.GetComponent<Tilemap>();
-            Assert.That(
-                rockWallTopTilemap,
-                Is.Not.Null,
-                "SampleSceneに基準面より上へ持ち上げる岩壁上面専用Tilemapがありません。");
-            Assert.That(
-                rockWallTopTilemap.transform.localPosition.y,
-                Is.EqualTo(TerrainLayerPresentationUtility.RockWallElevationInCells).Within(0.0001f),
-                "岩壁上面は基準面から12px上へ移動している必要があります。");
+                rockWallTilemap.transform.localPosition.y,
+                Is.EqualTo(0f).Within(0.0001f),
+                "岩壁の高さはSprite Pivotで表すため、Tilemap Transformを移動してはいけません。");
             GameObject rockWallResourceTilemapObject =
                 GameObject.Find("World Grid/Rock Wall Resource Tilemap");
             Tilemap rockWallResourceTilemap = rockWallResourceTilemapObject == null
@@ -500,10 +495,28 @@ namespace Farmware.WorldGeneration.PlayModeTests
 
             // 液面の下半分を手前土地で隠す前後関係はTransform位置だけでは決まらないため、Rendererの描画順もScene実体から確認します。
             TilemapRenderer groundRenderer = tilemap.GetComponent<TilemapRenderer>();
+            TilemapRenderer rockWallRenderer = rockWallTilemap.GetComponent<TilemapRenderer>();
             TilemapRenderer liquidBaseRenderer = liquidBaseTilemap.GetComponent<TilemapRenderer>();
             TilemapRenderer liquidAnimationRenderer =
                 liquidAnimationTilemap.GetComponent<TilemapRenderer>();
             Assert.That(groundRenderer, Is.Not.Null, "Ground TilemapにTilemapRendererがありません。");
+            Assert.That(rockWallRenderer, Is.Not.Null, "Rock Wall TilemapにTilemapRendererがありません。");
+            Assert.That(
+                groundRenderer.mode,
+                Is.EqualTo(TilemapRenderer.Mode.Individual),
+                "16×24土地はセルごとの行ソートが必要なためIndividual Modeで描画してください。");
+            Assert.That(
+                rockWallRenderer.mode,
+                Is.EqualTo(TilemapRenderer.Mode.Individual),
+                "16×28岩壁はセルごとの行ソートが必要なためIndividual Modeで描画してください。");
+            Assert.That(
+                groundRenderer.sortOrder,
+                Is.EqualTo(TilemapRenderer.SortOrder.TopLeft),
+                "16×24土地は奥の高いYから先に描き、手前の低いYを後から重ねてください。");
+            Assert.That(
+                rockWallRenderer.sortOrder,
+                Is.EqualTo(TilemapRenderer.SortOrder.TopLeft),
+                "16×28岩壁は奥の高いYから先に描き、手前の低いYを後から重ねてください。");
             Assert.That(
                 liquidBaseRenderer,
                 Is.Not.Null,
@@ -650,12 +663,12 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Is.True,
                 $"{MaximumWaitFrames}フレーム以内に初回生成と表示が完了しませんでした。");
 
-            // 岩壁上面が存在するセルを実際の表示結果から探し、同じ論理セルに基準面も残る二段構成を保証します。
-            // Transformの設定だけを検査すると、Presenterが上面を書き忘れてもテストが通るため、Tilemapの内容まで確認します。
+            // 一体型岩壁が存在するセルを実際の表示結果から探し、同じ論理セルに土地ブロックも残る二段構成を保証します。
+            // TransformとPivotだけを検査すると、Presenterが岩壁を書き忘れてもテストが通るため、Tilemapの内容まで確認します。
             bool foundDisplayedRockWall = false;
-            foreach (Vector3Int cellPosition in rockWallTopTilemap.cellBounds.allPositionsWithin)
+            foreach (Vector3Int cellPosition in rockWallTilemap.cellBounds.allPositionsWithin)
             {
-                if (!rockWallTopTilemap.HasTile(cellPosition))
+                if (!rockWallTilemap.HasTile(cellPosition))
                 {
                     continue;
                 }
@@ -664,18 +677,13 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Assert.That(
                     tilemap.HasTile(cellPosition),
                     Is.True,
-                    $"岩壁上面セル {cellPosition} の下に、Biome由来の基準面が残っていません。");
+                    $"岩壁セル {cellPosition} の下に、Biome由来の一体型土地ブロックが残っていません。");
             }
 
             Assert.That(
                 foundDisplayedRockWall,
                 Is.True,
-                "初回表示範囲に岩壁上面が1枚もなく、二段構成を実表示で検証できませんでした。");
-
-            Assert.That(
-                rockWallFrontFaceTilemap.GetUsedTilesCount(),
-                Is.GreaterThan(0),
-                "初回表示範囲に岩壁の最前列側面が描画されていません。");
+                "初回表示範囲に一体型岩壁が1枚もなく、二段構成を実表示で検証できませんでした。");
             Assert.That(
                 cameraPanController.transform.position.x,
                 Is.EqualTo(initialCameraWorldPosition.x).Within(0.00001f),

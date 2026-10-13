@@ -6,6 +6,7 @@
     "Farmware.WorldGeneration.Authoring",
     "Farmware.WorldGeneration.Editor",
     "Farmware.WorldGeneration.Presentation",
+    "Unity.2D.Sprite.Editor",
     "Unity.Collections",
     "Unity.Entities",
     "Unity.Mathematics"

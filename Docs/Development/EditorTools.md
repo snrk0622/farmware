@@ -1,6 +1,6 @@
 # Unity Editorツール
 
-- 最終更新日: 2026-10-12
+- 最終更新日: 2026-10-13
 - 対象: `Assets/Farmware/Editor/WorldGeneration/`
 
 ## 1. 用途
@@ -21,10 +21,11 @@
 
 #### 用途
 
-- 16×16ピクセルの仮色地形Tileと仮資源Tileを生成または更新する。
-- 上側16×16を完全透明にしてその直下8pxを描く、土、砂、岩、雪の24px高前面断面、16×16内の下部12pxだけを使う岩壁側面、淡水・海水・マグマ各4枚の透明フレームとAnimatedTileを生成または更新する。
+- 上面16pxと断面8pxを結合した16×24の仮色土地Tile、16×16の仮色液体・資源Tileを生成または更新する。
+- 上面16pxと側面12pxを結合した16×28岩壁Tile、淡水・海水・マグマ各4枚の透明フレームとAnimatedTileを生成または更新する。Sprite PivotはSprite Editor Data Provider経由で設定する。
+- 土地7種を同じTextureページへ収める`GroundTerrainAtlas.spriteatlasv2`と、岩壁用の`RockWallAtlas.spriteatlasv2`を生成または更新し、現在のBuild Target向けにパックする。
 - `WorldGenerationSettingsSubScene`へ生成設定のAuthoringを配置する。
-- `SampleScene`へCamera、Grid、Ground・静止液面・液面アニメーション・断面・岩壁側面・岩壁上面・通常資源・岩壁上資源の8枚のTilemap、表示用Component、SubScene参照を接続する。静止液面と液面アニメーションは土地より8px下、岩壁上面と岩壁上資源は土地基準面より12px上へ設定する。
+- `SampleScene`へCamera、Grid、Ground・静止液面・液面アニメーション・岩壁・通常資源・岩壁上資源の6枚のTilemap、表示用Component、SubScene参照を接続する。静止液面と液面アニメーションは土地より8px下、岩壁上資源は土地基準面より12px上へ設定する。GroundとRock WallはIndividual ModeかつTop Left順で描画し、画面奥から手前へ重ねる。
 - Pixel Perfect Cameraの基準解像度480×270を含む、再現可能な確認環境を構築する。
 
 #### 実行後の注意
@@ -35,19 +36,38 @@
 
 - `WorldGenerationAuthoring`の設定項目、既定値、Baker変換を変更した。
 - バイオーム、地面、水域、マグマ、岩壁、資源の種類またはフォールバック色を変更した。
-- Ground、Liquid Base、Liquid Surface Animation、Terrain Front Edge、Rock Wall Front Face、Rock Wall Top、Resource、Rock Wall ResourceのTilemapレイヤー構成、Transform、Sorting Order、参照関係を変更した。
+- Ground、Liquid Base、Liquid Surface Animation、Rock Wall、Resource、Rock Wall ResourceのTilemapレイヤー構成、Transform、描画Mode、Sorting Order、参照関係を変更した。
 - Camera、Pixel Perfect Camera、480×270の基準解像度、黒帯処理を変更した。
 - `SampleScene`または`WorldGenerationSettingsSubScene`の生成構成を変更した。
+- 土地・岩壁の元Texture、Sprite Slice、Atlas容量、Pixel Art向けAtlas設定を変更した。
 
 #### 確認内容
 
 1. Consoleに例外または新規警告が出ていない。
-2. 必要なPNG、Tile、AnimatedTile、`.meta`が揃っている。
+2. 必要なPNG、Tile、AnimatedTile、Sprite Atlas、`.meta`が揃っている。全土地Spriteが`GroundTerrainAtlas`の同じパック後Textureを参照し、岩壁が`RockWallAtlas`へ分離されている。
 3. SampleSceneとSubSceneの参照がMissingになっていない。
-4. PlayModeで地面、マグマ、淡水、海水、資源に加え、静止液面と透明アニメーションが同じ8px下、ワールドY-1条件の土地断面が上面へ重ならずセル直下から8px、岩壁側面がセル下端から上へ12px、岩壁上面・内部影・露出資源が12px上へ表示される。液体はGround Tilemapへ重複せず、液面下辺は手前土地に隠れる。岩壁が低地へ面する場所では土地断面と岩壁側面が両方表示される。
+4. PlayModeで土地が16×24、岩壁が16×28の一体型ブロックとして表示される。静止液面と透明アニメーションは同じ8px下、岩壁内部影・露出資源は12px上へ表示される。液体はGround Tilemapへ重複せず、液面下辺と奥側ブロックの断面・側面は手前ブロックに隠れる。岩壁セルでも下層の土地断面が欠けない。
 5. Gameビューの地形描画領域が480×270基準の黒帯内へ収まり、HUDとF4表示も同じ領域を使用する。
 
-### 2.2 Debug Visualization
+### 2.2 World Generation Sprite Atlas Prebuild
+
+- 実装: `WorldGenerationSpriteAtlasPrebuildGenerator`
+- 実行: Playerビルド直前にUnity Build Pipelineから自動実行する。専用メニューは持たない。
+
+#### 用途
+
+- Sprite Packer Modeを`Sprite Atlas V2`へ統一する。
+- 土地7種の元Textureを`GroundTerrainAtlas`、岩壁の元Textureを`RockWallAtlas`のPackableへ登録する。Texture単位で登録するため、同じPNGを4×4へSliceした将来の16差分も自動収録される。
+- Built-in配信、Point、Mip Maps Off、Read/Write Off、RGBA32、無圧縮、Padding 4 px、Rotation/Tight Packing/Alpha Dilation Off、Max Texture Size 512を再適用する。
+- 対象Build Target向けにパックし、各Atlas内のSpriteが1枚のTextureページへ収まらない場合はビルドを中止する。特に土地の複数ページ化は、バイオーム境界をまたぐIndividual Yソートを壊すため許可しない。
+
+#### 確認内容
+
+1. `WorldGenerationSpriteAtlasTests`が成功する。
+2. Playerビルド前処理後もAtlasのPackableとImporter設定が維持される。
+3. Gameビューで異なる土地バイオームが上下に接する場所でも、奥側断面が手前側上面を隠さない。
+
+### 2.3 Debug Visualization
 
 - メニュー: `Farmware > World Generation > Debug Visualization`
 - 実装: `WorldGenerationDebugVisualizationMenu`
@@ -89,7 +109,7 @@
 4. チャンク境界をまたいでも分類やグラデーションが不自然に途切れない。
 5. `Off`へ戻すと通常表示へ完全に戻る。
 
-### 2.3 Analyze Distribution
+### 2.4 Analyze Distribution
 
 - メニュー: `Farmware > World Generation > Analyze Distribution`
 - 実装: `WorldGenerationDistributionAuditMenu`、`WorldGenerationDistributionAnalyzer`
@@ -126,7 +146,7 @@ Consoleレポートには、次の比較材料を出力する。
 4. 同一コード・同一条件で再実行した署名が一致する。
 5. 大きな比率変化がある場合は、ランダムマップ生成仕様の調整値と説明も更新する。
 
-### 2.4 Map Viewer
+### 2.5 Map Viewer
 
 - メニュー: `Farmware > World Generation > Map Viewer`
 - 実装: `WorldGenerationMapViewerWindow`、`WorldGenerationMapSampler`

@@ -1,5 +1,5 @@
-// このファイルは、通常地形の手前断面、岩壁側面、液面アニメーションの分類規則をSceneなしのEditModeで検証します。
-// ChunkTilemapPresenterが参照する純粋計算だけを対象とし、TilemapやECS Worldを作らず表示条件の回帰を素早く検出します。
+// このファイルは、一体型の土地・岩壁Spriteと液面アニメーションに共通する表示寸法をSceneなしのEditModeで検証します。
+// ChunkTilemapPresenterとEditor構築ツールが同じ定数を使い、Pivotや表示高がずれないことを素早く保証します。
 
 using Farmware.WorldGeneration.Presentation;
 using NUnit.Framework;
@@ -7,76 +7,35 @@ using NUnit.Framework;
 namespace Farmware.WorldGeneration.Tests
 {
     /// <summary>
-    /// Forager風の直線的な手前断面と液面オーバーレイが、GeneratedTileを変更せず正しく分類されることを保証します。
+    /// 16×24土地、16×28岩壁、8px低い液面の寸法規則と液面分類を保証します。
     /// </summary>
     public sealed class TerrainLayerPresentationUtilityTests
     {
         /// <summary>
-        /// 土地または岩壁下の土地の手前が水・マグマの場合だけ、Biomeに対応する4種類の断面が選ばれることを検証します。
+        /// 土地Spriteが上面16pxと断面8pxを持ち、論理セル下端へ合わせるPivotが2/3になることを検証します。
         /// </summary>
         [Test]
-        public void ClassifyTerrainFrontEdge_SelectsMaterialOnlyAboveLowland()
+        public void CombinedTerrainSprite_UsesSixteenPixelSurfaceAndEightPixelFace()
         {
-            GeneratedTile water = new GeneratedTile { Ground = GroundType.Water };
-            GeneratedTile magma = new GeneratedTile { Ground = GroundType.Magma };
-            GeneratedTile normalLand = new GeneratedTile
-            {
-                Biome = BiomeId.Grassland,
-                Ground = GroundType.Normal
-            };
-            GeneratedTile rockWallAboveGrassland = new GeneratedTile
-            {
-                Biome = BiomeId.Grassland,
-                Ground = GroundType.RockWall
-            };
-
+            Assert.That(TerrainLayerPresentationUtility.TerrainSurfaceHeightInPixels, Is.EqualTo(16));
+            Assert.That(TerrainLayerPresentationUtility.TerrainFrontFaceHeightInPixels, Is.EqualTo(8));
+            Assert.That(TerrainLayerPresentationUtility.CombinedTerrainSpriteHeightInPixels, Is.EqualTo(24));
             Assert.That(
-                TerrainLayerPresentationUtility.ClassifyTerrainFrontEdge(normalLand, water),
-                Is.EqualTo(TerrainFrontEdgeKind.Soil));
-            Assert.That(
-                TerrainLayerPresentationUtility.ClassifyTerrainFrontEdge(
-                    new GeneratedTile { Biome = BiomeId.Desert, Ground = GroundType.Sand },
-                    water),
-                Is.EqualTo(TerrainFrontEdgeKind.Sand));
-            Assert.That(
-                TerrainLayerPresentationUtility.ClassifyTerrainFrontEdge(
-                    new GeneratedTile { Biome = BiomeId.Volcanic, Ground = GroundType.Normal },
-                    magma),
-                Is.EqualTo(TerrainFrontEdgeKind.Rock));
-            Assert.That(
-                TerrainLayerPresentationUtility.ClassifyTerrainFrontEdge(
-                    new GeneratedTile { Biome = BiomeId.Snowfield, Ground = GroundType.Normal },
-                    water),
-                Is.EqualTo(TerrainFrontEdgeKind.Snow));
-            Assert.That(
-                TerrainLayerPresentationUtility.ClassifyTerrainFrontEdge(normalLand, normalLand),
-                Is.EqualTo(TerrainFrontEdgeKind.None),
-                "基本地形同士には断面を付けず、オートタイル化しない必要があります。");
-            Assert.That(
-                TerrainLayerPresentationUtility.ClassifyTerrainFrontEdge(
-                    rockWallAboveGrassland,
-                    water),
-                Is.EqualTo(TerrainFrontEdgeKind.Soil),
-                "岩壁が低地へ面する場所にも、岩壁下の土地ブロック断面を残す必要があります。");
-            Assert.That(
-                TerrainLayerPresentationUtility.ShouldDisplayRockWallFrontFace(
-                    rockWallAboveGrassland,
-                    water),
-                Is.True,
-                "低地へ面する岩壁では、土地断面と同じセルへ岩壁側面も重ねる必要があります。");
-            Assert.That(
-                TerrainLayerPresentationUtility.ClassifyTerrainFrontEdge(water, magma),
-                Is.EqualTo(TerrainFrontEdgeKind.None),
-                "液体セル自身へ通常地形の断面を重ねてはいけません。");
+                TerrainLayerPresentationUtility.CombinedTerrainPivotY,
+                Is.EqualTo(2f / 3f).Within(0.0001f));
         }
 
         /// <summary>
-        /// 岩壁の上面16pxと側面12pxが1:0.75になり、Tilemap用セル換算も同じ値になることを検証します。
+        /// 岩壁Spriteが上面16pxと側面12pxを持ち、基準セルへ合わせるPivotが8/28になることを検証します。
         /// </summary>
         [Test]
-        public void RockWallElevation_UsesThreeQuarterSideRatio()
+        public void CombinedRockWallSprite_UsesSixteenPixelSurfaceAndTwelvePixelFace()
         {
             Assert.That(TerrainLayerPresentationUtility.RockWallElevationInPixels, Is.EqualTo(12));
+            Assert.That(TerrainLayerPresentationUtility.CombinedRockWallSpriteHeightInPixels, Is.EqualTo(28));
+            Assert.That(
+                TerrainLayerPresentationUtility.CombinedRockWallPivotY,
+                Is.EqualTo(2f / 7f).Within(0.0001f));
             Assert.That(TerrainLayerPresentationUtility.RockWallElevationInCells, Is.EqualTo(0.75f));
         }
 
@@ -90,26 +49,6 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(
                 TerrainLayerPresentationUtility.LiquidSurfaceOffsetInCells,
                 Is.EqualTo(-0.5f));
-        }
-
-        /// <summary>
-        /// 岩壁側面が最前列の岩壁だけに表示され、岩壁が縦に連続する内部では表示されないことを検証します。
-        /// </summary>
-        [Test]
-        public void ShouldDisplayRockWallFrontFace_ReturnsTrueOnlyForFrontRow()
-        {
-            GeneratedTile rockWall = new GeneratedTile { Ground = GroundType.RockWall };
-            GeneratedTile openLand = new GeneratedTile { Ground = GroundType.Normal };
-
-            Assert.That(
-                TerrainLayerPresentationUtility.ShouldDisplayRockWallFrontFace(rockWall, openLand),
-                Is.True);
-            Assert.That(
-                TerrainLayerPresentationUtility.ShouldDisplayRockWallFrontFace(rockWall, rockWall),
-                Is.False);
-            Assert.That(
-                TerrainLayerPresentationUtility.ShouldDisplayRockWallFrontFace(openLand, openLand),
-                Is.False);
         }
 
         /// <summary>
@@ -144,5 +83,6 @@ namespace Farmware.WorldGeneration.Tests
                 TerrainLayerPresentationUtility.ClassifyLiquidAnimation(land),
                 Is.EqualTo(LiquidAnimationKind.None));
         }
+
     }
 }

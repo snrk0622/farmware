@@ -302,14 +302,16 @@ WorldSeed
 - 初期目標密度は陸地タイルのおよそ10〜18%とし、シード差、実際のリンク迂回頻度、建築可能領域の発見率をPlayModeとProfilerで確認して調整する。
 - 開始エリアだけを特別扱いせず、ワールド全体へ同じ生成規則を適用する。
 
-### 7.7 岩壁の前面側面と内部表示
+### 7.7 一体型土地・岩壁と内部表示
 
-- 表示上は液面、土地基準面、岩壁上面の3つの高さを持つ。水とマグマは論理上の基準セルを維持しつつ、静止Base Tileと透明アニメーションを画面下へ8 px移動する。土地断面は土地上面へ重ならず論理セル直下から8 px伸び、移動後の液面上辺へ接する。
-- 通常地形、水、マグマのBase Tileはすべて16×16 pxとする。通常地形は`Ground Tilemap`へ論理セルどおり配置し、水・マグマは`Liquid Base Tilemap`へ分離して`-8/16セル`移動する。液面下辺が手前の土地セルへ重なる部分は、Sorting Orderが高い土地上面で隠す。岸用の接続Tileへは差し替えない。
-- 岩壁上面は16×16 pxのBase Tileとし、専用`Rock Wall Top Tilemap`を基準面より12 px上へ移動する。上面16 px：側面12 pxを1：0.75の基準比率とし、前面側面を上面Spriteへ焼き込まない。
-- 岩壁セルの画面下側1セルが岩壁以外の場合だけ、16×16透明Spriteの下部12 pxに描いた横一直線の岩壁側面を専用Tilemapへ重ねる。側面は論理セル下端から上へ伸ばし、セル下側へはみ出させない。隣接先が通常地形、水域、マグマのどれであっても同じ側面を使用する。
-- 岩壁セルにもBiome由来の土地ブロックが下層として存在する。岩壁の画面下側が水またはマグマの場合は、土地上面へ重ならない8 px前面断面を`Terrain Front Edge Tilemap`へ描き、その手前へ12 pxの岩壁側面を重ねる。岩壁だけ岸の土地断面を欠落させない。
-- 岩壁側面は外角、内角、左右の縦辺、画面上側を補完しない。判定は「画面下側1セルが岩壁か」という1bitだけとし、RuleTile、接続Tileset、4bit接続マスクを使用しない。
+- 表示上は液面、土地基準面、岩壁上面の3つの高さを持つ。水とマグマは論理上の基準セルを維持しつつ、16×16の静止Base Tileと透明アニメーションを画面下へ8 px移動する。
+- 通常地形は上面16 pxと前面断面8 pxを結合した16×24 Spriteとし、`Ground Tilemap`へ論理セルどおり配置する。Pivot Yは16/24とし、断面だけをセル直下へはみ出させる。
+- 草原、森林、砂漠、岩地、湿地、雪原、火山の全土地Spriteは`GroundTerrainAtlas.spriteatlasv2`の同じTextureページへ収める。バイオーム境界をまたいでもIndividual Yソートを連続させるため、土地Atlasの複数ページ化は許可しない。
+- 岩壁は上面16 pxと側面12 pxを結合した16×28 Spriteとし、`Rock Wall Tilemap`へ基準面と同じ論理座標で配置する。Pivot Yは8/28とし、側面12 pxと上面16 pxを基準面より上へ積む。
+- 岩壁Spriteは土地Atlasへ混在させず、独立した`RockWallAtlas.spriteatlasv2`へ収める。
+- 岩壁セルにもBiome由来の16×24土地ブロックを下層として残す。岩壁が水またはマグマへ面しても土地断面を欠落させない。
+- `Ground Tilemap`と`Rock Wall Tilemap`はIndividual ModeとTop Left順を使用する。ワールドYが大きい画面奥のセルから先に描き、ワールドYが小さい画面手前のセルを後から重ねることで、奥側ブロックの断面・側面を手前のブロックで隠す。高さ表現のために画面下側セルを調べる隣接判定は行わない。
+- 外角、内角、左右の縦辺、画面上側を補完せず、RuleTile、接続Tileset、4bit接続マスク、専用断面Tilemapを使用しない。
 - 露出面から奥へ進むほど暗くなるMindustry風の内部影を、岩壁地形の上へPresentationとして後付けする。
 - 露出面と内部で別の地形Tileを用意しない。全岩壁セルへ同じ岩壁Tileを通常色で置き、Tilemapセル色は暗くしない。
 - 内部影はチャンクごとに1枚の黒・透明なMeshを岩壁上面の手前へ重ね、上面Tilemapと同じ12 pxだけ上へ移動する。64×64タイルに対して65×65の共有頂点を持ち、頂点アルファを三角形内で補間してタイル境界のない連続グラデーションにする。
@@ -318,7 +320,7 @@ WorldSeed
 - チャンク内は生成済みBufferを読み、チャンク外周だけワールド座標から同じ岩壁規則を再計算する。未ロードの隣接チャンクがあっても影を連続させる。
 - 影Meshは4096タイルのTilemap反映完了後にチャンク単位で1回構築し、チャンクが画面外またはアンロードになった時点で破棄する。タイルごとのGameObjectやSpriteRendererは作成しない。
 - 影は未探索フォグやゲーム状態ではなく表示専用であり、当たり判定、建築可否、リンク遮断判定を変更しない。
-- 岩壁側面も表示専用であり、岩壁の占有、当たり判定、建築可否、リンク遮断判定を変更しない。
+- 一体型岩壁Spriteも表示専用であり、岩壁の占有、当たり判定、建築可否、リンク遮断判定を変更しない。
 - 内部影に覆われた資源・装飾は表示しない。露出した岩壁上の資源は専用`Rock Wall Resource Tilemap`へ分け、岩壁上面と同じ12 pxだけ上へ移動する。ECSの論理データはPresentation上の影やオフセットによって変更しない。
 - 初期バージョンでは岩壁の掘削・破壊を実装対象とせず、生成後に変化しない静的地形として扱う。
 
@@ -337,29 +339,28 @@ WorldSeed
 
 ### 7.9 現在のタイルマップ・描画レイヤー構成
 
-現在のSampleSceneでは、`World Grid` の子に8枚のTilemapを置き、岩壁内部影だけをTilemapではないMeshで挟んでいる。表示順は次のとおりである。
+現在のSampleSceneでは、`World Grid` の子に6枚のTilemapを置き、岩壁内部影だけをTilemapではないMeshで挟んでいる。表示順は次のとおりである。
 
 | 表示順 | Scene上の名前 | 描画方式 | 現在の内容 | ゲーム状態との関係 |
 |---:|---|---|---|---|
 | -2 | `Liquid Base Tilemap` | Tilemap / TilemapRenderer | 論理セルは変えず、土地より画面下へ8 px移動した淡水、海水、マグマの静止Base Tile | `GeneratedTile`を読み取る表示キャッシュであり、液体のゲーム状態や座標を変更しない |
 | -1 | `Liquid Surface Animation Tilemap` | Tilemap / TilemapRenderer | 静止液面と同じ8 px下で淡水、海水、マグマへ重ねる透明4フレームLoop | `GeneratedTile`を分類するPresentation専用表示であり、岸と論理状態を変更しない |
-| 0 | `Ground Tilemap` | Tilemap / TilemapRenderer | 草原、森林、砂漠、岩地、湿地、雪原、火山地面。岩壁セルにはBiome由来の土地基準面を置き、液体セルは空にする | `GeneratedTile` を読み取る表示キャッシュであり、ゲーム状態の正ではない |
-| 1 | `Terrain Front Edge Tilemap` | Tilemap / TilemapRenderer | 上面へ重ならず、画面下側が水・マグマの土地基盤直下から低地側へ8 px伸びる土、砂、岩、雪の水平断面。中心が岩壁でも表示する | ワールドY-1だけを見るPresentation専用表示である |
-| 2 | `Rock Wall Front Face Tilemap` | Tilemap / TilemapRenderer | 画面下側が岩壁以外の岩壁セルで、セル下端から上へ12 px描く水平側面 | 岩壁の占有、建築可否、リンク遮断を変更しない |
-| 3 | `Rock Wall Top Tilemap` | Tilemap / TilemapRenderer | 土地基準面より12 px上へ移動した16×16岩壁上面 | `GeneratedTile`の岩壁分類を読む表示専用レイヤーである |
+| 0 | `Ground Tilemap` | Tilemap / TilemapRenderer Individual | `GroundTerrainAtlas`の同じTextureページに収めた、上面16 pxと断面8 pxを結合した16×24の草原、森林、砂漠、岩地、湿地、雪原、火山。岩壁セルにもBiome由来の土地を置き、液体セルは空にする | `GeneratedTile` を読み取る表示キャッシュであり、ゲーム状態の正ではない |
+| 3 | `Rock Wall Tilemap` | Tilemap / TilemapRenderer Individual | `RockWallAtlas`に収めた、上面16 pxと側面12 pxを結合した16×28岩壁を基準セルと同じTransformで表示 | `GeneratedTile`の岩壁分類を読む表示専用レイヤーである |
 | 5 | `Rock Wall Shadow` | チャンクごとのMeshRenderer | 岩壁上面と同じ12 px上で、露出面から内部へ連続して暗くなる黒いグラデーション | `Ground Tilemap` の子へ実行時生成するPresentation専用表示であり、地形判定を変更しない |
 | 10 | `Resource Tilemap` | Tilemap / TilemapRenderer | 木、石、砂の透明背景アイコン | `GeneratedResourceTile` を読み取る表示キャッシュであり、採取状態の正ではない |
 | 11 | `Rock Wall Resource Tilemap` | Tilemap / TilemapRenderer | 露出した岩壁上の資源を基準面より12 px上へ表示 | 資源データを変更せず、表示位置だけを岩壁上面へ合わせる |
 | 画面最前面 | F3/F4・開発者可視化 | IMGUI | 座標HUD、タイル・サブチャンク・チャンク境界、初期スポーン、ノイズ・バイオーム・地形診断色 | TilemapとECSデータを変更しない診断表示 |
 
-- Sorting Orderは静止液面を-2、液面アニメーションを-1、`Ground Tilemap`を0、低地断面を1、岩壁側面を2、岩壁上面を3、岩壁内部影を5、`Resource Tilemap`を10、岩壁上資源を11とする。TilemapRendererはChunkモードとBottom Left順を使用する。
-- 通常地形は`Ground Tilemap`、水域・マグマは`Liquid Base Tilemap`で排他的に表示する。液体2レイヤーは同じ`-8/16セル`へ移動し、手前土地と重なる液面下辺はSorting Order 0の土地上面で隠す。岩壁セルではBiome由来の土地基準面へ、持ち上げた岩壁上面・必要な前面側面・内部影・露出資源をPresentationとして重ねる。
-- 通常地形と低地をつなぐ前面断面、岩壁前面側面、液面アニメーションの専用Tilemapは実装済みであり、現在はEditor構築ツールが生成する交換可能なフォールバック素材を参照する。バイオーム移行装飾は未実装である。
-- 基本表示順は、静止液面、液面アニメーション、`Ground Tilemap`、低地境界の前面断面、岩壁前面側面、岩壁上面、岩壁内部影、通常資源、岩壁上資源の順とする。土地上面、岸、岩壁の輪郭を液面より手前へ維持する。
+- Sorting Orderは静止液面を-2、液面アニメーションを-1、`Ground Tilemap`を0、`Rock Wall Tilemap`を3、岩壁内部影を5、`Resource Tilemap`を10、岩壁上資源を11とする。GroundとRock WallはIndividual ModeかつTop Left順とし、画面奥から手前へ描く。他のTilemapはChunk ModeかつBottom Left順を使用する。
+- `GroundTerrainAtlas`と`RockWallAtlas`はSprite Atlas V2、Built-in配信、Point、Mip Maps Off、RGBA32、無圧縮、回転なし、矩形Packingで生成する。Editor構築時とPlayerビルド前に再パックし、各Atlasが複数ページへ分割された場合は検証を失敗させる。
+- 通常地形は`Ground Tilemap`、水域・マグマは`Liquid Base Tilemap`で排他的に表示する。液体2レイヤーは同じ`-8/16セル`へ移動し、手前土地と重なる液面下辺は一体型土地ブロックで隠す。岩壁セルではBiome由来の土地へ、一体型岩壁・内部影・露出資源をPresentationとして重ねる。
+- 一体型土地・岩壁と液面アニメーションは実装済みであり、現在はEditor構築ツールが生成する交換可能なフォールバック素材を参照する。バイオーム移行装飾は未実装である。
+- 基本表示順は、静止液面、液面アニメーション、一体型土地、一体型岩壁、岩壁内部影、通常資源、岩壁上資源の順とする。
 - `Liquid Base Tilemap`は淡水、海水、マグマの静止Base Tileを8 px下へ表示する。`Liquid Surface Animation Tilemap`も同じTransformで透明な4フレームLoopだけを重ね、外周1 pxを常に透明に保つ。タイルごとのGameObjectやSpriteRendererは作成しない。
-- `Terrain Front Edge Tilemap`は画面下側が低地の土地基盤セルへ横一直線の透明な前面断面だけを配置する。16×24 Spriteの上側16×16は完全透明、下側8 pxはすべて可視断面とし、Base Tileの上面へ重ねない。中心が岩壁でも下層の土地断面を表示する。`Rock Wall Front Face Tilemap`は画面下側が岩壁以外の岩壁セルへ横一直線の側面だけを重ねる。どちらも左右、画面上側、角を補完しない。
+- `Ground Tilemap`と`Rock Wall Tilemap`では、上面と前面を一枚のSpriteとしてセル単位でYソートする。旧Terrain Front Edge、Rock Wall Front Face、Rock Wall Top Tilemapは使用しない。
 - 資源は地形と別レイヤーに置く。岩壁内部にある資源アイコンはPresentationで非表示にし、露出した岩壁上の資源だけを12 px上へ表示する。ECS上の資源データを影の表示都合で削除しない。
-- 16×16サブチャンクを土地、静止液面、液面アニメーション、通常資源、断面、岩壁側面、岩壁上面、岩壁上資源の共通更新単位とし、同じフレーム予算で8枚のTilemapへ一括反映・消去する。
+- 16×16サブチャンクを土地、静止液面、液面アニメーション、岩壁、通常資源、岩壁上資源の共通更新単位とし、同じフレーム予算で6枚のTilemapへ一括反映・消去する。
 - 将来のノード、リンク、搬送アイテム、動物、敵、粒子、選択表示は現在の生成Tilemapへ混在させず、それぞれのPresentation責務と前後関係を決めて追加する。
 
 ## 8. 建設可能領域と初期位置選択

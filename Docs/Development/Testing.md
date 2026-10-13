@@ -1,6 +1,6 @@
 # テスト
 
-- 最終更新日: 2026-10-12
+- 最終更新日: 2026-10-13
 - 対象: `Assets/Farmware/Tests/`
 
 ## 1. 用途
@@ -53,11 +53,15 @@ Map Viewerの全ピクセルが同じ座標へ直接`DeterministicChunkGenerator
 
 #### `TerrainLayerPresentationUtilityTests`
 
-土地基盤のワールドY-1が水・マグマの場合だけ土、砂、岩、雪の前面断面を選ぶ規則、岩壁が低地へ面するときも下層の土地断面を残す規則、岩壁最前列だけへ側面を出す規則、淡水・海水・マグマを別の液面アニメーションへ分類する規則を、Sceneを開かない純粋計算として検証する。液面を16pxセルの半分である8px下へ移す`-0.5セル`、岩壁の上面16px：側面12pxが1：0.75であること、基本地形同士や低地同士に断面を追加しないことも保証する。
+16×24土地の上面16px・断面8px・Pivot Y 2/3、16×28岩壁の上面16px・側面12px・Pivot Y 2/7、液面を8px下へ移す`-0.5セル`をSceneなしの純粋計算として検証する。淡水・海水・マグマを別の液面アニメーションへ分類する規則も保証する。
 
 #### `WorldGenerationFallbackArtTests`
 
-Editor構築ツールが生成した土、砂、岩、雪の16×24前面断面PNGを直接読み込み、上側16×16の論理上面領域が完全透明であることと、その直下8pxがすべて可視断面であることを検証する。これにより、断面Tilemapの描画順が上面より手前でもBase Tileを1pxも塗り替えず、土地ブロックを半セル分露出することを保証する。
+Editor構築ツールが生成した7種類の16×24土地PNGと16×28岩壁PNGを直接読み込み、上面と前面の全ピクセルが一枚の不透明ブロックとして存在することを検証する。旧土・砂・岩・雪断面と旧岩壁側面PNGが残っていないことも保証する。
+
+#### `WorldGenerationSpriteAtlasTests`
+
+Sprite Packer ModeがV2であること、土地Atlasが7種類の元Textureだけ、岩壁Atlasが岩壁TextureだけをPackableに持つこと、両AtlasがBuilt-in配信とPixel Art向け設定を持つことを検証する。さらに実際のパック結果を読み、全土地Spriteが同じTextureページへ収まることを保証して、バイオーム境界でTilemapのYソートがTexture単位に分断される再発を防ぐ。
 
 ### 3.2 PlayMode: `Farmware.WorldGeneration.PlayModeTests`
 
@@ -69,8 +73,8 @@ Editor構築ツールが生成した土、砂、岩、雪の16×24前面断面PN
 | F3 | 現在座標と記録済み初期スポーン座標のHUD文字列を保証する。 |
 | F4 | 初期スポーンの赤いTile・Chunk表示と、縦横グリッド線の矩形計算を保証する。 |
 | 開発者用可視化 | バイオーム、ノイズ、水域、移行帯、岩壁、マグマ、資源の色写像がSimulationを変更しないことを保証する。 |
-| 岩壁表示 | チャンク境界をまたぐ内部影が連続したグラデーションになり、岩壁上面・内部影・露出資源が同じ12px上へ揃うことを保証する。 |
-| SampleScene縦切り | SubSceneロード、初期カメラ、チャンク生成、8枚のTilemap、静止液面・アニメーションの-8pxオフセット、液面より土地を手前にする描画順、生成規則から探索した液体セルのGround Tilemapとの排他表示、岩壁上面・岩壁上資源の12pxオフセット、液面4fps設定、アンロード、同一地形の再生成を保証する。 |
+| 岩壁表示 | チャンク境界をまたぐ内部影が連続したグラデーションになり、一体型岩壁の上面・内部影・露出資源が同じ12px高へ揃うことを保証する。 |
+| SampleScene縦切り | SubSceneロード、初期カメラ、チャンク生成、6枚のTilemap、Ground・Rock WallのIndividual ModeおよびTop Left順、静止液面・アニメーションの-8pxオフセット、液体セルのGround Tilemapとの排他表示、岩壁セルの下層土地、岩壁上資源の12pxオフセット、液面4fps設定、アンロード、同一地形の再生成を保証する。 |
 
 ## 4. 変更内容ごとの実行範囲
 
@@ -80,6 +84,7 @@ Editor構築ツールが生成した土、砂、岩、雪の16×24前面断面PN
 | バイオーム、水域、マグマ、岩壁、資源 | 該当分類のEditModeテスト | 分布監査とGameビュー |
 | Component、Buffer、System、Job | 関連するECS EditModeテスト | Safety Check、必要に応じてProfiler |
 | Camera、Tilemap、前面断面、液面アニメーション、HUD、F3/F4、可視化 | 関連するEditMode分類テストとPlayModeテスト | 複数アスペクト比のGameビュー、断面のはみ出しと重なり |
+| Sprite Atlas、地形Texture、Sprite Slice、Atlas Importer設定 | `WorldGenerationSpriteAtlasTests`と`WorldGenerationFallbackArtTests` | 異なるバイオーム境界を含むGameビュー、Playerビルド前処理 |
 | Scene、SubScene、Authoring、Baker、参照 | SampleScene縦切りPlayModeテストとMap Viewerテスト | Scene内のMissing参照確認 |
 | asmdef、パッケージ、プラットフォーム条件 | 影響するEditModeとPlayMode Assembly | Playerビルドへの混入確認 |
 
