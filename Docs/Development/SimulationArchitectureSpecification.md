@@ -6,6 +6,7 @@
 - 対象環境: Unity 6000.3.8f1、Entities 1.5.0
 - 関連仕様: [ゲームコンセプト](../GameSpecification/2026-10-11_casual_factory_concept_v0.1.md)
 - 関連仕様: [ランダムマップ生成仕様](../GameSpecification/RandomMapGenerationSpecification.md)
+- 実装計画: [実装ロードマップ](./ImplementationRoadmap.md)
 
 ## 1. 目的
 

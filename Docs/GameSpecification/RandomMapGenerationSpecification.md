@@ -749,6 +749,8 @@ Unrequested
 
 ## 18. 実装順
 
+ゲーム全体を含む現在のPR・commit計画と実装状況は、[実装ロードマップ](../Development/ImplementationRoadmap.md)を正とする。本章はランダムマップ生成サブシステム内の依存順を示す。
+
 ### Phase 1: 決定論的チャンク基盤
 
 1. タイル・チャンク・サブチャンク座標変換。
