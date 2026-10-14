@@ -245,22 +245,26 @@ namespace Farmware.WorldGeneration.Editor
                     width);
             if (horizontalGridSpacing >= 4f)
             {
-                double minimumWorldX =
-                    centerTileX - ((mapTexture.width * 0.5d) * tilesPerPixel);
+                // Sample生成と同じ整数中央を使い、奇数幅でも左右端のワールド境界を正確に列挙します。
+                long minimumWorldX = centerTileX
+                    - ((long)(mapTexture.width / 2) * tilesPerPixel);
+                // 負座標でも0方向へ丸めず、境界以下にある最初のグリッド位置から走査します。
                 long firstWorldX =
-                    (long)Math.Floor(minimumWorldX / gridSizeInTiles) * gridSizeInTiles;
-                double maximumWorldX =
-                    centerTileX + ((mapTexture.width * 0.5d) * tilesPerPixel);
+                    (long)Math.Floor(minimumWorldX / (double)gridSizeInTiles) * gridSizeInTiles;
+                long maximumWorldX = centerTileX
+                    + ((long)(mapTexture.width - (mapTexture.width / 2)) * tilesPerPixel);
                 for (long worldX = firstWorldX;
                      worldX <= maximumWorldX;
                      worldX += gridSizeInTiles)
                 {
-                    float pixelX = (width * 0.5f)
-                        + WorldGenerationMapSampler.CalculateViewportOffsetFromTileOffset(
-                            worldX - centerTileX,
+                    float pixelX =
+                        WorldGenerationMapSampler.CalculateViewportPositionFromWorldBoundary(
+                            centerTileX,
+                            worldX,
                             tilesPerPixel,
                             mapTexture.width,
-                            width);
+                            width,
+                            invertAxis: false);
                     painter.BeginPath();
                     painter.MoveTo(new Vector2(pixelX, 0f));
                     painter.LineTo(new Vector2(pixelX, height));
@@ -276,22 +280,26 @@ namespace Farmware.WorldGeneration.Editor
                     height);
             if (verticalGridSpacing >= 4f)
             {
-                double minimumWorldY =
-                    centerTileY - ((mapTexture.height * 0.5d) * tilesPerPixel);
+                // Y軸も整数中央で列挙し、描画時だけTexture下端原点からCanvas上端原点へ反転します。
+                long minimumWorldY = centerTileY
+                    - ((long)(mapTexture.height / 2) * tilesPerPixel);
+                // 負座標でも0方向へ丸めず、境界以下にある最初のグリッド位置から走査します。
                 long firstWorldY =
-                    (long)Math.Floor(minimumWorldY / gridSizeInTiles) * gridSizeInTiles;
-                double maximumWorldY =
-                    centerTileY + ((mapTexture.height * 0.5d) * tilesPerPixel);
+                    (long)Math.Floor(minimumWorldY / (double)gridSizeInTiles) * gridSizeInTiles;
+                long maximumWorldY = centerTileY
+                    + ((long)(mapTexture.height - (mapTexture.height / 2)) * tilesPerPixel);
                 for (long worldY = firstWorldY;
                      worldY <= maximumWorldY;
                      worldY += gridSizeInTiles)
                 {
-                    float pixelY = (height * 0.5f)
-                        - WorldGenerationMapSampler.CalculateViewportOffsetFromTileOffset(
-                            worldY - centerTileY,
+                    float pixelY =
+                        WorldGenerationMapSampler.CalculateViewportPositionFromWorldBoundary(
+                            centerTileY,
+                            worldY,
                             tilesPerPixel,
                             mapTexture.height,
-                            height);
+                            height,
+                            invertAxis: true);
                     painter.BeginPath();
                     painter.MoveTo(new Vector2(0f, pixelY));
                     painter.LineTo(new Vector2(width, pixelY));
@@ -308,18 +316,21 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="height">Canvasの縦幅です。</param>
         private void DrawWorldOrigin(Painter2D painter, float width, float height)
         {
-            float originX = (width * 0.5f)
-                + WorldGenerationMapSampler.CalculateViewportOffsetFromTileOffset(
-                    -(long)centerTileX,
-                    tilesPerPixel,
-                    mapTexture.width,
-                    width);
-            float originY = (height * 0.5f)
-                - WorldGenerationMapSampler.CalculateViewportOffsetFromTileOffset(
-                    -(long)centerTileY,
-                    tilesPerPixel,
-                    mapTexture.height,
-                    height);
+            // 原点もグリッドと同じワールド境界変換を使い、奇数解像度で両者が別々にずれないようにします。
+            float originX = WorldGenerationMapSampler.CalculateViewportPositionFromWorldBoundary(
+                centerTileX,
+                0,
+                tilesPerPixel,
+                mapTexture.width,
+                width,
+                invertAxis: false);
+            float originY = WorldGenerationMapSampler.CalculateViewportPositionFromWorldBoundary(
+                centerTileY,
+                0,
+                tilesPerPixel,
+                mapTexture.height,
+                height,
+                invertAxis: true);
             if (originX < 0f || originX > width || originY < 0f || originY > height)
             {
                 return;

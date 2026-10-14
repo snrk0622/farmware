@@ -506,6 +506,47 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>
+        /// ワールドタイル境界を、地形Textureの実際のサンプル境界に一致するCanvas位置へ変換します。
+        /// </summary>
+        /// <param name="centerTileCoordinate">Textureの整数中央サンプルに割り当てたワールドタイル座標です。</param>
+        /// <param name="worldBoundaryCoordinate">表示位置を求めるワールドタイル境界座標です。</param>
+        /// <param name="tilesPerPixel">Texture 1サンプルが表すタイル数です。</param>
+        /// <param name="sampleLength">Textureの対象軸のサンプル数です。</param>
+        /// <param name="viewportLength">Canvasの対象軸の長さです。単位はEditorポイントです。</param>
+        /// <param name="invertAxis">Texture下端原点をCanvas上端原点へ反転するY軸の場合はtrueです。</param>
+        /// <returns>Canvas先頭からワールド境界までのEditorポイント位置です。</returns>
+        public static float CalculateViewportPositionFromWorldBoundary(
+            int centerTileCoordinate,
+            long worldBoundaryCoordinate,
+            int tilesPerPixel,
+            int sampleLength,
+            float viewportLength,
+            bool invertAxis)
+        {
+            ValidateViewportScale(
+                sampleLength,
+                viewportLength,
+                nameof(sampleLength),
+                nameof(viewportLength));
+            if (tilesPerPixel <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(tilesPerPixel));
+            }
+
+            // Sample生成はsampleLength / 2の整数除算位置へcenterTileCoordinateを割り当てます。
+            // ここで幾何学的中央の0.5倍を使うと奇数解像度だけ半サンプルずれるため、同じ整数中央から境界を求めます。
+            double sampleBoundary = (sampleLength / 2)
+                + (((double)worldBoundaryCoordinate - centerTileCoordinate) / tilesPerPixel);
+            if (invertAxis)
+            {
+                // Textureの行0は下端ですが、UI ToolkitのY=0は上端なので、境界位置を上下反転します。
+                sampleBoundary = sampleLength - sampleBoundary;
+            }
+
+            return (float)(sampleBoundary * viewportLength / sampleLength);
+        }
+
+        /// <summary>
         /// Textureサンプル数とCanvas長が座標変換に利用できる正の値かを検証します。
         /// </summary>
         /// <param name="sampleLength">Textureの対象軸のサンプル数です。</param>

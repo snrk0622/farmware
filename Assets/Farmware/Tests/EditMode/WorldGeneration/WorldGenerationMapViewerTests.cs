@@ -340,6 +340,50 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// 奇数・偶数のTextureと伸張Canvasを準備し、グリッドと原点が地形生成と同じ整数中央の境界へ揃うことを検証します。
+        /// Y軸はTexture下端原点からCanvas上端原点へ反転するため、奇数解像度ではXと1サンプル異なる位置になります。
+        /// </summary>
+        /// <param name="centerTileCoordinate">Texture中央サンプルへ割り当てるワールドタイル座標です。</param>
+        /// <param name="worldBoundaryCoordinate">Canvas位置を求めるワールドタイル境界座標です。</param>
+        /// <param name="tilesPerPixel">Texture 1サンプルが表すタイル数です。</param>
+        /// <param name="sampleLength">Textureの対象軸のサンプル数です。</param>
+        /// <param name="viewportLength">Canvasの対象軸の長さです。</param>
+        /// <param name="expectedX">左端原点で期待する境界位置です。</param>
+        /// <param name="expectedY">上端原点へ反転した場合に期待する境界位置です。</param>
+        [TestCase(0, 0, 1, 400, 400f, 200f, 200f)]
+        [TestCase(0, 0, 1, 401, 401f, 200f, 201f)]
+        [TestCase(16, 0, 4, 401, 802f, 392f, 410f)]
+        public void CalculateViewportPositionFromWorldBoundary_UsesSampledIntegerCenter(
+            int centerTileCoordinate,
+            long worldBoundaryCoordinate,
+            int tilesPerPixel,
+            int sampleLength,
+            float viewportLength,
+            float expectedX,
+            float expectedY)
+        {
+            float actualX =
+                WorldGenerationMapSampler.CalculateViewportPositionFromWorldBoundary(
+                    centerTileCoordinate,
+                    worldBoundaryCoordinate,
+                    tilesPerPixel,
+                    sampleLength,
+                    viewportLength,
+                    invertAxis: false);
+            float actualY =
+                WorldGenerationMapSampler.CalculateViewportPositionFromWorldBoundary(
+                    centerTileCoordinate,
+                    worldBoundaryCoordinate,
+                    tilesPerPixel,
+                    sampleLength,
+                    viewportLength,
+                    invertAxis: true);
+
+            Assert.That(actualX, Is.EqualTo(expectedX).Within(0.0001f));
+            Assert.That(actualY, Is.EqualTo(expectedY).Within(0.0001f));
+        }
+
+        /// <summary>
         /// 拡大表示されたTexture上のカーソル地点を準備し、ズーム前後で同じ表示ピクセルの代表タイルを指すことを検証します。
         /// </summary>
         [Test]

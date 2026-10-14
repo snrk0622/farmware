@@ -1006,7 +1006,7 @@ Unrequested
 - 左ドラッグによる移動、Point Filterで実際に表示中のTextureピクセル位置を固定したホイールズーム、＋・－Button、原点移動、16×16サブチャンク・64×64論理チャンク境界、表示ピクセルと一致するカーソル下のタイル・チャンク・地形情報。
 - 1画面ピクセルあたり1〜256タイルの代表サンプリングと、最大768×768サンプルの上限。純粋地形計算をバックグラウンド実行し、次の操作が入った場合は不要な走査をキャンセルする。
 - `WorldGenerationAuthoring`から`WorldGenerationSettings`への変換を公開Snapshotメソッドへ一元化し、BakerとMap Viewerで共有する処理。PlayModeでは実行中ECS Singletonを優先する。
-- 全表示ピクセルと直接Generator結果の一致、同一表示ピクセル内のPointer座標、Y反転、ズーム固定点、Authoringシード変換を検証する軽量なEditModeテスト。
+- 全表示ピクセルと直接Generator結果の一致、同一表示ピクセル内のPointer座標、Y反転、ズーム固定点、奇数・偶数Textureでのグリッド・原点とサンプル境界の一致、Authoringシード変換を検証する軽量なEditModeテスト。
 
 ### 2026-10-12: Foragerを参考にした直線前面断面・岩壁側面方針
 
