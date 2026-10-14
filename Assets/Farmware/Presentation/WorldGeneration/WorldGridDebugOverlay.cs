@@ -1,6 +1,7 @@
 // このファイルは、プレイヤーがF3で現在・初期スポーン座標、F4で各グリッド境界と初期スポーン位置を表示できるようにします。
 // ゲーム状態を変更しない診断表示として製品版でも利用でき、開発者専用のノイズ可視化とは入力と責務を分離します。
 
+using Unity.Collections;
 using Unity.Entities;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -118,14 +119,29 @@ namespace Farmware.WorldGeneration.Presentation
         // F3・F4の操作説明へ使用し、デバッグ表示を閉じた状態でも小さく表示するStyleです。
         private GUIStyle shortcutHintStyle;
 
-        // F3とF4へ初期スポーン地点を表示するため、InitialSpawnLocation Singletonを読むWorldを保持します。
-        private World spawnLocationWorld;
+        // F3とF4が診断情報を読むDefault Worldです。World再作成時に古いQueryとチャンクEntityキャッシュを捨てるため保持します。
+        private World diagnosticWorld;
 
         // F3またはF4表示中に毎フレームQueryを作り直さず、初期スポーンSingletonだけを読み取るためのQueryです。
         private EntityQuery spawnLocationQuery;
 
-        // spawnLocationQueryを現在のWorld向けに作成済みかを示します。
-        private bool spawnLocationQueryIsCreated;
+        // F3へGeneratorVersionとワールドシードを表示するため、生成設定Singletonだけを読み取るQueryです。
+        private EntityQuery generationSettingsQuery;
+
+        // F3へ現在タイルのBiomeを表示するため、生成済みチャンク座標・状態・地形Bufferを読むQueryです。
+        private EntityQuery generatedChunkQuery;
+
+        // 上記3つの診断用Queryを現在のWorld向けに作成済みかを示します。
+        private bool diagnosticQueriesAreCreated;
+
+        // 現在タイルを含むGeneratedTile BufferのEntityです。同じチャンク内で毎フレーム全チャンクを走査しないため保持します。
+        private Entity cachedGeneratedChunkEntity;
+
+        // cachedGeneratedChunkEntityが表す論理チャンク座標です。カメラが別チャンクへ移動したことを整数座標で判定します。
+        private ChunkCoordinate cachedGeneratedChunkCoordinate;
+
+        // cachedGeneratedChunkEntityとcachedGeneratedChunkCoordinateへ有効な組み合わせを記録済みかを示します。
+        private bool hasCachedGeneratedChunk;
 
         /// <summary>現在F3の座標HUDを表示している場合はtrueです。</summary>
         public bool IsCoordinateHudVisible => isCoordinateHudVisible;
@@ -177,7 +193,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// </summary>
         private void OnDestroy()
         {
-            DisposeSpawnLocationQuery();
+            DisposeDiagnosticQueries();
         }
 
         /// <summary>
@@ -393,19 +409,26 @@ namespace Farmware.WorldGeneration.Presentation
                 ? new Vector3Int(Mathf.FloorToInt(worldPosition.x), Mathf.FloorToInt(worldPosition.y), 0)
                 : targetGrid.WorldToCell(worldPosition);
             bool hasSpawnLocation = TryGetInitialSpawnLocation(out InitialSpawnLocation spawnLocation);
+            bool hasGenerationSettings = TryGetWorldGenerationSettings(
+                out WorldGenerationSettings generationSettings);
+            bool hasBiome = TryGetCurrentTileBiome(tile, out BiomeId biome);
             string text = BuildCoordinateHudText(
                 worldPosition,
                 tile,
                 hasSpawnLocation,
-                spawnLocation);
+                spawnLocation,
+                hasGenerationSettings,
+                generationSettings,
+                hasBiome,
+                biome);
 
-            const int textLineCount = 6;
-            const float panelWidth = 340f;
+            const int textLineCount = 10;
+            const float panelWidth = 420f;
             const float horizontalPadding = 8f;
             const float verticalPadding = 6f;
             const float glyphBottomSafetyPadding = 4f;
 
-            // 固定高では約1行分の空白が残るため、6行分の高さと小さな文字保護余白だけを確保します。
+            // 固定高では約1行分の空白が残るため、10行分の高さと小さな文字保護余白だけを確保します。
             // 最後の4pxはg・yなどの下へ伸びる字形がパネル枠へ触れないために必要で、空行ではありません。
             float textHeight = Mathf.Ceil(Mathf.Max(1f, coordinateHudStyle.lineHeight) * textLineCount);
             float panelHeight = textHeight + (verticalPadding * 2f) + glyphBottomSafetyPadding;
@@ -422,21 +445,37 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// 現在のカメラ座標と、ワールド開始時に記録した初期スポーン座標をF3表示用文字列へまとめます。
+        /// 現在の座標、生成済みBiome、生成互換情報、記録済み初期スポーンをF3表示用文字列へまとめます。
         /// </summary>
         /// <param name="worldPosition">現在のカメラ中心ワールド座標です。</param>
         /// <param name="tile">現在のカメラ中心タイル座標です。</param>
         /// <param name="hasSpawnLocation">初期スポーン探索が完了し、記録済み座標を渡せる場合はtrueです。</param>
         /// <param name="spawnLocation">記録済みの初期スポーン座標です。未完了時は表示に使用しません。</param>
-        /// <returns>見出しを含む6行のF3座標HUD文字列です。</returns>
+        /// <param name="hasGenerationSettings">生成設定Singletonからバージョンとシードを読めた場合はtrueです。</param>
+        /// <param name="generationSettings">現在のWorldが保持する生成設定です。未準備時は表示に使用しません。</param>
+        /// <param name="hasBiome">現在タイルの生成済みBiomeを読めた場合はtrueです。</param>
+        /// <param name="biome">現在タイルの論理Biomeです。未生成時は表示に使用しません。</param>
+        /// <returns>見出しを含む10行のF3座標HUD文字列です。</returns>
         public static string BuildCoordinateHudText(
             Vector3 worldPosition,
             Vector3Int tile,
             bool hasSpawnLocation,
-            InitialSpawnLocation spawnLocation)
+            InitialSpawnLocation spawnLocation,
+            bool hasGenerationSettings,
+            WorldGenerationSettings generationSettings,
+            bool hasBiome,
+            BiomeId biome)
         {
             ChunkCoordinate chunk = WorldGrid.ToChunkCoordinate(tile.x, tile.y);
             ChunkLocalTileCoordinate local = WorldGrid.ToLocalTileCoordinate(tile.x, tile.y);
+            SubChunkCoordinate subChunk = WorldGrid.ToSubChunkCoordinate(local.X, local.Y);
+            string biomeText = hasBiome ? biome.ToString() : "Loading...";
+            string generatorVersionText = hasGenerationSettings
+                ? generationSettings.GeneratorVersion.ToString()
+                : "Loading...";
+            string worldSeedText = hasGenerationSettings
+                ? $"0x{generationSettings.WorldSeed:X16}"
+                : "Loading...";
             string spawnText = "Spawn: Searching...";
             if (hasSpawnLocation)
             {
@@ -452,6 +491,10 @@ namespace Farmware.WorldGeneration.Presentation
                 + $"Tile  : ({tile.x}, {tile.y})\n"
                 + $"Chunk : ({chunk.X}, {chunk.Y})\n"
                 + $"Local : ({local.X}, {local.Y})\n"
+                + $"SubChunk: ({subChunk.X}, {subChunk.Y})\n"
+                + $"Biome: {biomeText}\n"
+                + $"GeneratorVersion: {generatorVersionText}\n"
+                + $"WorldSeed: {worldSeedText}\n"
                 + spawnText;
         }
 
@@ -499,19 +542,9 @@ namespace Farmware.WorldGeneration.Presentation
         private bool TryGetInitialSpawnLocation(out InitialSpawnLocation spawnLocation)
         {
             spawnLocation = default;
-            World currentWorld = World.DefaultGameObjectInjectionWorld;
-            if (currentWorld == null || !currentWorld.IsCreated)
+            if (!TryEnsureDiagnosticQueries())
             {
                 return false;
-            }
-
-            if (!spawnLocationQueryIsCreated || spawnLocationWorld != currentWorld)
-            {
-                DisposeSpawnLocationQuery();
-                spawnLocationWorld = currentWorld;
-                spawnLocationQuery = currentWorld.EntityManager.CreateEntityQuery(
-                    ComponentType.ReadOnly<InitialSpawnLocation>());
-                spawnLocationQueryIsCreated = true;
             }
 
             if (spawnLocationQuery.CalculateEntityCount() != 1)
@@ -524,21 +557,148 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// 初期スポーン表示用Queryと所有Worldが有効な場合だけQueryを破棄し、PlayMode終了後に古い参照を残しません。
-        /// UnityはWorldをMonoBehaviourより先に破棄する場合があるため、破棄済みEntityManagerへDisposeを要求しないことが重要です。
+        /// Default Worldから生成設定Singletonを読み、F3へGeneratorVersionとワールドシードを渡します。
         /// </summary>
-        private void DisposeSpawnLocationQuery()
+        /// <param name="settings">成功時に、現在のWorldが保持する決定論的な生成設定を返します。</param>
+        /// <returns>生成設定Singletonをちょうど1件読み取れた場合はtrueです。</returns>
+        private bool TryGetWorldGenerationSettings(out WorldGenerationSettings settings)
         {
-            if (spawnLocationQueryIsCreated
-                && spawnLocationWorld != null
-                && spawnLocationWorld.IsCreated)
+            settings = default;
+            if (!TryEnsureDiagnosticQueries()
+                || generationSettingsQuery.CalculateEntityCount() != 1)
             {
-                spawnLocationQuery.Dispose();
+                return false;
             }
 
-            spawnLocationWorld = null;
+            settings = generationSettingsQuery.GetSingleton<WorldGenerationSettings>();
+            return true;
+        }
+
+        /// <summary>
+        /// 現在タイルを含む生成済みチャンクのGeneratedTile Bufferから、論理Biomeを読み取ります。
+        /// 同じ64×64チャンク内ではEntityを再利用し、F3表示中に全チャンク配列を毎フレーム確保しないようにします。
+        /// </summary>
+        /// <param name="tile">Biomeを調べる符号付きワールドタイル座標です。</param>
+        /// <param name="biome">成功時に、Simulationが生成した現在タイルのBiomeを返します。</param>
+        /// <returns>生成完了済みの4096タイルBufferからBiomeを読めた場合はtrueです。</returns>
+        private bool TryGetCurrentTileBiome(Vector3Int tile, out BiomeId biome)
+        {
+            biome = default;
+            if (!TryEnsureDiagnosticQueries())
+            {
+                return false;
+            }
+
+            ChunkCoordinate requestedChunk = WorldGrid.ToChunkCoordinate(tile.x, tile.y);
+            EntityManager entityManager = diagnosticWorld.EntityManager;
+            if (!hasCachedGeneratedChunk
+                || !cachedGeneratedChunkCoordinate.Equals(requestedChunk)
+                || !entityManager.Exists(cachedGeneratedChunkEntity))
+            {
+                hasCachedGeneratedChunk = false;
+                cachedGeneratedChunkEntity = Entity.Null;
+
+                // Cameraが別チャンクへ移動した場合だけ座標配列を作り、対象Entityを次回以降の描画へキャッシュします。
+                using NativeArray<Entity> entities = generatedChunkQuery.ToEntityArray(Allocator.Temp);
+                using NativeArray<ChunkCoordinateComponent> coordinates =
+                    generatedChunkQuery.ToComponentDataArray<ChunkCoordinateComponent>(Allocator.Temp);
+                for (int index = 0; index < entities.Length; index++)
+                {
+                    ChunkCoordinateComponent coordinate = coordinates[index];
+                    if (coordinate.X != requestedChunk.X || coordinate.Y != requestedChunk.Y)
+                    {
+                        continue;
+                    }
+
+                    cachedGeneratedChunkEntity = entities[index];
+                    cachedGeneratedChunkCoordinate = requestedChunk;
+                    hasCachedGeneratedChunk = true;
+                    break;
+                }
+            }
+
+            if (!hasCachedGeneratedChunk)
+            {
+                return false;
+            }
+
+            ChunkGenerationStatus status =
+                entityManager.GetComponentData<ChunkGenerationStatus>(cachedGeneratedChunkEntity);
+            if (status.Phase != ChunkGenerationPhase.ReadyToApply
+                && status.Phase != ChunkGenerationPhase.Active)
+            {
+                return false;
+            }
+
+            DynamicBuffer<GeneratedTile> tiles =
+                entityManager.GetBuffer<GeneratedTile>(cachedGeneratedChunkEntity, true);
+            if (tiles.Length != WorldGridConstants.TilesPerChunk)
+            {
+                return false;
+            }
+
+            ChunkLocalTileCoordinate local = WorldGrid.ToLocalTileCoordinate(tile.x, tile.y);
+            biome = tiles[WorldGrid.ToTileIndex(local.X, local.Y)].Biome;
+            return true;
+        }
+
+        /// <summary>
+        /// Default World向けの初期スポーン、生成設定、生成済みチャンクQueryをまとめて用意します。
+        /// Worldが再作成された場合は古いQueryとEntityキャッシュを先に破棄し、別ワールドの診断値を表示しません。
+        /// </summary>
+        /// <returns>現在のDefault Worldから診断情報を読み取れる場合はtrueです。</returns>
+        private bool TryEnsureDiagnosticQueries()
+        {
+            World currentWorld = World.DefaultGameObjectInjectionWorld;
+            if (currentWorld == null || !currentWorld.IsCreated)
+            {
+                DisposeDiagnosticQueries();
+                return false;
+            }
+
+            if (diagnosticQueriesAreCreated && diagnosticWorld == currentWorld)
+            {
+                return true;
+            }
+
+            DisposeDiagnosticQueries();
+            diagnosticWorld = currentWorld;
+            EntityManager entityManager = currentWorld.EntityManager;
+            spawnLocationQuery = entityManager.CreateEntityQuery(
+                ComponentType.ReadOnly<InitialSpawnLocation>());
+            generationSettingsQuery = entityManager.CreateEntityQuery(
+                ComponentType.ReadOnly<WorldGenerationSettings>());
+            generatedChunkQuery = entityManager.CreateEntityQuery(
+                ComponentType.ReadOnly<ChunkCoordinateComponent>(),
+                ComponentType.ReadOnly<ChunkGenerationStatus>(),
+                ComponentType.ReadOnly<GeneratedTile>());
+            diagnosticQueriesAreCreated = true;
+            return true;
+        }
+
+        /// <summary>
+        /// 診断表示用Queryと所有Worldが有効な場合だけQueryを破棄し、PlayMode終了後に古い参照を残しません。
+        /// UnityはWorldをMonoBehaviourより先に破棄する場合があるため、破棄済みEntityManagerへDisposeを要求しないことが重要です。
+        /// </summary>
+        private void DisposeDiagnosticQueries()
+        {
+            if (diagnosticQueriesAreCreated
+                && diagnosticWorld != null
+                && diagnosticWorld.IsCreated)
+            {
+                spawnLocationQuery.Dispose();
+                generationSettingsQuery.Dispose();
+                generatedChunkQuery.Dispose();
+            }
+
+            diagnosticWorld = null;
             spawnLocationQuery = default;
-            spawnLocationQueryIsCreated = false;
+            generationSettingsQuery = default;
+            generatedChunkQuery = default;
+            diagnosticQueriesAreCreated = false;
+            cachedGeneratedChunkEntity = Entity.Null;
+            cachedGeneratedChunkCoordinate = default;
+            hasCachedGeneratedChunk = false;
         }
 
         /// <summary>

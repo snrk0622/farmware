@@ -13,6 +13,24 @@ namespace Farmware.WorldGeneration.Presentation
     [DisallowMultipleComponent]
     public sealed class CameraChunkStreamingBridge : MonoBehaviour
     {
+        /// <summary>
+        /// 画面下端より下に接地した岩壁が上方向へはみ出す量を、読み込み対象へ追加するタイル数です。
+        /// ピクセル数をタイル数へ切り上げることで、1ピクセルでも画面内へ入るSpriteの所属チャンクを保持します。
+        /// </summary>
+        private const int LowerViewportSpriteOverhangInTiles =
+            (TerrainLayerPresentationUtility.RockWallElevationInPixels
+                + TerrainLayerPresentationUtility.TerrainSurfaceHeightInPixels - 1)
+            / TerrainLayerPresentationUtility.TerrainSurfaceHeightInPixels;
+
+        /// <summary>
+        /// 画面上端より上に接地した土地断面が下方向へはみ出す量を、読み込み対象へ追加するタイル数です。
+        /// 現在の8ピクセル断面では1タイルとなり、チャンク境界直外の土地Spriteが途中で消えることを防ぎます。
+        /// </summary>
+        private const int UpperViewportSpriteOverhangInTiles =
+            (TerrainLayerPresentationUtility.TerrainFrontFaceHeightInPixels
+                + TerrainLayerPresentationUtility.TerrainSurfaceHeightInPixels - 1)
+            / TerrainLayerPresentationUtility.TerrainSurfaceHeightInPixels;
+
         // 表示範囲を取得する2Dカメラです。未指定なら同じGameObjectのCameraをAwakeで取得します。
         [Tooltip("チャンク読み込み範囲を決める2Dカメラです。未指定なら同じGameObjectのCameraを使用します。")]
         [SerializeField] private Camera targetCamera;
@@ -87,16 +105,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// </summary>
         private void OnDisable()
         {
-            if (observerWorld != null
-                && observerWorld.IsCreated
-                && observerWorld.EntityManager.Exists(observerEntity))
-            {
-                observerWorld.EntityManager.DestroyEntity(observerEntity);
-            }
-
-            observerEntity = Entity.Null;
-            observerWorld = null;
-            hasLastObserver = false;
+            DestroyOwnedObserverEntity();
         }
 
         /// <summary>
@@ -108,6 +117,8 @@ namespace Farmware.WorldGeneration.Presentation
             World currentWorld = World.DefaultGameObjectInjectionWorld;
             if (currentWorld == null || !currentWorld.IsCreated)
             {
+                // Default Worldが一時的に失われた場合も、以前のWorldが存続していれば所有Entityだけを残さないよう片付けます。
+                DestroyOwnedObserverEntity();
                 return false;
             }
 
@@ -115,6 +126,13 @@ namespace Farmware.WorldGeneration.Presentation
                 && currentWorld.EntityManager.Exists(observerEntity))
             {
                 return true;
+            }
+
+            // PlayMode再初期化などでDefault Worldだけが切り替わる場合、古いWorldはまだ有効なことがあります。
+            // 所有参照を新Worldへ上書きする前に旧Entityを破棄し、各WorldへObserverが1件ずつ残る状態を防ぎます。
+            if (observerWorld != null)
+            {
+                DestroyOwnedObserverEntity();
             }
 
             EntityQuery existingObserverQuery = currentWorld.EntityManager.CreateEntityQuery(
@@ -141,6 +159,26 @@ namespace Farmware.WorldGeneration.Presentation
             hasLastObserver = false;
             reportedDuplicateObserver = false;
             return true;
+        }
+
+        /// <summary>
+        /// このBridgeが作成したObserver Entityを、作成元Worldがまだ有効な場合だけ破棄します。
+        /// World切替、Component無効化、Default World消失のすべてが同じ後始末を通り、古いObserver参照を残しません。
+        /// </summary>
+        private void DestroyOwnedObserverEntity()
+        {
+            if (observerWorld != null
+                && observerWorld.IsCreated
+                && observerEntity != Entity.Null
+                && observerWorld.EntityManager.Exists(observerEntity))
+            {
+                observerWorld.EntityManager.DestroyEntity(observerEntity);
+            }
+
+            observerEntity = Entity.Null;
+            observerWorld = null;
+            reportedDuplicateObserver = false;
+            hasLastObserver = false;
         }
 
         /// <summary>
@@ -183,8 +221,51 @@ namespace Farmware.WorldGeneration.Presentation
                 maximumTileY = Mathf.CeilToInt(maximumWorldY) - 1;
             }
 
-            ChunkCoordinate minimumChunk = WorldGrid.ToChunkCoordinate(minimumTileX, minimumTileY);
-            ChunkCoordinate maximumChunk = WorldGrid.ToChunkCoordinate(maximumTileX, maximumTileY);
+            return CalculateChunkBoundsFromVisibleTileBounds(
+                minimumTileX,
+                maximumTileX,
+                minimumTileY,
+                maximumTileY);
+        }
+
+        /// <summary>
+        /// 論理的に画面へ入るタイル矩形へ土地・岩壁Spriteの上下はみ出し量を足し、必要なチャンク包含矩形へ変換します。
+        /// CameraやGridへ依存しない純粋計算として、チャンク境界と負座標をPlayModeテストから検証できます。
+        /// </summary>
+        /// <param name="minimumTileX">画面へ入る最小の水平ワールドタイル座標です。</param>
+        /// <param name="maximumTileX">画面へ入る最大の水平ワールドタイル座標です。</param>
+        /// <param name="minimumTileY">画面へ入る最小の垂直ワールドタイル座標です。</param>
+        /// <param name="maximumTileY">画面へ入る最大の垂直ワールドタイル座標です。</param>
+        /// <returns>Spriteの最大上下はみ出しを含めた論理チャンク包含矩形です。</returns>
+        public static ChunkStreamingObserver CalculateChunkBoundsFromVisibleTileBounds(
+            int minimumTileX,
+            int maximumTileX,
+            int minimumTileY,
+            int maximumTileY)
+        {
+            // 呼び出し側の2端点順に依存しないよう、先に各軸を最小・最大へ正規化します。
+            int normalizedMinimumTileX = Mathf.Min(minimumTileX, maximumTileX);
+            int normalizedMaximumTileX = Mathf.Max(minimumTileX, maximumTileX);
+            int normalizedMinimumTileY = Mathf.Min(minimumTileY, maximumTileY);
+            int normalizedMaximumTileY = Mathf.Max(minimumTileY, maximumTileY);
+
+            // 岩壁は接地セルから上へ、土地断面は接地セルから下へ見えるため、Viewportの反対側にある接地セルも読み込みます。
+            // int端へ到達した診断値でもオーバーフローしないよう、加減算できる範囲へ飽和させます。
+            int expandedMinimumTileY = normalizedMinimumTileY
+                < int.MinValue + LowerViewportSpriteOverhangInTiles
+                    ? int.MinValue
+                    : normalizedMinimumTileY - LowerViewportSpriteOverhangInTiles;
+            int expandedMaximumTileY = normalizedMaximumTileY
+                > int.MaxValue - UpperViewportSpriteOverhangInTiles
+                    ? int.MaxValue
+                    : normalizedMaximumTileY + UpperViewportSpriteOverhangInTiles;
+
+            ChunkCoordinate minimumChunk = WorldGrid.ToChunkCoordinate(
+                normalizedMinimumTileX,
+                expandedMinimumTileY);
+            ChunkCoordinate maximumChunk = WorldGrid.ToChunkCoordinate(
+                normalizedMaximumTileX,
+                expandedMaximumTileY);
             return new ChunkStreamingObserver
             {
                 MinimumVisibleChunkX = minimumChunk.X,

@@ -840,7 +840,7 @@ Unrequested
 
 以下を実装済み。
 
-- 2DカメラのViewportとGridから、正負座標に対応する可視論理チャンク包含矩形を求めてECSへ渡すPresentation Bridge。
+- 2DカメラのViewportとGridから、正負座標と16×24土地・16×28岩壁の上下描画はみ出しに対応する可視論理チャンク包含矩形を求めてECSへ渡すPresentation Bridge。Default World切替時は旧Worldの所有Observerを破棄してから新Worldへ作り直す。
 - 可視矩形、最低1チャンクのプリロード余白、保持余白を分離したチャンク寿命管理。
 - カメラ中心に近い四角いリングから要求し、同じ座標の重複Entityを作らない優先要求。
 - 生成待ち・生成中を合算する最大同時生成数。キャンセル済みEntityの再要求も同じ上限へ含める。
@@ -852,7 +852,7 @@ Unrequested
 - SampleSceneへ、設定用SubScene、World Grid、専用Ground Tilemap、Camera Bridge、ChunkTilemapPresenterを接続。
 - URP用Pixel Perfect CameraをPPU 16、基準解像度480×270、Pixel Snapping、Windowboxへ設定し、CameraのHDR・MSAA・動的解像度を無効化。
 - WASDまたは矢印キーで通常24タイル/秒、Shift併用時96タイル/秒で移動し、LateUpdateで1/16ワールド単位へ整列するカメラ操作。
-- プレイヤー向け診断表示としてF3を押すとカメラ中心と初期スポーンのワールド・タイル・チャンク・チャンク内座標、F4を押すと各グリッド境界、論理チャンク座標、初期スポーンタイルと所属チャンクの赤系マーカーを表示するオーバーレイ。
+- プレイヤー向け診断表示としてF3を押すとカメラ中心と初期スポーンのワールド・タイル・チャンク・チャンク内座標に加え、サブチャンク座標、生成済みBiome、GeneratorVersion、ワールドシードを表示する。F4を押すと各グリッド境界、論理チャンク座標、初期スポーンタイルと所属チャンクの赤系マーカーを表示するオーバーレイ。
 - Profilerでストリーミング寿命管理とTilemap反映を個別確認できる `Farmware.WorldGeneration.ChunkStreaming`、`Farmware.WorldGeneration.TilemapPresentation` の計測区間。
 - SampleSceneを実際に起動し、設定Singleton、4096タイルのActiveチャンク、Tilemap表示、遠方移動時のアンロード、原点帰還時の決定論的再生成まで確認するPlayModeテスト。
 

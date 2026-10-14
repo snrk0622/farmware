@@ -64,6 +64,32 @@ namespace Farmware.WorldGeneration.PlayModeTests
         }
 
         /// <summary>
+        /// 画面内タイルがちょうど1チャンクに収まる境界条件を準備し、上下へはみ出す土地・岩壁Spriteの接地チャンクも含むことを保証します。
+        /// 水平方向には現在はみ出しがないため、不要な左右チャンクを追加しないことも同時に確認します。
+        /// </summary>
+        [Test]
+        public void CalculateChunkBoundsFromVisibleTileBounds_IncludesVerticalSpriteOverhang()
+        {
+            ChunkStreamingObserver bounds =
+                CameraChunkStreamingBridge.CalculateChunkBoundsFromVisibleTileBounds(
+                    0,
+                    WorldGridConstants.LogicalChunkSize - 1,
+                    0,
+                    WorldGridConstants.LogicalChunkSize - 1);
+
+            Assert.That(bounds.MinimumVisibleChunkX, Is.EqualTo(0));
+            Assert.That(bounds.MaximumVisibleChunkX, Is.EqualTo(0));
+            Assert.That(
+                bounds.MinimumVisibleChunkY,
+                Is.EqualTo(-1),
+                "画面下端外の岩壁が上へはみ出すため、直下チャンクも表示対象に含める必要があります。");
+            Assert.That(
+                bounds.MaximumVisibleChunkY,
+                Is.EqualTo(1),
+                "画面上端外の土地断面が下へはみ出すため、直上チャンクも表示対象に含める必要があります。");
+        }
+
+        /// <summary>
         /// 現在の負座標と記録済み初期スポーンを準備し、F3文字列が両者を混同せずタイル・チャンク座標として表示することを保証します。
         /// </summary>
         [Test]
@@ -79,10 +105,101 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 new Vector3(5.5f, -2.5f, -10f),
                 new Vector3Int(5, -3, 0),
                 true,
-                spawnLocation);
+                spawnLocation,
+                true,
+                new WorldGenerationSettings
+                {
+                    GeneratorVersion = 7,
+                    WorldSeed = 0x1234UL
+                },
+                true,
+                BiomeId.Snowfield);
 
             Assert.That(text, Does.Contain("Tile  : (5, -3)"));
+            Assert.That(text, Does.Contain("SubChunk: (0, 3)"));
+            Assert.That(text, Does.Contain("Biome: Snowfield"));
+            Assert.That(text, Does.Contain("GeneratorVersion: 7"));
+            Assert.That(text, Does.Contain("WorldSeed: 0x0000000000001234"));
             Assert.That(text, Does.Contain("Spawn: Tile (-65, 64) / Chunk (-2, 1)"));
+        }
+
+        /// <summary>
+        /// 生成設定Singletonと負座標チャンクのGeneratedTile Bufferを一時Worldへ準備し、F3が表示用の推測値ではなくECSの正から値を読むことを保証します。
+        /// </summary>
+        [Test]
+        public void CoordinateHud_ReadsGenerationSettingsAndCurrentBiomeFromEcs()
+        {
+            World previousWorld = World.DefaultGameObjectInjectionWorld;
+            World testWorld = new World("CoordinateHudEcsReadWorld");
+            GameObject overlayObject = null;
+
+            try
+            {
+                World.DefaultGameObjectInjectionWorld = testWorld;
+                Entity settingsEntity = testWorld.EntityManager.CreateEntity();
+                testWorld.EntityManager.AddComponentData(
+                    settingsEntity,
+                    new WorldGenerationSettings
+                    {
+                        GeneratorVersion = 9,
+                        WorldSeed = 0xFEDCBA9876543210UL
+                    });
+
+                Entity chunkEntity = testWorld.EntityManager.CreateEntity();
+                testWorld.EntityManager.AddComponentData(
+                    chunkEntity,
+                    new ChunkCoordinateComponent
+                    {
+                        X = 0,
+                        Y = -1
+                    });
+                testWorld.EntityManager.AddComponentData(
+                    chunkEntity,
+                    new ChunkGenerationStatus
+                    {
+                        Phase = ChunkGenerationPhase.Active,
+                        GeneratedWithVersion = 9
+                    });
+                DynamicBuffer<GeneratedTile> tiles =
+                    testWorld.EntityManager.AddBuffer<GeneratedTile>(chunkEntity);
+                tiles.ResizeUninitialized(WorldGridConstants.TilesPerChunk);
+                ChunkLocalTileCoordinate local = WorldGrid.ToLocalTileCoordinate(5, -3);
+                int tileIndex = WorldGrid.ToTileIndex(local.X, local.Y);
+                tiles[tileIndex] = new GeneratedTile { Biome = BiomeId.Volcanic };
+
+                overlayObject = new GameObject("Coordinate HUD ECS Reader");
+                overlayObject.AddComponent<Camera>();
+                WorldGridDebugOverlay overlay = overlayObject.AddComponent<WorldGridDebugOverlay>();
+                MethodInfo readSettings = typeof(WorldGridDebugOverlay).GetMethod(
+                    "TryGetWorldGenerationSettings",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                MethodInfo readBiome = typeof(WorldGridDebugOverlay).GetMethod(
+                    "TryGetCurrentTileBiome",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.That(readSettings, Is.Not.Null);
+                Assert.That(readBiome, Is.Not.Null);
+
+                object[] settingsArguments = { default(WorldGenerationSettings) };
+                object[] biomeArguments = { new Vector3Int(5, -3, 0), default(BiomeId) };
+                Assert.That(readSettings.Invoke(overlay, settingsArguments), Is.EqualTo(true));
+                Assert.That(readBiome.Invoke(overlay, biomeArguments), Is.EqualTo(true));
+
+                WorldGenerationSettings actualSettings =
+                    (WorldGenerationSettings)settingsArguments[0];
+                Assert.That(actualSettings.GeneratorVersion, Is.EqualTo(9));
+                Assert.That(actualSettings.WorldSeed, Is.EqualTo(0xFEDCBA9876543210UL));
+                Assert.That((BiomeId)biomeArguments[1], Is.EqualTo(BiomeId.Volcanic));
+            }
+            finally
+            {
+                if (overlayObject != null)
+                {
+                    Object.DestroyImmediate(overlayObject);
+                }
+
+                World.DefaultGameObjectInjectionWorld = previousWorld;
+                testWorld.Dispose();
+            }
         }
 
         /// <summary>
@@ -175,6 +292,66 @@ namespace Farmware.WorldGeneration.PlayModeTests
 
                 World.DefaultGameObjectInjectionWorld = previousWorld;
                 testWorld.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// 2つの有効なWorldを維持したままDefault Worldを切り替え、Camera Bridgeが旧Worldの所有Observerを破棄してから新規作成することを保証します。
+        /// World再初期化後に古いObserver Singletonが残り、旧Worldを再利用できなくなる退行を防ぎます。
+        /// </summary>
+        [Test]
+        public void CameraChunkStreamingBridge_WorldChanged_DestroysPreviousObserver()
+        {
+            World previousWorld = World.DefaultGameObjectInjectionWorld;
+            World firstWorld = new World("CameraBridgeFirstWorld");
+            World secondWorld = new World("CameraBridgeSecondWorld");
+            GameObject cameraObject = null;
+
+            try
+            {
+                World.DefaultGameObjectInjectionWorld = firstWorld;
+                cameraObject = new GameObject("World Switching Streaming Camera");
+                cameraObject.SetActive(false);
+                Camera camera = cameraObject.AddComponent<Camera>();
+                camera.orthographic = true;
+                CameraChunkStreamingBridge streamingBridge =
+                    cameraObject.AddComponent<CameraChunkStreamingBridge>();
+                cameraObject.SetActive(true);
+
+                MethodInfo streamingUpdate = typeof(CameraChunkStreamingBridge).GetMethod(
+                    "Update",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.That(streamingUpdate, Is.Not.Null);
+                streamingUpdate.Invoke(streamingBridge, null);
+
+                using EntityQuery firstObserverQuery = firstWorld.EntityManager.CreateEntityQuery(
+                    ComponentType.ReadOnly<ChunkStreamingObserver>());
+                using EntityQuery secondObserverQuery = secondWorld.EntityManager.CreateEntityQuery(
+                    ComponentType.ReadOnly<ChunkStreamingObserver>());
+                Assert.That(firstObserverQuery.CalculateEntityCount(), Is.EqualTo(1));
+                Assert.That(secondObserverQuery.CalculateEntityCount(), Is.EqualTo(0));
+
+                // 旧Worldを破棄せずDefaultだけを切り替え、所有Entityの破棄先を正しく記憶していることを確認します。
+                World.DefaultGameObjectInjectionWorld = secondWorld;
+                streamingUpdate.Invoke(streamingBridge, null);
+
+                Assert.That(
+                    firstObserverQuery.CalculateEntityCount(),
+                    Is.EqualTo(0),
+                    "新Worldへ所有参照を上書きする前に、旧WorldのObserverを破棄する必要があります。");
+                Assert.That(secondObserverQuery.CalculateEntityCount(), Is.EqualTo(1));
+            }
+            finally
+            {
+                if (cameraObject != null)
+                {
+                    cameraObject.SetActive(false);
+                    Object.DestroyImmediate(cameraObject);
+                }
+
+                World.DefaultGameObjectInjectionWorld = previousWorld;
+                firstWorld.Dispose();
+                secondWorld.Dispose();
             }
         }
 
