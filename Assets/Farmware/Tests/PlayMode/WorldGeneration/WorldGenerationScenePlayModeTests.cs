@@ -2,6 +2,7 @@
 // F3/F4と開発者用表示を含め、純粋計算では確認できないGameObject・SubScene・Presentation間の参照切れを検出します。
 
 using System.Collections;
+using System.Collections.Generic;
 using System.Reflection;
 using Farmware.WorldGeneration.Presentation;
 using NUnit.Framework;
@@ -174,6 +175,181 @@ namespace Farmware.WorldGeneration.PlayModeTests
 
                 World.DefaultGameObjectInjectionWorld = previousWorld;
                 testWorld.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Camera GameObjectを維持したままDefault Worldを作り直し、新しいWorldの初期スポーンをもう一度適用することを保証します。
+        /// </summary>
+        [Test]
+        public void InitialCameraPosition_WorldRecreated_ReappliesNewSpawnLocation()
+        {
+            World previousWorld = World.DefaultGameObjectInjectionWorld;
+            World firstWorld = new World("InitialCameraFirstWorld");
+            World secondWorld = new World("InitialCameraSecondWorld");
+            GameObject cameraObject = null;
+
+            try
+            {
+                Entity firstSpawnEntity = firstWorld.EntityManager.CreateEntity();
+                firstWorld.EntityManager.AddComponentData(
+                    firstSpawnEntity,
+                    new InitialSpawnLocation
+                    {
+                        TileX = 2,
+                        TileY = 3
+                    });
+                Entity secondSpawnEntity = secondWorld.EntityManager.CreateEntity();
+                secondWorld.EntityManager.AddComponentData(
+                    secondSpawnEntity,
+                    new InitialSpawnLocation
+                    {
+                        TileX = -5,
+                        TileY = 7
+                    });
+
+                World.DefaultGameObjectInjectionWorld = firstWorld;
+                cameraObject = new GameObject("World Recreation Initial Camera");
+                cameraObject.SetActive(false);
+                cameraObject.AddComponent<Camera>();
+                cameraObject.AddComponent<CameraPanController>();
+                InitialCameraPositionController positionController =
+                    cameraObject.AddComponent<InitialCameraPositionController>();
+                cameraObject.SetActive(true);
+
+                MethodInfo positionUpdate = typeof(InitialCameraPositionController).GetMethod(
+                    "Update",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.That(positionUpdate, Is.Not.Null);
+
+                positionUpdate.Invoke(positionController, null);
+                Assert.That(cameraObject.transform.position.x, Is.EqualTo(2.5f));
+                Assert.That(cameraObject.transform.position.y, Is.EqualTo(3.5f));
+
+                // Componentを無効化せずWorldだけを切り替え、以前の完了フラグが新Worldの適用を妨げないことを確認します。
+                World.DefaultGameObjectInjectionWorld = secondWorld;
+                positionUpdate.Invoke(positionController, null);
+
+                Assert.That(positionController.HasCompletedInitialPositioning, Is.True);
+                Assert.That(positionController.HasAppliedInitialPosition, Is.True);
+                Assert.That(cameraObject.transform.position.x, Is.EqualTo(-4.5f));
+                Assert.That(cameraObject.transform.position.y, Is.EqualTo(7.5f));
+            }
+            finally
+            {
+                if (cameraObject != null)
+                {
+                    cameraObject.SetActive(false);
+                    Object.DestroyImmediate(cameraObject);
+                }
+
+                World.DefaultGameObjectInjectionWorld = previousWorld;
+                firstWorld.Dispose();
+                secondWorld.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Presenterが参照するDefault Worldを切り替え、旧WorldのTileと表示済み座標キャッシュを即時破棄することを保証します。
+        /// </summary>
+        [Test]
+        public void ChunkTilemapPresenter_WorldChanged_ClearsPreviousWorldPresentation()
+        {
+            World previousWorld = World.DefaultGameObjectInjectionWorld;
+            World firstWorld = new World("TilemapPresenterFirstWorld");
+            World secondWorld = new World("TilemapPresenterSecondWorld");
+            GameObject presenterRoot = null;
+            Tile testTile = null;
+
+            try
+            {
+                World.DefaultGameObjectInjectionWorld = firstWorld;
+                ChunkTilemapPresenter presenter = CreateLifecycleTestPresenter(
+                    out presenterRoot,
+                    out Tilemap terrainTilemap);
+                MethodInfo ensureQueries = typeof(ChunkTilemapPresenter).GetMethod(
+                    "TryEnsureQueries",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.That(ensureQueries, Is.Not.Null);
+                Assert.That(ensureQueries.Invoke(presenter, null), Is.EqualTo(true));
+
+                testTile = ScriptableObject.CreateInstance<Tile>();
+                terrainTilemap.SetTile(Vector3Int.zero, testTile);
+                FieldInfo displayedCoordinatesField = typeof(ChunkTilemapPresenter).GetField(
+                    "displayedCoordinates",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.That(displayedCoordinatesField, Is.Not.Null);
+                HashSet<ChunkCoordinate> displayedCoordinates =
+                    (HashSet<ChunkCoordinate>)displayedCoordinatesField.GetValue(presenter);
+                displayedCoordinates.Add(new ChunkCoordinate(0, 0));
+
+                // 同じ座標を持ち得る別Worldへ切り替え、旧キャッシュによる再反映省略を防げることを確認します。
+                World.DefaultGameObjectInjectionWorld = secondWorld;
+                Assert.That(ensureQueries.Invoke(presenter, null), Is.EqualTo(true));
+
+                Assert.That(terrainTilemap.GetTile(Vector3Int.zero), Is.Null);
+                Assert.That(displayedCoordinates, Is.Empty);
+            }
+            finally
+            {
+                if (presenterRoot != null)
+                {
+                    Object.DestroyImmediate(presenterRoot);
+                }
+
+                if (testTile != null)
+                {
+                    Object.DestroyImmediate(testTile);
+                }
+
+                World.DefaultGameObjectInjectionWorld = previousWorld;
+                firstWorld.Dispose();
+                secondWorld.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// 部分反映後に消去待ちだけとなったチャンクを準備し、Presenter無効化時に残存Tileと待機キャッシュを消去することを保証します。
+        /// </summary>
+        [Test]
+        public void ChunkTilemapPresenter_Disabled_ClearsPendingPartialChunk()
+        {
+            GameObject presenterRoot = null;
+            Tile testTile = null;
+
+            try
+            {
+                ChunkTilemapPresenter presenter = CreateLifecycleTestPresenter(
+                    out presenterRoot,
+                    out Tilemap terrainTilemap);
+                testTile = ScriptableObject.CreateInstance<Tile>();
+                terrainTilemap.SetTile(Vector3Int.zero, testTile);
+
+                FieldInfo pendingCoordinatesField = typeof(ChunkTilemapPresenter).GetField(
+                    "pendingClearCoordinates",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.That(pendingCoordinatesField, Is.Not.Null);
+                HashSet<ChunkCoordinate> pendingCoordinates =
+                    (HashSet<ChunkCoordinate>)pendingCoordinatesField.GetValue(presenter);
+                pendingCoordinates.Add(new ChunkCoordinate(0, 0));
+
+                // enabledの変更はUnityからOnDisableを同期的に呼び、消去キューを待たずに全セルを片付けます。
+                presenter.enabled = false;
+
+                Assert.That(terrainTilemap.GetTile(Vector3Int.zero), Is.Null);
+                Assert.That(pendingCoordinates, Is.Empty);
+            }
+            finally
+            {
+                if (presenterRoot != null)
+                {
+                    Object.DestroyImmediate(presenterRoot);
+                }
+
+                if (testTile != null)
+                {
+                    Object.DestroyImmediate(testTile);
+                }
             }
         }
 
@@ -1204,6 +1380,47 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 actual.VisualVariant,
                 Is.EqualTo(expected.VisualVariant),
                 $"資源表示差分が一致しません。Index={tileIndex}");
+        }
+
+        /// <summary>
+        /// PresenterのWorld切替・無効化テスト用に、最小のGrid、地形Tilemap、Presenterを作成します。
+        /// </summary>
+        /// <param name="rootObject">テスト終了時に破棄するGridとPresenterの親Objectです。</param>
+        /// <param name="terrainTilemap">残存Tileの有無を検証する地形Tilemapです。</param>
+        /// <returns>地形Tilemapだけを設定したテスト対象Presenterです。</returns>
+        private static ChunkTilemapPresenter CreateLifecycleTestPresenter(
+            out GameObject rootObject,
+            out Tilemap terrainTilemap)
+        {
+            rootObject = new GameObject("Tilemap Presenter Lifecycle Root");
+            rootObject.SetActive(false);
+            rootObject.AddComponent<Grid>();
+
+            GameObject tilemapObject = new GameObject("Lifecycle Ground Tilemap");
+            tilemapObject.transform.SetParent(rootObject.transform, false);
+            terrainTilemap = tilemapObject.AddComponent<Tilemap>();
+            tilemapObject.AddComponent<TilemapRenderer>();
+
+            ChunkTilemapPresenter presenter = rootObject.AddComponent<ChunkTilemapPresenter>();
+            presenter.Configure(
+                terrainTilemap,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null);
+            rootObject.SetActive(true);
+            return presenter;
         }
     }
 }

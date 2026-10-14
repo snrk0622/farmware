@@ -94,9 +94,11 @@ namespace Farmware.WorldGeneration.Presentation
         /// </summary>
         private void Update()
         {
-            if (hasCompletedInitialPositioning
-                || cameraPanController == null
-                || !TryEnsureQuery())
+            // 初期位置を適用済みでもDefault WorldはPlay中に再作成される場合があります。
+            // 完了判定より先にQueryを確認し、新しいWorldならTryEnsureQuery内で適用状態を戻します。
+            if (cameraPanController == null
+                || !TryEnsureQuery()
+                || hasCompletedInitialPositioning)
             {
                 return;
             }

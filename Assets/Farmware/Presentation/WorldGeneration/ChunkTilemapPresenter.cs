@@ -439,33 +439,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// </summary>
         private void OnDisable()
         {
-            if (targetTilemap != null
-                || liquidBaseTilemap != null
-                || resourceTilemap != null
-                || resourceBehindRockWallTilemap != null)
-            {
-                coordinateScratch.Clear();
-                foreach (ChunkCoordinate coordinate in displayedCoordinates)
-                {
-                    coordinateScratch.Add(coordinate);
-                }
-
-                foreach (ChunkCoordinate coordinate in applyProgressByCoordinate.Keys)
-                {
-                    if (!coordinateScratch.Contains(coordinate))
-                    {
-                        coordinateScratch.Add(coordinate);
-                    }
-                }
-
-                for (int index = 0; index < coordinateScratch.Count; index++)
-                {
-                    ClearWholeChunkImmediately(coordinateScratch[index]);
-                }
-            }
-
-            DestroyAllRockWallShadows();
-            ResetPresentationCaches();
+            ClearAllPresentedChunksImmediately();
         }
 
         /// <summary>
@@ -498,17 +472,27 @@ namespace Farmware.WorldGeneration.Presentation
         private bool TryEnsureQueries()
         {
             World currentWorld = World.DefaultGameObjectInjectionWorld;
-            if (currentWorld == null || !currentWorld.IsCreated)
-            {
-                return false;
-            }
-
-            if (queriesAreCreated && presentationWorld == currentWorld)
+            bool currentWorldIsUsable = currentWorld != null && currentWorld.IsCreated;
+            if (queriesAreCreated
+                && presentationWorld == currentWorld
+                && currentWorldIsUsable)
             {
                 return true;
             }
 
+            // Queryを作り直す状況では、旧Worldの表示キャッシュを先に完全消去します。
+            // Worldが一時的にnullまたは破棄済みになった場合も、別シードの古いTileを画面へ残さないために必要です。
+            if (queriesAreCreated)
+            {
+                ClearAllPresentedChunksImmediately();
+            }
+
             DisposeQueries();
+            if (!currentWorldIsUsable)
+            {
+                return false;
+            }
+
             presentationWorld = currentWorld;
             EntityManager entityManager = currentWorld.EntityManager;
             chunkQuery = entityManager.CreateEntityQuery(
@@ -900,6 +884,45 @@ namespace Farmware.WorldGeneration.Presentation
             {
                 ClearSubChunk(coordinate, subChunkIndex);
             }
+        }
+
+        /// <summary>
+        /// 現在のWorldから描画した可能性がある全チャンクを即時消去し、表示キャッシュと岩壁影を初期状態へ戻します。
+        /// Component無効化とDefault World切り替えの両方から呼ばれ、TilemapをSimulation状態として残さないために使用します。
+        /// </summary>
+        private void ClearAllPresentedChunksImmediately()
+        {
+            coordinateScratch.Clear();
+            foreach (ChunkCoordinate coordinate in displayedCoordinates)
+            {
+                coordinateScratch.Add(coordinate);
+            }
+
+            foreach (ChunkCoordinate coordinate in applyProgressByCoordinate.Keys)
+            {
+                if (!coordinateScratch.Contains(coordinate))
+                {
+                    coordinateScratch.Add(coordinate);
+                }
+            }
+
+            // 部分反映後に画面外へ出たチャンクは消去待ち集合にだけ残る場合があります。
+            // キューを破棄する前にこの座標も全消去し、再有効化後へ古いセルを持ち越さないようにします。
+            foreach (ChunkCoordinate coordinate in pendingClearCoordinates)
+            {
+                if (!coordinateScratch.Contains(coordinate))
+                {
+                    coordinateScratch.Add(coordinate);
+                }
+            }
+
+            for (int index = 0; index < coordinateScratch.Count; index++)
+            {
+                ClearWholeChunkImmediately(coordinateScratch[index]);
+            }
+
+            DestroyAllRockWallShadows();
+            ResetPresentationCaches();
         }
 
         /// <summary>
