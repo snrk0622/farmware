@@ -1003,10 +1003,10 @@ Unrequested
 
 - Unity Editorの`Map Viewer`メニューから、任意シードと符号付きタイル座標へ移動し、無限ワールドの広域形状を色分け表示する開発者専用Window。
 - `Terrain`では7バイオームBase色だけを使用し、Soil差を加えず、淡水、海水、マグマ、岩壁を優先表示する。`Biome`では水域や障害物の下を含む論理バイオームだけを表示する2モードとする。標準・肥沃・砂質の分布確認は、PlayMode中のEditor専用`Debug Visualization > Soil`を使用する。
-- 左ドラッグによる移動、カーソル位置を固定したホイールズーム、＋・－Button、原点移動、16×16サブチャンク・64×64論理チャンク境界、カーソル下のタイル・チャンク・地形情報。
+- 左ドラッグによる移動、Point Filterで実際に表示中のTextureピクセル位置を固定したホイールズーム、＋・－Button、原点移動、16×16サブチャンク・64×64論理チャンク境界、表示ピクセルと一致するカーソル下のタイル・チャンク・地形情報。
 - 1画面ピクセルあたり1〜256タイルの代表サンプリングと、最大768×768サンプルの上限。純粋地形計算をバックグラウンド実行し、次の操作が入った場合は不要な走査をキャンセルする。
 - `WorldGenerationAuthoring`から`WorldGenerationSettings`への変換を公開Snapshotメソッドへ一元化し、BakerとMap Viewerで共有する処理。PlayModeでは実行中ECS Singletonを優先する。
-- 全表示ピクセルと直接Generator結果の一致、Pointer座標、ズーム固定点、Authoringシード変換を検証する軽量なEditModeテスト。
+- 全表示ピクセルと直接Generator結果の一致、同一表示ピクセル内のPointer座標、Y反転、ズーム固定点、Authoringシード変換を検証する軽量なEditModeテスト。
 
 ### 2026-10-12: Foragerを参考にした直線前面断面・岩壁側面方針
 

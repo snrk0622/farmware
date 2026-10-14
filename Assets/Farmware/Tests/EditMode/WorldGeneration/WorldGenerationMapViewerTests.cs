@@ -110,7 +110,7 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 左上原点のPointer座標を負座標を含むワールド座標へ変換し、Canvas中央が指定中心へ一致することを検証します。
+        /// 左上原点のPointer座標を実際のTextureピクセルへ変換し、負座標とY反転を含む代表タイルへ一致することを検証します。
         /// </summary>
         [Test]
         public void CalculateWorldTileAtPointer_CenterAndCornersUseExpectedAxes()
@@ -123,8 +123,8 @@ namespace Farmware.WorldGeneration.Tests
                 300,
                 400f,
                 300f,
-                200f,
-                150f,
+                200.1f,
+                149.9f,
                 out int centerX,
                 out int centerY);
             WorldGenerationMapSampler.CalculateWorldTileAtPointer(
@@ -143,12 +143,49 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(centerX, Is.EqualTo(-100));
             Assert.That(centerY, Is.EqualTo(200));
             Assert.That(topLeftX, Is.EqualTo(-900));
-            Assert.That(topLeftY, Is.EqualTo(800));
+            Assert.That(topLeftY, Is.EqualTo(796));
         }
 
         /// <summary>
-        /// カーソル中心ズーム後も、そのPointer位置が同じワールドタイル付近を指すことを検証します。
-        /// 整数タイルへ丸めるため、許容差は新しい1ピクセル幅以内とします。
+        /// 同じ表示ピクセルの前半と後半へPointerを置き、連続座標の小数部が変わっても同じ代表タイルを返すことを保証します。
+        /// Point Filterの表示色とHover情報・ズーム固定点が、ピクセル途中で隣のタイルへずれる退行を防ぎます。
+        /// </summary>
+        [Test]
+        public void CalculateWorldTileAtPointer_PositionsWithinSameDisplayedPixelReturnSameTile()
+        {
+            WorldGenerationMapSampler.CalculateWorldTileAtPointer(
+                10,
+                -20,
+                1,
+                400,
+                300,
+                400f,
+                300f,
+                200.1f,
+                149.1f,
+                out int firstX,
+                out int firstY);
+            WorldGenerationMapSampler.CalculateWorldTileAtPointer(
+                10,
+                -20,
+                1,
+                400,
+                300,
+                400f,
+                300f,
+                200.9f,
+                149.9f,
+                out int secondX,
+                out int secondY);
+
+            Assert.That(firstX, Is.EqualTo(10));
+            Assert.That(firstY, Is.EqualTo(-20));
+            Assert.That(secondX, Is.EqualTo(firstX));
+            Assert.That(secondY, Is.EqualTo(firstY));
+        }
+
+        /// <summary>
+        /// カーソル中心ズーム後も、そのPointerに表示されるTextureピクセルが同じ代表タイルを指すことを検証します。
         /// </summary>
         [Test]
         public void CalculateZoomedCenter_PreservesWorldPositionUnderPointer()
@@ -196,8 +233,8 @@ namespace Farmware.WorldGeneration.Tests
                 out int afterX,
                 out int afterY);
 
-            Assert.That(afterX, Is.EqualTo(beforeX).Within(4));
-            Assert.That(afterY, Is.EqualTo(beforeY).Within(4));
+            Assert.That(afterX, Is.EqualTo(beforeX));
+            Assert.That(afterY, Is.EqualTo(beforeY));
         }
 
         /// <summary>
@@ -221,7 +258,7 @@ namespace Farmware.WorldGeneration.Tests
                 out int worldTileY);
 
             Assert.That(worldTileX, Is.EqualTo(868));
-            Assert.That(worldTileY, Is.EqualTo(376));
+            Assert.That(worldTileY, Is.EqualTo(372));
         }
 
         /// <summary>
@@ -303,8 +340,7 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 拡大表示されたTexture上のカーソル地点を準備し、ズーム前後で同じワールドタイルを指すことを検証します。
-        /// 整数タイルへ丸めるため、許容差は新しい1サンプル幅以内とします。
+        /// 拡大表示されたTexture上のカーソル地点を準備し、ズーム前後で同じ表示ピクセルの代表タイルを指すことを検証します。
         /// </summary>
         [Test]
         public void CalculateZoomedCenter_StretchedTexturePreservesPointerTile()
@@ -352,8 +388,8 @@ namespace Farmware.WorldGeneration.Tests
                 out int afterX,
                 out int afterY);
 
-            Assert.That(afterX, Is.EqualTo(beforeX).Within(4));
-            Assert.That(afterY, Is.EqualTo(beforeY).Within(4));
+            Assert.That(afterX, Is.EqualTo(beforeX));
+            Assert.That(afterY, Is.EqualTo(beforeY));
         }
 
         /// <summary>

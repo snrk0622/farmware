@@ -306,16 +306,28 @@ namespace Farmware.WorldGeneration.Editor
             ValidateViewportScale(sampleWidth, viewportWidth, nameof(sampleWidth), nameof(viewportWidth));
             ValidateViewportScale(sampleHeight, viewportHeight, nameof(sampleHeight), nameof(viewportHeight));
 
-            // TextureがCanvas全体へ拡大・縮小されるため、PointerのEditorポイントを
-            // 先にTexture上のサンプル位置へ戻し、表示サイズが768を超えても地形と座標を一致させます。
-            double horizontalSampleOffset =
-                ((pointerX / (double)viewportWidth) - 0.5d) * sampleWidth;
-            double verticalSampleOffset =
-                (0.5d - (pointerY / (double)viewportHeight)) * sampleHeight;
-            double horizontalOffset = horizontalSampleOffset * tilesPerPixel;
-            double verticalOffset = verticalSampleOffset * tilesPerPixel;
-            worldTileX = ClampToInt((long)Math.Round(centerTileX + horizontalOffset));
-            worldTileY = ClampToInt((long)Math.Round(centerTileY + verticalOffset));
+            // Map ViewerはPoint FilterでTextureを表示するため、同じ表示ピクセル内のPointerは
+            // 連続座標の違いにかかわらず、画像生成時と同じ1つの代表タイルを指す必要があります。
+            int pixelX = CalculateDisplayedSampleIndex(
+                pointerX,
+                viewportWidth,
+                sampleWidth,
+                invertAxis: false);
+            int pixelY = CalculateDisplayedSampleIndex(
+                pointerY,
+                viewportHeight,
+                sampleHeight,
+                invertAxis: true);
+            worldTileX = CalculateSampleCoordinate(
+                centerTileX,
+                pixelX,
+                sampleWidth,
+                tilesPerPixel);
+            worldTileY = CalculateSampleCoordinate(
+                centerTileY,
+                pixelY,
+                sampleHeight,
+                tilesPerPixel);
         }
 
         /// <summary>
@@ -375,16 +387,65 @@ namespace Farmware.WorldGeneration.Editor
                 nameof(newSampleHeight),
                 nameof(viewportHeight));
 
-            // Windowリサイズ後のズームでもPointer下を固定できるよう、
-            // 新しいTexture解像度から求めたサンプル位置を中心補正に使います。
-            double horizontalSamples =
-                ((pointerX / (double)viewportWidth) - 0.5d) * newSampleWidth;
-            double verticalSamples =
-                (0.5d - (pointerY / (double)viewportHeight)) * newSampleHeight;
-            newCenterTileX = ClampToInt(
-                (long)Math.Round(anchoredTileX - (horizontalSamples * newTilesPerPixel)));
-            newCenterTileY = ClampToInt(
-                (long)Math.Round(anchoredTileY - (verticalSamples * newTilesPerPixel)));
+            // 新TextureでPointer下に表示される離散ピクセルを先に求め、そのピクセルがanchoredTileを
+            // サンプルする中央座標を逆算します。連続オフセットを丸めると表示色と固定点がずれるためです。
+            int newPixelX = CalculateDisplayedSampleIndex(
+                pointerX,
+                viewportWidth,
+                newSampleWidth,
+                invertAxis: false);
+            int newPixelY = CalculateDisplayedSampleIndex(
+                pointerY,
+                viewportHeight,
+                newSampleHeight,
+                invertAxis: true);
+            long horizontalTileOffset =
+                (long)(newPixelX - (newSampleWidth / 2)) * newTilesPerPixel;
+            long verticalTileOffset =
+                (long)(newPixelY - (newSampleHeight / 2)) * newTilesPerPixel;
+            newCenterTileX = ClampToInt((long)anchoredTileX - horizontalTileOffset);
+            newCenterTileY = ClampToInt((long)anchoredTileY - verticalTileOffset);
+        }
+
+        /// <summary>
+        /// Canvas上のPointer座標を、Point Filterで実際に表示されるTextureピクセルIndexへ変換します。
+        /// </summary>
+        /// <param name="pointerCoordinate">Canvasの対象軸先頭からのPointer位置です。単位はEditorポイントです。</param>
+        /// <param name="viewportLength">Canvasの対象軸の長さです。単位はEditorポイントです。</param>
+        /// <param name="sampleLength">Textureの対象軸のピクセル数です。</param>
+        /// <param name="invertAxis">左上原点のYをTexture下端原点へ反転する場合はtrueです。</param>
+        /// <returns>0からsampleLength - 1へ収めたTextureピクセルIndexです。</returns>
+        private static int CalculateDisplayedSampleIndex(
+            float pointerCoordinate,
+            float viewportLength,
+            int sampleLength,
+            bool invertAxis)
+        {
+            ValidateViewportScale(
+                sampleLength,
+                viewportLength,
+                nameof(sampleLength),
+                nameof(viewportLength));
+
+            // Pointerは通常Canvas内ですが、境界の丸めやPointer退出直前のイベントでも配列外へ出ないよう端へ収めます。
+            double scaledCoordinate = pointerCoordinate * sampleLength / viewportLength;
+            int displayedIndex;
+            if (scaledCoordinate <= 0d)
+            {
+                displayedIndex = 0;
+            }
+            else if (scaledCoordinate >= sampleLength)
+            {
+                displayedIndex = sampleLength - 1;
+            }
+            else
+            {
+                displayedIndex = (int)Math.Floor(scaledCoordinate);
+            }
+
+            return invertAxis
+                ? (sampleLength - 1) - displayedIndex
+                : displayedIndex;
         }
 
         /// <summary>
