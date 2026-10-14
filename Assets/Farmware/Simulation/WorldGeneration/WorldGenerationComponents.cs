@@ -237,6 +237,18 @@ namespace Farmware.WorldGeneration
     /// </summary>
     public struct WorldGenerationSettings : IComponentData
     {
+        /// <summary>既定の海面を表す0〜65535の固定小数点閾値です。Authoringと分布監査が同じ値を共有します。</summary>
+        public const ushort DefaultSeaLevelThreshold = 20000;
+
+        /// <summary>既定の高温域を表す0〜65535の固定小数点閾値です。Authoringと分布監査が同じ値を共有します。</summary>
+        public const ushort DefaultHotTemperatureThreshold = 40000;
+
+        /// <summary>既定の乾燥域を表す0〜65535の固定小数点閾値です。Authoringと分布監査が同じ値を共有します。</summary>
+        public const ushort DefaultDryMoistureThreshold = 28500;
+
+        /// <summary>既定の湿潤域を表す0〜65535の固定小数点閾値です。Authoringと分布監査が同じ値を共有します。</summary>
+        public const ushort DefaultWetMoistureThreshold = 39500;
+
         /// <summary>ワールド作成からセーブ寿命全体で不変の64bitシードです。</summary>
         public ulong WorldSeed;
 
@@ -395,7 +407,8 @@ namespace Farmware.WorldGeneration
 
         /// <summary>
         /// Phase 1〜2の比較基準となる既定設定を作ります。
-        /// 調整値はこの1か所に集約します。初期開発中は呼び出し側から1を渡し、正式なセーブ互換運用開始後だけ非互換変更に合わせて更新します。
+        /// 固定小数点の既定閾値はこの型へ集約し、Authoringの初期値も同じ値を0〜1へ戻して使用します。
+        /// 初期開発中は呼び出し側から1を渡し、正式なセーブ互換運用開始後だけ非互換変更に合わせて更新します。
         /// </summary>
         /// <param name="worldSeed">文字列から変換済みのワールドシードです。</param>
         /// <param name="generatorVersion">保存対象の生成器バージョンです。</param>
@@ -415,7 +428,7 @@ namespace Farmware.WorldGeneration
                 OctaveCount = 4,
                 BiomeClassificationTransitionWidthInTiles = 12,
                 BiomeTransitionWidthInTiles = 6,
-                SeaLevelThreshold = 20000,
+                SeaLevelThreshold = DefaultSeaLevelThreshold,
                 RiverCellSizeInTiles = 96,
                 PondCellSizeInTiles = 48,
                 FreshWaterOctaveCount = 2,
@@ -447,10 +460,10 @@ namespace Farmware.WorldGeneration
                 RockWallWarpAmplitudeInTiles = 6,
                 RockWallNoiseThreshold = 41000,
                 RockWallCorridorHalfWidth = 1100,
-                HotTemperatureThreshold = 40000,
+                HotTemperatureThreshold = DefaultHotTemperatureThreshold,
                 ColdTemperatureThreshold = 23000,
-                DryMoistureThreshold = 28500,
-                WetMoistureThreshold = 39500,
+                DryMoistureThreshold = DefaultDryMoistureThreshold,
+                WetMoistureThreshold = DefaultWetMoistureThreshold,
                 WetlandMoistureThreshold = 50000,
                 WetlandMaximumElevation = 36000,
                 HighlandElevationThreshold = 43000,
@@ -636,6 +649,35 @@ namespace Farmware.WorldGeneration
                 RegionHeightInTiles = region.HeightInTiles
             };
         }
+    }
+
+    /// <summary>
+    /// 初期スポーン探索が現在どの段階にあるかを表します。
+    /// Presentationは失敗も完了状態として扱い、カメラをScene保存位置に保ったままチャンク要求を開始します。
+    /// </summary>
+    public enum InitialSpawnSearchPhase : byte
+    {
+        /// <summary>生成設定の準備を待っており、探索Jobをまだ開始していません。</summary>
+        WaitingForSettings = 0,
+
+        /// <summary>Worker Threadで初期スポーン候補を探索しています。</summary>
+        Searching = 1,
+
+        /// <summary>候補を発見し、InitialSpawnLocation Singletonを記録済みです。</summary>
+        Succeeded = 2,
+
+        /// <summary>探索上限内に候補がなく、Scene保存位置を代替の表示開始位置として使います。</summary>
+        Failed = 3
+    }
+
+    /// <summary>
+    /// 初期スポーン探索の進行状況をワールド全体で1件だけ保持します。
+    /// InitialSpawnLocationSystemが更新し、初期カメラとストリーミング開始条件が同じ結果を参照します。
+    /// </summary>
+    public struct InitialSpawnSearchStatus : IComponentData
+    {
+        /// <summary>現在の探索段階です。System作成からWorld破棄まで保持し、探索完了後も結果を残します。</summary>
+        public InitialSpawnSearchPhase Phase;
     }
 
     /// <summary>

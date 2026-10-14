@@ -7,7 +7,7 @@ namespace Farmware.WorldGeneration
 {
     /// <summary>
     /// 生成用途ごとに固定した64bitソルトを定義します。
-    /// 新しい用途は既存値を変更せず新規追加し、過去バージョンの生成結果を維持します。
+    /// 正式なセーブ互換運用後は既存値を変更せず、新しい用途へ一意な値を追加して過去バージョンの生成結果を維持します。
     /// </summary>
     public static class WorldGenerationPurposeSalts
     {
@@ -75,7 +75,7 @@ namespace Farmware.WorldGeneration
         public const ulong StoneResource = 0xA5A3564E27F8862BUL;
 
         /// <summary>砂資源の群生ノイズ専用のソルトです。</summary>
-        public const ulong SandResource = 0xC2B2AE3D27D4EB4FUL;
+        public const ulong SandResource = 0x9FB21C651E98DF25UL;
 
         /// <summary>資源スプライトの見た目差分専用のソルトです。</summary>
         public const ulong ResourceVisualVariant = 0x165667B19E3779F9UL;

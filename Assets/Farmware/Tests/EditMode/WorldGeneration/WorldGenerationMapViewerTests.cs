@@ -5,6 +5,7 @@ using System.Threading;
 using Farmware.WorldGeneration.Authoring;
 using Farmware.WorldGeneration.Editor;
 using NUnit.Framework;
+using UnityEditor;
 using UnityEngine;
 
 namespace Farmware.WorldGeneration.Tests
@@ -158,6 +159,82 @@ namespace Farmware.WorldGeneration.Tests
                     snapshot.WorldSeed,
                     Is.EqualTo(WorldSeedUtility.FromString("viewer-seed-override")));
                 Assert.That(snapshot.GeneratorVersion, Is.EqualTo(1));
+            }
+            finally
+            {
+                Object.DestroyImmediate(authoringObject);
+            }
+        }
+
+        /// <summary>
+        /// 新規Authoringの既定値と純粋計算・分布監査が使うCreateDefaultを準備し、主要な気候閾値が一致することを保証します。
+        /// Inspectorの丸めた小数値だけが別の固定小数点へ変換され、実ゲームと監査結果がずれる退行を防ぎます。
+        /// </summary>
+        [Test]
+        public void AuthoringSnapshot_DefaultClimateThresholdsMatchSharedDefaults()
+        {
+            GameObject authoringObject = new GameObject("WorldGenerationAuthoring Defaults Test");
+            try
+            {
+                WorldGenerationAuthoring authoring =
+                    authoringObject.AddComponent<WorldGenerationAuthoring>();
+                WorldGenerationSettings snapshot =
+                    authoring.CreateWorldGenerationSettingsSnapshot();
+                WorldGenerationSettings expected = WorldGenerationSettings.CreateDefault(
+                    WorldSeedUtility.FromString(authoring.SeedText),
+                    1);
+
+                Assert.That(snapshot.SeaLevelThreshold, Is.EqualTo(expected.SeaLevelThreshold));
+                Assert.That(
+                    snapshot.HotTemperatureThreshold,
+                    Is.EqualTo(expected.HotTemperatureThreshold));
+                Assert.That(
+                    snapshot.DryMoistureThreshold,
+                    Is.EqualTo(expected.DryMoistureThreshold));
+                Assert.That(
+                    snapshot.WetMoistureThreshold,
+                    Is.EqualTo(expected.WetMoistureThreshold));
+            }
+            finally
+            {
+                Object.DestroyImmediate(authoringObject);
+            }
+        }
+
+        /// <summary>
+        /// 既存Sceneに保存されている旧丸め小数を準備し、Snapshot変換時だけ現在の共通既定値へ移行されることを保証します。
+        /// Sceneファイルを外部から書き換えず、開いているUnity Editorの未保存状態と競合しない移行経路を検証します。
+        /// </summary>
+        [Test]
+        public void AuthoringSnapshot_LegacyRoundedClimateDefaultsUseSharedDefaults()
+        {
+            GameObject authoringObject = new GameObject("WorldGenerationAuthoring Legacy Defaults Test");
+            try
+            {
+                WorldGenerationAuthoring authoring =
+                    authoringObject.AddComponent<WorldGenerationAuthoring>();
+                SerializedObject serializedAuthoring = new SerializedObject(authoring);
+                serializedAuthoring.FindProperty("waterThreshold").floatValue = 0.305f;
+                serializedAuthoring.FindProperty("hotTemperatureThreshold").floatValue = 0.61f;
+                serializedAuthoring.FindProperty("dryMoistureThreshold").floatValue = 0.435f;
+                serializedAuthoring.FindProperty("wetMoistureThreshold").floatValue = 0.603f;
+                serializedAuthoring.ApplyModifiedPropertiesWithoutUndo();
+
+                WorldGenerationSettings snapshot =
+                    authoring.CreateWorldGenerationSettingsSnapshot();
+
+                Assert.That(
+                    snapshot.SeaLevelThreshold,
+                    Is.EqualTo(WorldGenerationSettings.DefaultSeaLevelThreshold));
+                Assert.That(
+                    snapshot.HotTemperatureThreshold,
+                    Is.EqualTo(WorldGenerationSettings.DefaultHotTemperatureThreshold));
+                Assert.That(
+                    snapshot.DryMoistureThreshold,
+                    Is.EqualTo(WorldGenerationSettings.DefaultDryMoistureThreshold));
+                Assert.That(
+                    snapshot.WetMoistureThreshold,
+                    Is.EqualTo(WorldGenerationSettings.DefaultWetMoistureThreshold));
             }
             finally
             {

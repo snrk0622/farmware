@@ -21,7 +21,7 @@ namespace Farmware.WorldGeneration.Presentation
         [Tooltip("Tilemapを所有するGridです。指定するとセルサイズとGrid原点を考慮して可視タイルを求めます。未指定時は1 Unity unitを1タイルとして扱います。")]
         [SerializeField] private GridLayout targetGrid;
 
-        // 初期スポーン位置を反映する前に原点周辺チャンクを要求しないよう、同じCamera上の初期化状態を参照します。
+        // 初期スポーン探索が成功または失敗する前に不要なチャンクを要求しないよう、同じCamera上の初期化状態を参照します。
         private InitialCameraPositionController initialPositionController;
 
         // このComponentが作成し、OnDisableで破棄するObserver Entityです。セーブ対象にはしません。
@@ -59,8 +59,9 @@ namespace Farmware.WorldGeneration.Presentation
         private void Update()
         {
             // 初期位置探索中はObserverを作らず、後で不要になる原点チャンクの生成・表示を防ぎます。
+            // 探索失敗も完了に含めるため、その場合はScene保存位置から通常どおり読み込みを始めます。
             if (initialPositionController != null
-                && !initialPositionController.HasAppliedInitialPosition)
+                && !initialPositionController.HasCompletedInitialPositioning)
             {
                 return;
             }

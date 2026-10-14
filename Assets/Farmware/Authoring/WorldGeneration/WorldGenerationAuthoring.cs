@@ -12,6 +12,18 @@ namespace Farmware.WorldGeneration.Authoring
     /// </summary>
     public sealed class WorldGenerationAuthoring : MonoBehaviour
     {
+        /// <summary>旧Authoringの小数0.305が変換されていた海面閾値です。既存Sceneの既定値移行だけに使用します。</summary>
+        private const ushort LegacySeaLevelThreshold = 19988;
+
+        /// <summary>旧Authoringの小数0.61が変換されていた高温閾値です。既存Sceneの既定値移行だけに使用します。</summary>
+        private const ushort LegacyHotTemperatureThreshold = 39976;
+
+        /// <summary>旧Authoringの小数0.435が変換されていた乾燥閾値です。既存Sceneの既定値移行だけに使用します。</summary>
+        private const ushort LegacyDryMoistureThreshold = 28508;
+
+        /// <summary>旧Authoringの小数0.603が変換されていた湿潤閾値です。既存Sceneの既定値移行だけに使用します。</summary>
+        private const ushort LegacyWetMoistureThreshold = 39518;
+
         // 開発者がInspectorで入力し、Bake時に安定64bit値へ変換されるシード文字列です。
         [Tooltip("開発用ワールドのシード文字列です。数字以外や日本語も使用できます。同じ文字列とGeneratorVersionなら同じ地形になります。")]
         [SerializeField] private string seedText = "Farmware";
@@ -69,7 +81,8 @@ namespace Farmware.WorldGeneration.Authoring
         // 0〜1の標高に対する海面境界です。既存Sceneとの互換のためフィールド名はwaterThresholdを維持します。
         [Tooltip("これ未満の標高を海水域にする海面閾値です。0〜1で指定し、大きくすると海が増えます。変更すると生成結果が変わります。")]
         [Range(0f, 1f)]
-        [SerializeField] private float waterThreshold = 0.305f;
+        [SerializeField] private float waterThreshold =
+            WorldGenerationSettings.DefaultSeaLevelThreshold / (float)ushort.MaxValue;
 
         // 川の大きな蛇行を決める低周波格子で、チャンク境界より大きくして短い断片を減らします。
         [Tooltip("川の蛇行を作るノイズ格子サイズです。単位はタイルです。大きくすると川が緩やかに曲がり、変更すると生成結果が変わります。")]
@@ -229,7 +242,8 @@ namespace Farmware.WorldGeneration.Authoring
         // 砂漠判定に使う0〜1の気温境界で、Bake時に固定小数点の閾値へ変換します。
         [Tooltip("これ以上を高温とみなす気温閾値です。0〜1で指定し、小さくすると砂漠候補が増えます。変更すると生成結果が変わります。")]
         [Range(0f, 1f)]
-        [SerializeField] private float hotTemperatureThreshold = 0.61f;
+        [SerializeField] private float hotTemperatureThreshold =
+            WorldGenerationSettings.DefaultHotTemperatureThreshold / (float)ushort.MaxValue;
 
         // 雪原判定に使う0〜1の低温境界で、高温境界より必ず低く保ちます。
         [Tooltip("これ未満を低温とみなす気温閾値です。0〜1で指定し、大きくすると雪原候補が増えます。高温閾値より小さくしてください。")]
@@ -239,12 +253,14 @@ namespace Farmware.WorldGeneration.Authoring
         // 砂漠判定に使う0〜1の乾燥境界で、湿潤境界より必ず低く保ちます。
         [Tooltip("これ未満を乾燥とみなす湿度閾値です。0〜1で指定し、大きくすると砂漠候補が増えます。森林閾値より小さくしてください。")]
         [Range(0f, 1f)]
-        [SerializeField] private float dryMoistureThreshold = 0.435f;
+        [SerializeField] private float dryMoistureThreshold =
+            WorldGenerationSettings.DefaultDryMoistureThreshold / (float)ushort.MaxValue;
 
         // 森林判定に使う0〜1の湿潤境界で、Bake時に固定小数点の閾値へ変換します。
         [Tooltip("これ以上を森林候補とみなす湿度閾値です。0〜1で指定し、小さくすると森林が増えます。変更すると生成結果が変わります。")]
         [Range(0f, 1f)]
-        [SerializeField] private float wetMoistureThreshold = 0.603f;
+        [SerializeField] private float wetMoistureThreshold =
+            WorldGenerationSettings.DefaultWetMoistureThreshold / (float)ushort.MaxValue;
 
         // 湿地判定に使う0〜1の非常に湿潤な境界で、森林閾値より必ず高く保ちます。
         [Tooltip("これ以上を湿地候補とみなす湿度閾値です。0〜1で指定し、小さくすると湿地が増えます。森林閾値より大きくしてください。")]
@@ -378,7 +394,10 @@ namespace Farmware.WorldGeneration.Authoring
                 BiomeClassificationTransitionWidthInTiles =
                     biomeClassificationTransitionWidthInTiles,
                 BiomeTransitionWidthInTiles = biomeTransitionWidthInTiles,
-                SeaLevelThreshold = ToNormalizedUShort(waterThreshold),
+                SeaLevelThreshold = ToCanonicalDefaultThreshold(
+                    waterThreshold,
+                    LegacySeaLevelThreshold,
+                    WorldGenerationSettings.DefaultSeaLevelThreshold),
                 RiverCellSizeInTiles = riverCellSizeInTiles,
                 PondCellSizeInTiles = pondCellSizeInTiles,
                 FreshWaterOctaveCount = freshWaterOctaveCount,
@@ -424,10 +443,19 @@ namespace Farmware.WorldGeneration.Authoring
                 RockWallWarpAmplitudeInTiles = rockWallWarpAmplitudeInTiles,
                 RockWallNoiseThreshold = ToNormalizedUShort(rockWallNoiseThreshold),
                 RockWallCorridorHalfWidth = ToNormalizedUShort(rockWallCorridorHalfWidth),
-                HotTemperatureThreshold = ToNormalizedUShort(hotTemperatureThreshold),
+                HotTemperatureThreshold = ToCanonicalDefaultThreshold(
+                    hotTemperatureThreshold,
+                    LegacyHotTemperatureThreshold,
+                    WorldGenerationSettings.DefaultHotTemperatureThreshold),
                 ColdTemperatureThreshold = ToNormalizedUShort(coldTemperatureThreshold),
-                DryMoistureThreshold = ToNormalizedUShort(dryMoistureThreshold),
-                WetMoistureThreshold = ToNormalizedUShort(wetMoistureThreshold),
+                DryMoistureThreshold = ToCanonicalDefaultThreshold(
+                    dryMoistureThreshold,
+                    LegacyDryMoistureThreshold,
+                    WorldGenerationSettings.DefaultDryMoistureThreshold),
+                WetMoistureThreshold = ToCanonicalDefaultThreshold(
+                    wetMoistureThreshold,
+                    LegacyWetMoistureThreshold,
+                    WorldGenerationSettings.DefaultWetMoistureThreshold),
                 WetlandMoistureThreshold = ToNormalizedUShort(wetlandMoistureThreshold),
                 WetlandMaximumElevation = ToNormalizedUShort(wetlandMaximumElevation),
                 HighlandElevationThreshold = ToNormalizedUShort(highlandElevationThreshold),
@@ -511,6 +539,23 @@ namespace Farmware.WorldGeneration.Authoring
         private static ushort ToNormalizedUShort(float normalizedValue)
         {
             return (ushort)Mathf.RoundToInt(Mathf.Clamp01(normalizedValue) * ushort.MaxValue);
+        }
+
+        /// <summary>
+        /// 既存Sceneへ保存済みの丸めた旧既定値だけを、純粋計算と共有する正確な固定小数点既定値へ移行します。
+        /// それ以外のInspector調整値は変更せず、開発者が意図したカスタム設定を保ちます。
+        /// </summary>
+        /// <param name="normalizedValue">InspectorまたはSceneへ保存された0〜1の値です。</param>
+        /// <param name="legacyDefault">旧小数値を0〜65535へ変換した値です。</param>
+        /// <param name="canonicalDefault">現在のCreateDefaultと共有する正確な既定値です。</param>
+        /// <returns>旧既定値なら現在の既定値、それ以外なら入力を通常変換した値です。</returns>
+        private static ushort ToCanonicalDefaultThreshold(
+            float normalizedValue,
+            ushort legacyDefault,
+            ushort canonicalDefault)
+        {
+            ushort convertedValue = ToNormalizedUShort(normalizedValue);
+            return convertedValue == legacyDefault ? canonicalDefault : convertedValue;
         }
 
         /// <summary>

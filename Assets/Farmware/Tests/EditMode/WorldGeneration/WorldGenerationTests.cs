@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using NUnit.Framework;
 using Unity.Entities;
 
@@ -49,6 +50,32 @@ namespace Farmware.WorldGeneration.Tests
             ulong actual = WorldSeedUtility.FromString("Farmware");
 
             Assert.That(actual, Is.EqualTo(0x3EE49B3100677454UL));
+        }
+
+        /// <summary>
+        /// 用途別Saltの全public定数を準備し、異なる生成用途が同じ乱数系列を共有していないことを保証します。
+        /// Reflectionで定数を列挙することで、将来Saltが追加されたときもテスト一覧へ手作業で追記せず重複を検出します。
+        /// </summary>
+        [Test]
+        public void PurposeSalts_AllPublicConstantsAreUnique()
+        {
+            FieldInfo[] saltFields = typeof(WorldGenerationPurposeSalts).GetFields(
+                BindingFlags.Public | BindingFlags.Static);
+            HashSet<ulong> usedSalts = new HashSet<ulong>();
+
+            // 同じ値が2用途へ割り当てられるとノイズ形状が意図せず相関するため、名前ではなく実際の64bit値を比較します。
+            foreach (FieldInfo saltField in saltFields)
+            {
+                object constantValue = saltField.GetRawConstantValue();
+                Assert.That(
+                    constantValue,
+                    Is.TypeOf<ulong>(),
+                    $"{saltField.Name}は64bit符号なし整数の定数で定義してください。");
+                Assert.That(
+                    usedSalts.Add((ulong)constantValue),
+                    Is.True,
+                    $"{saltField.Name}のPurposeSaltが別用途と重複しています。");
+            }
         }
 
         /// <summary>
@@ -1293,7 +1320,14 @@ namespace Farmware.WorldGeneration.Tests
 
             using EntityQuery locationQuery = entityManager.CreateEntityQuery(
                 ComponentType.ReadOnly<InitialSpawnLocation>());
+            using EntityQuery searchStatusQuery = entityManager.CreateEntityQuery(
+                ComponentType.ReadOnly<InitialSpawnSearchStatus>());
             Assert.That(locationQuery.CalculateEntityCount(), Is.EqualTo(1));
+            Assert.That(searchStatusQuery.CalculateEntityCount(), Is.EqualTo(1));
+            Assert.That(
+                searchStatusQuery.GetSingleton<InitialSpawnSearchStatus>().Phase,
+                Is.EqualTo(InitialSpawnSearchPhase.Succeeded),
+                "初期スポーンの記録後は、Presentationが待機を終えられる成功状態が必要です。");
             InitialSpawnLocation location = locationQuery.GetSingleton<InitialSpawnLocation>();
             GeneratedTile spawnTile = DeterministicChunkGenerator.GenerateTile(
                 generationSettings,

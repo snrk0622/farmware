@@ -2,6 +2,7 @@
 // F3/F4と開発者用表示を含め、純粋計算では確認できないGameObject・SubScene・Presentation間の参照切れを検出します。
 
 using System.Collections;
+using System.Reflection;
 using Farmware.WorldGeneration.Presentation;
 using NUnit.Framework;
 using Unity.Collections;
@@ -103,6 +104,77 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(chunkBounds, Is.EqualTo(new RectInt(-128, 64, 64, 64)));
             Assert.That(spawnLabel, Is.EqualTo("Spawn Chunk (-2, 1)"));
             Assert.That(normalLabel, Is.EqualTo("Chunk (-1, 1)"));
+        }
+
+        /// <summary>
+        /// 初期スポーン探索失敗を持つ一時Worldとカメラを準備し、Scene保存位置を維持したままストリーミングObserverを作れることを保証します。
+        /// </summary>
+        [Test]
+        public void InitialSpawnFailure_KeepsSceneCameraPositionAndStartsStreaming()
+        {
+            World previousWorld = World.DefaultGameObjectInjectionWorld;
+            World testWorld = new World("InitialSpawnFailurePresentationTests");
+            GameObject cameraObject = null;
+
+            try
+            {
+                World.DefaultGameObjectInjectionWorld = testWorld;
+                Entity searchStatusEntity = testWorld.EntityManager.CreateEntity();
+                testWorld.EntityManager.AddComponentData(
+                    searchStatusEntity,
+                    new InitialSpawnSearchStatus
+                    {
+                        Phase = InitialSpawnSearchPhase.Failed
+                    });
+
+                cameraObject = new GameObject("Initial Spawn Failure Camera");
+                cameraObject.SetActive(false);
+                Vector3 savedScenePosition = new Vector3(123.5f, -45.25f, -10f);
+                cameraObject.transform.position = savedScenePosition;
+                Camera camera = cameraObject.AddComponent<Camera>();
+                camera.orthographic = true;
+                cameraObject.AddComponent<CameraPanController>();
+                InitialCameraPositionController positionController =
+                    cameraObject.AddComponent<InitialCameraPositionController>();
+                CameraChunkStreamingBridge streamingBridge =
+                    cameraObject.AddComponent<CameraChunkStreamingBridge>();
+                cameraObject.SetActive(true);
+
+                // UnityがprivateなUpdateを呼ぶ通常フレームを待つと既存Sceneまで一時Worldへ接続されるため、
+                // Reflectionで対象2Componentだけを通常の実行順どおり同期実行し、テストを一時World内へ隔離します。
+                MethodInfo positionUpdate = typeof(InitialCameraPositionController).GetMethod(
+                    "Update",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                MethodInfo streamingUpdate = typeof(CameraChunkStreamingBridge).GetMethod(
+                    "Update",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.That(positionUpdate, Is.Not.Null);
+                Assert.That(streamingUpdate, Is.Not.Null);
+                positionUpdate.Invoke(positionController, null);
+                streamingUpdate.Invoke(streamingBridge, null);
+
+                Assert.That(positionController.HasCompletedInitialPositioning, Is.True);
+                Assert.That(positionController.HasAppliedInitialPosition, Is.False);
+                Assert.That(cameraObject.transform.position, Is.EqualTo(savedScenePosition));
+
+                using EntityQuery observerQuery = testWorld.EntityManager.CreateEntityQuery(
+                    ComponentType.ReadOnly<ChunkStreamingObserver>());
+                Assert.That(
+                    observerQuery.CalculateEntityCount(),
+                    Is.EqualTo(1),
+                    "探索失敗後もScene保存位置を基準にチャンク読み込みを開始する必要があります。");
+            }
+            finally
+            {
+                if (cameraObject != null)
+                {
+                    cameraObject.SetActive(false);
+                    Object.DestroyImmediate(cameraObject);
+                }
+
+                World.DefaultGameObjectInjectionWorld = previousWorld;
+                testWorld.Dispose();
+            }
         }
 
         /// <summary>
@@ -737,6 +809,18 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 runtimeGenerationSettings.GeneratorVersion,
                 Is.EqualTo(1),
                 "初期開発中のGeneratorVersionは1へ固定してください。");
+            Assert.That(
+                runtimeGenerationSettings.SeaLevelThreshold,
+                Is.EqualTo(WorldGenerationSettings.DefaultSeaLevelThreshold));
+            Assert.That(
+                runtimeGenerationSettings.HotTemperatureThreshold,
+                Is.EqualTo(WorldGenerationSettings.DefaultHotTemperatureThreshold));
+            Assert.That(
+                runtimeGenerationSettings.DryMoistureThreshold,
+                Is.EqualTo(WorldGenerationSettings.DefaultDryMoistureThreshold));
+            Assert.That(
+                runtimeGenerationSettings.WetMoistureThreshold,
+                Is.EqualTo(WorldGenerationSettings.DefaultWetMoistureThreshold));
 
             // 生成済みタイルを使う移行帯表示を1フレーム描画し、ECS Buffer読取、Windowboxクリップ、情報HUDまで例外なく通します。
             developerVisualization.SetMode(WorldGenerationDebugVisualizationMode.BiomeTransition);

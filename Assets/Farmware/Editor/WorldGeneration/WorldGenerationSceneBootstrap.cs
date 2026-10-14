@@ -74,6 +74,22 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>隣接バイオームの地面を段階的に混ぜる試作幅です。単位はタイルです。</summary>
         private const int PrototypeBiomeTransitionWidthInTiles = 6;
 
+        /// <summary>海面の固定小数点既定値をInspector表現へ戻した値です。</summary>
+        private const float PrototypeSeaLevelThreshold =
+            WorldGenerationSettings.DefaultSeaLevelThreshold / (float)ushort.MaxValue;
+
+        /// <summary>高温域の固定小数点既定値をInspector表現へ戻した値です。</summary>
+        private const float PrototypeHotTemperatureThreshold =
+            WorldGenerationSettings.DefaultHotTemperatureThreshold / (float)ushort.MaxValue;
+
+        /// <summary>乾燥域の固定小数点既定値をInspector表現へ戻した値です。</summary>
+        private const float PrototypeDryMoistureThreshold =
+            WorldGenerationSettings.DefaultDryMoistureThreshold / (float)ushort.MaxValue;
+
+        /// <summary>湿潤域の固定小数点既定値をInspector表現へ戻した値です。</summary>
+        private const float PrototypeWetMoistureThreshold =
+            WorldGenerationSettings.DefaultWetMoistureThreshold / (float)ushort.MaxValue;
+
         /// <summary>低温とみなす固定小数点閾値をInspector表現へ戻した値です。</summary>
         private const float PrototypeColdTemperatureThreshold = 23000f / ushort.MaxValue;
 
@@ -1071,6 +1087,14 @@ namespace Farmware.WorldGeneration.Editor
                 PrototypeBiomeClassificationTransitionWidthInTiles;
             serializedAuthoring.FindProperty("biomeTransitionWidthInTiles").intValue =
                 PrototypeBiomeTransitionWidthInTiles;
+            serializedAuthoring.FindProperty("waterThreshold").floatValue =
+                PrototypeSeaLevelThreshold;
+            serializedAuthoring.FindProperty("hotTemperatureThreshold").floatValue =
+                PrototypeHotTemperatureThreshold;
+            serializedAuthoring.FindProperty("dryMoistureThreshold").floatValue =
+                PrototypeDryMoistureThreshold;
+            serializedAuthoring.FindProperty("wetMoistureThreshold").floatValue =
+                PrototypeWetMoistureThreshold;
             serializedAuthoring.FindProperty("coldTemperatureThreshold").floatValue =
                 PrototypeColdTemperatureThreshold;
             serializedAuthoring.FindProperty("wetlandMoistureThreshold").floatValue =

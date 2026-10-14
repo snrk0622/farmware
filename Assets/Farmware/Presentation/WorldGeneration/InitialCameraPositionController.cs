@@ -1,5 +1,5 @@
-// このファイルは、Simulationが決定した初期スポーンタイルを読み、Play開始時のカメラ位置へ一度だけ反映します。
-// 初期地点の決定と記録はECSを正とし、このMonoBehaviourはCamera Transformへ表示結果を渡すPresentation境界だけを担当します。
+// このファイルは、Simulationが決定した初期スポーン探索結果を読み、Play開始時のカメラ位置を一度だけ確定します。
+// 成功時はスポーンへ移動し、失敗時はScene保存位置を採用します。探索結果はECSを正とし、Camera Transformへ渡すPresentation境界だけを担当します。
 
 using Unity.Entities;
 using UnityEngine;
@@ -7,7 +7,7 @@ using UnityEngine;
 namespace Farmware.WorldGeneration.Presentation
 {
     /// <summary>
-    /// InitialSpawnLocation Singletonの準備完了を待ち、対象タイル中央へCameraPanControllerを移動します。
+    /// InitialSpawnLocationまたは探索失敗状態を待ち、成功時だけ対象タイル中央へCameraPanControllerを移動します。
     /// CameraChunkStreamingBridgeより先に実行し、不要な原点チャンクを初回要求しないようにします。
     /// </summary>
     [DefaultExecutionOrder(-200)]
@@ -29,17 +29,32 @@ namespace Farmware.WorldGeneration.Presentation
         // 初期スポーンSingletonだけを読むQueryです。毎フレームQueryを作り直さないため再利用します。
         private EntityQuery spawnLocationQuery;
 
+        // 初期スポーン探索の成功・失敗を読むQueryです。失敗時もカメラ初期化の待機を終えるために使用します。
+        private EntityQuery searchStatusQuery;
+
         // spawnLocationQueryを現在のWorld向けに作成済みかを示します。
         private bool queryIsCreated;
 
         // このPlay開始中に初期カメラ位置を適用済みかを示し、プレイヤー移動を後から上書きしないようにします。
         private bool hasAppliedInitialPosition;
 
+        // 成功時の移動または失敗時のScene位置採用が確定したことを示し、ストリーミング待機を解除します。
+        private bool hasCompletedInitialPositioning;
+
         // Singleton重複を検出したとき、同じ警告を毎フレーム出さないためのフラグです。
         private bool reportedDuplicateLocation;
 
+        // 探索状態Singletonの重複を検出したとき、同じ警告を毎フレーム出さないためのフラグです。
+        private bool reportedDuplicateSearchStatus;
+
         /// <summary>このPlay開始中に、記録済み初期スポーン地点をカメラへ適用済みの場合はtrueです。</summary>
         public bool HasAppliedInitialPosition => hasAppliedInitialPosition;
+
+        /// <summary>
+        /// 初期スポーン地点の適用、または探索失敗時のScene保存位置採用が確定した場合はtrueです。
+        /// CameraChunkStreamingBridgeはこの値がtrueになってから最初のチャンク要求を作成します。
+        /// </summary>
+        public bool HasCompletedInitialPositioning => hasCompletedInitialPositioning;
 
         /// <summary>
         /// Editor構築ツールまたはテストから、移動Controllerと地形Gridをまとめて設定します。
@@ -69,15 +84,17 @@ namespace Farmware.WorldGeneration.Presentation
         private void OnEnable()
         {
             hasAppliedInitialPosition = false;
+            hasCompletedInitialPositioning = false;
             reportedDuplicateLocation = false;
+            reportedDuplicateSearchStatus = false;
         }
 
         /// <summary>
-        /// MonoBehaviourの各描画フレームで呼ばれ、探索完了後の最初の1回だけカメラをスポーンタイル中央へ移動します。
+        /// MonoBehaviourの各描画フレームで呼ばれ、探索成功時はカメラを移動し、失敗時はScene保存位置の採用を確定します。
         /// </summary>
         private void Update()
         {
-            if (hasAppliedInitialPosition
+            if (hasCompletedInitialPositioning
                 || cameraPanController == null
                 || !TryEnsureQuery())
             {
@@ -87,6 +104,29 @@ namespace Farmware.WorldGeneration.Presentation
             int locationCount = spawnLocationQuery.CalculateEntityCount();
             if (locationCount == 0)
             {
+                int searchStatusCount = searchStatusQuery.CalculateEntityCount();
+                if (searchStatusCount == 1)
+                {
+                    InitialSpawnSearchStatus searchStatus =
+                        searchStatusQuery.GetSingleton<InitialSpawnSearchStatus>();
+
+                    // 探索失敗時は移動先が存在しないため、Sceneへ保存されたカメラ座標を正式な代替位置として採用します。
+                    if (searchStatus.Phase == InitialSpawnSearchPhase.Failed)
+                    {
+                        hasCompletedInitialPositioning = true;
+                    }
+
+                    return;
+                }
+
+                if (searchStatusCount > 1 && !reportedDuplicateSearchStatus)
+                {
+                    Debug.LogError(
+                        $"InitialSpawnSearchStatusが{searchStatusCount}件あります。探索状態は1件だけにしてください。",
+                        this);
+                    reportedDuplicateSearchStatus = true;
+                }
+
                 return;
             }
 
@@ -131,12 +171,13 @@ namespace Farmware.WorldGeneration.Presentation
             cameraPanController.SetWorldPosition(
                 new Vector2(spawnWorldPosition.x, spawnWorldPosition.y));
             hasAppliedInitialPosition = true;
+            hasCompletedInitialPositioning = true;
         }
 
         /// <summary>
-        /// Default Worldの作成待ちと再作成を扱い、現在World用のInitialSpawnLocation Queryを用意します。
+        /// Default Worldの作成待ちと再作成を扱い、現在World用の初期位置と探索状態のQueryを用意します。
         /// </summary>
-        /// <returns>現在のWorldから初期スポーン地点を読み取れるQueryがある場合はtrueです。</returns>
+        /// <returns>現在のWorldから初期スポーン地点と探索状態を読み取れるQueryがある場合はtrueです。</returns>
         private bool TryEnsureQuery()
         {
             World currentWorld = World.DefaultGameObjectInjectionWorld;
@@ -154,9 +195,13 @@ namespace Farmware.WorldGeneration.Presentation
             spawnLocationWorld = currentWorld;
             spawnLocationQuery = currentWorld.EntityManager.CreateEntityQuery(
                 ComponentType.ReadOnly<InitialSpawnLocation>());
+            searchStatusQuery = currentWorld.EntityManager.CreateEntityQuery(
+                ComponentType.ReadOnly<InitialSpawnSearchStatus>());
             queryIsCreated = true;
             hasAppliedInitialPosition = false;
+            hasCompletedInitialPositioning = false;
             reportedDuplicateLocation = false;
+            reportedDuplicateSearchStatus = false;
             return true;
         }
 
@@ -179,10 +224,12 @@ namespace Farmware.WorldGeneration.Presentation
                 && spawnLocationWorld.IsCreated)
             {
                 spawnLocationQuery.Dispose();
+                searchStatusQuery.Dispose();
             }
 
             spawnLocationWorld = null;
             spawnLocationQuery = default;
+            searchStatusQuery = default;
             queryIsCreated = false;
         }
     }

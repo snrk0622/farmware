@@ -24,7 +24,7 @@ namespace Farmware.WorldGeneration
 
     /// <summary>
     /// ワールド設定の準備後に、木・石・水が近い12×8建設可能領域を非同期で探します。
-    /// 成功時にInitialSpawnLocation Singletonを1つだけ作成し、以後はSystem自身を停止します。
+    /// 探索結果をInitialSpawnSearchStatusへ記録し、成功時はInitialSpawnLocation Singletonも1つだけ作成します。
     /// </summary>
     [UpdateInGroup(typeof(InitializationSystemGroup))]
     public partial struct InitialSpawnLocationSystem : ISystem
@@ -38,12 +38,22 @@ namespace Farmware.WorldGeneration
         // Jobが書き、Systemが完了後に読む1件分の結果です。SystemがPersistent確保と破棄の責任を持ちます。
         private NativeReference<InitialSpawnSearchResult> searchResult;
 
+        // 探索中・成功・失敗をPresentationへ伝えるSingleton Entityです。Systemが作成し、Worldが破棄まで所有します。
+        private Entity searchStatusEntity;
+
         /// <summary>
-        /// System作成時に呼ばれ、地形設定と資源設定がそろうまで探索開始を待機します。
+        /// System作成時に呼ばれ、待機状態Singletonを作成してから地形設定と資源設定がそろうまで探索開始を待機します。
         /// </summary>
         /// <param name="state">Systemの更新条件、依存関係、EntityManagerへアクセスする状態です。</param>
         public void OnCreate(ref SystemState state)
         {
+            searchStatusEntity = state.EntityManager.CreateEntity();
+            state.EntityManager.AddComponentData(
+                searchStatusEntity,
+                new InitialSpawnSearchStatus
+                {
+                    Phase = InitialSpawnSearchPhase.WaitingForSettings
+                });
             state.RequireForUpdate<WorldGenerationSettings>();
             state.RequireForUpdate<ResourceGenerationSettings>();
             searchState = 0;
@@ -52,7 +62,7 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>
-        /// 初回更新で探索Jobを開始し、後続フレームで完了したときだけ初期スポーンSingletonを作成します。
+        /// 初回更新で探索Jobを開始し、後続フレームで成功時の初期スポーンまたは失敗状態を記録します。
         /// 完了前にメインスレッドで待機しないため、広い探索範囲でもGameビューとEditor操作を止めません。
         /// </summary>
         /// <param name="state">Job依存関係と、結果Entityを作成するEntityManagerを保持する状態です。</param>
@@ -63,6 +73,7 @@ namespace Farmware.WorldGeneration
             {
                 DisposeSearchResultIfCreated();
                 searchState = 2;
+                SetSearchPhase(ref state, InitialSpawnSearchPhase.Succeeded);
                 state.Enabled = false;
                 return;
             }
@@ -81,6 +92,7 @@ namespace Farmware.WorldGeneration
                 searchHandle = searchJob.Schedule(state.Dependency);
                 state.Dependency = searchHandle;
                 searchState = 1;
+                SetSearchPhase(ref state, InitialSpawnSearchPhase.Searching);
                 return;
             }
 
@@ -97,8 +109,9 @@ namespace Farmware.WorldGeneration
 
             if (completedResult.Found == 0)
             {
+                SetSearchPhase(ref state, InitialSpawnSearchPhase.Failed);
                 Debug.LogError(
-                    "初期スポーン地点を探索範囲内で発見できませんでした。カメラはScene保存位置に留まります。");
+                    "初期スポーン地点を探索範囲内で発見できませんでした。カメラはScene保存位置に留まり、その位置からチャンク読み込みを開始します。");
                 state.Enabled = false;
                 return;
             }
@@ -107,6 +120,7 @@ namespace Farmware.WorldGeneration
             state.EntityManager.AddComponentData(
                 locationEntity,
                 InitialSpawnLocation.FromRegion(completedResult.Region));
+            SetSearchPhase(ref state, InitialSpawnSearchPhase.Succeeded);
             state.Enabled = false;
         }
 
@@ -135,6 +149,18 @@ namespace Farmware.WorldGeneration
             }
 
             searchResult = default;
+        }
+
+        /// <summary>
+        /// Systemが所有する状態Singletonを更新し、Presentationへ探索の開始または終了を通知します。
+        /// </summary>
+        /// <param name="state">状態Entityへ書き込むためのEntityManagerを保持するSystem状態です。</param>
+        /// <param name="phase">新しく記録する探索段階です。</param>
+        private void SetSearchPhase(ref SystemState state, InitialSpawnSearchPhase phase)
+        {
+            state.EntityManager.SetComponentData(
+                searchStatusEntity,
+                new InitialSpawnSearchStatus { Phase = phase });
         }
 
         /// <summary>
