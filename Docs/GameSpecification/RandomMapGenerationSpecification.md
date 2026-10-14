@@ -4,6 +4,7 @@
 - 最終更新日: 2026-10-14
 - 状態: 初期実装仕様。設備・ベルト・施設との接続条件は実装前レビューを前提とする仮仕様
 - 関連仕様: [2026-10-11_casual_factory_concept_v0.1.md](./2026-10-11_casual_factory_concept_v0.1.md)
+- 関連開発資料: [シミュレーション技術仕様](../Development/SimulationArchitectureSpecification.md)
 - 関連開発資料: [Unity Editorツール](../Development/EditorTools.md)
 - 関連開発資料: [テスト](../Development/Testing.md)
 
@@ -577,6 +578,7 @@ Unrequested
 - サポートを終了する旧生成器がある場合は、そのバージョンで生成済みのチャンク基礎データを事前にセーブへ焼き込む。
 - 生成器更新で再現性が失われる場合に備え、重要な生成物は明示保存できる構造にする。
 - セーブ中に生成処理が完了していないチャンクは、安全にキャンセルまたは完了待ちできる。
+- `SaveFormatVersion`は初期開発中にインクリメントせず、古い開発用セーブの移行を保証しない。製品版または互換性保証開始後の更新・移行方針は[シミュレーション技術仕様](../Development/SimulationArchitectureSpecification.md)を正とする。
 
 ## 14. データ定義
 

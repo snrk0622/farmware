@@ -1,6 +1,6 @@
 # Farmware ドキュメント案内
 
-- 最終更新日: 2026-10-12
+- 最終更新日: 2026-10-14
 - 目的: 仕様、制作資料、開発手順の参照先を一か所にまとめる。
 
 ## ゲーム仕様
@@ -14,6 +14,7 @@
 
 ## 開発・検証
 
+- [シミュレーション技術仕様](./Development/SimulationArchitectureSpecification.md)
 - [Unity Editorツール](./Development/EditorTools.md)
 - [テスト](./Development/Testing.md)
 

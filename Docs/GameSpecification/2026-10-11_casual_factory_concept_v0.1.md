@@ -3,6 +3,7 @@
 - 作成日: 2026-10-11
 - 最終更新日: 2026-10-14
 - 状態: 基礎コンセプト。コア復旧、設備、ベルトコンベア、施設、建築操作は実装前レビューを前提とする仮仕様。実装済みランダムマップの詳細は[ランダムマップ生成仕様](./RandomMapGenerationSpecification.md)を正とする
+- 技術仕様: 固定Tick、ECSデータ、遠距離集計、永続ID、セーブ、建築Command、Floating Originは[シミュレーション技術仕様](../Development/SimulationArchitectureSpecification.md)を正とする
 - 対象: PC向けシングルプレイを第一候補とする
 - 参照作品: Forager、Stardew Valley、Core Keeper、Minecraft、F.A.R.M.S.: Chill Factory
 
