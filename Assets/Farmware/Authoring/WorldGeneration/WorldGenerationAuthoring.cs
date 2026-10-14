@@ -496,8 +496,11 @@ namespace Farmware.WorldGeneration.Authoring
                 rocklandMagmaInfluenceMinimumVolcanicInfluence,
                 rocklandMagmaMinimumVolcanicInfluence);
 
-            // 乾燥と湿潤の領域が逆転しないよう、森林閾値を乾燥閾値より上へ保ちます。
-            dryMoistureThreshold = Mathf.Min(dryMoistureThreshold, 1f - minimumGap);
+            // 乾燥・森林・湿地の3領域をすべて残すには上端側へ2つの間隔が必要なため、乾燥閾値を0.998以下へ収めます。
+            // 乾燥閾値を0.999まで許すと、森林閾値も上限0.999へ補正されて同値になり、中湿度の森林候補帯が消えてしまいます。
+            dryMoistureThreshold = Mathf.Min(
+                dryMoistureThreshold,
+                1f - (minimumGap * 2f));
             wetMoistureThreshold = Mathf.Max(wetMoistureThreshold, dryMoistureThreshold + minimumGap);
             wetMoistureThreshold = Mathf.Min(wetMoistureThreshold, 1f - minimumGap);
             wetlandMoistureThreshold = Mathf.Max(

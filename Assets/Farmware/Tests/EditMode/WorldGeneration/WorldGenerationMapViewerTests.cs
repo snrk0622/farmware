@@ -1,6 +1,7 @@
 // このファイルは、広域マップビューアが実ゲームと同じ座標・設定・Generator結果を表示することをEditModeで検証します。
 // EditorWindowそのものを開かず、バックグラウンド化できる純粋サンプラーとAuthoring設定変換を対象にします。
 
+using System.Reflection;
 using System.Threading;
 using Farmware.WorldGeneration.Authoring;
 using Farmware.WorldGeneration.Editor;
@@ -403,6 +404,47 @@ namespace Farmware.WorldGeneration.Tests
                 Assert.That(
                     snapshot.WetMoistureThreshold,
                     Is.EqualTo(WorldGenerationSettings.DefaultWetMoistureThreshold));
+            }
+            finally
+            {
+                Object.DestroyImmediate(authoringObject);
+            }
+        }
+
+        /// <summary>
+        /// 乾燥・森林・湿地の湿度閾値へInspector上限を設定して検証処理を実行し、3つの領域が必ず昇順で残ることを保証します。
+        /// 乾燥閾値と森林閾値が同じ0.999へ補正され、中湿度の森林候補帯が消える退行を防ぎます。
+        /// </summary>
+        [Test]
+        public void AuthoringOnValidate_MaximumMoistureThresholdsKeepStrictOrdering()
+        {
+            GameObject authoringObject = new GameObject("WorldGenerationAuthoring Moisture Threshold Test");
+            try
+            {
+                WorldGenerationAuthoring authoring =
+                    authoringObject.AddComponent<WorldGenerationAuthoring>();
+                SerializedObject serializedAuthoring = new SerializedObject(authoring);
+
+                // 3つともInspectorで選べる最大値を入力し、レビュー指摘の境界条件を再現します。
+                serializedAuthoring.FindProperty("dryMoistureThreshold").floatValue = 1f;
+                serializedAuthoring.FindProperty("wetMoistureThreshold").floatValue = 1f;
+                serializedAuthoring.FindProperty("wetlandMoistureThreshold").floatValue = 1f;
+                serializedAuthoring.ApplyModifiedPropertiesWithoutUndo();
+
+                // OnValidateはUnityから呼ばれる非公開ライフサイクルメソッドなので、EditModeテストではReflection経由で明示的に実行します。
+                MethodInfo onValidate = typeof(WorldGenerationAuthoring).GetMethod(
+                    "OnValidate",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.That(onValidate, Is.Not.Null);
+                onValidate.Invoke(authoring, null);
+                serializedAuthoring.Update();
+
+                float dry = serializedAuthoring.FindProperty("dryMoistureThreshold").floatValue;
+                float wet = serializedAuthoring.FindProperty("wetMoistureThreshold").floatValue;
+                float wetland = serializedAuthoring.FindProperty("wetlandMoistureThreshold").floatValue;
+
+                Assert.That(dry, Is.LessThan(wet));
+                Assert.That(wet, Is.LessThan(wetland));
             }
             finally
             {
