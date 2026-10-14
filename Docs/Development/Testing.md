@@ -49,7 +49,7 @@ Editorの分布監査と同じAnalyzerを小さな固定サンプルで2回実�
 #### `WorldGenerationMapViewerTests`
 
 Map Viewerの全ピクセルが同じ座標へ直接`DeterministicChunkGenerator.GenerateTile`した結果と一致することを保証する。
-あわせて、負座標を含むPointer座標変換、カーソル中心ズーム、Bakerと共有するAuthoring設定Snapshotのシード変換、新規・旧丸め値のどちらでもAuthoringと純粋計算の主要な既定気候閾値が一致することを検証する。
+あわせて、負座標を含むPointer座標変換、生成TextureとCanvasの表示解像度が異なるときの縦横比維持とリサイズ後の再生成判定、Pointer・パン・グリッド用座標変換とカーソル中心ズーム、Bakerと共有するAuthoring設定Snapshotのシード変換、新規・旧丸め値のどちらでもAuthoringと純粋計算の主要な既定気候閾値が一致することを検証する。
 
 #### `TerrainLayerPresentationUtilityTests`
 
@@ -73,7 +73,7 @@ Sprite Packer ModeがV2であること、土地Atlasが7種類の元Textureだ�
 | F3 | 現在座標と記録済み初期スポーン座標のHUD文字列を保証する。 |
 | F4 | 初期スポーンの赤いTile・Chunk表示と、縦横グリッド線の矩形計算を保証する。 |
 | 初期スポーン失敗 | Scene保存位置を維持し、失敗状態の確定後にチャンクストリーミングを開始できることを保証する。 |
-| Presentation寿命 | Camera GameObjectを維持したDefault World再作成時に新しい初期スポーンを再適用し、Tilemap PresenterがWorld切替または無効化時に表示済み・反映途中・消去途中の旧表示を残さないことを保証する。 |
+| Presentation寿命 | Camera GameObjectを維持したDefault World再作成時に新しい初期スポーンを再適用し、同一Worldでカメラ制御を再有効化した場合はプレイヤーの移動後位置を保つ。Tilemap PresenterがWorld切替または無効化時に表示済み・反映途中・消去途中の旧表示を残さないことも保証する。 |
 | 開発者用可視化 | バイオーム、ノイズ、水域、移行帯、岩壁、マグマ、資源の色写像がSimulationを変更しないことを保証する。 |
 | 岩壁表示 | チャンク境界をまたぐ内部影が連続したグラデーションになり、一体型岩壁の上面・内部影・露出資源が同じ12px高へ揃うことを保証する。 |
 | SampleScene縦切り | SubSceneロード、Authoringと共通既定閾値、初期カメラ、チャンク生成、7枚のTilemap、Ground・Rock WallのIndividual ModeおよびTop Left順、通常資源の岩壁背面用Order 2・前面用Order 10への振り分け、静止液面・アニメーションの-8pxオフセット、液体セルのGround Tilemapとの排他表示、岩壁セルの下層土地、岩壁上資源の12pxオフセット、液面4fps設定、アンロード、同一地形の再生成を保証する。EditModeでは、資源がある通常地面の直前方だけが岩壁の場合に背面用へ分類する純粋計算を保証する。 |

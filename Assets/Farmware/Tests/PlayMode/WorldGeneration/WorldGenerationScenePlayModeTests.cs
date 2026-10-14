@@ -250,6 +250,70 @@ namespace Farmware.WorldGeneration.PlayModeTests
         }
 
         /// <summary>
+        /// 初期スポーン適用後にプレイヤーが移動したカメラを準備し、同じWorldでComponentを再有効化しても位置を保つことを保証します。
+        /// OnEnableが初期化済み状態を消し、カメラを開始地点へ戻す退行を防ぎます。
+        /// </summary>
+        [Test]
+        public void InitialCameraPosition_ReenabledInSameWorld_KeepsPlayerPosition()
+        {
+            World previousWorld = World.DefaultGameObjectInjectionWorld;
+            World testWorld = new World("InitialCameraReenableWorld");
+            GameObject cameraObject = null;
+
+            try
+            {
+                Entity spawnEntity = testWorld.EntityManager.CreateEntity();
+                testWorld.EntityManager.AddComponentData(
+                    spawnEntity,
+                    new InitialSpawnLocation
+                    {
+                        TileX = 2,
+                        TileY = 3
+                    });
+
+                World.DefaultGameObjectInjectionWorld = testWorld;
+                cameraObject = new GameObject("Reenabled Initial Camera");
+                cameraObject.SetActive(false);
+                cameraObject.AddComponent<Camera>();
+                CameraPanController panController =
+                    cameraObject.AddComponent<CameraPanController>();
+                InitialCameraPositionController positionController =
+                    cameraObject.AddComponent<InitialCameraPositionController>();
+                cameraObject.SetActive(true);
+
+                MethodInfo positionUpdate = typeof(InitialCameraPositionController).GetMethod(
+                    "Update",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.That(positionUpdate, Is.Not.Null);
+                positionUpdate.Invoke(positionController, null);
+                Assert.That(cameraObject.transform.position.x, Is.EqualTo(2.5f));
+                Assert.That(cameraObject.transform.position.y, Is.EqualTo(3.5f));
+
+                Vector2 playerPosition = new Vector2(30.5f, -12.5f);
+                panController.SetWorldPosition(playerPosition);
+                positionController.enabled = false;
+                positionController.enabled = true;
+                positionUpdate.Invoke(positionController, null);
+
+                Assert.That(positionController.HasCompletedInitialPositioning, Is.True);
+                Assert.That(positionController.HasAppliedInitialPosition, Is.True);
+                Assert.That(cameraObject.transform.position.x, Is.EqualTo(playerPosition.x));
+                Assert.That(cameraObject.transform.position.y, Is.EqualTo(playerPosition.y));
+            }
+            finally
+            {
+                if (cameraObject != null)
+                {
+                    cameraObject.SetActive(false);
+                    Object.DestroyImmediate(cameraObject);
+                }
+
+                World.DefaultGameObjectInjectionWorld = previousWorld;
+                testWorld.Dispose();
+            }
+        }
+
+        /// <summary>
         /// Presenterが参照するDefault Worldを切り替え、旧WorldのTileと表示済み座標キャッシュを即時破棄することを保証します。
         /// </summary>
         [Test]

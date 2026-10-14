@@ -71,6 +71,8 @@ namespace Farmware.WorldGeneration.Tests
                 -100,
                 200,
                 4,
+                400,
+                300,
                 400f,
                 300f,
                 200f,
@@ -81,6 +83,8 @@ namespace Farmware.WorldGeneration.Tests
                 -100,
                 200,
                 4,
+                400,
+                300,
                 400f,
                 300f,
                 0f,
@@ -107,6 +111,8 @@ namespace Farmware.WorldGeneration.Tests
                 50,
                 -75,
                 8,
+                400,
+                300,
                 400f,
                 300f,
                 pointerX,
@@ -119,6 +125,10 @@ namespace Farmware.WorldGeneration.Tests
                 -75,
                 8,
                 4,
+                400,
+                300,
+                400,
+                300,
                 400f,
                 300f,
                 pointerX,
@@ -129,8 +139,166 @@ namespace Farmware.WorldGeneration.Tests
                 newCenterX,
                 newCenterY,
                 4,
+                400,
+                300,
                 400f,
                 300f,
+                pointerX,
+                pointerY,
+                out int afterX,
+                out int afterY);
+
+            Assert.That(afterX, Is.EqualTo(beforeX).Within(4));
+            Assert.That(afterY, Is.EqualTo(beforeY).Within(4));
+        }
+
+        /// <summary>
+        /// 768サンプルへ制限したTextureを大きなCanvasへ伸張し、Pointer座標が表示上の地形と一致することを検証します。
+        /// 縦横で異なる倍率を使い、X側の上限だけが適用されるWindow形状でも誤変換を防ぎます。
+        /// </summary>
+        [Test]
+        public void CalculateWorldTileAtPointer_StretchedTextureUsesSampleResolution()
+        {
+            WorldGenerationMapSampler.CalculateWorldTileAtPointer(
+                100,
+                -200,
+                4,
+                768,
+                576,
+                1200f,
+                900f,
+                900f,
+                225f,
+                out int worldTileX,
+                out int worldTileY);
+
+            Assert.That(worldTileX, Is.EqualTo(868));
+            Assert.That(worldTileY, Is.EqualTo(376));
+        }
+
+        /// <summary>
+        /// 横長・縦長・上限以内のCanvasを準備し、上限768サンプル内で縦横比を保つことを検証します。
+        /// 長軸だけを制限して正方形のタイルとグリッドが長方形へ歪む退行を防ぎます。
+        /// </summary>
+        /// <param name="viewportWidth">検証するCanvasの横幅です。</param>
+        /// <param name="viewportHeight">検証するCanvasの縦幅です。</param>
+        /// <param name="expectedWidth">期待するTextureの横サンプル数です。</param>
+        /// <param name="expectedHeight">期待するTextureの縦サンプル数です。</param>
+        [TestCase(1200f, 600f, 768, 384)]
+        [TestCase(600f, 1200f, 384, 768)]
+        [TestCase(640f, 480f, 640, 480)]
+        public void CalculateSampleResolution_PreservesViewportAspectRatio(
+            float viewportWidth,
+            float viewportHeight,
+            int expectedWidth,
+            int expectedHeight)
+        {
+            WorldGenerationMapSampler.CalculateSampleResolution(
+                viewportWidth,
+                viewportHeight,
+                out int sampleWidth,
+                out int sampleHeight);
+
+            Assert.That(sampleWidth, Is.EqualTo(expectedWidth));
+            Assert.That(sampleHeight, Is.EqualTo(expectedHeight));
+        }
+
+        /// <summary>
+        /// Windowリサイズ前後のTexture解像度を準備し、縦横比が合わない古いTextureだけを再生成対象と判定することを検証します。
+        /// 同じ比率の大きさ変更で不要な生成を繰り返さず、横長・縦長の切り替えは見逃さないことを保証します。
+        /// </summary>
+        /// <param name="sampleWidth">表示中Textureの横サンプル数です。</param>
+        /// <param name="sampleHeight">表示中Textureの縦サンプル数です。</param>
+        /// <param name="viewportWidth">リサイズ後Canvasの横幅です。</param>
+        /// <param name="viewportHeight">リサイズ後Canvasの縦幅です。</param>
+        /// <param name="expected">表示中Textureをそのまま利用できる場合はtrueです。</param>
+        [TestCase(768, 576, 1200f, 900f, true)]
+        [TestCase(768, 600, 1200f, 900f, false)]
+        [TestCase(768, 384, 600f, 1200f, false)]
+        public void DoesSampleResolutionMatchViewport_DetectsResizeThatNeedsRegeneration(
+            int sampleWidth,
+            int sampleHeight,
+            float viewportWidth,
+            float viewportHeight,
+            bool expected)
+        {
+            bool actual = WorldGenerationMapSampler.DoesSampleResolutionMatchViewport(
+                sampleWidth,
+                sampleHeight,
+                viewportWidth,
+                viewportHeight);
+
+            Assert.That(actual, Is.EqualTo(expected));
+        }
+
+        /// <summary>
+        /// 拡大表示中のドラッグ量とグリッドの逆変換を準備し、同じ地形上の移動量を往復できることを検証します。
+        /// CanvasポイントをTextureサンプルと誤認し、パン量や境界線がずれる退行を防ぎます。
+        /// </summary>
+        [Test]
+        public void ViewportAndTileOffsets_StretchedTextureRoundTrip()
+        {
+            long tileOffset = WorldGenerationMapSampler.CalculateTileOffsetFromViewportDelta(
+                300f,
+                1200f,
+                768,
+                4);
+            float viewportOffset =
+                WorldGenerationMapSampler.CalculateViewportOffsetFromTileOffset(
+                    tileOffset,
+                    4,
+                    768,
+                    1200f);
+
+            Assert.That(tileOffset, Is.EqualTo(768));
+            Assert.That(viewportOffset, Is.EqualTo(300f).Within(0.0001f));
+        }
+
+        /// <summary>
+        /// 拡大表示されたTexture上のカーソル地点を準備し、ズーム前後で同じワールドタイルを指すことを検証します。
+        /// 整数タイルへ丸めるため、許容差は新しい1サンプル幅以内とします。
+        /// </summary>
+        [Test]
+        public void CalculateZoomedCenter_StretchedTexturePreservesPointerTile()
+        {
+            const float pointerX = 900f;
+            const float pointerY = 225f;
+            WorldGenerationMapSampler.CalculateWorldTileAtPointer(
+                50,
+                -75,
+                8,
+                768,
+                576,
+                1200f,
+                900f,
+                pointerX,
+                pointerY,
+                out int beforeX,
+                out int beforeY);
+
+            WorldGenerationMapSampler.CalculateZoomedCenter(
+                50,
+                -75,
+                8,
+                4,
+                768,
+                576,
+                768,
+                576,
+                1200f,
+                900f,
+                pointerX,
+                pointerY,
+                out int newCenterX,
+                out int newCenterY);
+            WorldGenerationMapSampler.CalculateWorldTileAtPointer(
+                newCenterX,
+                newCenterY,
+                4,
+                768,
+                576,
+                1200f,
+                900f,
                 pointerX,
                 pointerY,
                 out int afterX,

@@ -79,17 +79,6 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// Componentが有効になったときにUnityから呼ばれ、Play開始ごとの一度だけ適用できる状態へ戻します。
-        /// </summary>
-        private void OnEnable()
-        {
-            hasAppliedInitialPosition = false;
-            hasCompletedInitialPositioning = false;
-            reportedDuplicateLocation = false;
-            reportedDuplicateSearchStatus = false;
-        }
-
-        /// <summary>
         /// MonoBehaviourの各描画フレームで呼ばれ、探索成功時はカメラを移動し、失敗時はScene保存位置の採用を確定します。
         /// </summary>
         private void Update()

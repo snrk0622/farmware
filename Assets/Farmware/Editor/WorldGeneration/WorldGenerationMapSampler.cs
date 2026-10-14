@@ -116,6 +116,66 @@ namespace Farmware.WorldGeneration.Editor
         public const int MaximumResolution = 768;
 
         /// <summary>
+        /// Canvasの縦横比を保ちながら、1辺が上限以内に収まるTextureサンプル数を求めます。
+        /// 各軸を別々に制限すると正方形のタイルが長方形へ歪むため、両軸へ同じ縮小率を適用します。
+        /// </summary>
+        /// <param name="viewportWidth">Canvasの横幅です。単位はEditorポイントです。</param>
+        /// <param name="viewportHeight">Canvasの縦幅です。単位はEditorポイントです。</param>
+        /// <param name="sampleWidth">縦横比を保ったTextureの横サンプル数です。</param>
+        /// <param name="sampleHeight">縦横比を保ったTextureの縦サンプル数です。</param>
+        public static void CalculateSampleResolution(
+            float viewportWidth,
+            float viewportHeight,
+            out int sampleWidth,
+            out int sampleHeight)
+        {
+            if (viewportWidth <= 0f)
+            {
+                throw new ArgumentOutOfRangeException(nameof(viewportWidth));
+            }
+
+            if (viewportHeight <= 0f)
+            {
+                throw new ArgumentOutOfRangeException(nameof(viewportHeight));
+            }
+
+            // 長辺を基準に1つの縮小率を決めることで、短辺だけが余分に高解像度となる非等方伸縮を防ぎます。
+            float longestViewportSide = Math.Max(viewportWidth, viewportHeight);
+            float uniformScale = Math.Min(1f, MaximumResolution / longestViewportSide);
+            sampleWidth = Mathf.Clamp(
+                Mathf.RoundToInt(viewportWidth * uniformScale),
+                1,
+                MaximumResolution);
+            sampleHeight = Mathf.Clamp(
+                Mathf.RoundToInt(viewportHeight * uniformScale),
+                1,
+                MaximumResolution);
+        }
+
+        /// <summary>
+        /// 表示中Textureの解像度が、現在のCanvasサイズに対する縦横比維持後の解像度と一致するかを返します。
+        /// EditorWindowのリサイズ後に、古いTextureを非等方伸縮せず再生成すべきか判定するために使います。
+        /// </summary>
+        /// <param name="sampleWidth">表示中Textureの横サンプル数です。</param>
+        /// <param name="sampleHeight">表示中Textureの縦サンプル数です。</param>
+        /// <param name="viewportWidth">現在のCanvas横幅です。</param>
+        /// <param name="viewportHeight">現在のCanvas縦幅です。</param>
+        /// <returns>表示中Textureを非等方伸縮せずに表示できる場合はtrueです。</returns>
+        public static bool DoesSampleResolutionMatchViewport(
+            int sampleWidth,
+            int sampleHeight,
+            float viewportWidth,
+            float viewportHeight)
+        {
+            CalculateSampleResolution(
+                viewportWidth,
+                viewportHeight,
+                out int expectedWidth,
+                out int expectedHeight);
+            return sampleWidth == expectedWidth && sampleHeight == expectedHeight;
+        }
+
+        /// <summary>
         /// 指定範囲を1ピクセル1代表タイルで走査し、表示用の色配列を作ります。
         /// 呼び出し元はこの純粋計算をTask.Runへ渡せますが、返却後のTexture2D生成はEditorメインスレッドで行います。
         /// </summary>
@@ -221,7 +281,9 @@ namespace Farmware.WorldGeneration.Editor
         /// </summary>
         /// <param name="centerTileX">表示中央の水平タイル座標です。</param>
         /// <param name="centerTileY">表示中央の垂直タイル座標です。</param>
-        /// <param name="tilesPerPixel">1画面ピクセルあたりのタイル数です。</param>
+        /// <param name="tilesPerPixel">Texture 1サンプルあたりのタイル数です。</param>
+        /// <param name="sampleWidth">表示中Textureの横サンプル数です。</param>
+        /// <param name="sampleHeight">表示中Textureの縦サンプル数です。</param>
         /// <param name="viewportWidth">マップ表示領域の横幅です。単位はEditorポイントです。</param>
         /// <param name="viewportHeight">マップ表示領域の縦幅です。単位はEditorポイントです。</param>
         /// <param name="pointerX">表示領域左端からのカーソルXです。</param>
@@ -232,6 +294,8 @@ namespace Farmware.WorldGeneration.Editor
             int centerTileX,
             int centerTileY,
             int tilesPerPixel,
+            int sampleWidth,
+            int sampleHeight,
             float viewportWidth,
             float viewportHeight,
             float pointerX,
@@ -239,8 +303,17 @@ namespace Farmware.WorldGeneration.Editor
             out int worldTileX,
             out int worldTileY)
         {
-            double horizontalOffset = (pointerX - (viewportWidth * 0.5d)) * tilesPerPixel;
-            double verticalOffset = ((viewportHeight * 0.5d) - pointerY) * tilesPerPixel;
+            ValidateViewportScale(sampleWidth, viewportWidth, nameof(sampleWidth), nameof(viewportWidth));
+            ValidateViewportScale(sampleHeight, viewportHeight, nameof(sampleHeight), nameof(viewportHeight));
+
+            // TextureがCanvas全体へ拡大・縮小されるため、PointerのEditorポイントを
+            // 先にTexture上のサンプル位置へ戻し、表示サイズが768を超えても地形と座標を一致させます。
+            double horizontalSampleOffset =
+                ((pointerX / (double)viewportWidth) - 0.5d) * sampleWidth;
+            double verticalSampleOffset =
+                (0.5d - (pointerY / (double)viewportHeight)) * sampleHeight;
+            double horizontalOffset = horizontalSampleOffset * tilesPerPixel;
+            double verticalOffset = verticalSampleOffset * tilesPerPixel;
             worldTileX = ClampToInt((long)Math.Round(centerTileX + horizontalOffset));
             worldTileY = ClampToInt((long)Math.Round(centerTileY + verticalOffset));
         }
@@ -252,6 +325,10 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="centerTileY">変更前の中央垂直タイル座標です。</param>
         /// <param name="oldTilesPerPixel">変更前の1ピクセルあたりタイル数です。</param>
         /// <param name="newTilesPerPixel">変更後の1ピクセルあたりタイル数です。</param>
+        /// <param name="oldSampleWidth">変更前Textureの横サンプル数です。</param>
+        /// <param name="oldSampleHeight">変更前Textureの縦サンプル数です。</param>
+        /// <param name="newSampleWidth">変更後Textureの横サンプル数です。</param>
+        /// <param name="newSampleHeight">変更後Textureの縦サンプル数です。</param>
         /// <param name="viewportWidth">マップ表示領域の横幅です。</param>
         /// <param name="viewportHeight">マップ表示領域の縦幅です。</param>
         /// <param name="pointerX">ズーム中心にするカーソルXです。</param>
@@ -263,6 +340,10 @@ namespace Farmware.WorldGeneration.Editor
             int centerTileY,
             int oldTilesPerPixel,
             int newTilesPerPixel,
+            int oldSampleWidth,
+            int oldSampleHeight,
+            int newSampleWidth,
+            int newSampleHeight,
             float viewportWidth,
             float viewportHeight,
             float pointerX,
@@ -274,6 +355,8 @@ namespace Farmware.WorldGeneration.Editor
                 centerTileX,
                 centerTileY,
                 oldTilesPerPixel,
+                oldSampleWidth,
+                oldSampleHeight,
                 viewportWidth,
                 viewportHeight,
                 pointerX,
@@ -281,12 +364,108 @@ namespace Farmware.WorldGeneration.Editor
                 out int anchoredTileX,
                 out int anchoredTileY);
 
-            double horizontalPixels = pointerX - (viewportWidth * 0.5d);
-            double verticalPixels = (viewportHeight * 0.5d) - pointerY;
+            ValidateViewportScale(
+                newSampleWidth,
+                viewportWidth,
+                nameof(newSampleWidth),
+                nameof(viewportWidth));
+            ValidateViewportScale(
+                newSampleHeight,
+                viewportHeight,
+                nameof(newSampleHeight),
+                nameof(viewportHeight));
+
+            // Windowリサイズ後のズームでもPointer下を固定できるよう、
+            // 新しいTexture解像度から求めたサンプル位置を中心補正に使います。
+            double horizontalSamples =
+                ((pointerX / (double)viewportWidth) - 0.5d) * newSampleWidth;
+            double verticalSamples =
+                (0.5d - (pointerY / (double)viewportHeight)) * newSampleHeight;
             newCenterTileX = ClampToInt(
-                (long)Math.Round(anchoredTileX - (horizontalPixels * newTilesPerPixel)));
+                (long)Math.Round(anchoredTileX - (horizontalSamples * newTilesPerPixel)));
             newCenterTileY = ClampToInt(
-                (long)Math.Round(anchoredTileY - (verticalPixels * newTilesPerPixel)));
+                (long)Math.Round(anchoredTileY - (verticalSamples * newTilesPerPixel)));
+        }
+
+        /// <summary>
+        /// Canvas上のPointer移動量を、拡大・縮小前Textureが表すワールドタイル移動量へ変換します。
+        /// </summary>
+        /// <param name="viewportDelta">Canvas上の移動量です。単位はEditorポイントです。</param>
+        /// <param name="viewportLength">Canvasの対象軸の長さです。</param>
+        /// <param name="sampleLength">Textureの対象軸のサンプル数です。</param>
+        /// <param name="tilesPerPixel">Texture 1サンプルが表すタイル数です。</param>
+        /// <returns>Canvas移動量に対応する符号付きワールドタイル数です。</returns>
+        public static long CalculateTileOffsetFromViewportDelta(
+            float viewportDelta,
+            float viewportLength,
+            int sampleLength,
+            int tilesPerPixel)
+        {
+            ValidateViewportScale(
+                sampleLength,
+                viewportLength,
+                nameof(sampleLength),
+                nameof(viewportLength));
+            if (tilesPerPixel <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(tilesPerPixel));
+            }
+
+            double sampleDelta = viewportDelta * sampleLength / viewportLength;
+            return (long)Math.Round(sampleDelta * tilesPerPixel);
+        }
+
+        /// <summary>
+        /// 中心からのワールドタイル差を、拡大・縮小後のCanvas上の表示位置差へ変換します。
+        /// グリッドと原点マーカーを背景Textureの地形と一致させるために使います。
+        /// </summary>
+        /// <param name="tileOffset">中心からの符号付きワールドタイル差です。</param>
+        /// <param name="tilesPerPixel">Texture 1サンプルが表すタイル数です。</param>
+        /// <param name="sampleLength">Textureの対象軸のサンプル数です。</param>
+        /// <param name="viewportLength">Canvasの対象軸の長さです。</param>
+        /// <returns>Canvas中心からの符号付きEditorポイント差です。</returns>
+        public static float CalculateViewportOffsetFromTileOffset(
+            long tileOffset,
+            int tilesPerPixel,
+            int sampleLength,
+            float viewportLength)
+        {
+            ValidateViewportScale(
+                sampleLength,
+                viewportLength,
+                nameof(sampleLength),
+                nameof(viewportLength));
+            if (tilesPerPixel <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(tilesPerPixel));
+            }
+
+            double sampleOffset = tileOffset / (double)tilesPerPixel;
+            return (float)(sampleOffset * viewportLength / sampleLength);
+        }
+
+        /// <summary>
+        /// Textureサンプル数とCanvas長が座標変換に利用できる正の値かを検証します。
+        /// </summary>
+        /// <param name="sampleLength">Textureの対象軸のサンプル数です。</param>
+        /// <param name="viewportLength">Canvasの対象軸の長さです。</param>
+        /// <param name="sampleParameterName">例外に含めるサンプル数の引数名です。</param>
+        /// <param name="viewportParameterName">例外に含めるCanvas長の引数名です。</param>
+        private static void ValidateViewportScale(
+            int sampleLength,
+            float viewportLength,
+            string sampleParameterName,
+            string viewportParameterName)
+        {
+            if (sampleLength <= 0)
+            {
+                throw new ArgumentOutOfRangeException(sampleParameterName);
+            }
+
+            if (viewportLength <= 0f)
+            {
+                throw new ArgumentOutOfRangeException(viewportParameterName);
+            }
         }
 
         /// <summary>

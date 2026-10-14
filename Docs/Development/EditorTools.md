@@ -1,6 +1,6 @@
 # Unity Editorツール
 
-- 最終更新日: 2026-10-13
+- 最終更新日: 2026-10-14
 - 対象: `Assets/Farmware/Editor/WorldGeneration/`
 
 ## 1. 用途
@@ -166,6 +166,7 @@ Farmwareのワールドは無限なので「全体」を有限画像へ収める
 - `WorldGenerationAuthoring.CreateWorldGenerationSettingsSnapshot`をBakerとMap Viewerで共有する。
 - PlayModeでは、`ChunkGenerationSystem`が使用中のECS Singletonを直接読む。
 - 各代表タイルは`DeterministicChunkGenerator.GenerateTile`で生成し、ビューア専用の簡易バイオーム計算は持たない。
+- 表示領域が生成Textureの上限768サンプルを超える場合は、縦横共通の縮小率でTextureを生成し、正方形のタイルとグリッドを保つ。Windowリサイズで縦横比が変わった場合は、操作停止後に新しい比率のTextureを自動再生成する。生成TextureとCanvasの表示倍率はPointer座標、パン、ズーム、境界線、原点表示へ反映する。
 - 実設定を取得できない場合は生成を停止し、別の既定値へフォールバックしない。
 
 `Terrain`は7バイオームの地面に淡水、海水、マグマ、岩壁を重ねた最終地形を表示する。
@@ -198,7 +199,7 @@ Farmwareのワールドは無限なので「全体」を有限画像へ収める
 
 1. 原点付近と既知の遠距離座標で、Map ViewerとGameビューのバイオーム・水域・マグマ・岩壁が一致する。
 2. `実設定を再読込`後のSeed、WorldSeed、GeneratorVersion、設定取得元が想定どおり表示される。
-3. 負座標への移動、ドラッグ、ホイール、＋・－Buttonで中心と縮尺が正しく変化する。
+3. 負座標への移動、ドラッグ、ホイール、＋・－Buttonで中心と縮尺が正しく変化する。Windowを768ポイントより大きくしても、カーソル下の座標、グリッド、原点印が地形とずれず、正方形のグリッドが維持される。
 4. 同じSeed・座標・縮尺へ戻ると同じ画像になる。
 5. 連続操作で古い非同期結果が後から上書きされず、Editorが長時間応答不能にならない。
 

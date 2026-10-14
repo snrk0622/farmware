@@ -28,6 +28,9 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>ズームアウト側の上限で、768px幅なら約196,608タイルを一度に確認できます。</summary>
         private const int MaximumTilesPerPixel = 256;
 
+        /// <summary>Window連続リサイズが止まってから再生成するまでの待機時間です。単位はミリ秒です。</summary>
+        private const long ResizeRenderDelayMilliseconds = 150;
+
         /// <summary>Toolbarの表示名とenumを対応させる固定選択肢です。</summary>
         private static readonly List<string> ViewModeChoices = new List<string>
         {
@@ -111,6 +114,9 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>最初のGeometryChangedEventでだけ自動生成を始めるためのフラグです。</summary>
         private bool initialRenderRequested;
 
+        /// <summary>Windowリサイズ中の連続生成を避け、最後のサイズだけを反映する遅延実行項目です。</summary>
+        private IVisualElementScheduledItem resizeRenderSchedule;
+
         /// <summary>カーソルが同じタイル内を動くたびに再生成しないため、最後に表示した水平座標を保持します。</summary>
         private int lastHoveredTileX = int.MinValue;
 
@@ -143,6 +149,8 @@ namespace Farmware.WorldGeneration.Editor
         private void OnDisable()
         {
             EditorApplication.playModeStateChanged -= OnPlayModeStateChanged;
+            resizeRenderSchedule?.Pause();
+            resizeRenderSchedule = null;
             CancelPendingRender();
             DestroyDisplayedTexture();
         }
@@ -155,6 +163,8 @@ namespace Farmware.WorldGeneration.Editor
             // Unityのスクリプト再コンパイル時はEditorWindowの一部フィールドが一時復元されるため、
             // 破棄済みTextureに対応する「初期生成済み」状態を必ず解除します。
             initialRenderRequested = false;
+            resizeRenderSchedule?.Pause();
+            resizeRenderSchedule = null;
             rootVisualElement.Clear();
             VisualTreeAsset layout = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(LayoutAssetPath);
             if (layout == null)
@@ -232,6 +242,8 @@ namespace Farmware.WorldGeneration.Editor
             mapCanvas.PointerMoved = UpdateHoverInformation;
             mapCanvas.SetGridVisible(gridToggle.value);
             mapCanvas.RegisterCallback<GeometryChangedEvent>(OnMapGeometryChanged);
+            resizeRenderSchedule = mapCanvas.schedule.Execute(RequestRenderAfterResize);
+            resizeRenderSchedule.Pause();
             UpdateLegend();
         }
 
@@ -254,12 +266,50 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>
-        /// Canvasの初回サイズ確定後に1度だけ自動生成し、0×0のTextureを作らないようにします。
+        /// Canvasの初回サイズ確定後に自動生成し、以後のWindowリサイズ後は縦横比に合うTextureを再生成します。
         /// </summary>
         /// <param name="evt">変更前後のCanvas矩形を含むイベントです。</param>
         private void OnMapGeometryChanged(GeometryChangedEvent evt)
         {
-            RequestInitialRenderAfterLayout();
+            if (!initialRenderRequested)
+            {
+                RequestInitialRenderAfterLayout();
+                return;
+            }
+
+            if (mapCanvas.contentRect.width < 64f
+                || mapCanvas.contentRect.height < 64f
+                || (displayedSample != null
+                    && WorldGenerationMapSampler.DoesSampleResolutionMatchViewport(
+                        displayedSample.Width,
+                        displayedSample.Height,
+                        mapCanvas.contentRect.width,
+                        mapCanvas.contentRect.height)))
+            {
+                // リサイズを元の比率へ戻した場合は、直前のGeometryChangedEventで予約した不要な再生成を取り消します。
+                resizeRenderSchedule?.Pause();
+                return;
+            }
+
+            // GeometryChangedEventはWindowをドラッグ中に連続して発生するため、
+            // 先の予約を停止し、操作が落ち着いた後の最終サイズだけを生成します。
+            resizeRenderSchedule?.ExecuteLater(ResizeRenderDelayMilliseconds);
+        }
+
+        /// <summary>
+        /// Windowリサイズが止まった後に呼ばれ、現在のCanvas縦横比で地図を1回だけ再生成します。
+        /// </summary>
+        private void RequestRenderAfterResize()
+        {
+            if (!hasSourceSettings
+                || mapCanvas == null
+                || mapCanvas.contentRect.width < 64f
+                || mapCanvas.contentRect.height < 64f)
+            {
+                return;
+            }
+
+            RequestRenderFromFields();
         }
 
         /// <summary>
@@ -354,14 +404,11 @@ namespace Farmware.WorldGeneration.Editor
             CancellationToken cancellationToken = renderCancellation.Token;
             int requestId = ++renderRequestId;
 
-            int width = Mathf.Clamp(
-                Mathf.RoundToInt(mapCanvas.contentRect.width),
-                128,
-                WorldGenerationMapSampler.MaximumResolution);
-            int height = Mathf.Clamp(
-                Mathf.RoundToInt(mapCanvas.contentRect.height),
-                128,
-                WorldGenerationMapSampler.MaximumResolution);
+            WorldGenerationMapSampler.CalculateSampleResolution(
+                mapCanvas.contentRect.width,
+                mapCanvas.contentRect.height,
+                out int width,
+                out int height);
             int centerTileX = serializedCenterTileX;
             int centerTileY = serializedCenterTileY;
             int tilesPerPixel = serializedTilesPerPixel;
@@ -473,10 +520,18 @@ namespace Farmware.WorldGeneration.Editor
                 return;
             }
 
-            long horizontalTileOffset = (long)Math.Round(
-                screenOffset.x * displayedSample.TilesPerPixel);
-            long verticalTileOffset = (long)Math.Round(
-                screenOffset.y * displayedSample.TilesPerPixel);
+            long horizontalTileOffset =
+                WorldGenerationMapSampler.CalculateTileOffsetFromViewportDelta(
+                    screenOffset.x,
+                    mapCanvas.contentRect.width,
+                    displayedSample.Width,
+                    displayedSample.TilesPerPixel);
+            long verticalTileOffset =
+                WorldGenerationMapSampler.CalculateTileOffsetFromViewportDelta(
+                    screenOffset.y,
+                    mapCanvas.contentRect.height,
+                    displayedSample.Height,
+                    displayedSample.TilesPerPixel);
             serializedCenterTileX = ClampCoordinate(
                 (long)displayedSample.CenterTileX - horizontalTileOffset);
             serializedCenterTileY = ClampCoordinate(
@@ -530,11 +585,22 @@ namespace Farmware.WorldGeneration.Editor
 
             int currentCenterX = displayedSample?.CenterTileX ?? serializedCenterTileX;
             int currentCenterY = displayedSample?.CenterTileY ?? serializedCenterTileY;
+            WorldGenerationMapSampler.CalculateSampleResolution(
+                mapCanvas.contentRect.width,
+                mapCanvas.contentRect.height,
+                out int requestedSampleWidth,
+                out int requestedSampleHeight);
+            int oldSampleWidth = displayedSample?.Width ?? requestedSampleWidth;
+            int oldSampleHeight = displayedSample?.Height ?? requestedSampleHeight;
             WorldGenerationMapSampler.CalculateZoomedCenter(
                 currentCenterX,
                 currentCenterY,
                 oldTilesPerPixel,
                 newTilesPerPixel,
+                oldSampleWidth,
+                oldSampleHeight,
+                requestedSampleWidth,
+                requestedSampleHeight,
                 mapCanvas.contentRect.width,
                 mapCanvas.contentRect.height,
                 anchorPosition.x,
@@ -601,6 +667,8 @@ namespace Farmware.WorldGeneration.Editor
                 displayedSample.CenterTileX,
                 displayedSample.CenterTileY,
                 displayedSample.TilesPerPixel,
+                displayedSample.Width,
+                displayedSample.Height,
                 mapCanvas.contentRect.width,
                 mapCanvas.contentRect.height,
                 localPointerPosition.x,
