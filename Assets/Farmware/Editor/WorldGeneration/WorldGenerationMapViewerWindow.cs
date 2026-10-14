@@ -689,7 +689,7 @@ namespace Farmware.WorldGeneration.Editor
             ChunkCoordinate chunk = WorldGrid.ToChunkCoordinate(worldTileX, worldTileY);
             hoverLabel.text =
                 $"Tile ({worldTileX}, {worldTileY}) / Chunk ({chunk.X}, {chunk.Y}) / "
-                + $"Biome {tile.Biome} / Ground {tile.Ground} / Water {tile.WaterBodyType}";
+                + $"Biome {tile.Biome} / Ground {tile.Ground} / Soil {tile.Soil} / Water {tile.WaterBodyType}";
         }
 
         /// <summary>
@@ -740,6 +740,8 @@ namespace Farmware.WorldGeneration.Editor
 
             if (GetSelectedViewMode() == WorldGenerationMapViewMode.Terrain)
             {
+                // TerrainではBiome以外に優先表示する水域・マグマ・岩壁だけを凡例へ追加します。
+                // SoilTypeは通常地形へ反映しないため、Editor専用Debug Visualization側だけで案内します。
                 AddLegendRow("Fresh Water", "legend-fresh-water");
                 AddLegendRow("Salt Water", "legend-salt-water");
                 AddLegendRow("Magma", "legend-magma");

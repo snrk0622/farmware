@@ -50,7 +50,7 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>生成するSprite AtlasをまとめるUnityプロジェクト相対フォルダです。</summary>
         public const string AtlasAssetFolder = "Assets/Farmware/Art/WorldGeneration/Atlases";
 
-        /// <summary>7種類の16×24土地Spriteを同じTextureページへまとめるAtlasのアセットパスです。</summary>
+        /// <summary>7種類のバイオーム土地Spriteを同じTextureページへまとめるAtlasのアセットパスです。</summary>
         public const string GroundTerrainAtlasPath =
             AtlasAssetFolder + "/GroundTerrainAtlas.spriteatlasv2";
 
@@ -68,7 +68,7 @@ namespace Farmware.WorldGeneration.Editor
         private const string FallbackAssetFolder =
             "Assets/Farmware/Art/WorldGeneration/Fallback";
 
-        /// <summary>土地Atlasへ収録する7種類の元Textureパスです。</summary>
+        /// <summary>プレイヤー向け表示に使う7種類のバイオーム土地Textureパスです。</summary>
         private static readonly string[] GroundTerrainSourceTexturePaths =
         {
             FallbackAssetFolder + "/Grassland.png",
@@ -175,17 +175,19 @@ namespace Farmware.WorldGeneration.Editor
                     throw new InvalidOperationException($"Sprite Atlas V2を読み込めません: {atlasPath}");
                 }
 
-                SpriteAtlas runtimeAtlas = AssetDatabase.LoadAssetAtPath<SpriteAtlas>(atlasPath);
-                if (runtimeAtlas == null)
+                // 削除済みTextureの参照はRuntime SpriteAtlas.GetPackablesでは取得できません。
+                // SerializedPropertyから配列そのものを空にし、旧Soil派生などのMissing参照も確実に除去します。
+                SerializedObject serializedAtlas = new SerializedObject(atlasAsset);
+                SerializedProperty packablesProperty =
+                    serializedAtlas.FindProperty("m_ImporterData.packables");
+                if (packablesProperty == null || !packablesProperty.isArray)
                 {
-                    throw new InvalidOperationException($"Runtime SpriteAtlasを読み込めません: {atlasPath}");
+                    throw new InvalidOperationException(
+                        $"Sprite Atlas V2のPackable配列を取得できません: {atlasPath}");
                 }
 
-                UnityEngine.Object[] existingPackables = runtimeAtlas.GetPackables();
-                if (existingPackables.Length > 0)
-                {
-                    atlasAsset.Remove(existingPackables);
-                }
+                packablesProperty.ClearArray();
+                serializedAtlas.ApplyModifiedPropertiesWithoutUndo();
             }
 
             // Texture自体をPackableにすると、将来4×4へSliceしてSprite数が増えても同じ画像内の全差分が自動収録されます。

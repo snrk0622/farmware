@@ -1,5 +1,5 @@
-// このファイルは、Editor構築ツールが生成した一体型土地・岩壁PNGのピクセル配置を検証します。
-// 地形分類のテストとは分け、上面と断面が指定寸法の一枚画像として欠けずに生成されることを保証します。
+// このファイルは、Editor構築ツールが生成したバイオーム色だけの一体型土地・岩壁PNGと、廃止アセットの削除を検証します。
+// 地形分類とは分け、7種類の土地上面、断面、岩壁側面が指定寸法の一枚画像として欠けずに生成されることを保証します。
 
 using System.IO;
 using NUnit.Framework;
@@ -8,7 +8,7 @@ using UnityEngine;
 namespace Farmware.WorldGeneration.Tests
 {
     /// <summary>
-    /// 7種類の土地が16×24、岩壁が16×28で、上面と断面の全ピクセルが可視であることを保証します。
+    /// 土地が単色のバイオーム上面を持つ16×24、岩壁が16×28であり、旧Soil派生が残らないことを保証します。
     /// </summary>
     public sealed class WorldGenerationFallbackArtTests
     {
@@ -43,9 +43,19 @@ namespace Farmware.WorldGeneration.Tests
             "RockWallFrontFace.png"
         };
 
-        /// <summary>
-        /// 各土地PNGが16×24で、上面16pxと断面8pxの全領域を一枚の不透明画像として持つことを検証します。
-        /// </summary>
+        // プレイヤー表示からSoilTypeを除いたため削除する、旧肥沃土・砂質土派生アセットの拡張子なし名称です。
+        private static readonly string[] ObsoleteSoilVariantNames =
+        {
+            "GrasslandFertile", "GrasslandSandy",
+            "ForestFertile", "ForestSandy",
+            "DesertFertile", "DesertSandy",
+            "RocklandFertile", "RocklandSandy",
+            "WetlandFertile", "WetlandSandy",
+            "SnowfieldFertile", "SnowfieldSandy",
+            "VolcanicFertile", "VolcanicSandy"
+        };
+
+        /// <summary>各土地PNGが16×24で、全領域を一枚の不透明画像として持つことを検証します。</summary>
         [Test]
         public void TerrainTextures_ContainSurfaceAndEightPixelFace()
         {
@@ -55,47 +65,77 @@ namespace Farmware.WorldGeneration.Tests
             }
         }
 
-        /// <summary>
-        /// 岩壁PNGが16×28で、上面16pxと側面12pxの全領域を一枚の不透明画像として持つことを検証します。
-        /// </summary>
+        /// <summary>7枚の土地上面に草・葉・砂紋やSoil模様がなく、各Biome色だけで塗られることを検証します。</summary>
+        [Test]
+        public void TerrainTextures_SurfaceUsesSingleBiomeColor()
+        {
+            foreach (string textureName in TerrainTextureNames)
+            {
+                Texture2D texture = LoadTexture(textureName);
+                try
+                {
+                    Color32[] pixels = texture.GetPixels32();
+                    int surfaceStartY = ExpectedTerrainHeight - ExpectedWidth;
+                    Color32 expectedColor = pixels[surfaceStartY * ExpectedWidth];
+
+                    // 下側8pxの断面は対象外とし、論理セルに対応する上面16pxだけを比較します。
+                    for (int y = surfaceStartY; y < ExpectedTerrainHeight; y++)
+                    {
+                        for (int x = 0; x < ExpectedWidth; x++)
+                        {
+                            Assert.That(
+                                pixels[(y * ExpectedWidth) + x],
+                                Is.EqualTo(expectedColor),
+                                $"Biome上面へ固有模様またはSoil模様が残っています: {textureName} ({x}, {y})");
+                        }
+                    }
+                }
+                finally
+                {
+                    Object.DestroyImmediate(texture);
+                }
+            }
+        }
+
+        /// <summary>岩壁PNGが16×28で、全領域を一枚の不透明画像として持つことを検証します。</summary>
         [Test]
         public void RockWallTexture_ContainsSurfaceAndTwelvePixelFace()
         {
             VerifyOpaqueTexture("RockWall.png", ExpectedRockWallHeight);
         }
 
-        /// <summary>
-        /// 旧分離断面PNGが削除され、一体型画像との二重管理へ戻らないことを検証します。
-        /// </summary>
+        /// <summary>旧分離断面PNGが削除され、一体型画像との二重管理へ戻らないことを検証します。</summary>
         [Test]
         public void ObsoleteSeparateFaceTextures_DoNotRemain()
         {
             foreach (string textureName in ObsoleteTextureNames)
             {
-                string texturePath = GetFallbackTexturePath(textureName);
+                string texturePath = GetFallbackAssetPath(textureName);
                 Assert.That(File.Exists(texturePath), Is.False, $"旧断面PNGが残っています: {texturePath}");
             }
         }
 
-        /// <summary>
-        /// 1枚のPNGについて寸法と全ピクセルの可視性を確認します。
-        /// </summary>
+        /// <summary>廃止した14種類のSoil派生PNGとTileが削除され、プレイヤー表示へ再混入しないことを検証します。</summary>
+        [Test]
+        public void ObsoleteSoilVariantAssets_DoNotRemain()
+        {
+            foreach (string assetName in ObsoleteSoilVariantNames)
+            {
+                string texturePath = GetFallbackAssetPath(assetName + ".png");
+                string tilePath = GetFallbackAssetPath(assetName + ".asset");
+                Assert.That(File.Exists(texturePath), Is.False, $"旧Soil派生PNGが残っています: {texturePath}");
+                Assert.That(File.Exists(tilePath), Is.False, $"旧Soil派生Tileが残っています: {tilePath}");
+            }
+        }
+
+        /// <summary>1枚のPNGについて寸法と全ピクセルの可視性を確認します。</summary>
         /// <param name="textureName">Fallbackフォルダー内にある拡張子付きPNG名です。</param>
         /// <param name="expectedHeight">期待する画像高です。単位はピクセルです。</param>
-        /// <remarks>ファイルを読み込み、一時Texture2Dを生成・破棄します。プロジェクトアセット自体は変更しません。</remarks>
         private static void VerifyOpaqueTexture(string textureName, int expectedHeight)
         {
-            string texturePath = GetFallbackTexturePath(textureName);
-            Assert.That(File.Exists(texturePath), Is.True, $"一体型PNGが見つかりません: {texturePath}");
-
-            Texture2D texture = new Texture2D(2, 2, TextureFormat.RGBA32, mipChain: false);
+            Texture2D texture = LoadTexture(textureName);
             try
             {
-                byte[] pngBytes = File.ReadAllBytes(texturePath);
-                Assert.That(
-                    ImageConversion.LoadImage(texture, pngBytes, markNonReadable: false),
-                    Is.True,
-                    $"一体型PNGを読み込めません: {textureName}");
                 Assert.That(texture.width, Is.EqualTo(ExpectedWidth), $"横幅が不正です: {textureName}");
                 Assert.That(texture.height, Is.EqualTo(expectedHeight), $"高さが不正です: {textureName}");
 
@@ -116,17 +156,32 @@ namespace Farmware.WorldGeneration.Tests
             }
         }
 
-        /// <summary>
-        /// Fallbackフォルダー内のPNG絶対パスを組み立てます。
-        /// </summary>
+        /// <summary>Fallback内のPNGを読取可能な一時Texture2Dへ読み込みます。</summary>
         /// <param name="textureName">拡張子付きPNG名です。</param>
-        /// <returns>現在のUnityプロジェクト内にある対象PNGの絶対パスです。</returns>
-        private static string GetFallbackTexturePath(string textureName)
+        /// <returns>呼び出し元がDestroyImmediateで破棄する一時Texture2Dです。</returns>
+        private static Texture2D LoadTexture(string textureName)
+        {
+            string texturePath = GetFallbackAssetPath(textureName);
+            Assert.That(File.Exists(texturePath), Is.True, $"一体型PNGが見つかりません: {texturePath}");
+
+            Texture2D texture = new Texture2D(2, 2, TextureFormat.RGBA32, mipChain: false);
+            byte[] pngBytes = File.ReadAllBytes(texturePath);
+            Assert.That(
+                ImageConversion.LoadImage(texture, pngBytes, markNonReadable: false),
+                Is.True,
+                $"一体型PNGを読み込めません: {textureName}");
+            return texture;
+        }
+
+        /// <summary>Fallbackフォルダー内の対象ファイル絶対パスを組み立てます。</summary>
+        /// <param name="fileName">拡張子付きファイル名です。</param>
+        /// <returns>現在のUnityプロジェクト内にある対象ファイルの絶対パスです。</returns>
+        private static string GetFallbackAssetPath(string fileName)
         {
             return Path.Combine(
                 Application.dataPath,
                 "Farmware/Art/WorldGeneration/Fallback",
-                textureName);
+                fileName);
         }
     }
 }

@@ -31,7 +31,7 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 土地Atlasが7種類の元TextureだけをPackableとして持ち、液体や資源を誤って収録していないことを検証します。
+        /// 土地Atlasが7種類のバイオームTextureだけをPackableとして持ち、Soil派生、液体、資源を誤って収録していないことを検証します。
         /// </summary>
         [Test]
         public void GroundTerrainAtlas_ContainsAllTerrainSourceTextures()

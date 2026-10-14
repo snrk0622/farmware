@@ -13,7 +13,7 @@ namespace Farmware.WorldGeneration.Editor
     /// </summary>
     public enum WorldGenerationMapViewMode : byte
     {
-        /// <summary>バイオーム地面、水域、マグマ、岩壁を最終生成結果に近い色で表示します。</summary>
+        /// <summary>論理バイオーム色を基準に、水域、マグマ、岩壁を優先したプレイヤー向け地形を表示します。</summary>
         Terrain = 0,
 
         /// <summary>水域や障害物に隠れている場所も含め、7種類の論理バイオームを表示します。</summary>
@@ -496,6 +496,7 @@ namespace Farmware.WorldGeneration.Editor
                 case GroundType.RockWall:
                     return new Color32(52, 52, 60, 255);
                 default:
+                    // Gameビューと同様に、SoilTypeは内部情報として保持しつつ土地の見た目はBiomeだけで決めます。
                     return GetBiomeColor(tile.Biome);
             }
         }

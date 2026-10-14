@@ -1,4 +1,4 @@
-// このファイルは、PlayMode中のノイズ・バイオーム・水域・マグマ・岩壁・資源可視化をUnity Editorメニューから切り替えます。
+// このファイルは、PlayMode中のノイズ・バイオーム・土壌・水域・マグマ・岩壁・資源可視化をUnity Editorメニューから切り替えます。
 // Editor Assemblyだけに属し、プレイヤー用入力や製品版ビルドへ開発者専用の操作UIを追加しません。
 
 using Farmware.WorldGeneration.Presentation;
@@ -18,6 +18,9 @@ namespace Farmware.WorldGeneration.Editor
 
         /// <summary>論理バイオーム表示へ切り替えるメニューパスです。</summary>
         private const string BiomeMenuPath = "Farmware/World Generation/Debug Visualization/Biome";
+
+        /// <summary>標準・肥沃・砂質の土壌表示へ切り替えるメニューパスです。</summary>
+        private const string SoilMenuPath = "Farmware/World Generation/Debug Visualization/Soil";
 
         /// <summary>連続標高表示へ切り替えるメニューパスです。</summary>
         private const string ElevationMenuPath = "Farmware/World Generation/Debug Visualization/Elevation";
@@ -69,71 +72,78 @@ namespace Farmware.WorldGeneration.Editor
             SelectMode(WorldGenerationDebugVisualizationMode.Biome);
         }
 
+        /// <summary>PlayMode中のSoilTypeを標準・肥沃・砂質の固定色で表示します。</summary>
+        [MenuItem(SoilMenuPath, false, 202)]
+        private static void SelectSoil()
+        {
+            SelectMode(WorldGenerationDebugVisualizationMode.Soil);
+        }
+
         /// <summary>PlayMode中の連続標高値を黒から白の濃淡で表示します。</summary>
-        [MenuItem(ElevationMenuPath, false, 202)]
+        [MenuItem(ElevationMenuPath, false, 203)]
         private static void SelectElevation()
         {
             SelectMode(WorldGenerationDebugVisualizationMode.Elevation);
         }
 
         /// <summary>PlayMode中の連続気温値を青から赤のグラデーションで表示します。</summary>
-        [MenuItem(TemperatureMenuPath, false, 203)]
+        [MenuItem(TemperatureMenuPath, false, 204)]
         private static void SelectTemperature()
         {
             SelectMode(WorldGenerationDebugVisualizationMode.Temperature);
         }
 
         /// <summary>PlayMode中の連続湿度値を茶から水色のグラデーションで表示します。</summary>
-        [MenuItem(MoistureMenuPath, false, 204)]
+        [MenuItem(MoistureMenuPath, false, 205)]
         private static void SelectMoisture()
         {
             SelectMode(WorldGenerationDebugVisualizationMode.Moisture);
         }
 
         /// <summary>PlayMode中の連続Weirdness値を紫から黄のグラデーションで表示します。</summary>
-        [MenuItem(WeirdnessMenuPath, false, 205)]
+        [MenuItem(WeirdnessMenuPath, false, 206)]
         private static void SelectWeirdness()
         {
             SelectMode(WorldGenerationDebugVisualizationMode.Weirdness);
         }
 
         /// <summary>PlayMode中の水域を陸地・淡水・海水の固定色で表示します。</summary>
-        [MenuItem(WaterSalinityMenuPath, false, 205)]
+        [MenuItem(WaterSalinityMenuPath, false, 207)]
         private static void SelectWaterSalinity()
         {
             SelectMode(WorldGenerationDebugVisualizationMode.WaterSalinity);
         }
 
         /// <summary>PlayMode中の水域を陸地・川・池・海の固定色で表示します。</summary>
-        [MenuItem(WaterBodyMenuPath, false, 206)]
+        [MenuItem(WaterBodyMenuPath, false, 208)]
         private static void SelectWaterBody()
         {
             SelectMode(WorldGenerationDebugVisualizationMode.WaterBody);
         }
 
         /// <summary>PlayMode中に論理Biomeと異なる陸上Groundだけを強調表示します。</summary>
-        [MenuItem(TransitionMenuPath, false, 207)]
+        [MenuItem(TransitionMenuPath, false, 209)]
         private static void SelectTransition()
         {
             SelectMode(WorldGenerationDebugVisualizationMode.BiomeTransition);
         }
 
         /// <summary>PlayMode中の岩壁を非岩壁・露出面・内部影の濃淡で表示します。</summary>
-        [MenuItem(RockWallMenuPath, false, 208)]
+        [MenuItem(RockWallMenuPath, false, 210)]
         private static void SelectRockWall()
         {
             SelectMode(WorldGenerationDebugVisualizationMode.RockWall);
         }
 
         /// <summary>PlayMode中のマグマ本体と周囲の淡水抑制域を固定色で表示します。</summary>
-        [MenuItem(MagmaMenuPath, false, 209)]
+        [MenuItem(MagmaMenuPath, false, 211)]
         private static void SelectMagma()
         {
             SelectMode(WorldGenerationDebugVisualizationMode.Magma);
         }
 
         /// <summary>PlayMode中の最終資源配置を木・石・砂の固定色で表示します。</summary>
-        [MenuItem(ResourcesMenuPath, false, 210)]
+        [MenuItem(ResourcesMenuPath, false, 212)]
         private static void SelectResources()
         {
             SelectMode(WorldGenerationDebugVisualizationMode.Resources);
@@ -153,6 +163,14 @@ namespace Farmware.WorldGeneration.Editor
         private static bool ValidateBiome()
         {
             return ValidateMode(BiomeMenuPath, WorldGenerationDebugVisualizationMode.Biome);
+        }
+
+        /// <summary>Soil項目の有効状態とチェック表示を更新します。</summary>
+        /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
+        [MenuItem(SoilMenuPath, true)]
+        private static bool ValidateSoil()
+        {
+            return ValidateMode(SoilMenuPath, WorldGenerationDebugVisualizationMode.Soil);
         }
 
         /// <summary>Elevation項目の有効状態とチェック表示を更新します。</summary>

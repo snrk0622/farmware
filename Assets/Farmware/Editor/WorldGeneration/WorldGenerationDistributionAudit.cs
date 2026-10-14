@@ -1,4 +1,4 @@
-// このファイルは、複数シードのバイオーム・地形・水域・隣接関係を一定条件で集計し、調整前後を比較できる診断結果を作ります。
+// このファイルは、複数シードのバイオーム・基礎地形・土壌・水域・隣接関係を一定条件で集計し、調整前後を比較できる診断結果を作ります。
 // Editorメニューから呼ばれる開発専用処理であり、ランタイムのECS状態や実際のワールド生成結果は変更しません。
 
 using System;
@@ -106,6 +106,9 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>GroundTypeの数値を添字にした代表サンプル件数です。</summary>
         private readonly int[] groundCounts;
 
+        /// <summary>SoilTypeの数値を添字にした代表サンプル件数です。</summary>
+        private readonly int[] soilCounts;
+
         /// <summary>WaterBodyTypeの数値を添字にした代表サンプル件数です。</summary>
         private readonly int[] waterBodyCounts;
 
@@ -159,6 +162,7 @@ namespace Farmware.WorldGeneration.Editor
         /// </summary>
         /// <param name="biomeCounts">BiomeId別の代表サンプル件数です。</param>
         /// <param name="groundCounts">GroundType別の代表サンプル件数です。</param>
+        /// <param name="soilCounts">SoilType別の代表サンプル件数です。</param>
         /// <param name="waterBodyCounts">WaterBodyType別の代表サンプル件数です。</param>
         /// <param name="biomeAdjacencyCounts">順不同のBiomeIdペア別直接隣接件数です。</param>
         /// <param name="biomeRegionCounts">BiomeId別の概算連結領域数です。</param>
@@ -177,6 +181,7 @@ namespace Farmware.WorldGeneration.Editor
         internal WorldGenerationDistributionAuditResult(
             int[] biomeCounts,
             int[] groundCounts,
+            int[] soilCounts,
             int[] waterBodyCounts,
             int[] biomeAdjacencyCounts,
             int[] biomeRegionCounts,
@@ -195,6 +200,7 @@ namespace Farmware.WorldGeneration.Editor
         {
             this.biomeCounts = biomeCounts;
             this.groundCounts = groundCounts;
+            this.soilCounts = soilCounts;
             this.waterBodyCounts = waterBodyCounts;
             this.biomeAdjacencyCounts = biomeAdjacencyCounts;
             this.biomeRegionCounts = biomeRegionCounts;
@@ -227,6 +233,14 @@ namespace Farmware.WorldGeneration.Editor
         public int GetGroundCount(GroundType ground)
         {
             return groundCounts[(int)ground];
+        }
+
+        /// <summary>指定土壌種別の代表サンプル件数を返します。</summary>
+        /// <param name="soil">件数を取得する土壌種別です。</param>
+        /// <returns>すべての監査シードを合計した件数です。</returns>
+        public int GetSoilCount(SoilType soil)
+        {
+            return soilCounts[(int)soil];
         }
 
         /// <summary>指定水域種別の代表サンプル件数を返します。</summary>
@@ -300,10 +314,16 @@ namespace Farmware.WorldGeneration.Editor
             }
 
             builder.AppendLine("Ground distribution:");
-            for (GroundType ground = GroundType.Normal; ground <= GroundType.Magma; ground++)
+            AppendGroundDistribution(builder, GroundType.Land);
+            AppendGroundDistribution(builder, GroundType.Water);
+            AppendGroundDistribution(builder, GroundType.RockWall);
+            AppendGroundDistribution(builder, GroundType.Magma);
+
+            builder.AppendLine("Soil distribution:");
+            for (SoilType soil = SoilType.None; soil <= SoilType.Sandy; soil++)
             {
-                int count = groundCounts[(int)ground];
-                builder.Append("  ").Append(ground)
+                int count = soilCounts[(int)soil];
+                builder.Append("  ").Append(soil)
                     .Append(": ").Append(count)
                     .Append(" (").Append(FormatPercent(count, TotalAnchorSamples)).AppendLine(")");
             }
@@ -359,6 +379,17 @@ namespace Farmware.WorldGeneration.Editor
             return builder.ToString();
         }
 
+        /// <summary>廃止済みIDを飛ばし、現在有効な基礎地形1種類の件数をレポートへ追加します。</summary>
+        /// <param name="builder">監査レポートを組み立てる再利用文字列Builderです。</param>
+        /// <param name="ground">出力する有効な基礎地形種別です。</param>
+        private void AppendGroundDistribution(StringBuilder builder, GroundType ground)
+        {
+            int count = groundCounts[(int)ground];
+            builder.Append("  ").Append(ground)
+                .Append(": ").Append(count)
+                .Append(" (").Append(FormatPercent(count, TotalAnchorSamples)).AppendLine(")");
+        }
+
         /// <summary>分母0を安全に扱い、割合を小数第2位までの文字列へ変換します。</summary>
         /// <param name="count">割合の分子です。</param>
         /// <param name="total">割合の分母です。</param>
@@ -384,8 +415,11 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>BiomeId.NoneからVolcanicまでを格納できる配列スロット数です。</summary>
         private const int BiomeSlotCount = (int)BiomeId.Volcanic + 1;
 
-        /// <summary>GroundType.NormalからMagmaまでを格納できる配列スロット数です。</summary>
+        /// <summary>予約済みの旧IDを含め、GroundType.LandからMagmaまでを格納できる配列スロット数です。</summary>
         private const int GroundSlotCount = (int)GroundType.Magma + 1;
+
+        /// <summary>SoilType.NoneからSandyまでを格納できる配列スロット数です。</summary>
+        private const int SoilSlotCount = (int)SoilType.Sandy + 1;
 
         /// <summary>WaterBodyType.NoneからSeaまでを格納できる配列スロット数です。</summary>
         private const int WaterBodySlotCount = (int)WaterBodyType.Sea + 1;
@@ -408,6 +442,7 @@ namespace Farmware.WorldGeneration.Editor
             int samplesPerSeed = gridWidth * gridWidth;
             int[] biomeCounts = new int[BiomeSlotCount];
             int[] groundCounts = new int[GroundSlotCount];
+            int[] soilCounts = new int[SoilSlotCount];
             int[] waterBodyCounts = new int[WaterBodySlotCount];
             int[] adjacencyCounts = new int[BiomeSlotCount * BiomeSlotCount];
             int[] regionCounts = new int[BiomeSlotCount];
@@ -453,6 +488,7 @@ namespace Farmware.WorldGeneration.Editor
                         biomeGrid[gridIndex] = anchor.Biome;
                         biomeCounts[(int)anchor.Biome]++;
                         groundCounts[(int)anchor.Ground]++;
+                        soilCounts[(int)anchor.Soil]++;
                         waterBodyCounts[(int)anchor.WaterBodyType]++;
                         CountAdjacency(
                             anchor.Biome,
@@ -472,6 +508,7 @@ namespace Farmware.WorldGeneration.Editor
                         // 件数が同じでも配置が変わった場合を検出できるよう、走査順の分類値を署名へ順番に混ぜます。
                         MixSignature(ref signature, (byte)anchor.Biome);
                         MixSignature(ref signature, (byte)anchor.Ground);
+                        MixSignature(ref signature, (byte)anchor.Soil);
                         MixSignature(ref signature, (byte)anchor.WaterBodyType);
                         MixSignature(ref signature, (byte)east.Biome);
                         MixSignature(ref signature, (byte)north.Biome);
@@ -495,6 +532,7 @@ namespace Farmware.WorldGeneration.Editor
             return new WorldGenerationDistributionAuditResult(
                 biomeCounts,
                 groundCounts,
+                soilCounts,
                 waterBodyCounts,
                 adjacencyCounts,
                 regionCounts,
@@ -735,7 +773,7 @@ namespace Farmware.WorldGeneration.Editor
 
         /// <summary>1byteの分類値を走査順の比較署名へ混ぜます。</summary>
         /// <param name="signature">更新対象の64bit署名です。</param>
-        /// <param name="value">今回混ぜるバイオーム・地面・水域の分類値です。</param>
+        /// <param name="value">今回混ぜるバイオーム・基礎地形・土壌・水域の分類値です。</param>
         private static void MixSignature(ref ulong signature, byte value)
         {
             signature ^= value;

@@ -41,6 +41,7 @@ namespace Farmware.WorldGeneration.Tests
                 Is.InRange(0, first.TotalChunkBoundaryAdjacencySamples));
             Assert.That(SumBiomeCounts(first), Is.EqualTo(expectedTotalSamples));
             Assert.That(SumGroundCounts(first), Is.EqualTo(expectedTotalSamples));
+            Assert.That(SumSoilCounts(first), Is.EqualTo(expectedTotalSamples));
             Assert.That(SumWaterBodyCounts(first), Is.EqualTo(expectedTotalSamples));
             Assert.That(second.Signature, Is.EqualTo(first.Signature));
             Assert.That(second.Report, Is.EqualTo(first.Report));
@@ -63,13 +64,24 @@ namespace Farmware.WorldGeneration.Tests
 
         /// <summary>全地面種別の件数を合計し、代表サンプルの集計漏れがないか確認します。</summary>
         /// <param name="result">合計対象の監査結果です。</param>
-        /// <returns>通常地面からマグマまでの件数合計です。</returns>
+        /// <returns>現在有効な4種類の基礎地形件数合計です。</returns>
         private static int SumGroundCounts(WorldGenerationDistributionAuditResult result)
         {
+            return result.GetGroundCount(GroundType.Land)
+                + result.GetGroundCount(GroundType.Water)
+                + result.GetGroundCount(GroundType.RockWall)
+                + result.GetGroundCount(GroundType.Magma);
+        }
+
+        /// <summary>土壌なしを含む全土壌種別の件数を合計し、代表サンプルの集計漏れがないか確認します。</summary>
+        /// <param name="result">合計対象の監査結果です。</param>
+        /// <returns>None、Normal、Fertile、Sandyの件数合計です。</returns>
+        private static int SumSoilCounts(WorldGenerationDistributionAuditResult result)
+        {
             int total = 0;
-            for (GroundType ground = GroundType.Normal; ground <= GroundType.Magma; ground++)
+            for (SoilType soil = SoilType.None; soil <= SoilType.Sandy; soil++)
             {
-                total += result.GetGroundCount(ground);
+                total += result.GetSoilCount(soil);
             }
 
             return total;

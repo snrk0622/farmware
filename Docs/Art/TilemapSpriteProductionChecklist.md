@@ -1,7 +1,7 @@
 # Farmware タイルマップ用スプライト制作・導入チェックリスト v0.15
 
 - 作成日: 2026-10-11
-- 最終更新日: 2026-10-13
+- 最終更新日: 2026-10-14
 - 対象: ランダムマップ生成の地形・資源と、後続のドローン、設備、ベルト、橋、柵、施設表示
 - 関連仕様: [ランダムマップ生成仕様](../GameSpecification/RandomMapGenerationSpecification.md)
 - 関連仕様: [ゲームコンセプト仕様](../GameSpecification/2026-10-11_casual_factory_concept_v0.1.md)
@@ -11,9 +11,9 @@
 
 PixelLabだけで制作する製品用スプライトを漏れなく管理し、画風の固定、生成、Unityへのインポート、表示設定、実機確認を段階別に記録する。
 
-Editorの構築メニューが `Assets/Farmware/Art/WorldGeneration/Fallback/` へ生成する、7種類の16×24土地Tile、3種類の16×16液体Tile、1種類の16×28岩壁Tile、3種類の資源Tile、淡水・海水・マグマの各4フレームAnimatedTileは表示を成立させるための仮素材である。本書のチェックは、PixelLabで制作した本番候補へ置き換えた時点から付ける。仮素材が存在するだけではチェックしない。
+Editorの構築メニューが `Assets/Farmware/Art/WorldGeneration/Fallback/` へ生成する、上面をBiome基準色一色で塗った7種類の16×24土地Tile、3種類の16×16液体Tile、1種類の16×28岩壁Tile、3種類の資源Tile、淡水・海水・マグマの各4フレームAnimatedTileは表示を成立させるための仮素材である。本書のチェックは、PixelLabで制作した本番候補へ置き換えた時点から付ける。仮素材が存在するだけではチェックしない。
 
-2026-10-13時点で、`ChunkTilemapPresenter`には上面16 pxと断面8 pxを結合した土地、上面16 pxと側面12 pxを結合した岩壁、土地より8 px下へ投影する静止液面・液面アニメーション、岩壁上資源を16×16サブチャンク単位で表示・消去する仕組みを実装済みである。断面は隣接判定で出し分けず、画面手前の一体型ブロックが奥側の断面を隠す。`Build Fallback Map Prototype`を実行すると必要レイヤーと仮素材を再生成できる。
+2026-10-14時点で、`ChunkTilemapPresenter`には上面16 pxと断面8 pxを結合した土地、上面16 pxと側面12 pxを結合した岩壁、土地より8 px下へ投影する静止液面・液面アニメーション、岩壁上資源を16×16サブチャンク単位で表示・消去する仕組みを実装済みである。土地は論理バイオームだけを表示し、標準・肥沃・砂質のSoilType差は通常表示へ反映しない。フォールバック7枚の上面はBiome基準色一色で、草・葉・砂紋などの固有模様も持たない。本番候補はBiomeらしい質感や差分を持てるが、SoilType別の派生素材は不要である。断面は隣接判定で出し分けず、画面手前の一体型ブロックが奥側の断面を隠す。`Build Fallback Map Prototype`を実行すると必要レイヤーと仮素材を再生成できる。
 
 ### 1.1 チェック欄の意味
 
@@ -134,6 +134,7 @@ Base地形は合計11種類×16差分の176 Spriteとなる。段階Aの世界�
 - 草原は自然光の下の若草色を基準とし、黄緑へ寄せすぎない緑主体の中高明度・中彩度にする。蛍光ライム、蛍光黄色、白に近い広い色面、全画面へ灰色や茶色を重ねたようなくすんだ色調、暗いオリーブ色、陰鬱な照明は避ける。
 - 明るさは白飛び、蛍光色、高コントラストを意味しない。地面の広い色面を明るく保ち、模様のコントラストと密度を抑えることで、工業設備、資源、ベルト、柵を読みやすくする。
 - バイオームは色だけに依存せず、草、落ち葉、砂粒などの模様でも区別する。
+- SoilTypeはプレイヤー向け土地表示へ反映しない。標準・肥沃・砂質の派生Tileや共通模様マスクを制作せず、土地素材はBiomeごとの見た目だけを設計する。土壌分布の確認にはEditor専用Debug Visualizationを使用する。
 - 同じ地形の差分は平均明度と主色を近づけ、ランダム配置時に市松模様を作らない。
 - 目立つ花、ひび、大石などは通常地面へ大量に焼き込まず、低密度の装飾オーバーレイへ分離する。
 - 地面には方向性の強い影を置かない。自然物と設備の光源は左上に統一する。
@@ -783,7 +784,7 @@ Create a readable seamless four-frame active production loop with a brighter amb
 - [ ] PixelLabで生成した一体型ブロックへ、拡大縮小、補間、可視ピクセルの描き足しを行っていない
 - [ ] PNGと`.meta`を一緒にバージョン管理対象へ追加
 - [ ] Sprite Packer Modeを`Sprite Atlas V2`へ設定
-- [ ] 土地7種の元Textureを`GroundTerrainAtlas.spriteatlasv2`、岩壁の元Textureを`RockWallAtlas.spriteatlasv2`のPackableへ設定
+- [ ] 7枚のBiome土地Textureを`GroundTerrainAtlas.spriteatlasv2`、岩壁の元Textureを`RockWallAtlas.spriteatlasv2`のPackableへ設定
 - [ ] 両AtlasをBuilt-in（Include in Build）とし、Point、Mip Maps Off、Read/Write Off、RGBA32、Compression Noneへ設定
 - [ ] 両AtlasをPadding 4 px、Rotation Off、Tight Packing Off、Alpha Dilation Off、Max Texture Size 512へ設定
 - [ ] 土地Atlasが1ページに収まり、全土地Spriteのパック後Textureが同一であることを確認
@@ -822,7 +823,7 @@ node_starting_core_active.png
 
 現在の`ChunkTilemapPresenter`は、7バイオームの16×24土地を`Ground Tilemap`、淡水・海水・マグマを`Liquid Base Tilemap`へ排他的に表示する。静止液面と透明アニメーションは論理セルを変えず画面下へ8 px移動する。岩壁セルにもBiome由来の土地ブロックを残し、16×28岩壁を`Rock Wall Tilemap`へ同じ論理座標で重ねる。GroundとRock WallはIndividual ModeかつTop Left順でセルごとにYソートし、画面奥を先、手前を後に描いて奥側の断面・側面を手前ブロックで隠す。通常Resourceは直前方の岩壁有無から背面用と前面用の固定Tilemapへ振り分け、遠方座標でも手前岩壁との前後関係を維持する。岩壁の内部影と露出資源は岩壁上面に合わせて12 px上へ表示する。
 
-Editor構築ツールとPlayerビルド前処理は、土地7種を`GroundTerrainAtlas`の1ページ、岩壁を`RockWallAtlas`へ自動登録・再パックする。元TextureをPackableにするため、各PNGを将来4×4へSliceして16差分へ増やしても、同じPNG内の全Spriteが自動的にAtlasへ含まれる。土地が複数ページへ分割された場合は、バイオーム境界の描画順が保証できないためテストまたはビルドを失敗させる。
+Editor構築ツールとPlayerビルド前処理は、7枚のBiome土地を`GroundTerrainAtlas`の1ページ、岩壁を`RockWallAtlas`へ自動登録・再パックする。元TextureをPackableにするため、各PNGを将来4×4へSliceして16差分へ増やしても、同じPNG内の全Spriteが自動的にAtlasへ含まれる。土地が複数ページへ分割された場合は、バイオーム境界の描画順が保証できないためテストまたはビルドを失敗させる。
 
 - [x] 通常地形と低地の高さ分類をPresentationで判定できる
 - [x] 静止液面と透明アニメーションをGround Tilemapから分離し、同じ8 pxだけ画面下へ移動できる
@@ -831,7 +832,7 @@ Editor構築ツールとPlayerビルド前処理は、土地7種を`GroundTerrai
 - [x] 16×28岩壁TileをRock Wall Tilemapへ同じ論理セル座標で表示・消去できる
 - [x] GroundとRock WallをIndividual ModeかつTop Left順で描画し、奥側の前面を手前ブロックで隠せる
 - [x] 通常Resourceを直前方の岩壁有無から背面用Order 2と前面用Order 10へ振り分け、奥の資源を手前岩壁で隠せる
-- [x] 土地7種を同じ`GroundTerrainAtlas`ページへ、岩壁を別の`RockWallAtlas`へパックできる
+- [x] 7枚のBiome土地を同じ`GroundTerrainAtlas`ページへ、岩壁を別の`RockWallAtlas`へパックできる
 - [x] 岩壁セルにもBiome由来の土地ブロックを残せる
 - [x] Terrain Front Edge、Rock Wall Front Face、Rock Wall Topの旧TilemapをSceneから削除済みである
 - [x] Rock Wall Resource Tilemapを基準面より12 px上へ表示・消去できる

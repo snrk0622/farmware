@@ -595,6 +595,87 @@ namespace Farmware.WorldGeneration.PlayModeTests
         }
 
         /// <summary>
+        /// 同じBiomeでSoilTypeだけを変えても、Presenterが同じプレイヤー向け土地Tileを選ぶことを保証します。
+        /// </summary>
+        [Test]
+        public void ChunkTilemapPresenter_IgnoresSoilForPlayerTerrainTile()
+        {
+            GameObject presenterRoot = null;
+            Tile grasslandBase = null;
+            Tile forestBase = null;
+
+            try
+            {
+                ChunkTilemapPresenter presenter = CreateLifecycleTestPresenter(
+                    out presenterRoot,
+                    out Tilemap terrainTilemap);
+                grasslandBase = ScriptableObject.CreateInstance<Tile>();
+                forestBase = ScriptableObject.CreateInstance<Tile>();
+
+                presenter.Configure(
+                    terrainTilemap,
+                    null,
+                    grasslandBase,
+                    forestBase,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null);
+                MethodInfo selectLandTile = typeof(ChunkTilemapPresenter).GetMethod(
+                    "SelectLandTile",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.That(selectLandTile, Is.Not.Null);
+
+                GeneratedTile forestNormal = new GeneratedTile
+                {
+                    Ground = GroundType.Land,
+                    Biome = BiomeId.Forest,
+                    Soil = SoilType.Normal
+                };
+                GeneratedTile forestFertile = forestNormal;
+                forestFertile.Soil = SoilType.Fertile;
+                GeneratedTile forestSandy = forestNormal;
+                forestSandy.Soil = SoilType.Sandy;
+
+                // SoilTypeは資源生成の内部情報なので、3種類とも森林の同じTileへ到達する必要があります。
+                Assert.That(
+                    selectLandTile.Invoke(presenter, new object[] { forestNormal }),
+                    Is.SameAs(forestBase));
+                Assert.That(
+                    selectLandTile.Invoke(presenter, new object[] { forestFertile }),
+                    Is.SameAs(forestBase));
+                Assert.That(
+                    selectLandTile.Invoke(presenter, new object[] { forestSandy }),
+                    Is.SameAs(forestBase));
+            }
+            finally
+            {
+                if (presenterRoot != null)
+                {
+                    Object.DestroyImmediate(presenterRoot);
+                }
+
+                if (grasslandBase != null)
+                {
+                    Object.DestroyImmediate(grasslandBase);
+                }
+
+                if (forestBase != null)
+                {
+                    Object.DestroyImmediate(forestBase);
+                }
+            }
+        }
+
+        /// <summary>
         /// F4グリッドの縦線と横線が、Windowbox内でGUI.matrixを回転せず描画できる正の矩形へ変換されることを検証します。
         /// 開始・終了の向きを逆にしたケースも含め、縦線だけ消える不具合の再発を防ぎます。
         /// </summary>
@@ -634,7 +715,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
         }
 
         /// <summary>
-        /// 開発者用可視化が7種Biome、連続ノイズ、水域、移行帯、資源を異なる色へ写像し、論理BiomeとGroundの差を正しく判定することを検証します。
+        /// 開発者用可視化がBiome、Soil、連続ノイズ、水域、移行帯、資源を異なる色へ写像し、論理BiomeとSoilの差を正しく判定することを検証します。
         /// SceneやECS Worldを作らない純粋計算として、表示色の両端、水域分類、水域除外、最終資源分類をまとめて保証します。
         /// </summary>
         [Test]
@@ -643,7 +724,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
             GeneratedTile forestTransitionTile = new GeneratedTile
             {
                 Biome = BiomeId.Forest,
-                Ground = GroundType.Normal,
+                Ground = GroundType.Land,
+                Soil = SoilType.Normal,
                 Elevation = ushort.MaxValue,
                 Temperature = 0,
                 Moisture = ushort.MaxValue,
@@ -653,7 +735,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(
                 WorldGenerationDebugVisualizationOverlay.IsBiomeTransitionTile(forestTransitionTile),
                 Is.True,
-                "森林Biomeで通常地面が選ばれた陸上タイルは移行帯として強調される必要があります。");
+                "森林Biomeで標準土壌が選ばれた陸上タイルは移行帯として強調される必要があります。");
 
             Color coldColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
                 WorldGenerationDebugVisualizationMode.Temperature,
@@ -686,6 +768,19 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 wetlandColor,
                 Is.Not.EqualTo(volcanicColor),
                 "7バイオーム表示では湿地と火山を別色で判別できる必要があります。");
+
+            Color normalSoilColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.Soil,
+                new GeneratedTile { Soil = SoilType.Normal });
+            Color fertileSoilColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.Soil,
+                new GeneratedTile { Soil = SoilType.Fertile });
+            Color sandySoilColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.Soil,
+                new GeneratedTile { Soil = SoilType.Sandy });
+            Assert.That(normalSoilColor, Is.Not.EqualTo(fertileSoilColor));
+            Assert.That(fertileSoilColor, Is.Not.EqualTo(sandySoilColor));
+            Assert.That(sandySoilColor, Is.Not.EqualTo(normalSoilColor));
 
             Color transitionColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
                 WorldGenerationDebugVisualizationMode.BiomeTransition,
@@ -1575,6 +1670,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
         {
             Assert.That(actual.Biome, Is.EqualTo(expected.Biome), $"Biomeが一致しません。Index={tileIndex}");
             Assert.That(actual.Ground, Is.EqualTo(expected.Ground), $"Groundが一致しません。Index={tileIndex}");
+            Assert.That(actual.Soil, Is.EqualTo(expected.Soil), $"Soilが一致しません。Index={tileIndex}");
             Assert.That(
                 actual.WaterSalinity,
                 Is.EqualTo(expected.WaterSalinity),

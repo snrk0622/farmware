@@ -43,12 +43,12 @@ Unity Editorを開いたまま外部プロセスから同じプロジェクト�
 
 #### `WorldGenerationDistributionAuditTests`
 
-Editorの分布監査と同じAnalyzerを小さな固定サンプルで2回実行し、集計漏れがないことと、署名・レポートが決定論的に一致することを保証する。
+Editorの分布監査と同じAnalyzerを小さな固定サンプルで2回実行し、バイオーム・基礎地形・土壌・水域の集計漏れがないことと、署名・レポートが決定論的に一致することを保証する。
 広域のバランス確認はテストへ組み込まず、`Farmware > World Generation > Analyze Distribution`から実行する。
 
 #### `WorldGenerationMapViewerTests`
 
-Map Viewerの全ピクセルが同じ座標へ直接`DeterministicChunkGenerator.GenerateTile`した結果と一致することを保証する。
+Map Viewerの全ピクセルが同じ座標へ直接`DeterministicChunkGenerator.GenerateTile`した結果と一致することを保証する。Terrain表示とBiome表示はどちらもSoilTypeを反映せず、同じ論理Biomeなら標準・肥沃・砂質のいずれも同じ所属色を保つことを検証する。
 あわせて、負座標を含むPointer座標変換、生成TextureとCanvasの表示解像度が異なるときの縦横比維持とリサイズ後の再生成判定、Pointer・パン・グリッド用座標変換とカーソル中心ズーム、Bakerと共有するAuthoring設定Snapshotのシード変換、新規・旧丸め値のどちらでもAuthoringと純粋計算の主要な既定気候閾値が一致することを検証する。湿度閾値をInspector上限へ設定した場合にも、乾燥・森林・湿地の境界が厳密な昇順を保つことを保証する。
 
 #### `TerrainLayerPresentationUtilityTests`
@@ -61,7 +61,7 @@ Editor構築ツールが生成した7種類の16×24土地PNGと16×28岩壁PNG�
 
 #### `WorldGenerationSpriteAtlasTests`
 
-Sprite Packer ModeがV2であること、土地Atlasが7種類の元Textureだけ、岩壁Atlasが岩壁TextureだけをPackableに持つこと、両AtlasがBuilt-in配信とPixel Art向け設定を持つことを検証する。さらに実際のパック結果を読み、全土地Spriteが同じTextureページへ収まることを保証して、バイオーム境界でTilemapのYソートがTexture単位に分断される再発を防ぐ。
+Sprite Packer ModeがV2であること、土地Atlasが7種類のBiome Textureだけ、岩壁Atlasが岩壁TextureだけをPackableに持つこと、両AtlasがBuilt-in配信とPixel Art向け設定を持つことを検証する。さらに実際のパック結果を読み、7枚の土地Spriteが同じTextureページへ収まることを保証して、バイオーム境界でTilemapのYソートがTexture単位に分断される再発を防ぐ。
 
 ### 3.2 PlayMode: `Farmware.WorldGeneration.PlayModeTests`
 
@@ -76,7 +76,7 @@ Sprite Packer ModeがV2であること、土地Atlasが7種類の元Textureだ�
 | Presentation寿命 | Camera GameObjectを維持したDefault World再作成時に新しい初期スポーンを再適用し、Camera Bridgeが旧WorldのObserverを破棄して新Worldへ1件だけ作り直す。同一Worldでカメラ制御を再有効化した場合はプレイヤーの移動後位置を保つ。Tilemap PresenterがWorld切替または無効化時に表示済み・反映途中・消去途中の旧表示を残さないことも保証する。 |
 | 開発者用可視化 | バイオーム、ノイズ、水域、移行帯、岩壁、マグマ、資源の色写像がSimulationを変更しないことを保証する。 |
 | 岩壁表示 | チャンク境界をまたぐ内部影が連続したグラデーションになり、一体型岩壁の上面・内部影・露出資源が同じ12px高へ揃うことを保証する。 |
-| SampleScene縦切り | SubSceneロード、Authoringと共通既定閾値、初期カメラ、チャンク生成、7枚のTilemap、Ground・Rock WallのIndividual ModeおよびTop Left順、通常資源の岩壁背面用Order 2・前面用Order 10への振り分け、静止液面・アニメーションの-8pxオフセット、液体セルのGround Tilemapとの排他表示、岩壁セルの下層土地、岩壁上資源の12pxオフセット、土地・岩壁Spriteの上下はみ出しを含む可視チャンク範囲、液面4fps設定、アンロード、同一地形の再生成を保証する。EditModeでは、資源がある通常地面の直前方だけが岩壁の場合に背面用へ分類する純粋計算を保証する。 |
+| SampleScene縦切り | SubSceneロード、Authoringと共通既定閾値、初期カメラ、チャンク生成、7枚のTilemap、Ground・Rock WallのIndividual ModeおよびTop Left順、同じBiomeなら標準・肥沃・砂質のいずれも同じプレイヤー向けTileを選ぶこと、7枚の土地上面がBiome基準色一色で旧Soil派生アセットが残らないこと、Editor専用Soil可視化が3種類を別色にすること、通常資源の岩壁背面用Order 2・前面用Order 10への振り分け、静止液面・アニメーションの-8pxオフセット、液体セルのGround Tilemapとの排他表示、岩壁セルの下層土地、岩壁上資源の12pxオフセット、土地・岩壁Spriteの上下はみ出しを含む可視チャンク範囲、液面4fps設定、アンロード、同一地形の再生成を保証する。EditModeでは、資源がある通常地面の直前方だけが岩壁の場合に背面用へ分類する純粋計算を保証する。 |
 
 ## 4. 変更内容ごとの実行範囲
 

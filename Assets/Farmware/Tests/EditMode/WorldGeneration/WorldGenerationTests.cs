@@ -850,17 +850,18 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 同じシードを移行帯あり・なしで生成し、論理Biomeと気候値を維持したまま境界付近の陸上地面だけが混ざることを保証します。
+        /// 同じシードを移行帯あり・なしで生成し、論理Biome、基礎地形、気候値を維持したまま境界付近の土壌だけが混ざることを保証します。
         /// </summary>
         [Test]
-        public void BiomeTransition_ChangesGroundWithoutChangingLogicalBiome()
+        public void BiomeTransition_ChangesSoilWithoutChangingLogicalBiomeOrGround()
         {
             WorldGenerationSettings transitionSettings = WorldGenerationSettings.CreateDefault(
                 WorldSeedUtility.FromString("biome-transition-test"),
                 2);
             WorldGenerationSettings discreteSettings = transitionSettings;
             discreteSettings.BiomeTransitionWidthInTiles = 0;
-            int changedGroundTileCount = 0;
+            int changedSoilTileCount = 0;
+            HashSet<SoilType> discoveredLandSoils = new HashSet<SoilType>();
 
             // 正負座標と複数チャンク境界を含む範囲を調べ、移行判定が特定チャンク内だけに閉じていないことも確認します。
             for (int tileY = -96; tileY < 96; tileY++)
@@ -877,26 +878,47 @@ namespace Farmware.WorldGeneration.Tests
                         tileY);
 
                     Assert.That(transitioned.Biome, Is.EqualTo(discrete.Biome));
+                    Assert.That(transitioned.Ground, Is.EqualTo(discrete.Ground));
                     Assert.That(transitioned.Elevation, Is.EqualTo(discrete.Elevation));
                     Assert.That(transitioned.Temperature, Is.EqualTo(discrete.Temperature));
                     Assert.That(transitioned.Moisture, Is.EqualTo(discrete.Moisture));
                     Assert.That(transitioned.Weirdness, Is.EqualTo(discrete.Weirdness));
 
-                    if (transitioned.Ground != discrete.Ground)
+                    if (transitioned.Ground == GroundType.Land)
                     {
-                        // 水域・マグマ・岩壁はバイオーム移行の対象外であり、地形ルールを変えてはならないため明示的に除外を保証します。
-                        Assert.That(discrete.Ground, Is.Not.EqualTo(GroundType.Water));
-                        Assert.That(discrete.Ground, Is.Not.EqualTo(GroundType.Magma));
-                        Assert.That(discrete.Ground, Is.Not.EqualTo(GroundType.RockWall));
-                        changedGroundTileCount++;
+                        // 陸地には必ず資源候補と表示差分に使える土壌があり、物理地形とは独立して保持される必要があります。
+                        Assert.That(transitioned.Soil, Is.Not.EqualTo(SoilType.None));
+                        Assert.That(
+                            transitioned.GameplayFlags & TileGameplayFlags.IsBuildable,
+                            Is.EqualTo(TileGameplayFlags.IsBuildable),
+                            "土壌の種類だけで通常設備の建築可否を変えてはいけません。");
+                        Assert.That(transitioned.MovementCost, Is.EqualTo(1));
+                        discoveredLandSoils.Add(transitioned.Soil);
+                    }
+                    else
+                    {
+                        Assert.That(
+                            transitioned.Soil,
+                            Is.EqualTo(SoilType.None),
+                            "水域・岩壁・マグマへ陸地用の土壌を設定してはいけません。");
+                    }
+
+                    if (transitioned.Soil != discrete.Soil)
+                    {
+                        // 水域・マグマ・岩壁は土壌を持たず、移行帯が物理的な地形ルールを変えてはならないため陸地だけに限定します。
+                        Assert.That(discrete.Ground, Is.EqualTo(GroundType.Land));
+                        changedSoilTileCount++;
                     }
                 }
             }
 
             Assert.That(
-                changedGroundTileCount,
+                changedSoilTileCount,
                 Is.GreaterThan(0),
-                "試験範囲にバイオーム移行地面が1件も生成されませんでした。");
+                "試験範囲にバイオーム移行土壌が1件も生成されませんでした。");
+            Assert.That(discoveredLandSoils, Does.Contain(SoilType.Normal));
+            Assert.That(discoveredLandSoils, Does.Contain(SoilType.Fertile));
+            Assert.That(discoveredLandSoils, Does.Contain(SoilType.Sandy));
         }
 
         /// <summary>
@@ -1934,6 +1956,7 @@ namespace Farmware.WorldGeneration.Tests
         {
             Assert.That(actual.Biome, Is.EqualTo(expected.Biome));
             Assert.That(actual.Ground, Is.EqualTo(expected.Ground));
+            Assert.That(actual.Soil, Is.EqualTo(expected.Soil));
             Assert.That(actual.WaterSalinity, Is.EqualTo(expected.WaterSalinity));
             Assert.That(actual.WaterBodyType, Is.EqualTo(expected.WaterBodyType));
             Assert.That(actual.ElevationClass, Is.EqualTo(expected.ElevationClass));

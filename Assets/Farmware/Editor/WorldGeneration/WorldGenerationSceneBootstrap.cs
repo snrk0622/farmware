@@ -26,6 +26,18 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>表示用フォールバック素材をまとめるUnityプロジェクト相対フォルダです。</summary>
         private const string FallbackAssetFolder = "Assets/Farmware/Art/WorldGeneration/Fallback";
 
+        // 旧Soil派生Tileを確実に削除するために列挙する、7種類の土地アセット共通英語名です。
+        private static readonly string[] FallbackBiomeAssetNames =
+        {
+            "Grassland",
+            "Forest",
+            "Desert",
+            "Rockland",
+            "Wetland",
+            "Snowfield",
+            "Volcanic"
+        };
+
         /// <summary>Presentation用GameObjectを配置する既存の確認Sceneです。</summary>
         private const string MainScenePath = "Assets/Scenes/SampleScene.unity";
 
@@ -329,8 +341,15 @@ namespace Farmware.WorldGeneration.Editor
             DeleteObsoleteFallbackTile("SnowFrontEdge");
             DeleteObsoleteFallbackTile("RockWallFrontFace");
 
+            // SoilTypeはプレイヤー向け土地表示へ反映しないため、以前生成した14枚の派生Tileを残さず削除します。
+            for (int index = 0; index < FallbackBiomeAssetNames.Length; index++)
+            {
+                DeleteObsoleteFallbackTile(FallbackBiomeAssetNames[index] + "Fertile");
+                DeleteObsoleteFallbackTile(FallbackBiomeAssetNames[index] + "Sandy");
+            }
+
             // PNGのSaveAndReimport中に以前読み込んだUnity Object参照が無効化される場合があります。
-            // 14種類をすべて生成した後、AssetDatabaseから最新のTileを読み直してSceneへ保存します。
+            // 7枚のバイオーム土地、液体・岩壁・資源を生成した後、最新のTileを読み直してSceneへ保存します。
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
 
@@ -491,7 +510,7 @@ namespace Farmware.WorldGeneration.Editor
         /// 上面16pxと前面断面8pxを一枚へ結合した16×24土地Tileを作成または更新します。
         /// </summary>
         /// <param name="assetName">PNGとTileアセットに使用する英語名です。</param>
-        /// <param name="surfaceColor">上側16pxの地形上面色です。</param>
+        /// <param name="surfaceColor">上側16pxを一色で塗るバイオームの地形上面色です。</param>
         /// <param name="rimColor">断面上端の1pxへ使う影色です。</param>
         /// <param name="faceColor">断面の地盤色です。</param>
         /// <returns>作成または更新された一体型土地Tileアセットです。</returns>
@@ -511,6 +530,7 @@ namespace Farmware.WorldGeneration.Editor
                     Color32 selectedColor;
                     if (y >= TerrainLayerPresentationUtility.TerrainFrontFaceHeightInPixels)
                     {
+                        // フォールバック上面はBiome色だけを示し、草・葉・砂紋やSoilTypeの模様を重ねません。
                         selectedColor = surfaceColor;
                     }
                     else if (y == TerrainLayerPresentationUtility.TerrainFrontFaceHeightInPixels - 1)
@@ -792,7 +812,7 @@ namespace Farmware.WorldGeneration.Editor
                     return isStone ? new Color32(185, 190, 199, 255) : transparent;
 
                 case GeneratedResourceType.Sand:
-                    // ひし形の砂山を暖色で描き、砂地の全面色と区別します。
+                    // ひし形の砂山を暖色で描き、砂質土の全面色と区別します。
                     bool isSandDeposit = Math.Abs(offsetX) + Math.Abs(offsetY) <= 9;
                     return isSandDeposit ? new Color32(255, 220, 92, 255) : transparent;
 
@@ -1199,13 +1219,13 @@ namespace Farmware.WorldGeneration.Editor
         /// SampleSceneへSubScene、Grid、Tilemap、Presenter、Camera Bridge、プレイヤー診断表示、開発者可視化、Pixel Perfect Cameraを接続して保存します。
         /// </summary>
         /// <param name="settingsSubSceneAsset">生成設定をBakeするSubSceneアセットです。</param>
-        /// <param name="grasslandTile">草原用の単色Tileです。</param>
-        /// <param name="forestTile">森林用の単色Tileです。</param>
-        /// <param name="desertTile">砂漠用の単色Tileです。</param>
-        /// <param name="rocklandTile">岩地用の単色Tileです。</param>
-        /// <param name="wetlandTile">湿地用の単色Tileです。</param>
-        /// <param name="snowfieldTile">雪原用の単色Tileです。</param>
-        /// <param name="volcanicTile">火山用の単色Tileです。</param>
+        /// <param name="grasslandTile">草原固有色の上面を持つTileです。</param>
+        /// <param name="forestTile">森林固有色の上面を持つTileです。</param>
+        /// <param name="desertTile">砂漠固有色の上面を持つTileです。</param>
+        /// <param name="rocklandTile">岩地固有色の上面を持つTileです。</param>
+        /// <param name="wetlandTile">湿地固有色の上面を持つTileです。</param>
+        /// <param name="snowfieldTile">雪原固有色の上面を持つTileです。</param>
+        /// <param name="volcanicTile">火山固有色の上面を持つTileです。</param>
         /// <param name="magmaTile">マグマ地形用の単色Tileです。</param>
         /// <param name="freshWaterTile">川と池の淡水域用の単色Tileです。</param>
         /// <param name="saltWaterTile">海の海水域用の単色Tileです。</param>
@@ -1361,13 +1381,13 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="tilemap">生成地形だけを表示する専用Tilemapです。</param>
         /// <param name="resourceTilemap">岩壁に隠れない生成資源を、岩壁より前へ表示する専用Tilemapです。</param>
         /// <param name="resourceBehindRockWallTilemap">直前方の岩壁に隠す生成資源を、岩壁より後ろへ表示する専用Tilemapです。</param>
-        /// <param name="grasslandTile">草原用の単色Tileです。</param>
-        /// <param name="forestTile">森林用の単色Tileです。</param>
-        /// <param name="desertTile">砂漠用の単色Tileです。</param>
-        /// <param name="rocklandTile">岩地用の単色Tileです。</param>
-        /// <param name="wetlandTile">湿地用の単色Tileです。</param>
-        /// <param name="snowfieldTile">雪原用の単色Tileです。</param>
-        /// <param name="volcanicTile">火山用の単色Tileです。</param>
+        /// <param name="grasslandTile">草原固有色の上面を持つTileです。</param>
+        /// <param name="forestTile">森林固有色の上面を持つTileです。</param>
+        /// <param name="desertTile">砂漠固有色の上面を持つTileです。</param>
+        /// <param name="rocklandTile">岩地固有色の上面を持つTileです。</param>
+        /// <param name="wetlandTile">湿地固有色の上面を持つTileです。</param>
+        /// <param name="snowfieldTile">雪原固有色の上面を持つTileです。</param>
+        /// <param name="volcanicTile">火山固有色の上面を持つTileです。</param>
         /// <param name="magmaTile">マグマ地形用の単色Tileです。</param>
         /// <param name="freshWaterTile">川と池の淡水域用の単色Tileです。</param>
         /// <param name="saltWaterTile">海の海水域用の単色Tileです。</param>

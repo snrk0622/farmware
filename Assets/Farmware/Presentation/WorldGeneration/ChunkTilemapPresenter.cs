@@ -1,4 +1,4 @@
-// このファイルは、ECSで生成済みの地形・資源チャンクデータを、一体型の土地・岩壁Spriteと液面を含む複数Tilemapへ16×16サブチャンク単位で反映・消去します。
+// このファイルは、ECSで生成済みの地形・資源チャンクデータを、バイオームだけを示す一体型土地、岩壁Sprite、液面を含む複数Tilemapへ16×16サブチャンク単位で反映・消去します。
 // Tilemapは表示専用キャッシュであり、地形はGeneratedTile、資源はGeneratedResourceTileをゲーム状態の正として参照します。
 
 using System.Collections.Generic;
@@ -59,32 +59,32 @@ namespace Farmware.WorldGeneration.Presentation
         [Tooltip("露出した岩壁上の資源を岩壁上面と同じ12px上へ表示する専用Tilemapです。ゲーム状態の正には使用しません。")]
         [SerializeField] private Tilemap rockWallResourceTilemap;
 
-        // 草原の通常地面へ使用する表示専用Tileです。ゲームルール判定には使いません。
-        [Tooltip("草原バイオームの通常地面に表示するTileです。未指定の場合、そのセルは空表示になります。")]
+        // 草原Biomeの土地へ使用するTileです。プレイヤー表示にはSoilTypeを反映せず、バイオームの識別だけに使います。
+        [Tooltip("草原バイオームの土地に表示するTileです。SoilTypeによる見た目の差は付けません。")]
         [SerializeField] private TileBase grasslandTile;
 
-        // 森林の植生または通常地面へ使用する表示専用Tileです。
-        [Tooltip("森林バイオームの地面に表示するTileです。未指定の場合、そのセルは空表示になります。")]
+        // 森林Biomeの土地へ使用するTileです。異なる土壌でも同じ森林表示を維持します。
+        [Tooltip("森林バイオームの土地に表示するTileです。SoilTypeによる見た目の差は付けません。")]
         [SerializeField] private TileBase forestTile;
 
-        // 砂漠の砂地または通常地面へ使用する表示専用Tileです。
-        [Tooltip("砂漠バイオームの地面に表示するTileです。未指定の場合、そのセルは空表示になります。")]
+        // 砂漠Biomeの土地へ使用するTileです。異なる土壌でも同じ砂漠表示を維持します。
+        [Tooltip("砂漠バイオームの土地に表示するTileです。SoilTypeによる見た目の差は付けません。")]
         [SerializeField] private TileBase desertTile;
 
-        // 岩地の地面へ使用する表示専用Tileです。障害物の岩壁Tileとは別の、建築可能な地面を表します。
-        [Tooltip("岩地バイオームの地面に表示するTileです。岩壁とは異なり、通常地面として扱われます。")]
+        // 岩地Biomeの土地へ使用するTileです。障害物の岩壁Tileとは別で、SoilTypeは表示へ反映しません。
+        [Tooltip("岩地バイオームの土地に表示するTileです。岩壁とは別で、SoilTypeによる見た目の差は付けません。")]
         [SerializeField] private TileBase rocklandTile;
 
-        // 湿地の地面へ使用する表示専用Tileです。水域そのものはfreshWaterTileまたはsaltWaterTileを優先します。
-        [Tooltip("湿地バイオームの陸地に表示するTileです。川・池・海のセルには水域Tileが優先されます。")]
+        // 湿地Biomeの土地へ使用するTileです。水域セルでは専用Tileを優先し、SoilTypeは表示へ反映しません。
+        [Tooltip("湿地バイオームの土地に表示するTileです。川・池・海の水域セルでは専用Tileを優先します。")]
         [SerializeField] private TileBase wetlandTile;
 
-        // 雪原の地面へ使用する表示専用Tileです。凍結水面は未実装のため水域表示には使用しません。
-        [Tooltip("雪原バイオームの陸地に表示するTileです。現在、水域は凍結させず通常の水域Tileを表示します。")]
+        // 雪原Biomeの土地へ使用するTileです。水域セルでは専用Tileを優先し、SoilTypeは表示へ反映しません。
+        [Tooltip("雪原バイオームの土地に表示するTileです。水域セルでは専用Tileを優先します。")]
         [SerializeField] private TileBase snowfieldTile;
 
-        // 火山の通常地面へ使用する表示専用Tileです。マグマ本体は次の専用Tileを優先します。
-        [Tooltip("火山バイオームの陸地に表示するTileです。マグマ地形とは別の基礎地面です。")]
+        // 火山Biomeの土地へ使用するTileです。マグマセルでは専用Tileを優先し、SoilTypeは表示へ反映しません。
+        [Tooltip("火山バイオームの土地に表示するTileです。マグマセルでは専用Tileを優先します。")]
         [SerializeField] private TileBase volcanicTile;
 
         // GroundType.Magmaへ使用する表示専用Tileで、水域や火山地面とは別のゲームルールを視覚化します。
@@ -125,7 +125,7 @@ namespace Farmware.WorldGeneration.Presentation
         [SerializeField] private TileBase stoneResourceTile;
 
         // GeneratedResourceType.Sandへ使用する透明背景の表示専用Tileです。
-        [Tooltip("砂資源に表示する仮Tileです。砂地地形そのものとは別の採取候補表示です。")]
+        [Tooltip("砂資源に表示する仮Tileです。砂質土そのものとは別の採取候補表示です。")]
         [SerializeField] private TileBase sandResourceTile;
 
         // World再作成を検知し、EntityQueryを作り直すために保持する現在のDefault Worldです。
@@ -220,8 +220,8 @@ namespace Farmware.WorldGeneration.Presentation
         private Tile generatedFreshWaterFallbackTile;
 
         /// <summary>
-        /// Editor構築ツールまたはテストから、地形・資源Tilemapと分類ごとの表示Tileをまとめて設定します。
-        /// ゲームルールは変更せず、ECSバッファをどのTileBaseで見せるかだけを更新します。
+        /// Editor構築ツールまたはテストから、地形・資源TilemapとBiomeごとの基準Tileをまとめて設定します。
+        /// ゲームルールは変更せず、ECSのBiomeをどのTileで見せるかだけを更新します。
         /// </summary>
         /// <param name="terrainTilemap">水・マグマを除く生成地形だけを描画する専用Tilemapです。</param>
         /// <param name="generatedResourceTilemap">生成資源だけを描画する専用Tilemapです。</param>
@@ -1025,38 +1025,49 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// 液体を除くゲームルール用GeneratedTileを、Inspectorで割り当てた土地の基準面Tileへ変換します。
+        /// 液体を除くゲームルール用GeneratedTileを、論理バイオームに対応する一体型土地Tileへ変換します。
+        /// SoilTypeは資源生成の内部情報として保持しますが、プレイヤー向け土地表示には反映しません。
         /// </summary>
         /// <param name="tile">ECSを正とする1タイル分の土地地形データです。</param>
-        /// <returns>岩壁セルを含めてバイオームに対応する土地の基準面Tileです。</returns>
+        /// <returns>岩壁セルを含めて論理バイオームに対応する土地の基準面Tileです。</returns>
         private TileBase SelectLandTile(GeneratedTile tile)
         {
-            if (tile.Biome == BiomeId.Forest)
+            return SelectBiomeBaseTile(tile.Biome);
+        }
+
+        /// <summary>
+        /// 論理Biomeを7枚の基準土地Tileへ変換します。
+        /// </summary>
+        /// <param name="biome">Simulationが決定した論理バイオームです。</param>
+        /// <returns>指定Biomeの基準Tileです。未設定値は草原へ安全にフォールバックします。</returns>
+        private TileBase SelectBiomeBaseTile(BiomeId biome)
+        {
+            if (biome == BiomeId.Forest)
             {
                 return forestTile;
             }
 
-            if (tile.Biome == BiomeId.Desert)
+            if (biome == BiomeId.Desert)
             {
                 return desertTile;
             }
 
-            if (tile.Biome == BiomeId.Rockland)
+            if (biome == BiomeId.Rockland)
             {
                 return rocklandTile;
             }
 
-            if (tile.Biome == BiomeId.Wetland)
+            if (biome == BiomeId.Wetland)
             {
                 return wetlandTile;
             }
 
-            if (tile.Biome == BiomeId.Snowfield)
+            if (biome == BiomeId.Snowfield)
             {
                 return snowfieldTile;
             }
 
-            if (tile.Biome == BiomeId.Volcanic)
+            if (biome == BiomeId.Volcanic)
             {
                 return volcanicTile;
             }

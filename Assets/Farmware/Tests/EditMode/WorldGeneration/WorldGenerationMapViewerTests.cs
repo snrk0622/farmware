@@ -63,6 +63,53 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// 同じ論理Biomeへ3種類のSoilTypeを設定しても、TerrainとBiomeの両表示が所属色だけを維持することを保証します。
+        /// </summary>
+        [Test]
+        public void DisplayColor_PlayerTerrainIgnoresSoilAndKeepsBiomeIdentity()
+        {
+            GeneratedTile forestNormal = new GeneratedTile
+            {
+                Biome = BiomeId.Forest,
+                Ground = GroundType.Land,
+                Soil = SoilType.Normal
+            };
+            GeneratedTile forestFertile = forestNormal;
+            forestFertile.Soil = SoilType.Fertile;
+            GeneratedTile forestSandy = forestNormal;
+            forestSandy.Soil = SoilType.Sandy;
+
+            Color32 terrainNormal = WorldGenerationMapSampler.GetDisplayColor(
+                WorldGenerationMapViewMode.Terrain,
+                forestNormal);
+            Color32 terrainFertile = WorldGenerationMapSampler.GetDisplayColor(
+                WorldGenerationMapViewMode.Terrain,
+                forestFertile);
+            Color32 terrainSandy = WorldGenerationMapSampler.GetDisplayColor(
+                WorldGenerationMapViewMode.Terrain,
+                forestSandy);
+            Color32 biomeNormal = WorldGenerationMapSampler.GetDisplayColor(
+                WorldGenerationMapViewMode.Biome,
+                forestNormal);
+            Color32 biomeFertile = WorldGenerationMapSampler.GetDisplayColor(
+                WorldGenerationMapViewMode.Biome,
+                forestFertile);
+
+            Assert.That(
+                terrainNormal,
+                Is.EqualTo(terrainFertile),
+                "プレイヤー向けTerrain表示へ肥沃土の違いを反映してはいけません。");
+            Assert.That(
+                terrainSandy,
+                Is.EqualTo(terrainNormal),
+                "プレイヤー向けTerrain表示へ砂質土の違いを反映してはいけません。");
+            Assert.That(
+                biomeNormal,
+                Is.EqualTo(biomeFertile),
+                "Biome表示はSoilに左右されず、両方を同じ森林として表示する必要があります。");
+        }
+
+        /// <summary>
         /// 左上原点のPointer座標を負座標を含むワールド座標へ変換し、Canvas中央が指定中心へ一致することを検証します。
         /// </summary>
         [Test]

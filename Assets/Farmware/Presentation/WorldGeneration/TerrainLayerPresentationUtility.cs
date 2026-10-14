@@ -1,6 +1,8 @@
 // このファイルは、16×24の土地ブロック、16×28の岩壁ブロック、液面アニメーション、岩壁際の資源レイヤー分類に共通する表示規則を定義します。
 // Tilemapへ実際に描画するChunkTilemapPresenterと数値を分離し、Sceneを開かないEditModeテストでも高さ規則を検証できるようにします。
 
+using UnityEngine;
+
 namespace Farmware.WorldGeneration.Presentation
 {
     /// <summary>

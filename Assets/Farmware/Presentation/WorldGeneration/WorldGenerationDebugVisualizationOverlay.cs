@@ -1,4 +1,4 @@
-// このファイルは、ECSで生成済みの可視タイルをPlayMode中だけ色分けして、ノイズ・バイオーム・水域・岩壁・資源判定を確認できるようにします。
+// このファイルは、ECSで生成済みの可視タイルをPlayMode中だけ色分けして、ノイズ・バイオーム・土壌・水域・岩壁・資源判定を確認できるようにします。
 // 操作入口はEditor AssemblyのWorldGenerationDebugVisualizationMenuに置き、Simulationとプレイヤー用F3/F4入力から分離します。
 
 using System.Collections.Generic;
@@ -49,7 +49,10 @@ namespace Farmware.WorldGeneration.Presentation
         Weirdness = 10,
 
         /// <summary>マグマ本体、淡水抑制用の火山影響域、それ以外を固定色で表示します。</summary>
-        Magma = 11
+        Magma = 11,
+
+        /// <summary>プレイヤー表示へ出さない標準・肥沃・砂質のSoilTypeを固定色で表示します。</summary>
+        Soil = 12
     }
 
     /// <summary>
@@ -256,6 +259,22 @@ namespace Farmware.WorldGeneration.Presentation
 
                     return new Color32(104, 190, 85, 238);
 
+                case WorldGenerationDebugVisualizationMode.Soil:
+                    // SoilTypeは通常の土地Spriteへ反映しないため、生成分布を検証するときだけ専用色で区別します。
+                    if (tile.Soil == SoilType.Fertile)
+                    {
+                        return new Color32(70, 180, 82, 238);
+                    }
+
+                    if (tile.Soil == SoilType.Sandy)
+                    {
+                        return new Color32(232, 190, 80, 238);
+                    }
+
+                    return tile.Soil == SoilType.Normal
+                        ? new Color32(150, 130, 105, 238)
+                        : new Color32(35, 35, 42, 210);
+
                 case WorldGenerationDebugVisualizationMode.Elevation:
                     float elevation = tile.Elevation / (float)ushort.MaxValue;
                     return Color.Lerp(
@@ -374,11 +393,11 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// 論理Biomeの代表Groundと実際の陸上Groundを比較し、移行帯で別の地面が選ばれたかを判定します。
-        /// 水域と独立生成された岩壁はバイオーム地面より優先されるため、バイオーム移行としては数えません。
+        /// 論理Biomeの代表Soilと実際の陸上Soilを比較し、移行帯で別の土壌が選ばれたかを判定します。
+        /// 水域と独立生成された岩壁は土壌を持たないため、バイオーム移行としては数えません。
         /// </summary>
         /// <param name="tile">判定する1タイルの生成結果です。</param>
-        /// <returns>陸上で論理Biomeと異なるGroundが選択されている場合はtrueです。</returns>
+        /// <returns>陸上で論理Biomeと異なるSoilが選択されている場合はtrueです。</returns>
         public static bool IsBiomeTransitionTile(GeneratedTile tile)
         {
             if (tile.Ground == GroundType.Water
@@ -388,17 +407,17 @@ namespace Farmware.WorldGeneration.Presentation
                 return false;
             }
 
-            GroundType representativeGround = GroundType.Normal;
+            SoilType representativeSoil = SoilType.Normal;
             if (tile.Biome == BiomeId.Forest || tile.Biome == BiomeId.Wetland)
             {
-                representativeGround = GroundType.Vegetation;
+                representativeSoil = SoilType.Fertile;
             }
             else if (tile.Biome == BiomeId.Desert)
             {
-                representativeGround = GroundType.Sand;
+                representativeSoil = SoilType.Sandy;
             }
 
-            return tile.Ground != representativeGround;
+            return tile.Soil != representativeSoil;
         }
 
         /// <summary>
@@ -846,7 +865,7 @@ namespace Farmware.WorldGeneration.Presentation
 
                 // 生密度・平滑化後・通路削り・連続影値を同時に表示し、生成規則変更時の食い違いをGameビューだけで診断できます。
                 centerInformation = $"Tile ({centerCoordinate.x}, {centerCoordinate.y})  "
-                    + $"Biome={centerTile.Biome}  Ground={centerTile.Ground}\n"
+                    + $"Biome={centerTile.Biome}  Ground={centerTile.Ground}  Soil={centerTile.Soil}\n"
                     + $"Water={centerTile.WaterSalinity} / {centerTile.WaterBodyType}\n"
                     + $"Elevation={centerTile.Elevation}  Temperature={centerTile.Temperature}\n"
                     + $"Moisture={centerTile.Moisture}  Weirdness={centerTile.Weirdness}\n"
@@ -1031,6 +1050,32 @@ namespace Farmware.WorldGeneration.Presentation
                         "Volcanic",
                         88f);
                     break;
+                case WorldGenerationDebugVisualizationMode.Soil:
+                    DrawLegendEntry(
+                        ref nextX,
+                        y,
+                        GetVisualizationColor(mode, new GeneratedTile { Soil = SoilType.None }),
+                        "None",
+                        62f);
+                    DrawLegendEntry(
+                        ref nextX,
+                        y,
+                        GetVisualizationColor(mode, new GeneratedTile { Soil = SoilType.Normal }),
+                        "Normal",
+                        76f);
+                    DrawLegendEntry(
+                        ref nextX,
+                        y,
+                        GetVisualizationColor(mode, new GeneratedTile { Soil = SoilType.Fertile }),
+                        "Fertile",
+                        74f);
+                    DrawLegendEntry(
+                        ref nextX,
+                        y,
+                        GetVisualizationColor(mode, new GeneratedTile { Soil = SoilType.Sandy }),
+                        "Sandy",
+                        72f);
+                    break;
                 case WorldGenerationDebugVisualizationMode.Elevation:
                     DrawContinuousValueLegend(mode, ref nextX, y, "0 (Low)", "65535 (High)");
                     break;
@@ -1120,15 +1165,25 @@ namespace Farmware.WorldGeneration.Presentation
                         y,
                         GetVisualizationColor(
                             mode,
-                            new GeneratedTile { Biome = BiomeId.Forest, Ground = GroundType.Normal }),
-                        "Transition Ground",
+                            new GeneratedTile
+                            {
+                                Biome = BiomeId.Forest,
+                                Ground = GroundType.Land,
+                                Soil = SoilType.Normal
+                            }),
+                        "Transition Soil",
                         132f);
                     DrawLegendEntry(
                         ref nextX,
                         y,
                         GetVisualizationColor(
                             mode,
-                            new GeneratedTile { Biome = BiomeId.Forest, Ground = GroundType.Vegetation }),
+                            new GeneratedTile
+                            {
+                                Biome = BiomeId.Forest,
+                                Ground = GroundType.Land,
+                                Soil = SoilType.Fertile
+                            }),
                         "Unchanged",
                         96f);
                     break;

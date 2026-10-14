@@ -38,13 +38,13 @@ namespace Farmware.WorldGeneration
     }
 
     /// <summary>
-    /// ゲームルールが参照する基礎地面種別です。
-    /// 表示用SpriteやRuleTileの種類とは分離し、建築・リンク判定の入力に使用します。
+    /// 建築、通行、リンク可否へ直接影響する基礎地形種別です。
+    /// 資源候補や地表の見た目を表すSoilTypeとは分離し、物理的な地形ルールだけに使用します。
     /// </summary>
     public enum GroundType : byte
     {
-        /// <summary>通常の建築可能地面です。</summary>
-        Normal = 0,
+        /// <summary>通常の建築可能な陸地です。</summary>
+        Land = 0,
 
         /// <summary>通常ノードは建築不可ですが、通常リンクは通過できる水域です。</summary>
         Water = 1,
@@ -52,14 +52,28 @@ namespace Farmware.WorldGeneration
         /// <summary>建築と通常リンクの両方を遮断する岩壁です。</summary>
         RockWall = 2,
 
-        /// <summary>森林などの植生を持つ地面です。</summary>
-        Vegetation = 3,
-
-        /// <summary>砂資源に適する砂地です。</summary>
-        Sand = 4,
-
+        // ID 3と4は旧Vegetation、旧Sandが使用していたため、既存データの誤読を防ぐ目的で再利用しません。
         /// <summary>建築・通常移動・通常リンクを遮断する高温のマグマ地形です。</summary>
         Magma = 5
+    }
+
+    /// <summary>
+    /// 陸地表面の土壌傾向を表す安定IDです。
+    /// Biomeと組み合わせて資源候補を絞り、Presentationではバイオーム用Base Tileへ色調や模様を重ねるために使用します。
+    /// </summary>
+    public enum SoilType : byte
+    {
+        /// <summary>水域、岩壁、マグマなど、土壌を持たない地形です。</summary>
+        None = 0,
+
+        /// <summary>特定資源へ強く偏らない標準的な土壌です。</summary>
+        Normal = 1,
+
+        /// <summary>樹木や植物系資源の候補になりやすい、湿潤で肥沃な土壌です。</summary>
+        Fertile = 2,
+
+        /// <summary>砂や乾燥地向け資源の候補になりやすい砂質土壌です。</summary>
+        Sandy = 3
     }
 
     /// <summary>
@@ -780,6 +794,9 @@ namespace Farmware.WorldGeneration
 
         /// <summary>建築やリンク判定に使う基礎地面種別です。</summary>
         public GroundType Ground;
+
+        /// <summary>陸地の資源適性と表示差分に使う土壌種別です。陸地以外ではNoneです。</summary>
+        public SoilType Soil;
 
         /// <summary>水域なら淡水または海水、陸地ならNoneです。</summary>
         public WaterSalinity WaterSalinity;

@@ -74,7 +74,7 @@ namespace Farmware.WorldGeneration.Authoring
         [SerializeField] private int biomeClassificationTransitionWidthInTiles = 12;
 
         // 論理Biome IDを変えず、境界付近の地面種別だけを座標ハッシュで段階的に混ぜる幅です。
-        [Tooltip("バイオーム境界で草地・植生・砂地を混ぜる帯のおおよその幅です。単位はタイルです。0で無効、2〜8を推奨します。変更すると生成結果が変わります。")]
+        [Tooltip("バイオーム境界で標準・肥沃・砂質の土壌を混ぜる帯のおおよその幅です。単位はタイルです。0で無効、2〜8を推奨します。変更すると生成結果が変わります。")]
         [Range(0, 16)]
         [SerializeField] private int biomeTransitionWidthInTiles = 6;
 
@@ -307,8 +307,8 @@ namespace Farmware.WorldGeneration.Authoring
         [Range(0f, 1f)]
         [SerializeField] private float stoneResourceThreshold = 55500f / ushort.MaxValue;
 
-        // 砂地内の採取可能な砂資源群を決める0〜1の下限です。
-        [Tooltip("砂資源を配置するノイズ下限です。0〜1で指定し、小さくすると砂地内の採取候補が増えます。")]
+        // 砂質土内の採取可能な砂資源群を決める0〜1の下限です。
+        [Tooltip("砂資源を配置するノイズ下限です。0〜1で指定し、小さくすると砂質土内の採取候補が増えます。")]
         [Range(0f, 1f)]
         [SerializeField] private float sandResourceThreshold = 48000f / ushort.MaxValue;
 

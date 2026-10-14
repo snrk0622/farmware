@@ -4,7 +4,7 @@
 namespace Farmware.WorldGeneration
 {
     /// <summary>
-    /// 7種類の陸上バイオーム、淡水・海水、水域の生成由来、マグマ、岩壁を決定論的に分類します。
+    /// 7種類の陸上バイオーム、土壌、淡水・海水、水域の生成由来、マグマ、岩壁を決定論的に分類します。
     /// UnityEngine.Objectやグローバル乱数を参照しないため、Burst Jobから並列に呼び出せます。
     /// </summary>
     public static class DeterministicChunkGenerator
@@ -131,24 +131,31 @@ namespace Farmware.WorldGeneration
                 worldTileY);
             WaterBodyType waterBodyType = waterInfo.WaterBodyType;
             GroundType ground = ClassifyGround(
-                temperature,
-                moisture,
-                biome,
                 waterBodyType,
                 magmaInfo.IsMagma,
                 settings,
                 worldTileX,
                 worldTileY);
+            SoilType soil = ground == GroundType.Land
+                ? ClassifySoil(
+                    temperature,
+                    moisture,
+                    biome,
+                    settings,
+                    worldTileX,
+                    worldTileY)
+                : SoilType.None;
 
             return new GeneratedTile
             {
                 Biome = biome,
                 Ground = ground,
+                Soil = soil,
                 WaterSalinity = ClassifyWaterSalinity(waterBodyType),
                 WaterBodyType = waterBodyType,
                 ElevationClass = ClassifyElevation(elevation, ground, settings),
                 GameplayFlags = ClassifyGameplayFlags(ground),
-                ResourceSuitability = ClassifyResourceSuitability(ground, biome),
+                ResourceSuitability = ClassifyResourceSuitability(ground, soil, biome),
                 MovementCost = ClassifyMovementCost(ground),
                 Elevation = elevation,
                 Temperature = temperature,
@@ -870,22 +877,16 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>
-        /// 水域、マグマ、独立岩壁群を優先し、その後に気候値と座標ハッシュから陸上の地面種別を決めます。
-        /// 論理Biome IDは閾値で一意に保ち、境界付近の地面だけを段階的に混ぜて見た目とゲームルールをなじませます。
+        /// 水域、マグマ、独立岩壁群を優先し、それ以外を建築可能な陸地として分類します。
+        /// 資源候補と表示差分はSoilTypeへ分離し、地表の変化だけで建築・通行ルールが変わらないようにします。
         /// </summary>
-        /// <param name="temperature">0〜65535の気温です。</param>
-        /// <param name="moisture">0〜65535の湿度です。</param>
-        /// <param name="biome">気候から決めた陸上バイオームです。</param>
         /// <param name="waterBodyType">先に分類済みの川・池・海です。</param>
         /// <param name="isMagma">専用ノイズと火山適性からマグマ本体に選ばれた場合はtrueです。</param>
         /// <param name="settings">水面、岩壁群、バイオーム移行の設定です。</param>
         /// <param name="worldTileX">決定論的な移行タイル抽選に使う水平ワールドタイル座標です。</param>
         /// <param name="worldTileY">決定論的な移行タイル抽選に使う垂直ワールドタイル座標です。</param>
-        /// <returns>ゲームルール用の地面種別です。</returns>
+        /// <returns>建築、通行、リンク判定に使う基礎地形種別です。</returns>
         private static GroundType ClassifyGround(
-            ushort temperature,
-            ushort moisture,
-            BiomeId biome,
             WaterBodyType waterBodyType,
             bool isMagma,
             in WorldGenerationSettings settings,
@@ -912,10 +913,32 @@ namespace Farmware.WorldGeneration
                 return GroundType.RockWall;
             }
 
-            // 幅0は比較用テストや旧生成器を再現する入口として、従来の離散的な地面判定をそのまま返します。
+            return GroundType.Land;
+        }
+
+        /// <summary>
+        /// 陸地の気候値と論理バイオームから、資源候補と地表差分に使う土壌を決めます。
+        /// 論理Biome IDは閾値で一意に保ち、境界付近の土壌だけを段階的に混ぜて資源と見た目へ緩急を付けます。
+        /// </summary>
+        /// <param name="temperature">0〜65535の気温です。</param>
+        /// <param name="moisture">0〜65535の湿度です。</param>
+        /// <param name="biome">気候から決めた陸上バイオームです。</param>
+        /// <param name="settings">バイオーム移行の設定です。</param>
+        /// <param name="worldTileX">決定論的な土壌抽選に使う水平ワールドタイル座標です。</param>
+        /// <param name="worldTileY">決定論的な土壌抽選に使う垂直ワールドタイル座標です。</param>
+        /// <returns>陸地の資源適性と表示差分に使う土壌種別です。</returns>
+        private static SoilType ClassifySoil(
+            ushort temperature,
+            ushort moisture,
+            BiomeId biome,
+            in WorldGenerationSettings settings,
+            int worldTileX,
+            int worldTileY)
+        {
+            // 幅0は比較用テストや旧生成器を再現する入口として、バイオームと土壌を直接対応させます。
             if (settings.BiomeTransitionWidthInTiles <= 0)
             {
-                return ClassifyDiscreteBiomeGround(biome);
+                return ClassifyDiscreteBiomeSoil(biome);
             }
 
             ushort hotWeight = CalculateAboveThresholdWeight(
@@ -940,7 +963,7 @@ namespace Farmware.WorldGeneration
                 candidateIndex: 0));
             if (IsSelectedByWeight(desertWeight, desertSample))
             {
-                return GroundType.Sand;
+                return SoilType.Sandy;
             }
 
             ushort forestWeight = CalculateAboveThresholdWeight(
@@ -957,27 +980,27 @@ namespace Farmware.WorldGeneration
                 candidateIndex: 1));
             if (IsSelectedByWeight(forestWeight, forestSample))
             {
-                return GroundType.Vegetation;
+                return SoilType.Fertile;
             }
 
-            return GroundType.Normal;
+            return SoilType.Normal;
         }
 
         /// <summary>
-        /// 移行帯を無効にした場合の、論理バイオームから地面への直接対応を返します。
+        /// 移行帯を無効にした場合の、論理バイオームから土壌への直接対応を返します。
         /// </summary>
         /// <param name="biome">気候閾値から決定済みの論理バイオームです。</param>
-        /// <returns>森林と湿地は植生地面、砂漠は砂地、それ以外は通常地面です。</returns>
-        private static GroundType ClassifyDiscreteBiomeGround(BiomeId biome)
+        /// <returns>森林と湿地は肥沃土、砂漠は砂質土、それ以外は標準土壌です。</returns>
+        private static SoilType ClassifyDiscreteBiomeSoil(BiomeId biome)
         {
             if (biome == BiomeId.Desert)
             {
-                return GroundType.Sand;
+                return SoilType.Sandy;
             }
 
             return biome == BiomeId.Forest || biome == BiomeId.Wetland
-                ? GroundType.Vegetation
-                : GroundType.Normal;
+                ? SoilType.Fertile
+                : SoilType.Normal;
         }
 
         /// <summary>
@@ -1137,24 +1160,31 @@ namespace Farmware.WorldGeneration
         {
             switch (ground)
             {
+                case GroundType.Land:
+                    return TileGameplayFlags.IsBuildable;
                 case GroundType.Water:
                     return TileGameplayFlags.None;
                 case GroundType.RockWall:
                 case GroundType.Magma:
                     return TileGameplayFlags.BlocksNormalLink;
                 default:
-                    return TileGameplayFlags.IsBuildable;
+                    // 予約済みIDや破損データを建築可能地として扱わず、安全側で通常設備を置けない状態にします。
+                    return TileGameplayFlags.None;
             }
         }
 
         /// <summary>
-        /// 地面とバイオームから、Phase 3で利用する資源候補フラグを決めます。
+        /// 基礎地形、土壌、バイオームから、Phase 3で利用する資源候補フラグを決めます。
         /// ここでは候補だけを記録し、密度・群れ・最低間隔は後続の資源配置Systemで判定します。
         /// </summary>
         /// <param name="ground">分類済みの地面種別です。</param>
+        /// <param name="soil">陸地の局所的な土壌種別です。</param>
         /// <param name="biome">分類済みのバイオームです。</param>
         /// <returns>配置可能な資源種別の組み合わせです。</returns>
-        private static ResourceSuitability ClassifyResourceSuitability(GroundType ground, BiomeId biome)
+        private static ResourceSuitability ClassifyResourceSuitability(
+            GroundType ground,
+            SoilType soil,
+            BiomeId biome)
         {
             if (ground == GroundType.Water || ground == GroundType.Magma)
             {
@@ -1167,12 +1197,18 @@ namespace Farmware.WorldGeneration
                 return ResourceSuitability.Stone;
             }
 
-            if (ground == GroundType.Sand || biome == BiomeId.Desert)
+            if (ground != GroundType.Land)
+            {
+                // 予約済みIDや破損データへ通常資源を生成せず、既知の陸地だけを候補にします。
+                return ResourceSuitability.None;
+            }
+
+            if (soil == SoilType.Sandy || biome == BiomeId.Desert)
             {
                 return ResourceSuitability.Sand | ResourceSuitability.Stone;
             }
 
-            if (ground == GroundType.Vegetation || biome == BiomeId.Forest)
+            if (soil == SoilType.Fertile || biome == BiomeId.Forest)
             {
                 return ResourceSuitability.Tree | ResourceSuitability.Stone;
             }
@@ -1193,12 +1229,18 @@ namespace Farmware.WorldGeneration
         /// <returns>0〜2の移動コストです。</returns>
         private static byte ClassifyMovementCost(GroundType ground)
         {
-            if (ground == GroundType.RockWall || ground == GroundType.Magma)
+            if (ground == GroundType.Land)
             {
-                return 0;
+                return 1;
             }
 
-            return ground == GroundType.Water ? (byte)2 : (byte)1;
+            if (ground == GroundType.Water)
+            {
+                return 2;
+            }
+
+            // 岩壁、マグマ、予約済みIDは通常移動不可として0を返します。
+            return 0;
         }
 
         /// <summary>
@@ -1226,7 +1268,9 @@ namespace Farmware.WorldGeneration
                 packedClimate |= (ulong)tile.Weirdness << 48;
 
                 ulong classificationsHash = WorldSeedUtility.Mix64(currentHash ^ packedClassifications);
-                return WorldSeedUtility.Mix64(classificationsHash ^ packedClimate);
+                // 既存8分類で64bitを使い切っているため、土壌は独立した混合段階へ加えて配置差分も検出します。
+                ulong soilHash = WorldSeedUtility.Mix64(classificationsHash ^ (byte)tile.Soil);
+                return WorldSeedUtility.Mix64(soilHash ^ packedClimate);
             }
         }
     }

@@ -68,7 +68,7 @@ namespace Farmware.WorldGeneration.Tests
                 WaterSalinity = WaterSalinity.SaltWater
             };
             GeneratedTile magma = new GeneratedTile { Ground = GroundType.Magma };
-            GeneratedTile land = new GeneratedTile { Ground = GroundType.Normal };
+            GeneratedTile land = new GeneratedTile { Ground = GroundType.Land };
 
             Assert.That(
                 TerrainLayerPresentationUtility.ClassifyLiquidAnimation(freshWater),
@@ -95,7 +95,7 @@ namespace Farmware.WorldGeneration.Tests
                 Type = GeneratedResourceType.Tree
             };
             GeneratedResourceTile noResource = default;
-            GeneratedTile land = new GeneratedTile { Ground = GroundType.Normal };
+            GeneratedTile land = new GeneratedTile { Ground = GroundType.Land };
             GeneratedTile rockWall = new GeneratedTile { Ground = GroundType.RockWall };
 
             Assert.That(
