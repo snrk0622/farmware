@@ -76,6 +76,10 @@ namespace Farmware.WorldGeneration.Presentation
         /// </summary>
         private void Update()
         {
+            // 初期スポーン探索の待機中でもDefault Worldは切り替わる可能性があります。
+            // 新WorldへObserverを作るのは待機終了後に遅らせつつ、旧Worldの要求だけは直ちに止める必要があります。
+            DestroyOwnedObserverIfDefaultWorldChanged();
+
             // 初期位置探索中はObserverを作らず、後で不要になる原点チャンクの生成・表示を防ぎます。
             // 探索失敗も完了に含めるため、その場合はScene保存位置から通常どおり読み込みを始めます。
             if (initialPositionController != null
@@ -98,6 +102,27 @@ namespace Farmware.WorldGeneration.Presentation
             observerWorld.EntityManager.SetComponentData(observerEntity, currentObserver);
             lastObserver = currentObserver;
             hasLastObserver = true;
+        }
+
+        /// <summary>
+        /// Default Worldの変更または消失を、初期スポーン待機判定より先に検出して旧Observerを破棄します。
+        /// 新World側のObserverは作成せず、初期位置が確定した後のTryEnsureObserverEntityへ作成を委ねます。
+        /// </summary>
+        private void DestroyOwnedObserverIfDefaultWorldChanged()
+        {
+            if (observerWorld == null)
+            {
+                return;
+            }
+
+            World currentWorld = World.DefaultGameObjectInjectionWorld;
+            if (observerWorld == currentWorld && observerWorld.IsCreated)
+            {
+                return;
+            }
+
+            // 旧Worldがまだ更新中ならEntityを実際に破棄し、破棄済みなら所有参照と送信キャッシュだけを安全に戻します。
+            DestroyOwnedObserverEntity();
         }
 
         /// <summary>

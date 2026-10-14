@@ -296,11 +296,11 @@ namespace Farmware.WorldGeneration.PlayModeTests
         }
 
         /// <summary>
-        /// 2つの有効なWorldを維持したままDefault Worldを切り替え、Camera Bridgeが旧Worldの所有Observerを破棄してから新規作成することを保証します。
-        /// World再初期化後に古いObserver Singletonが残り、旧Worldを再利用できなくなる退行を防ぎます。
+        /// 2つの有効なWorldを維持したままDefault Worldを初期スポーン探索中のWorldへ切り替え、Camera Bridgeが旧Observerだけを直ちに破棄することを保証します。
+        /// 新Worldでは初期位置の確定までObserverを作らず、確定後に1件だけ作成する寿命全体も検証します。
         /// </summary>
         [Test]
-        public void CameraChunkStreamingBridge_WorldChanged_DestroysPreviousObserver()
+        public void CameraChunkStreamingBridge_WorldChangedWhileSpawnPending_DestroysOnlyPreviousObserver()
         {
             World previousWorld = World.DefaultGameObjectInjectionWorld;
             World firstWorld = new World("CameraBridgeFirstWorld");
@@ -310,18 +310,34 @@ namespace Farmware.WorldGeneration.PlayModeTests
             try
             {
                 World.DefaultGameObjectInjectionWorld = firstWorld;
+                Entity firstSearchStatusEntity = firstWorld.EntityManager.CreateEntity();
+                firstWorld.EntityManager.AddComponentData(
+                    firstSearchStatusEntity,
+                    new InitialSpawnSearchStatus
+                    {
+                        Phase = InitialSpawnSearchPhase.Failed
+                    });
+
                 cameraObject = new GameObject("World Switching Streaming Camera");
                 cameraObject.SetActive(false);
                 Camera camera = cameraObject.AddComponent<Camera>();
                 camera.orthographic = true;
+                cameraObject.AddComponent<CameraPanController>();
+                InitialCameraPositionController positionController =
+                    cameraObject.AddComponent<InitialCameraPositionController>();
                 CameraChunkStreamingBridge streamingBridge =
                     cameraObject.AddComponent<CameraChunkStreamingBridge>();
                 cameraObject.SetActive(true);
 
+                MethodInfo positionUpdate = typeof(InitialCameraPositionController).GetMethod(
+                    "Update",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
                 MethodInfo streamingUpdate = typeof(CameraChunkStreamingBridge).GetMethod(
                     "Update",
                     BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.That(positionUpdate, Is.Not.Null);
                 Assert.That(streamingUpdate, Is.Not.Null);
+                positionUpdate.Invoke(positionController, null);
                 streamingUpdate.Invoke(streamingBridge, null);
 
                 using EntityQuery firstObserverQuery = firstWorld.EntityManager.CreateEntityQuery(
@@ -331,14 +347,35 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Assert.That(firstObserverQuery.CalculateEntityCount(), Is.EqualTo(1));
                 Assert.That(secondObserverQuery.CalculateEntityCount(), Is.EqualTo(0));
 
-                // 旧Worldを破棄せずDefaultだけを切り替え、所有Entityの破棄先を正しく記憶していることを確認します。
+                // 旧Worldを破棄せずDefaultだけを切り替え、新World側の初期位置Controllerを探索待機状態へ戻します。
                 World.DefaultGameObjectInjectionWorld = secondWorld;
+                positionUpdate.Invoke(positionController, null);
                 streamingUpdate.Invoke(streamingBridge, null);
 
                 Assert.That(
                     firstObserverQuery.CalculateEntityCount(),
                     Is.EqualTo(0),
-                    "新Worldへ所有参照を上書きする前に、旧WorldのObserverを破棄する必要があります。");
+                    "新Worldの初期スポーン探索中でも、旧WorldのObserverは直ちに破棄する必要があります。");
+                Assert.That(
+                    positionController.HasCompletedInitialPositioning,
+                    Is.False,
+                    "探索結果がない新Worldでは、初期カメラ位置の確定を待つ必要があります。");
+                Assert.That(
+                    secondObserverQuery.CalculateEntityCount(),
+                    Is.EqualTo(0),
+                    "初期位置が未確定の新WorldへObserverを先行作成してはいけません。");
+
+                Entity secondSearchStatusEntity = secondWorld.EntityManager.CreateEntity();
+                secondWorld.EntityManager.AddComponentData(
+                    secondSearchStatusEntity,
+                    new InitialSpawnSearchStatus
+                    {
+                        Phase = InitialSpawnSearchPhase.Failed
+                    });
+                positionUpdate.Invoke(positionController, null);
+                streamingUpdate.Invoke(streamingBridge, null);
+
+                Assert.That(positionController.HasCompletedInitialPositioning, Is.True);
                 Assert.That(secondObserverQuery.CalculateEntityCount(), Is.EqualTo(1));
             }
             finally
