@@ -71,6 +71,8 @@ namespace Farmware.WorldGeneration
             // SubSceneの再読み込みなどで既存Singletonがある場合は、二重作成せずこのSystemを停止します。
             if (SystemAPI.TryGetSingleton<InitialSpawnLocation>(out _))
             {
+                // 探索Jobが結果を書き込んでいる途中でも、書き込み完了前のNativeReferenceを破棄しないよう同期します。
+                CompleteSearchJobIfRunning();
                 DisposeSearchResultIfCreated();
                 searchState = 2;
                 SetSearchPhase(ref state, InitialSpawnSearchPhase.Succeeded);
@@ -130,12 +132,20 @@ namespace Farmware.WorldGeneration
         /// <param name="state">破棄されるSystem状態です。Entityの追加は行いません。</param>
         public void OnDestroy(ref SystemState state)
         {
+            CompleteSearchJobIfRunning();
+            DisposeSearchResultIfCreated();
+        }
+
+        /// <summary>
+        /// 探索Jobが実行中の場合だけ完了を待ち、結果領域をメインスレッドから安全に読み取り・破棄できる状態へ戻します。
+        /// 既存地点の出現またはWorld破棄で探索を途中終了するときに呼び、完了まで一時的にメインスレッドを待機させます。
+        /// </summary>
+        private void CompleteSearchJobIfRunning()
+        {
             if (searchState == 1)
             {
                 searchHandle.Complete();
             }
-
-            DisposeSearchResultIfCreated();
         }
 
         /// <summary>

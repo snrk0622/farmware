@@ -1344,6 +1344,53 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// 非同期の初期スポーン探索を開始した直後に外部から既存地点を追加し、探索Jobの完了後に一時結果を安全に破棄できることを保証します。
+        /// Jobが書き込み中のNativeReferenceを先に破棄するSafety Check例外と、探索結果によるSingletonの二重作成を防ぎます。
+        /// </summary>
+        [Test]
+        public void InitialSpawnLocationSystem_ExistingLocationDuringSearchCompletesJobBeforeDisposal()
+        {
+            using World world = new World("InitialSpawnLocationSystem Existing Location Test");
+            EntityManager entityManager = world.EntityManager;
+            Entity settingsEntity = entityManager.CreateEntity();
+            entityManager.AddComponentData(
+                settingsEntity,
+                WorldGenerationSettings.CreateDefault(WorldSeedUtility.Mix64(2UL), 1));
+            entityManager.AddComponentData(
+                settingsEntity,
+                ResourceGenerationSettings.CreateDefault());
+
+            SystemHandle system = world.GetOrCreateSystem<InitialSpawnLocationSystem>();
+
+            // 1回目の更新で探索Jobだけを開始し、完了待ちを行わないまま外部由来の地点を追加します。
+            system.Update(world.Unmanaged);
+            Entity existingLocationEntity = entityManager.CreateEntity();
+            entityManager.AddComponentData(
+                existingLocationEntity,
+                new InitialSpawnLocation
+                {
+                    TileX = 10,
+                    TileY = -20,
+                    RegionMinimumTileX = 4,
+                    RegionMinimumTileY = -24,
+                    RegionWidthInTiles = 12,
+                    RegionHeightInTiles = 8
+                });
+
+            // 2回目の更新は探索Jobを完了してから結果領域を破棄し、既存地点をそのまま成功結果として採用します。
+            system.Update(world.Unmanaged);
+
+            using EntityQuery locationQuery = entityManager.CreateEntityQuery(
+                ComponentType.ReadOnly<InitialSpawnLocation>());
+            using EntityQuery searchStatusQuery = entityManager.CreateEntityQuery(
+                ComponentType.ReadOnly<InitialSpawnSearchStatus>());
+            Assert.That(locationQuery.CalculateEntityCount(), Is.EqualTo(1));
+            Assert.That(
+                searchStatusQuery.GetSingleton<InitialSpawnSearchStatus>().Phase,
+                Is.EqualTo(InitialSpawnSearchPhase.Succeeded));
+        }
+
+        /// <summary>
         /// テスト用Worldへ設定Entityと要求チャンクを作り、System更新後に4096タイルと完了状態が得られることを保証します。
         /// </summary>
         [Test]
