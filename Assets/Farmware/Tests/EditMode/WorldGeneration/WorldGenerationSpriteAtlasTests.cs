@@ -1,4 +1,4 @@
-// このファイルは、一体型土地・岩壁のSprite Atlas V2設定と、土地が同じパック済みTextureへ収まることを検証します。
+// このファイルは、本番用バイオーム土地・フォールバック岩壁のSprite Atlas V2設定と、土地が同じパック済みTextureへ収まることを検証します。
 // Tilemapの見た目を画像比較する代わりに、誤描画の原因だったTexture分割をEditModeで直接保証します。
 
 using System;
@@ -10,6 +10,7 @@ using UnityEditor.Sprites;
 using UnityEditor.U2D;
 using UnityEngine;
 using UnityEngine.U2D;
+using UnityEngine.Tilemaps;
 
 namespace Farmware.WorldGeneration.Tests
 {
@@ -31,7 +32,7 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 土地Atlasが7種類のバイオームTextureだけをPackableとして持ち、Soil派生、液体、資源を誤って収録していないことを検証します。
+        /// 土地Atlasが7バイオームを収録した本番用TextureだけをPackableとして持ち、Fallback、液体、資源を誤って収録していないことを検証します。
         /// </summary>
         [Test]
         public void GroundTerrainAtlas_ContainsAllTerrainSourceTextures()
@@ -39,6 +40,77 @@ namespace Farmware.WorldGeneration.Tests
             AssertAtlasPackables(
                 WorldGenerationSpriteAtlasBuilder.GroundTerrainAtlasPath,
                 WorldGenerationSpriteAtlasBuilder.GetGroundTerrainSourceTexturePaths());
+        }
+
+        /// <summary>
+        /// 本番用土地シートが左からBiome ID順の7枚へSliceされ、16×24土地向けのPixel Art設定を持つことを検証します。
+        /// </summary>
+        [Test]
+        public void ProductionBiomeSpriteSheet_UsesExpectedSlicesAndPixelArtSettings()
+        {
+            string texturePath = WorldGenerationSpriteAtlasBuilder.ProductionBiomeTerrainTexturePath;
+            TextureImporter importer = AssetImporter.GetAtPath(texturePath) as TextureImporter;
+            Assert.That(importer, Is.Not.Null, $"TextureImporterを取得できません: {texturePath}");
+            Assert.That(importer.textureType, Is.EqualTo(TextureImporterType.Sprite));
+            Assert.That(importer.spriteImportMode, Is.EqualTo(SpriteImportMode.Multiple));
+            Assert.That(importer.spritePixelsPerUnit, Is.EqualTo(16f));
+            Assert.That(importer.filterMode, Is.EqualTo(FilterMode.Point));
+            Assert.That(importer.mipmapEnabled, Is.False);
+            Assert.That(importer.textureCompression, Is.EqualTo(TextureImporterCompression.Uncompressed));
+            Assert.That(importer.wrapMode, Is.EqualTo(TextureWrapMode.Clamp));
+
+            // Unity 6.3ではMesh TypeとFallback Physics ShapeがTextureImporter本体から設定構造体へ移動しています。
+            // 実際のImporter設定を読み戻し、矩形Tileへ不要な輪郭処理やCollider形状が混ざらないことを保証します。
+            TextureImporterSettings importerSettings = new TextureImporterSettings();
+            importer.ReadTextureSettings(importerSettings);
+            Assert.That(importerSettings.spriteMeshType, Is.EqualTo(SpriteMeshType.FullRect));
+            Assert.That(importerSettings.spriteGenerateFallbackPhysicsShape, Is.False);
+
+            Sprite[] sprites = AssetDatabase.LoadAllAssetsAtPath(texturePath)
+                .OfType<Sprite>()
+                .OrderBy(sprite => sprite.rect.x)
+                .ToArray();
+            string[] expectedNames = WorldGenerationSpriteAtlasBuilder.GetExpectedBiomeSpriteNames();
+            Assert.That(sprites, Has.Length.EqualTo(expectedNames.Length));
+
+            for (int index = 0; index < sprites.Length; index++)
+            {
+                Sprite sprite = sprites[index];
+
+                // 112×24画像を左から16pxずつ読むことで、Biome IDとSprite名の対応を固定します。
+                Assert.That(sprite.name, Is.EqualTo(expectedNames[index]));
+                Assert.That(sprite.rect.x, Is.EqualTo(index * 16f));
+                Assert.That(sprite.rect.y, Is.Zero);
+                Assert.That(sprite.rect.width, Is.EqualTo(16f));
+                Assert.That(sprite.rect.height, Is.EqualTo(24f));
+                Assert.That(sprite.pivot.x, Is.EqualTo(8f).Within(0.001f));
+                Assert.That(sprite.pivot.y, Is.EqualTo(16f).Within(0.001f));
+            }
+        }
+
+        /// <summary>
+        /// 7個の本番用Tileが同名のSlice Spriteを参照し、Colliderを持たない表示専用アセットであることを検証します。
+        /// </summary>
+        [Test]
+        public void ProductionBiomeTiles_ReferenceMatchingSprites()
+        {
+            string[] expectedNames = WorldGenerationSpriteAtlasBuilder.GetExpectedBiomeSpriteNames();
+
+            for (int index = 0; index < expectedNames.Length; index++)
+            {
+                string expectedName = expectedNames[index];
+                string tilePath =
+                    $"Assets/Farmware/Art/WorldGeneration/Terrain/Base/{expectedName}.asset";
+                Tile tile = AssetDatabase.LoadAssetAtPath<Tile>(tilePath);
+
+                Assert.That(tile, Is.Not.Null, $"本番用Biome Tileが見つかりません: {tilePath}");
+                Assert.That(tile.sprite, Is.Not.Null, $"TileのSprite参照がありません: {tilePath}");
+                Assert.That(tile.sprite.name, Is.EqualTo(expectedName));
+                Assert.That(
+                    AssetDatabase.GetAssetPath(tile.sprite),
+                    Is.EqualTo(WorldGenerationSpriteAtlasBuilder.ProductionBiomeTerrainTexturePath));
+                Assert.That(tile.colliderType, Is.EqualTo(Tile.ColliderType.None));
+            }
         }
 
         /// <summary>
@@ -62,7 +134,7 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 岩壁Atlasも土地と同じPixel Art向け設定を使用し、将来の差分追加時に設定が分岐しないことを検証します。
+        /// 岩壁Atlasも土地と同じPixel Art向け設定を使用し、本番岩壁へ差し替える際に設定が分岐しないことを検証します。
         /// </summary>
         [Test]
         public void RockWallAtlas_UsesPixelArtSettingsAndBuiltInDelivery()

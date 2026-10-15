@@ -241,10 +241,10 @@ WorldSeed
 
 - 大きな水域はElevationと、必要性を確認して導入するContinentalnessから決定する。マグマは火山適性とWeirdness、ベルトを遮って迂回を要求する岩壁群は標高から独立した連続ノイズで決定する。
 - 細かな岸、突起、空き地は高周波ノイズで変化させる。
-- 地形種別そのものをタイルごとに独立抽選して市松模様にしない。Presentation用Base SpriteのA・Bだけは、地形生成結果を変えない意図的な市松状の交互配置とする。
+- 地形種別そのものをタイルごとに独立抽選して市松模様にしない。Presentation用Base Spriteも分類ごとに1枚とし、座標による差分選択を行わない。
 - 平滑化が必要な場合も、隣接チャンクを生成済みであることへ依存しない座標ベースの処理にする。
 - 草原、森林、砂漠など同じ高さの基本地形同士はBase Tileの材質を境界用Tileで混ぜず、生成済みのBase Tileを直接隣接させる。境界ハイライトは、水・マグマに接する土地の外周辺・内角と、岩壁領域の外周辺・内角へ、Base Tileに依存しない白い共通デザインの透明オーバーレイを追加する。8方向から47接続状態を判定し、14枚の可視Spriteを90度回転して表示する。異なる土地バイオーム同士には表示しない。既存のバイオーム移行帯は、座標ベースで選ばれた土壌・植生・装飾の分布として表現する。
-- 各Base地形はA・Bの2差分だけを持つ。差分選択は乱数、ワールドシード、生成順、ロード順を使わず、ワールド整数タイル座標の`(x & 1) ^ (y & 1)`が`0`ならA、`1`ならBとして全地形で共通化する。負座標、バイオーム境界、16×16サブチャンク境界、64×64チャンク境界でも交互配置を再開しない。
+- 各Base地形は分類ごとに1枚だけを持つ。通常表示では座標、乱数、ワールドシード、生成順、ロード順にかかわらず、同じ論理Biomeへ同じTileを使用する。低頻度の色や模様の変化が必要な場合は、Base Tileの差分ではなく地表装飾へ分離する。
 - 通常表示では論理`BiomeId`に対応するBase Tileだけを使用し、`SoilType.Normal`、`SoilType.Fertile`、`SoilType.Sandy`の違いを土地Spriteへ反映しない。土壌を理由に、森林を草原Tileへ置き換えるなど別バイオームの見た目へ変更しない。
 - 初期フォールバックは7枚のバイオームBase Spriteを使用し、上面は各バイオームの基準色一色とする。草、葉、砂紋などの固有模様および肥沃・砂質の派生Sprite／Tileは生成しない。本番アートはバイオームごとの表現差を持てるが、現仕様ではSoilType別素材を必要としない。将来SoilTypeを施設条件などプレイヤーの判断へ使う場合は、その機能と同時に専用Overlayや凡例を設計し、通常土地Tileへ暗黙に混ぜない。
 - バイオーム限定施設の配置操作を実装する際は、通常時の自然な移行表示とは別に、配置可能範囲、カーソル位置のバイオーム名、設置不可理由を表示し、1タイル単位の論理境界を必要なときだけ判別できるようにする。
@@ -371,7 +371,7 @@ WorldSeed
 - Sorting Orderは静止液面を-2、液面アニメーションを-1、`Ground Tilemap`を0、岩壁背面資源を2、`Rock Wall Tilemap`を3、岩壁内部影を5、通常前面資源を10、岩壁上資源を11とする。GroundとRock WallはIndividual ModeかつTop Left順を使用し、他のTilemapはChunk ModeかつBottom Left順を使用する。
 - `GroundTerrainAtlas`と`RockWallAtlas`はSprite Atlas V2、Built-in配信、Point、Mip Maps Off、RGBA32、無圧縮、回転なし、矩形Packingで生成する。Editor構築時とPlayerビルド前に再パックし、各Atlasが複数ページへ分割された場合は検証を失敗させる。
 - 通常地形は`Ground Tilemap`、水域・マグマは`Liquid Base Tilemap`で排他的に表示する。液体2レイヤーは同じ`-8/16セル`へ移動し、手前土地と重なる液面下辺は一体型土地ブロックで隠す。岩壁セルではBiome由来の土地へ、一体型岩壁・内部影・露出資源をPresentationとして重ねる。
-- 一体型土地・岩壁と液面アニメーションは実装済みであり、現在はEditor構築ツールが生成する交換可能なフォールバック素材を参照する。プレイヤー向け土地は7種類のBiome基準Tileだけを使い、上面は基準色一色で、Soil差や草・葉・砂紋などの固有模様を含まない。Soil分布はEditor専用Debug Visualizationでのみ確認でき、追加のバイオーム移行装飾は未実装である。
+- 一体型土地・岩壁と液面アニメーションは実装済みである。プレイヤー向け土地は`terrain_biomes_base.png`を左からBiome ID順に7分割した本番用Tileを参照し、各Biomeで常に同じ1枚を使う。岩壁、液体、資源、液面アニメーションはEditor構築ツールが生成する交換可能なフォールバック素材を参照する。Soil差は通常土地へ反映せずEditor専用Debug Visualizationでのみ確認でき、追加のバイオーム移行装飾は未実装である。
 - 固定レイヤーの基本順は、静止液面、液面アニメーション、一体型土地、岩壁背面資源、一体型岩壁、岩壁内部影、通常前面資源、岩壁上資源とする。通常資源は直前方の岩壁有無から背面用または前面用へ分ける。
 - `Liquid Base Tilemap`は淡水、海水、マグマの静止Base Tileを8 px下へ表示する。`Liquid Surface Animation Tilemap`も同じTransformで透明な4フレームLoopだけを重ね、外周1 pxを常に透明に保つ。タイルごとのGameObjectやSpriteRendererは作成しない。
 - `Ground Tilemap`と`Rock Wall Tilemap`では、上面と前面を一枚のSpriteとしてセル単位でYソートする。旧Terrain Front Edge、Rock Wall Front Face、Rock Wall Top Tilemapは使用しない。
@@ -382,11 +382,11 @@ WorldSeed
 
 ### 7.10 完成形のタイルマップ・描画レイヤー構成
 
-現在の7枚構成は縦切り試作の実装状態として維持するが、製品向けの完成形では次の5枚をTilemapとして使用する。液面は静止したA・Bの2差分と、共用できる透明アニメーションを独立させる。これにより、両Base差分へ同じアニメーションフレームを複製せず、遠距離や負荷設定では表面アニメーションだけを停止できる。木・岩などの自然資源、動物、プレイヤー配置設備は、相互に接地点Yで前後関係を解決する必要があるためTilemapへ混在させず、共通のWorld Object Presentationで表示する。
+現在の7枚構成は縦切り試作の実装状態として維持するが、製品向けの完成形では次の5枚をTilemapとして使用する。液面は分類ごとに1枚の静止Base Tileと、共用できる透明アニメーションを独立させる。これにより、Base Tileへアニメーションフレームを複製せず、遠距離や負荷設定では表面アニメーションだけを停止できる。木・岩などの自然資源、動物、プレイヤー配置設備は、相互に接地点Yで前後関係を解決する必要があるためTilemapへ混在させず、共通のWorld Object Presentationで表示する。
 
 | 表示帯 | Scene上の名前 | 描画方式 | 完成形での責務 |
 |---|---|---|---|
-| Terrain | `Liquid Base Tilemap` | Tilemap / TilemapRenderer | 淡水、海水、マグマの静止したA・Bの2差分を市松状に交互配置し、論理セルから画面下へ8 px投影する |
+| Terrain | `Liquid Base Tilemap` | Tilemap / TilemapRenderer | 淡水、海水、マグマの分類ごとに1枚の静止Base Tileを、論理セルから画面下へ8 px投影する |
 | Terrain | `Liquid Surface Animation Tilemap` | Tilemap / AnimatedTile | Baseと同じ位置へ透明な波紋・明暗の4フレームLoopを重ねる |
 | Terrain | `Ground Tilemap` | Tilemap / TilemapRenderer Individual | 16×24の土地ブロックを表示する |
 | Terrain | `Ground Overlay Tilemap` | Tilemap / TilemapRenderer | プレイヤーが配置する床、道、模様、舗装、耕地など、厚みを持たない地表装飾を土地より前、全立体物より後ろへ表示する |
