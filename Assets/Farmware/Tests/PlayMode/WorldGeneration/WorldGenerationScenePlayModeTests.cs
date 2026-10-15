@@ -659,7 +659,9 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 World.DefaultGameObjectInjectionWorld = firstWorld;
                 ChunkTilemapPresenter presenter = CreateLifecycleTestPresenter(
                     out presenterRoot,
-                    out Tilemap terrainTilemap);
+                    out Tilemap terrainTilemap,
+                    out Tilemap landBoundaryHighlightTilemap,
+                    out Tilemap rockWallBoundaryHighlightTilemap);
                 MethodInfo ensureQueries = typeof(ChunkTilemapPresenter).GetMethod(
                     "TryEnsureQueries",
                     BindingFlags.Instance | BindingFlags.NonPublic);
@@ -668,6 +670,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
 
                 testTile = ScriptableObject.CreateInstance<Tile>();
                 terrainTilemap.SetTile(Vector3Int.zero, testTile);
+                landBoundaryHighlightTilemap.SetTile(Vector3Int.zero, testTile);
+                rockWallBoundaryHighlightTilemap.SetTile(Vector3Int.zero, testTile);
                 FieldInfo displayedCoordinatesField = typeof(ChunkTilemapPresenter).GetField(
                     "displayedCoordinates",
                     BindingFlags.Instance | BindingFlags.NonPublic);
@@ -681,6 +685,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Assert.That(ensureQueries.Invoke(presenter, null), Is.EqualTo(true));
 
                 Assert.That(terrainTilemap.GetTile(Vector3Int.zero), Is.Null);
+                Assert.That(landBoundaryHighlightTilemap.GetTile(Vector3Int.zero), Is.Null);
+                Assert.That(rockWallBoundaryHighlightTilemap.GetTile(Vector3Int.zero), Is.Null);
                 Assert.That(displayedCoordinates, Is.Empty);
             }
             finally
@@ -714,9 +720,13 @@ namespace Farmware.WorldGeneration.PlayModeTests
             {
                 ChunkTilemapPresenter presenter = CreateLifecycleTestPresenter(
                     out presenterRoot,
-                    out Tilemap terrainTilemap);
+                    out Tilemap terrainTilemap,
+                    out Tilemap landBoundaryHighlightTilemap,
+                    out Tilemap rockWallBoundaryHighlightTilemap);
                 testTile = ScriptableObject.CreateInstance<Tile>();
                 terrainTilemap.SetTile(Vector3Int.zero, testTile);
+                landBoundaryHighlightTilemap.SetTile(Vector3Int.zero, testTile);
+                rockWallBoundaryHighlightTilemap.SetTile(Vector3Int.zero, testTile);
 
                 FieldInfo pendingCoordinatesField = typeof(ChunkTilemapPresenter).GetField(
                     "pendingClearCoordinates",
@@ -730,6 +740,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 presenter.enabled = false;
 
                 Assert.That(terrainTilemap.GetTile(Vector3Int.zero), Is.Null);
+                Assert.That(landBoundaryHighlightTilemap.GetTile(Vector3Int.zero), Is.Null);
+                Assert.That(rockWallBoundaryHighlightTilemap.GetTile(Vector3Int.zero), Is.Null);
                 Assert.That(pendingCoordinates, Is.Empty);
             }
             finally
@@ -760,7 +772,9 @@ namespace Farmware.WorldGeneration.PlayModeTests
             {
                 ChunkTilemapPresenter presenter = CreateLifecycleTestPresenter(
                     out presenterRoot,
-                    out Tilemap terrainTilemap);
+                    out Tilemap terrainTilemap,
+                    out _,
+                    out _);
                 grasslandBase = ScriptableObject.CreateInstance<Tile>();
                 forestBase = ScriptableObject.CreateInstance<Tile>();
 
@@ -1292,6 +1306,83 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 rockWallResourceTilemap.transform.localPosition.y,
                 Is.EqualTo(TerrainLayerPresentationUtility.RockWallElevationInCells).Within(0.0001f),
                 "岩壁上資源は岩壁上面と同じ12px上へ移動している必要があります。");
+            GameObject landBoundaryHighlightTilemapObject =
+                GameObject.Find("World Grid/Land Boundary Highlight Tilemap");
+            Tilemap landBoundaryHighlightTilemap = landBoundaryHighlightTilemapObject == null
+                ? null
+                : landBoundaryHighlightTilemapObject.GetComponent<Tilemap>();
+            Assert.That(
+                landBoundaryHighlightTilemap,
+                Is.Not.Null,
+                "SampleSceneに通常土地の境界ハイライト専用Tilemapがありません。");
+            Assert.That(
+                landBoundaryHighlightTilemap.transform.localPosition.y,
+                Is.EqualTo(0f).Within(0.0001f),
+                "通常土地の境界ハイライトは地表と同じ高さへ配置する必要があります。");
+            GameObject rockWallBoundaryHighlightTilemapObject =
+                GameObject.Find("World Grid/Rock Wall Boundary Highlight Tilemap");
+            Tilemap rockWallBoundaryHighlightTilemap =
+                rockWallBoundaryHighlightTilemapObject == null
+                    ? null
+                    : rockWallBoundaryHighlightTilemapObject.GetComponent<Tilemap>();
+            Assert.That(
+                rockWallBoundaryHighlightTilemap,
+                Is.Not.Null,
+                "SampleSceneに岩壁上面の境界ハイライト専用Tilemapがありません。");
+            Assert.That(
+                rockWallBoundaryHighlightTilemap.transform.localPosition.y,
+                Is.EqualTo(TerrainLayerPresentationUtility.RockWallElevationInCells)
+                    .Within(0.0001f),
+                "岩壁境界ハイライトは岩壁上面と同じ12px上へ移動する必要があります。");
+
+            FieldInfo boundarySpritesField = typeof(ChunkTilemapPresenter).GetField(
+                "boundaryHighlightSprites",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.That(boundarySpritesField, Is.Not.Null, "境界ハイライトSprite配列が見つかりません。");
+            Sprite[] boundarySprites =
+                boundarySpritesField.GetValue(terrainPresenter) as Sprite[];
+            Assert.That(
+                boundarySprites,
+                Has.Length.EqualTo(TerrainBoundaryHighlightUtility.ExpectedSpriteCount),
+                "SampleSceneには左から右への14基本Spriteを保存する必要があります。");
+            for (int index = 0; index < boundarySprites.Length; index++)
+            {
+                Assert.That(boundarySprites[index], Is.Not.Null, $"境界Sprite参照がありません: index={index}");
+                Assert.That(
+                    boundarySprites[index].name,
+                    Is.EqualTo($"terrain_boundary_highlight_{index + 1:00}"),
+                    $"境界Spriteの順序が画像の左から右と一致しません: index={index}");
+            }
+
+            FieldInfo boundaryOpacityField = typeof(ChunkTilemapPresenter).GetField(
+                "boundaryHighlightOpacity",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.That(boundaryOpacityField, Is.Not.Null, "境界ハイライトの不透明度設定が見つかりません。");
+            Assert.That(
+                (float)boundaryOpacityField.GetValue(terrainPresenter),
+                Is.EqualTo(TerrainBoundaryHighlightUtility.DefaultOpacity).Within(0.0001f),
+                "境界ハイライトは既定の20%不透明度でBase Tileへ馴染ませる必要があります。");
+
+            FieldInfo generatedBoundaryTilesField = typeof(ChunkTilemapPresenter).GetField(
+                "generatedBoundaryHighlightTiles",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.That(generatedBoundaryTilesField, Is.Not.Null, "実行時境界Tile配列が見つかりません。");
+            Tile[,] generatedBoundaryTiles =
+                generatedBoundaryTilesField.GetValue(terrainPresenter) as Tile[,];
+            Assert.That(generatedBoundaryTiles, Is.Not.Null, "境界Spriteから実行時Tileが生成されていません。");
+            Assert.That(
+                generatedBoundaryTiles[0, 0],
+                Is.Not.Null,
+                "不透明度を検証する境界Tileが生成されていません。");
+            Assert.That(
+                generatedBoundaryTiles[0, 0].color.a,
+                Is.EqualTo(TerrainBoundaryHighlightUtility.DefaultOpacity).Within(0.0001f),
+                "実行時Tileへ20%の不透明度が反映されていません。");
+
+            Assert.That(
+                tilemap.transform.parent.GetComponentsInChildren<Tilemap>(includeInactive: true),
+                Has.Length.EqualTo(9),
+                "World Gridには既存7層と境界ハイライト2層の合計9 Tilemapが必要です。");
 
             // 液面の下半分を手前土地で隠す前後関係はTransform位置だけでは決まらないため、Rendererの描画順もScene実体から確認します。
             TilemapRenderer groundRenderer = tilemap.GetComponent<TilemapRenderer>();
@@ -1302,6 +1393,10 @@ namespace Farmware.WorldGeneration.PlayModeTests
             TilemapRenderer liquidBaseRenderer = liquidBaseTilemap.GetComponent<TilemapRenderer>();
             TilemapRenderer liquidAnimationRenderer =
                 liquidAnimationTilemap.GetComponent<TilemapRenderer>();
+            TilemapRenderer landBoundaryHighlightRenderer =
+                landBoundaryHighlightTilemap.GetComponent<TilemapRenderer>();
+            TilemapRenderer rockWallBoundaryHighlightRenderer =
+                rockWallBoundaryHighlightTilemap.GetComponent<TilemapRenderer>();
             Assert.That(groundRenderer, Is.Not.Null, "Ground TilemapにTilemapRendererがありません。");
             Assert.That(rockWallRenderer, Is.Not.Null, "Rock Wall TilemapにTilemapRendererがありません。");
             Assert.That(resourceRenderer, Is.Not.Null, "Resource TilemapにTilemapRendererがありません。");
@@ -1333,6 +1428,14 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 resourceRenderer.sortingOrder,
                 Is.GreaterThan(rockWallRenderer.sortingOrder),
                 "岩壁に隠れない通常資源は、岩壁より後から描いて前面へ表示してください。");
+            Assert.That(
+                landBoundaryHighlightRenderer.sortingOrder,
+                Is.EqualTo(1),
+                "通常土地の境界はGroundより前、岩壁に隠す資源より後ろへ描画してください。");
+            Assert.That(
+                rockWallBoundaryHighlightRenderer.sortingOrder,
+                Is.EqualTo(4),
+                "岩壁上面の境界は岩壁より前、通常資源より後ろへ描画してください。");
             Assert.That(
                 liquidBaseRenderer,
                 Is.Not.Null,
@@ -1927,14 +2030,18 @@ namespace Farmware.WorldGeneration.PlayModeTests
         }
 
         /// <summary>
-        /// PresenterのWorld切替・無効化テスト用に、最小のGrid、地形Tilemap、Presenterを作成します。
+        /// PresenterのWorld切替・無効化テスト用に、最小のGrid、地形Tilemap、境界Tilemap、Presenterを作成します。
         /// </summary>
         /// <param name="rootObject">テスト終了時に破棄するGridとPresenterの親Objectです。</param>
         /// <param name="terrainTilemap">残存Tileの有無を検証する地形Tilemapです。</param>
-        /// <returns>地形Tilemapだけを設定したテスト対象Presenterです。</returns>
+        /// <param name="landBoundaryHighlightTilemap">土地境界の表示残りを検証するTilemapです。</param>
+        /// <param name="rockWallBoundaryHighlightTilemap">岩壁境界の表示残りを検証するTilemapです。</param>
+        /// <returns>地形Tilemapと境界Tilemapを設定したテスト対象Presenterです。</returns>
         private static ChunkTilemapPresenter CreateLifecycleTestPresenter(
             out GameObject rootObject,
-            out Tilemap terrainTilemap)
+            out Tilemap terrainTilemap,
+            out Tilemap landBoundaryHighlightTilemap,
+            out Tilemap rockWallBoundaryHighlightTilemap)
         {
             rootObject = new GameObject("Tilemap Presenter Lifecycle Root");
             rootObject.SetActive(false);
@@ -1944,6 +2051,17 @@ namespace Farmware.WorldGeneration.PlayModeTests
             tilemapObject.transform.SetParent(rootObject.transform, false);
             terrainTilemap = tilemapObject.AddComponent<Tilemap>();
             tilemapObject.AddComponent<TilemapRenderer>();
+
+            // 境界表示もPresenterが所有するため、地形と同じライフサイクルで確実に消去されるかを確認します。
+            GameObject landBoundaryObject = new GameObject("Lifecycle Land Boundary Highlight Tilemap");
+            landBoundaryObject.transform.SetParent(rootObject.transform, false);
+            landBoundaryHighlightTilemap = landBoundaryObject.AddComponent<Tilemap>();
+            landBoundaryObject.AddComponent<TilemapRenderer>();
+
+            GameObject rockWallBoundaryObject = new GameObject("Lifecycle Rock Wall Boundary Highlight Tilemap");
+            rockWallBoundaryObject.transform.SetParent(rootObject.transform, false);
+            rockWallBoundaryHighlightTilemap = rockWallBoundaryObject.AddComponent<Tilemap>();
+            rockWallBoundaryObject.AddComponent<TilemapRenderer>();
 
             ChunkTilemapPresenter presenter = rootObject.AddComponent<ChunkTilemapPresenter>();
             presenter.Configure(
@@ -1962,6 +2080,10 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 null,
                 null,
                 null,
+                null);
+            presenter.ConfigureBoundaryHighlights(
+                landBoundaryHighlightTilemap,
+                rockWallBoundaryHighlightTilemap,
                 null);
             rootObject.SetActive(true);
             return presenter;

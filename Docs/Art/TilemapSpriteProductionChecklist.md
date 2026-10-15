@@ -1,4 +1,4 @@
-# Farmware タイルマップ用スプライト制作・導入チェックリスト v0.20
+# Farmware タイルマップ用スプライト制作・導入チェックリスト v0.22
 
 - 作成日: 2026-10-11
 - 最終更新日: 2026-10-15
@@ -526,7 +526,7 @@ Use readable medium cool gray, warm gray-brown, and limited charcoal accents whi
 
 `ART-00B`では、上下左右と斜め4方向の合計8方向から接続状態を求め、16×16 pxの透明ハイライトを上面へ重ねる。土地セルでは、水またはマグマに接する上下左右の辺を外周とし、角を挟む2つの上下左右セルがどちらも土地側で、斜めセルだけが水またはマグマなら内角を表示する。異なるバイオームの土地同士には表示しない。岩壁セルでは、岩壁以外に接する上下左右の辺を外周とし、角を挟む2セルが岩壁で斜めセルだけが岩壁ではない場合に内角を表示する。
 
-接続判定は、斜めをその角に隣接する上下左右2方向が接続済みの場合だけ有効にする47状態のBlobオートタイルとする。方向による色・陰影差を付けず、90度回転だけを使って47状態を14枚の可視Spriteから構成する。左右反転は使用しない。周囲8方向がすべて同じ領域でハイライトが不要な状態は、透明Spriteを置かずTilemapセルを空にする。
+接続判定は、斜めをその角に隣接する上下左右2方向が接続済みの場合だけ有効にする47状態の参照表とする。方向による色・陰影差を付けず、90度回転だけを使って47状態を14枚の可視Spriteから構成する。左右反転は使用しない。周囲8方向がすべて同じ領域でハイライトが不要な状態は、透明Spriteを置かずTilemapセルを空にする。
 
 制作する14形状は次のとおりとする。`N`、`E`、`S`、`W`は上、右、下、左の外周辺、`NE`、`SE`、`SW`、`NW`は内角を表す。表にない向きは90度回転で作る。
 
@@ -547,14 +547,15 @@ Use readable medium cool gray, warm gray-brown, and limited charcoal accents whi
 | 13 | なし | NE・SE・SW | 内角3つ |
 | 14 | なし | NE・SE・SW・NW | 内角4つ |
 
-Asepriteの原稿は16×16 pxセルを4×4へ並べた64×64 pxとし、14形状を配置して残り2セルを予約する。1 pxガターを付けて書き出す場合は67×67 pxとし、UnityのSliceではCell Size 16×16、Padding 1×1、Offset 0×0を使用する。拡大縮小、補間、半透明のぼかしは行わない。
+Asepriteの原稿とUnity用PNGは、14形状を左から番号順へ並べた224×16 pxの横一列とする。各セルは16×16 px、Padding 0×0、Offset 0×0とし、予約セルやガターは設けない。Unityでは`Assets/Farmware/Art/WorldGeneration/Terrain/Highlights/terrain_boundary_highlights.png`へ配置し、構築ツールがSprite Editor Data Provider経由で安定名`terrain_boundary_highlight_01`〜`14`へ分割する。拡大縮小、補間、半透明のぼかしは行わない。
 
-ハイライトの可視ピクセルは、被せるバイオーム、土地Sprite、岩壁Spriteに依存しない白い共通デザインとし、同じ14枚を共有する。土地と岩壁では上面の表示高さが異なるため、素材を共有しても土地上面用と岩壁上面用のTilemapは分離する。
+ハイライトの可視ピクセルは、被せるバイオーム、土地Sprite、岩壁Spriteに依存しない不透明白の共通デザインとし、同じ14枚を共有する。輪郭の1 px形状をぼかさずBase Tileへ自然に馴染ませるため、PNGへ半透明画素を直接混ぜず、Presentationが実行時Tileカラーへ一様な不透明度20%を掛ける。土地と岩壁では上面の表示高さが異なるため、素材を共有しても土地上面用と岩壁上面用のTilemapは分離する。
 
 ハイライトはBase地形の材質を混ぜるためではなく、土地と岩壁の輪郭を読みやすくするためのPresentationである。Base Spriteへ焼き込まず、Simulationのバイオーム、地形種別、建築可否を変更しない。更新はDirtyなサブチャンクと、その境界判定に必要な隣接セルへ限定する。
 
 - [ ] ハイライト素材が透明背景で、Base Tileの模様と断面を置き換えない
 - [ ] ハイライトの色とデザインが全バイオーム・岩壁で共通の白一種類になっている
+- [ ] PNGの可視画素は不透明白のまま、実行時Tileカラーの不透明度20%でBase Tileへ自然に馴染んでいる
 - [ ] 14枚の可視Spriteと90度回転だけで47接続状態を表し、左右反転を使用していない
 - [ ] ハイライト不要状態では透明Spriteではなく空のTilemapセルを使用している
 - [ ] 土地では水・マグマとの境界だけに表示され、異なる土地バイオーム間には表示されない
@@ -819,7 +820,7 @@ Create a readable seamless four-frame active production loop with a brighter amb
 - [ ] 各立体物の接地点、論理占有サイズ、上下左右の最大描画はみ出し量を表示定義へ記録
 - [ ] SpriteRendererのSort Pointを`Pivot`にし、接地点のワールドY座標で前後関係を決定
 - [ ] 土地シートはCell Size 16×24、岩壁シートは16×28、液体シートは16×16でSliceする
-- [ ] 本番用バイオーム土地シートは112×24 pxを16×24 pxで左から7分割し、Padding 0×0、Offset 0×0を設定する。1 pxガター付き境界ハイライト4×4出力にはCell Size 16×16、Padding 1×1、Offset 0×0を設定する
+- [ ] 本番用バイオーム土地シートは112×24 pxを16×24 pxで左から7分割し、Padding 0×0、Offset 0×0を設定する。境界ハイライトは224×16 pxを16×16 pxで左から14分割し、Padding 0×0、Offset 0×0を設定する
 - [x] 土地はSlice後の各Spriteが16×24 pxで、上側16 pxが上面、下側8 pxが可視断面になっている
 - [ ] 岩壁はSlice後の各Spriteが16×28 pxで、上側16 pxが上面、下側12 pxが可視側面になっている
 - [ ] PixelLabで生成した一体型ブロックへ、拡大縮小、補間、可視ピクセルの描き足しを行っていない
@@ -839,9 +840,12 @@ Create a readable seamless four-frame active production loop with a brighter amb
 Assets/Farmware/Art/WorldGeneration/
 ├── Atlases/
 │   ├── GroundTerrainAtlas.spriteatlasv2
-│   └── RockWallAtlas.spriteatlasv2
+│   ├── RockWallAtlas.spriteatlasv2
+│   └── BoundaryHighlightAtlas.spriteatlasv2
 ├── Terrain/
 │   ├── Base/
+│   ├── Highlights/
+│   │   └── terrain_boundary_highlights.png
 │   └── Decorations/
 ├── Resources/
 ├── Player/
@@ -863,9 +867,9 @@ player_drone_idle_south.png
 node_starting_core_active.png
 ```
 
-現在の`ChunkTilemapPresenter`は、7バイオームの16×24土地を`Ground Tilemap`、淡水・海水・マグマを`Liquid Base Tilemap`へ排他的に表示する。静止液面と透明アニメーションは論理セルを変えず画面下へ8 px移動する。岩壁セルにもBiome由来の土地ブロックを残し、16×28岩壁を`Rock Wall Tilemap`へ同じ論理座標で重ねる。GroundとRock WallはIndividual ModeかつTop Left順でセルごとにYソートし、画面奥を先、手前を後に描いて奥側の断面・側面を手前ブロックで隠す。通常Resourceは直前方の岩壁有無から背面用と前面用の固定Tilemapへ振り分け、遠方座標でも手前岩壁との前後関係を維持する。岩壁の内部影と露出資源は岩壁上面に合わせて12 px上へ表示する。
+現在の`ChunkTilemapPresenter`は、7バイオームの16×24土地を`Ground Tilemap`、淡水・海水・マグマを`Liquid Base Tilemap`へ排他的に表示する。静止液面と透明アニメーションは論理セルを変えず画面下へ8 px移動する。岩壁セルにもBiome由来の土地ブロックを残し、16×28岩壁を`Rock Wall Tilemap`へ同じ論理座標で重ねる。GroundとRock WallはIndividual ModeかつTop Left順でセルごとにYソートし、画面奥を先、手前を後に描いて奥側の断面・側面を手前ブロックで隠す。通常Resourceは直前方の岩壁有無から背面用と前面用の固定Tilemapへ振り分け、遠方座標でも手前岩壁との前後関係を維持する。岩壁の内部影と露出資源は岩壁上面に合わせて12 px上へ表示する。境界ハイライトは`Land Boundary Highlight Tilemap`を地表と同じ高さ、`Rock Wall Boundary Highlight Tilemap`を12 px上へ配置し、14基本Spriteから作る回転済みTileを共有して不透明度20%で描画する。
 
-Editor構築ツールとPlayerビルド前処理は、`terrain_biomes_base.png`を16×24 pxで左から7分割したBiome土地Spriteを`GroundTerrainAtlas`の1ページ、岩壁を`RockWallAtlas`へ自動登録・再パックする。土地が複数ページへ分割された場合は、バイオーム境界の描画順が保証できないためテストまたはビルドを失敗させる。
+Editor構築ツールとPlayerビルド前処理は、`terrain_biomes_base.png`を16×24 pxで左から7分割したBiome土地Spriteを`GroundTerrainAtlas`の1ページ、岩壁を`RockWallAtlas`、`terrain_boundary_highlights.png`を16×16 pxで左から14分割したSpriteを`BoundaryHighlightAtlas`へ自動登録・再パックする。各Atlasが複数ページへ分割された場合は、テストまたはビルドを失敗させる。
 
 - [x] 通常地形と低地の高さ分類をPresentationで判定できる
 - [x] 静止液面と透明アニメーションをGround Tilemapから分離し、同じ8 pxだけ画面下へ移動できる

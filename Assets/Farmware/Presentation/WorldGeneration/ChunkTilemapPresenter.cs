@@ -59,6 +59,14 @@ namespace Farmware.WorldGeneration.Presentation
         [Tooltip("露出した岩壁上の資源を岩壁上面と同じ12px上へ表示する専用Tilemapです。ゲーム状態の正には使用しません。")]
         [SerializeField] private Tilemap rockWallResourceTilemap;
 
+        // 通常土地の水・マグマ側だけへ境界線を重ね、Biome同士の境界は描画しない専用Tilemapです。
+        [Tooltip("通常土地と水・マグマの境界ハイライト専用Tilemapです。Groundより前、資源と岩壁より後ろのSorting Orderにしてください。")]
+        [SerializeField] private Tilemap landBoundaryHighlightTilemap;
+
+        // 岩壁上面の外周と内角へ境界線を重ね、側面や通常土地の表示から分離する専用Tilemapです。
+        [Tooltip("岩壁上面の境界ハイライト専用Tilemapです。Transform Yを12/16セル上げ、岩壁より前へ描画してください。")]
+        [SerializeField] private Tilemap rockWallBoundaryHighlightTilemap;
+
         // 草原Biomeの土地へ使用するTileです。プレイヤー表示にはSoilTypeを反映せず、バイオームの識別だけに使います。
         [Tooltip("草原バイオームの土地に表示するTileです。SoilTypeによる見た目の差は付けません。")]
         [SerializeField] private TileBase grasslandTile;
@@ -115,6 +123,16 @@ namespace Farmware.WorldGeneration.Presentation
         // マグマセルへ重ねる透明なAnimatedTileです。基礎のMagma Tileは下層に残します。
         [Tooltip("マグマセルへ重ねる透明なAnimatedTileです。未設定ならマグマは静止表示のままです。")]
         [SerializeField] private TileBase magmaAnimationTile;
+
+        // 224×16画像を左から右へ16pxずつSliceした14枚です。配列順はBoundaryHighlightShapeの1〜14と一致します。
+        [Tooltip("境界ハイライト画像を左から右へ分割した14枚のSpriteです。順番を変えると47状態の形が崩れます。")]
+        [SerializeField] private Sprite[] boundaryHighlightSprites;
+
+        // 白い境界線へ一様に掛ける不透明度です。PNGの1px形状は変えず、Base Tileとの馴染みだけを調整します。
+        [Range(0f, 1f)]
+        [Tooltip("境界ハイライトの不透明度です。0で完全透明、1で不透明になり、下げるほどBase Tileへ馴染みます。")]
+        [SerializeField] private float boundaryHighlightOpacity =
+            TerrainBoundaryHighlightUtility.DefaultOpacity;
 
         // GeneratedResourceType.Treeへ使用する透明背景の表示専用Tileです。
         [Tooltip("樹木資源に表示する仮Tileです。資源の種類と存在はECSバッファを正とします。")]
@@ -191,6 +209,15 @@ namespace Farmware.WorldGeneration.Presentation
 
         // 露出した岩壁上の資源だけを12px上へ描画する256要素の再利用配列です。
         private TileBase[] rockWallResourceSubChunkTileBuffer;
+
+        // 通常土地の境界ハイライトTilemapへ渡す256要素の再利用配列です。
+        private TileBase[] landBoundaryHighlightSubChunkTileBuffer;
+
+        // 岩壁上面の境界ハイライトTilemapへ渡す256要素の再利用配列です。
+        private TileBase[] rockWallBoundaryHighlightSubChunkTileBuffer;
+
+        // 14基本形を4方向へ回した実行時Tileです。このComponentがAwakeで作成し、OnDestroyで破棄します。
+        private Tile[,] generatedBoundaryHighlightTiles;
 
         // 表示済みチャンクへ重ねた影GameObjectとMeshを座標別に保持し、アンロード時に同じ単位で破棄します。
         private readonly Dictionary<ChunkCoordinate, RockWallShadowChunkPresentation>
@@ -314,6 +341,34 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
+        /// Editor構築ツールまたはテストから、通常土地・岩壁の境界レイヤーと14基本Spriteを設定します。
+        /// 配列は呼び出し元と共有せず、PlayMode中なら回転済みの実行時Tileを直ちに作り直します。
+        /// </summary>
+        /// <param name="landHighlightTilemap">通常土地の水・マグマ側へ境界を重ねるTilemapです。</param>
+        /// <param name="rockWallHighlightTilemap">岩壁上面の外周・内角へ境界を重ねるTilemapです。</param>
+        /// <param name="highlightSprites">画像の左から右へShape01〜Shape14の順に並ぶ14枚のSpriteです。</param>
+        /// <param name="opacity">白い境界線へ一様に掛ける0〜1の不透明度です。</param>
+        public void ConfigureBoundaryHighlights(
+            Tilemap landHighlightTilemap,
+            Tilemap rockWallHighlightTilemap,
+            Sprite[] highlightSprites,
+            float opacity = TerrainBoundaryHighlightUtility.DefaultOpacity)
+        {
+            landBoundaryHighlightTilemap = landHighlightTilemap;
+            rockWallBoundaryHighlightTilemap = rockWallHighlightTilemap;
+            boundaryHighlightSprites = highlightSprites == null
+                ? null
+                : (Sprite[])highlightSprites.Clone();
+            boundaryHighlightOpacity = Mathf.Clamp01(opacity);
+
+            // EditModeのScene構築中は一時Tileを保存せず、PlayModeでAwake済みのテスト設定だけを即時反映します。
+            if (Application.isPlaying)
+            {
+                RebuildBoundaryHighlightTiles();
+            }
+        }
+
+        /// <summary>
         /// Component読み込み直後にUnityから呼ばれ、16×16タイルの再利用配列を1回だけ確保します。
         /// </summary>
         private void Awake()
@@ -327,8 +382,11 @@ namespace Farmware.WorldGeneration.Presentation
             liquidAnimationSubChunkTileBuffer = new TileBase[tileCount];
             rockWallSubChunkTileBuffer = new TileBase[tileCount];
             rockWallResourceSubChunkTileBuffer = new TileBase[tileCount];
+            landBoundaryHighlightSubChunkTileBuffer = new TileBase[tileCount];
+            rockWallBoundaryHighlightSubChunkTileBuffer = new TileBase[tileCount];
             AllocateRockWallShadowBuffers();
             EnsureFreshWaterFallbackTile();
+            RebuildBoundaryHighlightTiles();
         }
 
         /// <summary>
@@ -404,6 +462,81 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
+        /// 14枚の基本Spriteから時計回り0〜3回転の実行時Tileを1度だけ作り、セル走査中の生成を避けます。
+        /// </summary>
+        private void RebuildBoundaryHighlightTiles()
+        {
+            DestroyGeneratedBoundaryHighlightTiles();
+            if (boundaryHighlightSprites == null
+                || boundaryHighlightSprites.Length
+                    != TerrainBoundaryHighlightUtility.ExpectedSpriteCount)
+            {
+                return;
+            }
+
+            generatedBoundaryHighlightTiles = new Tile[
+                TerrainBoundaryHighlightUtility.ExpectedSpriteCount,
+                4];
+            for (int shapeIndex = 0;
+                 shapeIndex < TerrainBoundaryHighlightUtility.ExpectedSpriteCount;
+                 shapeIndex++)
+            {
+                Sprite sprite = boundaryHighlightSprites[shapeIndex];
+                if (sprite == null)
+                {
+                    continue;
+                }
+
+                for (int rotation = 0; rotation < 4; rotation++)
+                {
+                    Tile generatedTile = ScriptableObject.CreateInstance<Tile>();
+                    generatedTile.name =
+                        $"Generated Boundary Highlight {shapeIndex + 1:00} R{rotation}";
+                    generatedTile.sprite = sprite;
+                    // 元画像は不透明白のまま保ち、一様なαだけを表示時に掛けて色付きBase Tileへ自然に馴染ませます。
+                    generatedTile.color = new Color(
+                        1f,
+                        1f,
+                        1f,
+                        Mathf.Clamp01(boundaryHighlightOpacity));
+                    generatedTile.colliderType = Tile.ColliderType.None;
+                    // Unityの正Z回転は反時計回りなので、負角度で画像を時計回りへ回します。拡大・反転は加えません。
+                    generatedTile.transform = Matrix4x4.Rotate(
+                        Quaternion.Euler(0f, 0f, -90f * rotation));
+                    generatedTile.flags = TileFlags.LockColor | TileFlags.LockTransform;
+                    generatedBoundaryHighlightTiles[shapeIndex, rotation] = generatedTile;
+                }
+            }
+        }
+
+        /// <summary>
+        /// このComponentが作成した最大56個の境界Tileだけを破棄し、SceneやProjectのSpriteは破棄しません。
+        /// </summary>
+        private void DestroyGeneratedBoundaryHighlightTiles()
+        {
+            if (generatedBoundaryHighlightTiles == null)
+            {
+                return;
+            }
+
+            int shapeCount = generatedBoundaryHighlightTiles.GetLength(0);
+            int rotationCount = generatedBoundaryHighlightTiles.GetLength(1);
+            for (int shapeIndex = 0; shapeIndex < shapeCount; shapeIndex++)
+            {
+                for (int rotation = 0; rotation < rotationCount; rotation++)
+                {
+                    Tile generatedTile = generatedBoundaryHighlightTiles[shapeIndex, rotation];
+                    if (generatedTile != null)
+                    {
+                        DestroyUnityObject(generatedTile);
+                    }
+                }
+            }
+
+            generatedBoundaryHighlightTiles = null;
+        }
+
+        /// <summary>
         /// MonoBehaviourの各描画フレームで呼ばれ、表示対象の収集と予算分割された反映・消去を実行します。
         /// </summary>
         private void Update()
@@ -414,6 +547,8 @@ namespace Farmware.WorldGeneration.Presentation
                     || liquidBaseTilemap == null
                     || resourceTilemap == null
                     || resourceBehindRockWallTilemap == null
+                    || landBoundaryHighlightTilemap == null
+                    || rockWallBoundaryHighlightTilemap == null
                     || !TryEnsureQueries())
                 {
                     return;
@@ -449,6 +584,7 @@ namespace Farmware.WorldGeneration.Presentation
         {
             DisposeQueries();
             DestroyAllRockWallShadows();
+            DestroyGeneratedBoundaryHighlightTiles();
 
             // 各影Meshは共有Materialを所有しないため、Presenterが作成したMaterialだけを最後に1回破棄します。
             if (generatedRockWallShadowMaterial != null)
@@ -744,6 +880,29 @@ namespace Farmware.WorldGeneration.Presentation
                     bool isLiquid = tile.Ground == GroundType.Water
                         || tile.Ground == GroundType.Magma;
 
+                    BoundaryHighlightSelection landBoundarySelection = default;
+                    BoundaryHighlightSelection rockWallBoundarySelection = default;
+                    if (tile.Ground == GroundType.Land || tile.Ground == GroundType.RockWall)
+                    {
+                        // 8近傍は現在のチャンクBufferを優先し、外周だけ決定論的に再生成するためロード順へ依存しません。
+                        TerrainNeighborTiles neighbors = GetTerrainNeighborTiles(
+                            coordinate,
+                            tileLocalX,
+                            tileLocalY,
+                            tiles,
+                            generationSettings);
+                        if (tile.Ground == GroundType.Land)
+                        {
+                            landBoundarySelection =
+                                TerrainBoundaryHighlightUtility.SelectLand(tile, neighbors);
+                        }
+                        else
+                        {
+                            rockWallBoundarySelection =
+                                TerrainBoundaryHighlightUtility.SelectRockWall(tile, neighbors);
+                        }
+                    }
+
                     // 土地Spriteは上面と断面を一体化し、液体だけを別Tilemapで8px下へ投影します。
                     // Individual ModeとTop Left順により、画面奥の行から先に描きます。
                     // 画面手前の土地ブロックを後から重ねることで、奥側の不要な断面を自然に隠します。
@@ -762,6 +921,10 @@ namespace Farmware.WorldGeneration.Presentation
                     rockWallSubChunkTileBuffer[destinationIndex] = isRockWall
                         ? rockWallTile
                         : null;
+                    landBoundaryHighlightSubChunkTileBuffer[destinationIndex] =
+                        SelectBoundaryHighlightTile(landBoundarySelection);
+                    rockWallBoundaryHighlightSubChunkTileBuffer[destinationIndex] =
+                        SelectBoundaryHighlightTile(rockWallBoundarySelection);
 
                     // 内部影に覆われる資源アイコンだけを隠します。ECSの資源データと露出面の表示は維持します。
                     TileBase selectedResource =
@@ -820,6 +983,13 @@ namespace Farmware.WorldGeneration.Presentation
             {
                 rockWallResourceTilemap.SetTilesBlock(bounds, rockWallResourceSubChunkTileBuffer);
             }
+
+            landBoundaryHighlightTilemap.SetTilesBlock(
+                bounds,
+                landBoundaryHighlightSubChunkTileBuffer);
+            rockWallBoundaryHighlightTilemap.SetTilesBlock(
+                bounds,
+                rockWallBoundaryHighlightSubChunkTileBuffer);
         }
 
         /// <summary>
@@ -869,6 +1039,16 @@ namespace Farmware.WorldGeneration.Presentation
             if (rockWallResourceTilemap != null)
             {
                 rockWallResourceTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
+            }
+
+            if (landBoundaryHighlightTilemap != null)
+            {
+                landBoundaryHighlightTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
+            }
+
+            if (rockWallBoundaryHighlightTilemap != null)
+            {
+                rockWallBoundaryHighlightTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
             }
         }
 
@@ -952,6 +1132,33 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
+        /// 中央セルを囲む8方向を、同一チャンクBufferまたは決定論的な境界外再生成から取得します。
+        /// </summary>
+        /// <param name="coordinate">中央セルが属する論理チャンク座標です。</param>
+        /// <param name="localTileX">中央セルの水平チャンク内座標です。</param>
+        /// <param name="localTileY">中央セルの垂直チャンク内座標です。</param>
+        /// <param name="tiles">中央チャンクの4096件の生成済み地形Bufferです。</param>
+        /// <param name="generationSettings">チャンク外周を同じ結果へ再生成する設定です。</param>
+        /// <returns>北から時計回りの8近傍地形です。</returns>
+        private static TerrainNeighborTiles GetTerrainNeighborTiles(
+            ChunkCoordinate coordinate,
+            int localTileX,
+            int localTileY,
+            DynamicBuffer<GeneratedTile> tiles,
+            in WorldGenerationSettings generationSettings)
+        {
+            return new TerrainNeighborTiles(
+                GetGeneratedTile(coordinate, localTileX, localTileY + 1, tiles, generationSettings),
+                GetGeneratedTile(coordinate, localTileX + 1, localTileY, tiles, generationSettings),
+                GetGeneratedTile(coordinate, localTileX, localTileY - 1, tiles, generationSettings),
+                GetGeneratedTile(coordinate, localTileX - 1, localTileY, tiles, generationSettings),
+                GetGeneratedTile(coordinate, localTileX + 1, localTileY + 1, tiles, generationSettings),
+                GetGeneratedTile(coordinate, localTileX + 1, localTileY - 1, tiles, generationSettings),
+                GetGeneratedTile(coordinate, localTileX - 1, localTileY - 1, tiles, generationSettings),
+                GetGeneratedTile(coordinate, localTileX - 1, localTileY + 1, tiles, generationSettings));
+        }
+
+        /// <summary>
         /// 同一チャンク内では生成済みBufferを読み、チャンク外ではSimulationと同じ生成器で1セルだけ再生成します。
         /// </summary>
         /// <param name="coordinate">中心チャンクの論理座標です。</param>
@@ -982,6 +1189,30 @@ namespace Farmware.WorldGeneration.Presentation
                 generationSettings,
                 worldTileX,
                 worldTileY);
+        }
+
+        /// <summary>
+        /// 純粋計算で得た基本形と回転数を、Awakeで事前作成した実行時Tileへ変換します。
+        /// </summary>
+        /// <param name="selection">境界基本形と時計回り回転数です。</param>
+        /// <returns>対応するTileです。境界なし、未設定、範囲外ならnullです。</returns>
+        private TileBase SelectBoundaryHighlightTile(BoundaryHighlightSelection selection)
+        {
+            if (!selection.HasHighlight || generatedBoundaryHighlightTiles == null)
+            {
+                return null;
+            }
+
+            int shapeIndex = (int)selection.Shape - 1;
+            int rotation = selection.QuarterTurnsClockwise;
+            if (shapeIndex < 0
+                || shapeIndex >= generatedBoundaryHighlightTiles.GetLength(0)
+                || rotation >= generatedBoundaryHighlightTiles.GetLength(1))
+            {
+                return null;
+            }
+
+            return generatedBoundaryHighlightTiles[shapeIndex, rotation];
         }
 
         /// <summary>

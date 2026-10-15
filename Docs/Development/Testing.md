@@ -55,13 +55,17 @@ Map Viewerの全ピクセルが同じ座標へ直接`DeterministicChunkGenerator
 
 16×24土地の上面16px・断面8px・Pivot Y 2/3、16×28岩壁の上面16px・側面12px・Pivot Y 2/7、液面を8px下へ移す`-0.5セル`をSceneなしの純粋計算として検証する。淡水・海水・マグマを別の液面アニメーションへ分類する規則も保証する。
 
+#### `TerrainBoundaryHighlightUtilityTests`
+
+8方向の256入力が斜め接続制約によって47状態へ正規化され、完全接続を除く46状態が14基本形と時計回り90度回転へ割り当てられることを検証する。左右反転を使わない回転方向、画像の左から右への形状表、異なる土地Biome・岩壁を陸続きとして扱う規則、水・マグマ境界、斜めだけが欠ける内角、岩壁領域の境界もSceneなしの純粋計算として保証する。
+
 #### `WorldGenerationFallbackArtTests`
 
 Editor構築ツールが生成した7種類の16×24土地PNGと16×28岩壁PNGを直接読み込み、上面と前面の全ピクセルが一枚の不透明ブロックとして存在することを検証する。旧土・砂・岩・雪断面と旧岩壁側面PNGが残っていないことも保証する。
 
 #### `WorldGenerationSpriteAtlasTests`
 
-Sprite Packer ModeがV2であること、土地Atlasが7バイオームを収録した本番用Textureだけ、岩壁Atlasが岩壁TextureだけをPackableに持つこと、両AtlasがBuilt-in配信とPixel Art向け設定を持つことを検証する。本番用土地シートは左からBiome ID順の7枚へ16×24でSliceされ、各SpriteがPivot Y 2/3を持ち、同名のTileから参照されることも保証する。さらに実際のパック結果を読み、7枚の土地Spriteが同じTextureページへ収まることを保証して、バイオーム境界でTilemapのYソートがTexture単位に分断される再発を防ぐ。
+Sprite Packer ModeがV2であること、土地Atlasが7バイオームの本番用Textureだけ、岩壁Atlasが岩壁Textureだけ、境界Atlasが224×16の境界TextureだけをPackableに持つこと、3 AtlasがBuilt-in配信とPixel Art向け設定を持つことを検証する。本番用土地シートは左からBiome ID順の7枚へ16×24でSliceされ、各SpriteがPivot Y 2/3を持ち、同名のTileから参照されることも保証する。境界シートは左から安定名の14枚へ16×16でSliceされ、中心Pivot、透明設定、Full Rect、Collider用Fallback Shapeなしを保証する。PNG原稿も直接読み、14区画すべてに可視画素があり、可視画素が不透明白、背景が完全透明で、半透明ぼかしや別色を含まないことを確認する。各区画の外周辺と内角の実画素が`TerrainBoundaryHighlightUtility`の特徴マスクと一致し、北をTexture上端として上下反転していないことも保証する。さらに実際のパック結果を読み、土地7枚と境界14枚がそれぞれのAtlasで同じTextureページへ収まることを確認する。
 
 #### `WorldGenerationSceneBootstrapTests`
 
@@ -80,7 +84,7 @@ Sprite Packer ModeがV2であること、土地Atlasが7バイオームを収録
 | Presentation寿命 | Camera GameObjectを維持したDefault World再作成時に新しい初期スポーンを再適用する。Camera Bridgeは新Worldの初期スポーン探索中でも旧WorldのObserverを直ちに破棄し、初期位置の確定前は新Observerを作らず、確定後に1件だけ作り直す。同一Worldでカメラ制御を再有効化した場合はプレイヤーの移動後位置を保つ。正負座標のGrid 64タイル境界へViewport右上端が一致しても、上限側の面積を持たない隣接チャンクを要求しない。Tilemap PresenterがWorld切替または無効化時に表示済み・反映途中・消去途中の旧表示を残さないことも保証する。 |
 | 開発者用可視化 | バイオーム、ノイズ、水域、移行帯、岩壁、マグマ、資源の色写像がSimulationを変更しないことを保証する。 |
 | 岩壁表示 | チャンク境界をまたぐ内部影が連続したグラデーションになり、一体型岩壁の上面・内部影・露出資源が同じ12px高へ揃うことを保証する。 |
-| SampleScene縦切り | SubSceneロード、Authoringと共通既定閾値、初期カメラ、チャンク生成、7枚のTilemap、Ground・Rock WallのIndividual ModeおよびTop Left順、同じBiomeなら標準・肥沃・砂質のいずれも同じプレイヤー向けTileを選ぶこと、SampleSceneの7バイオーム参照が本番用`terrain_biomes_base.png`の同名Spriteへ対応すること、Editor専用Soil可視化が3種類を別色にすること、通常資源の岩壁背面用Order 2・前面用Order 10への振り分け、静止液面・アニメーションの-8pxオフセット、液体セルのGround Tilemapとの排他表示、岩壁セルの下層土地、岩壁上資源の12pxオフセット、土地・岩壁Spriteの上下はみ出しを含む可視チャンク範囲、液面4fps設定、アンロード、同一地形の再生成を保証する。EditModeでは、資源がある通常地面の直前方だけが岩壁の場合に背面用へ分類する純粋計算を保証する。 |
+| SampleScene縦切り | SubSceneロード、Authoringと共通既定閾値、初期カメラ、チャンク生成、境界2層を含む9枚のTilemap、Ground・Rock WallのIndividual ModeおよびTop Left順、土地境界Order 1・岩壁境界Order 4と表示高、14 Sprite参照、境界の既定不透明度20%と実行時Tileへの反映、同じBiomeなら標準・肥沃・砂質のいずれも同じプレイヤー向けTileを選ぶこと、SampleSceneの7バイオーム参照が本番用`terrain_biomes_base.png`の同名Spriteへ対応すること、Editor専用Soil可視化が3種類を別色にすること、通常資源の岩壁背面用Order 2・前面用Order 10への振り分け、静止液面・アニメーションの-8pxオフセット、液体セルのGround Tilemapとの排他表示、岩壁セルの下層土地、岩壁上資源の12pxオフセット、土地・岩壁Spriteの上下はみ出しを含む可視チャンク範囲、液面4fps設定、アンロード、同一地形の再生成を保証する。EditModeでは、境界選択と資源背面分類の純粋計算を保証する。 |
 
 ## 4. 変更内容ごとの実行範囲
 
