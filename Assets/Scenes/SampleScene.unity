@@ -1515,7 +1515,7 @@ MonoBehaviour:
   magmaTile: {fileID: 11400000, guid: 6a015ba4629a2470990ef874ec171e33, type: 2}
   freshWaterTile: {fileID: 11400000, guid: 0c8767b14ec794733bf2093f1c6b8c2f, type: 2}
   saltWaterTile: {fileID: 11400000, guid: 06507ec0f78364046ab6c0ec235d8bcf, type: 2}
-  rockWallTile: {fileID: 11400000, guid: 1efd85541c8714c359c7e09eea3ffb12, type: 2}
+  rockWallTile: {fileID: 11400000, guid: cfaf69eb81d29435695f221a8ae3b907, type: 2}
   freshWaterAnimationTile: {fileID: 11400000, guid: 8529b82c19a7b46fa814f1a35b7c2e9b, type: 2}
   saltWaterAnimationTile: {fileID: 11400000, guid: 4c4ec2429210742598bd813c711dfa95, type: 2}
   magmaAnimationTile: {fileID: 11400000, guid: 9180a084fe52e4ce88e81809363adeb4, type: 2}

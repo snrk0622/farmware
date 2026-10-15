@@ -1,7 +1,7 @@
 // [UNITY-SKILL:SPRITEATLAS]
 // [TYPE:PREBUILD]
-// [VERSION:2.0.2]
-// このファイルは、本番用バイオーム土地、フォールバック岩壁、境界ハイライトのSpriteをSprite Atlas V2へまとめ、Tilemapの描画を安定させます。
+// [VERSION:2.0.3]
+// このファイルは、本番用バイオーム土地・岩壁と境界ハイライトのSpriteをSprite Atlas V2へまとめ、Tilemapの描画を安定させます。
 // WorldGenerationSceneBootstrapからEditor確認用に呼ばれ、Playerビルド前にはIPreprocessBuildWithReportから同じ設定を再適用します。
 
 using System;
@@ -44,7 +44,7 @@ namespace Farmware.WorldGeneration.Editor
     }
 
     /// <summary>
-    /// 本番用の一体型バイオーム土地、フォールバック岩壁、境界ハイライトのSprite Atlas V2を冪等に生成します。
+    /// 本番用の一体型バイオーム土地・岩壁と境界ハイライトのSprite Atlas V2を冪等に生成します。
     /// </summary>
     public static class WorldGenerationSpriteAtlasBuilder
     {
@@ -67,6 +67,10 @@ namespace Farmware.WorldGeneration.Editor
         public const string ProductionBiomeTerrainTexturePath =
             "Assets/Farmware/Art/WorldGeneration/Terrain/Base/terrain_biomes_base.png";
 
+        /// <summary>上面16pxと側面12pxを一体化した本番用岩壁Textureパスです。</summary>
+        public const string ProductionRockWallTexturePath =
+            "Assets/Farmware/Art/WorldGeneration/Terrain/Base/terrain_rock_wall_01.png";
+
         /// <summary>14基本形を16pxずつ横一列に収録した境界ハイライトTextureパスです。</summary>
         public const string BoundaryHighlightTexturePath =
             "Assets/Farmware/Art/WorldGeneration/Terrain/Highlights/terrain_boundary_highlights.png";
@@ -82,10 +86,6 @@ namespace Farmware.WorldGeneration.Editor
 
         /// <summary>隣接Spriteの色がにじまないように確保する余白です。単位はピクセルです。</summary>
         public const int AtlasPaddingInPixels = 4;
-
-        /// <summary>岩壁の本番素材が用意されるまで使用するフォールバック素材フォルダです。</summary>
-        private const string FallbackAssetFolder =
-            "Assets/Farmware/Art/WorldGeneration/Fallback";
 
         /// <summary>プレイヤー向け表示に使う本番バイオーム土地Textureパスです。</summary>
         private static readonly string[] GroundTerrainSourceTexturePaths =
@@ -108,7 +108,7 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>岩壁Atlasへ収録する元Textureパスです。</summary>
         private static readonly string[] RockWallSourceTexturePaths =
         {
-            FallbackAssetFolder + "/RockWall.png"
+            ProductionRockWallTexturePath
         };
 
         /// <summary>境界ハイライトAtlasへ収録する元Textureパスです。</summary>
@@ -200,6 +200,7 @@ namespace Farmware.WorldGeneration.Editor
             EnsureSpritePackerV2Enabled();
             EnsureFolderHierarchy(AtlasAssetFolder);
             ValidateProductionBiomeSpriteSheet();
+            ValidateProductionRockWallSprite();
             ValidateBoundaryHighlightSpriteSheet();
 
             GenerateOrUpdateAtlas(GroundTerrainAtlasPath, GroundTerrainSourceTexturePaths);
@@ -311,6 +312,40 @@ namespace Farmware.WorldGeneration.Editor
                         $"本番用バイオームSpriteの順序または名前が不正です: index={index}, "
                         + $"expected={ExpectedBiomeSpriteNames[index]}, actual={sprites[index].name}");
                 }
+            }
+        }
+
+        /// <summary>
+        /// 本番用岩壁が16×28の単一SpriteとしてImportされ、Atlasへ安全に登録できることを確認します。
+        /// </summary>
+        /// <exception cref="InvalidOperationException">Sprite数、寸法、名前が期待と異なる場合に送出します。</exception>
+        private static void ValidateProductionRockWallSprite()
+        {
+            Sprite[] sprites = AssetDatabase.LoadAllAssetsAtPath(ProductionRockWallTexturePath)
+                .OfType<Sprite>()
+                .ToArray();
+            if (sprites.Length != 1)
+            {
+                throw new InvalidOperationException(
+                    $"本番用岩壁画像は単一SpriteとしてImportしてください: "
+                    + $"{ProductionRockWallTexturePath}, actual={sprites.Length}");
+            }
+
+            Sprite sprite = sprites[0];
+            Rect rect = sprite.rect;
+            bool geometryIsValid = Mathf.Approximately(rect.x, 0f)
+                && Mathf.Approximately(rect.y, 0f)
+                && Mathf.Approximately(rect.width, 16f)
+                && Mathf.Approximately(rect.height, 28f);
+            if (!geometryIsValid
+                || !string.Equals(
+                    sprite.name,
+                    "terrain_rock_wall_01",
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"本番用岩壁Spriteの名前または16×28区画が不正です: "
+                    + $"expected=terrain_rock_wall_01, actual={sprite.name}, rect={rect}");
             }
         }
 

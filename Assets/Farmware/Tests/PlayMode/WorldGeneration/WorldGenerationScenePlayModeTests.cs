@@ -1222,6 +1222,22 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     $"SampleSceneが本番用Biome Spriteを参照していません: {biomeTileFieldNames[biomeIndex]}");
             }
 
+            // 専用TileアセットとSceneの参照を同時に確認し、構築ツールの再実行でFallback岩壁へ戻る回帰を検出します。
+            FieldInfo rockWallTileField = typeof(ChunkTilemapPresenter).GetField(
+                "rockWallTile",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.That(rockWallTileField, Is.Not.Null, "岩壁Tileフィールドが見つかりません。");
+            Tile productionRockWallTile = rockWallTileField.GetValue(terrainPresenter) as Tile;
+            Assert.That(productionRockWallTile, Is.Not.Null, "SampleSceneの岩壁Tile参照がありません。");
+            Assert.That(
+                productionRockWallTile.sprite,
+                Is.Not.Null,
+                "SampleSceneの岩壁TileにSpriteがありません。");
+            Assert.That(
+                productionRockWallTile.sprite.name,
+                Is.EqualTo("terrain_rock_wall_01"),
+                "SampleSceneが本番用岩壁Spriteを参照していません。");
+
             GameObject resourceTilemapObject = GameObject.Find("World Grid/Resource Tilemap");
             Tilemap resourceTilemap = resourceTilemapObject == null
                 ? null
@@ -1594,6 +1610,10 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 }
 
                 foundDisplayedRockWall = true;
+                Assert.That(
+                    rockWallTilemap.GetTile(cellPosition),
+                    Is.SameAs(productionRockWallTile),
+                    $"岩壁セル {cellPosition} がSampleSceneの本番用岩壁Tileを参照していません。");
                 Assert.That(
                     tilemap.HasTile(cellPosition),
                     Is.True,

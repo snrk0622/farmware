@@ -1,4 +1,4 @@
-// このファイルは、本番用バイオーム土地と、岩壁・資源・液面アニメーションの仮素材を組み合わせ、マップ生成を確認できるSampleScene構成を再現可能に作ります。
+// このファイルは、本番用バイオーム土地・岩壁と、資源・液面アニメーションの仮素材を組み合わせ、マップ生成を確認できるSampleScene構成を再現可能に作ります。
 // Runtimeの生成規則には関与せず、製品・フォールバック表示素材、Sprite Atlas、SubScene、Camera、Grid、TilemapのAuthoring接続だけを担当します。
 
 using System;
@@ -19,7 +19,7 @@ using UnityEngine.Tilemaps;
 namespace Farmware.WorldGeneration.Editor
 {
     /// <summary>
-    /// 本番用バイオーム土地、フォールバック地形、共通Sprite Atlas、資源アイコンを接続し、SampleSceneと設定用SubSceneを安全に構築するEditor専用ツールです。
+    /// 本番用バイオーム土地・岩壁、フォールバック地形、共通Sprite Atlas、資源アイコンを接続し、SampleSceneと設定用SubSceneを安全に構築するEditor専用ツールです。
     /// メニューまたはバッチモードのexecuteMethodから呼び出し、同じ名前の構成は再利用して重複作成を防ぎます。
     /// </summary>
     public static class WorldGenerationSceneBootstrap
@@ -27,9 +27,13 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>表示用フォールバック素材をまとめるUnityプロジェクト相対フォルダです。</summary>
         private const string FallbackAssetFolder = "Assets/Farmware/Art/WorldGeneration/Fallback";
 
-        /// <summary>本番用バイオーム土地のTileアセットをまとめるUnityプロジェクト相対フォルダです。</summary>
-        private const string ProductionBiomeTileFolder =
+        /// <summary>本番用土地・岩壁のTileアセットをまとめるUnityプロジェクト相対フォルダです。</summary>
+        private const string ProductionTerrainTileFolder =
             "Assets/Farmware/Art/WorldGeneration/Terrain/Base";
+
+        /// <summary>本番用岩壁Spriteを参照する専用TileのUnityプロジェクト相対パスです。</summary>
+        private const string ProductionRockWallTilePath =
+            ProductionTerrainTileFolder + "/terrain_rock_wall_01.asset";
 
         // 旧Soil派生Tileを確実に削除するために列挙する、7種類の土地アセット共通英語名です。
         private static readonly string[] FallbackBiomeAssetNames =
@@ -394,6 +398,10 @@ namespace Farmware.WorldGeneration.Editor
             // ユーザー制作の224×16画像を、Sprite Editorの公式Data Providerで14枚へ安全に分割します。
             ConfigureBoundaryHighlightSpriteSheet();
 
+            // 本番PNG自体は書き換えず、Importerと専用Tileだけを冪等に設定します。
+            // これを毎回行うことで、構築ツールの再実行後もFallback岩壁へ参照が戻りません。
+            CreateOrUpdateProductionRockWallTile();
+
             // PNGのSaveAndReimport中に以前読み込んだUnity Object参照が無効化される場合があります。
             // 液体・岩壁・資源を生成した後、本番用土地を含む最新のTileを読み直してSceneへ保存します。
             AssetDatabase.SaveAssets();
@@ -413,7 +421,7 @@ namespace Farmware.WorldGeneration.Editor
             Tile magmaTile = LoadRequiredFallbackTile("Magma");
             Tile freshWaterTile = LoadRequiredFallbackTile("FreshWater");
             Tile saltWaterTile = LoadRequiredFallbackTile("SaltWater");
-            Tile rockWallTile = LoadRequiredFallbackTile("RockWall");
+            Tile rockWallTile = LoadRequiredProductionRockWallTile();
             Tile treeResourceTile = LoadRequiredFallbackTile("TreeResource");
             Tile stoneResourceTile = LoadRequiredFallbackTile("StoneResource");
             Tile sandResourceTile = LoadRequiredFallbackTile("SandResource");
@@ -891,6 +899,77 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>
+        /// 配置済みの16×28本番岩壁PNGへPixel Art用Importer設定を適用し、専用Tileを作成または更新します。
+        /// </summary>
+        /// <returns>本番岩壁Spriteを参照し、Colliderを持たない表示専用Tileです。</returns>
+        /// <remarks>PNGの画素は変更せず、Importer、Pivot、Tile参照だけを更新します。</remarks>
+        private static Tile CreateOrUpdateProductionRockWallTile()
+        {
+            string texturePath = WorldGenerationSpriteAtlasBuilder.ProductionRockWallTexturePath;
+            AssetDatabase.ImportAsset(texturePath, ImportAssetOptions.ForceSynchronousImport);
+            Texture2D texture = AssetDatabase.LoadAssetAtPath<Texture2D>(texturePath);
+            if (texture == null
+                || texture.width != FallbackTilePixelSize
+                || texture.height
+                    != TerrainLayerPresentationUtility.CombinedRockWallSpriteHeightInPixels)
+            {
+                throw new InvalidOperationException(
+                    $"本番用岩壁画像は16×28ピクセルで配置してください: {texturePath}");
+            }
+
+            TextureImporter importer = AssetImporter.GetAtPath(texturePath) as TextureImporter;
+            if (importer == null)
+            {
+                throw new InvalidOperationException(
+                    $"本番用岩壁画像のTextureImporterを取得できません: {texturePath}");
+            }
+
+            importer.textureType = TextureImporterType.Sprite;
+            importer.spriteImportMode = SpriteImportMode.Single;
+            importer.spritePixelsPerUnit = AssetsPixelsPerUnit;
+            importer.filterMode = FilterMode.Point;
+            importer.mipmapEnabled = false;
+            importer.textureCompression = TextureImporterCompression.Uncompressed;
+            importer.alphaIsTransparency = true;
+            importer.wrapMode = TextureWrapMode.Clamp;
+            importer.isReadable = false;
+            importer.npotScale = TextureImporterNPOTScale.None;
+            TextureImporterSettings importerSettings = new TextureImporterSettings();
+            importer.ReadTextureSettings(importerSettings);
+            importerSettings.spriteMeshType = SpriteMeshType.FullRect;
+            importerSettings.spriteGenerateFallbackPhysicsShape = false;
+            importer.SetTextureSettings(importerSettings);
+            importer.SaveAndReimport();
+
+            // 下側12pxを基準面より上へ積むため、Pivotは左下基準でY=8/28へ固定します。
+            ApplySpritePivot(
+                texturePath,
+                new Vector2(0.5f, TerrainLayerPresentationUtility.CombinedRockWallPivotY));
+
+            Sprite sprite = AssetDatabase.LoadAssetAtPath<Sprite>(texturePath);
+            if (sprite == null)
+            {
+                throw new InvalidOperationException(
+                    $"本番用岩壁Spriteを読み込めませんでした: {texturePath}");
+            }
+
+            Tile tile = AssetDatabase.LoadAssetAtPath<Tile>(ProductionRockWallTilePath);
+            if (tile == null)
+            {
+                tile = ScriptableObject.CreateInstance<Tile>();
+                AssetDatabase.CreateAsset(tile, ProductionRockWallTilePath);
+            }
+
+            tile.sprite = sprite;
+            tile.color = Color.white;
+            tile.transform = Matrix4x4.identity;
+            tile.colliderType = Tile.ColliderType.None;
+            tile.flags = TileFlags.LockTransform;
+            EditorUtility.SetDirty(tile);
+            return tile;
+        }
+
+        /// <summary>
         /// 任意高さのピクセル配列をPNGへ保存し、指定PivotのSpriteと表示専用Tileへ変換します。
         /// </summary>
         /// <param name="assetName">PNGとTileアセットに使用する英語名です。</param>
@@ -1216,7 +1295,7 @@ namespace Farmware.WorldGeneration.Editor
         /// <returns>本番用土地シート内の対応Spriteを参照するTileアセットです。</returns>
         private static Tile LoadRequiredProductionBiomeTile(string assetName)
         {
-            string tileAssetPath = $"{ProductionBiomeTileFolder}/{assetName}.asset";
+            string tileAssetPath = $"{ProductionTerrainTileFolder}/{assetName}.asset";
             Tile tile = AssetDatabase.LoadAssetAtPath<Tile>(tileAssetPath);
             if (tile == null || tile.sprite == null)
             {
@@ -1234,6 +1313,35 @@ namespace Farmware.WorldGeneration.Editor
                 throw new InvalidOperationException(
                     $"本番用バイオームTileが別のSpriteを参照しています: "
                     + $"{tileAssetPath}, sprite={tile.sprite.name}, texture={spriteAssetPath}");
+            }
+
+            return tile;
+        }
+
+        /// <summary>
+        /// 本番用岩壁Tileを読み直し、Fallbackではなく配置済みPNGのSpriteを参照することを確認します。
+        /// </summary>
+        /// <returns>本番用岩壁Spriteを参照する専用Tileです。</returns>
+        private static Tile LoadRequiredProductionRockWallTile()
+        {
+            Tile tile = AssetDatabase.LoadAssetAtPath<Tile>(ProductionRockWallTilePath);
+            if (tile == null || tile.sprite == null)
+            {
+                throw new InvalidOperationException(
+                    $"本番用岩壁Tileを再読込できませんでした: {ProductionRockWallTilePath}");
+            }
+
+            string spriteAssetPath = AssetDatabase.GetAssetPath(tile.sprite);
+            if (!string.Equals(tile.sprite.name, "terrain_rock_wall_01", StringComparison.Ordinal)
+                || !string.Equals(
+                    spriteAssetPath,
+                    WorldGenerationSpriteAtlasBuilder.ProductionRockWallTexturePath,
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"本番用岩壁Tileが別のSpriteを参照しています: "
+                    + $"{ProductionRockWallTilePath}, sprite={tile.sprite.name}, "
+                    + $"texture={spriteAssetPath}");
             }
 
             return tile;

@@ -1,4 +1,4 @@
-// このファイルは、本番用バイオーム土地・フォールバック岩壁・境界ハイライトのSprite Atlas V2設定と、各Atlasが1ページへ収まることを検証します。
+// このファイルは、本番用バイオーム土地・岩壁・境界ハイライトのSprite Atlas V2設定と、各Atlasが1ページへ収まることを検証します。
 // Tilemapの見た目を画像比較する代わりに、誤描画の原因だったTexture分割をEditModeで直接保証します。
 
 using System;
@@ -124,6 +124,62 @@ namespace Farmware.WorldGeneration.Tests
             AssertAtlasPackables(
                 WorldGenerationSpriteAtlasBuilder.RockWallAtlasPath,
                 WorldGenerationSpriteAtlasBuilder.GetRockWallSourceTexturePaths());
+        }
+
+        /// <summary>
+        /// 本番用岩壁が16×28の単一Spriteとして、PPU 16、Point、MipMapなし、無圧縮、Full Rect、Pivot Y 8/28で取り込まれることを検証します。
+        /// </summary>
+        [Test]
+        public void ProductionRockWallSprite_UsesExpectedGeometryAndPixelArtSettings()
+        {
+            string texturePath = WorldGenerationSpriteAtlasBuilder.ProductionRockWallTexturePath;
+            TextureImporter importer = AssetImporter.GetAtPath(texturePath) as TextureImporter;
+            Assert.That(importer, Is.Not.Null, $"TextureImporterを取得できません: {texturePath}");
+            Assert.That(importer.textureType, Is.EqualTo(TextureImporterType.Sprite));
+            Assert.That(importer.spriteImportMode, Is.EqualTo(SpriteImportMode.Single));
+            Assert.That(importer.spritePixelsPerUnit, Is.EqualTo(16f));
+            Assert.That(importer.filterMode, Is.EqualTo(FilterMode.Point));
+            Assert.That(importer.mipmapEnabled, Is.False);
+            Assert.That(importer.textureCompression, Is.EqualTo(TextureImporterCompression.Uncompressed));
+            Assert.That(importer.wrapMode, Is.EqualTo(TextureWrapMode.Clamp));
+
+            // Tilemapの矩形全体を常に描画し、透明輪郭から自動生成されたMeshやColliderへ依存しないことを保証します。
+            TextureImporterSettings importerSettings = new TextureImporterSettings();
+            importer.ReadTextureSettings(importerSettings);
+            Assert.That(importerSettings.spriteMeshType, Is.EqualTo(SpriteMeshType.FullRect));
+            Assert.That(importerSettings.spriteGenerateFallbackPhysicsShape, Is.False);
+
+            Sprite[] sprites = AssetDatabase.LoadAllAssetsAtPath(texturePath)
+                .OfType<Sprite>()
+                .ToArray();
+            Assert.That(sprites, Has.Length.EqualTo(1));
+            Sprite sprite = sprites[0];
+            Assert.That(sprite.name, Is.EqualTo("terrain_rock_wall_01"));
+            Assert.That(sprite.rect.x, Is.Zero);
+            Assert.That(sprite.rect.y, Is.Zero);
+            Assert.That(sprite.rect.width, Is.EqualTo(16f));
+            Assert.That(sprite.rect.height, Is.EqualTo(28f));
+            Assert.That(sprite.pivot.x, Is.EqualTo(8f).Within(0.001f));
+            Assert.That(sprite.pivot.y, Is.EqualTo(8f).Within(0.001f));
+        }
+
+        /// <summary>
+        /// 専用TileがFallbackではなく本番岩壁Spriteを参照し、物理衝突をPresentationへ混入させないことを検証します。
+        /// </summary>
+        [Test]
+        public void ProductionRockWallTile_ReferencesProductionSprite()
+        {
+            const string tilePath =
+                "Assets/Farmware/Art/WorldGeneration/Terrain/Base/terrain_rock_wall_01.asset";
+            Tile tile = AssetDatabase.LoadAssetAtPath<Tile>(tilePath);
+
+            Assert.That(tile, Is.Not.Null, $"本番用岩壁Tileが見つかりません: {tilePath}");
+            Assert.That(tile.sprite, Is.Not.Null, $"TileのSprite参照がありません: {tilePath}");
+            Assert.That(tile.sprite.name, Is.EqualTo("terrain_rock_wall_01"));
+            Assert.That(
+                AssetDatabase.GetAssetPath(tile.sprite),
+                Is.EqualTo(WorldGenerationSpriteAtlasBuilder.ProductionRockWallTexturePath));
+            Assert.That(tile.colliderType, Is.EqualTo(Tile.ColliderType.None));
         }
 
         /// <summary>
@@ -381,6 +437,17 @@ namespace Farmware.WorldGeneration.Tests
             AssertAllSpritesPackedIntoOneTexture(
                 WorldGenerationSpriteAtlasBuilder.GroundTerrainAtlasPath,
                 WorldGenerationSpriteAtlasBuilder.GetGroundTerrainSourceTexturePaths());
+        }
+
+        /// <summary>
+        /// 本番用岩壁Spriteが専用Atlasへ実際にパックされ、Fallback画像を必要としないことを検証します。
+        /// </summary>
+        [Test]
+        public void RockWallAtlas_PacksProductionSpriteIntoOneTexture()
+        {
+            AssertAllSpritesPackedIntoOneTexture(
+                WorldGenerationSpriteAtlasBuilder.RockWallAtlasPath,
+                WorldGenerationSpriteAtlasBuilder.GetRockWallSourceTexturePaths());
         }
 
         /// <summary>

@@ -11,9 +11,9 @@
 
 PixelLabだけで制作する製品用スプライトを漏れなく管理し、画風の固定、生成、Unityへのインポート、表示設定、実機確認を段階別に記録する。
 
-Editorの構築メニューが `Assets/Farmware/Art/WorldGeneration/Fallback/` へ生成する、上面をBiome基準色一色で塗った7種類の16×24土地Tile、3種類の16×16液体Tile、1種類の16×28岩壁Tile、3種類の資源Tile、淡水・海水・マグマの各4フレームAnimatedTileは表示を成立させるための仮素材である。現在、7バイオームの土地だけは`Terrain/Base/terrain_biomes_base.png`の本番候補をSampleSceneへ適用済みで、フォールバック土地は生成確認用として残す。本書のチェックは、本番候補へ置き換えた素材から付け、仮素材が存在するだけではチェックしない。
+Editorの構築メニューが `Assets/Farmware/Art/WorldGeneration/Fallback/` へ生成する、上面をBiome基準色一色で塗った7種類の16×24土地Tile、3種類の16×16液体Tile、1種類の16×28岩壁Tile、3種類の資源Tile、淡水・海水・マグマの各4フレームAnimatedTileは表示を成立させるための仮素材である。現在、7バイオームの土地は`Terrain/Base/terrain_biomes_base.png`、岩壁は`Terrain/Base/terrain_rock_wall_01.png`の本番候補をSampleSceneへ適用済みで、対応するフォールバック素材は生成確認用として残す。本書のチェックは、本番候補へ置き換えた素材から付け、仮素材が存在するだけではチェックしない。
 
-2026-10-15時点で、`ChunkTilemapPresenter`には上面16 pxと断面8 pxを結合した土地、上面16 pxと側面12 pxを結合した岩壁、土地より8 px下へ投影する静止液面・液面アニメーション、岩壁上資源を16×16サブチャンク単位で表示・消去する仕組みを実装済みである。土地は論理バイオームだけを表示し、標準・肥沃・砂質のSoilType差は通常表示へ反映しない。本番用を含む7枚の通常土地Baseは、上面をBiome代表色一色、断面を対応する一色で構成し、草・葉・砂紋、ランダムな色むら、A・B差分、SoilType別派生を持たない。マップ全体の賑わいとバイオームらしさは、資源、植生、動物、地形障害物、プレイヤー配置物など、配置に意味を持つ別要素で表現する。断面は隣接判定で出し分けず、画面手前の一体型ブロックが奥側の断面を隠す。`Build Fallback Map Prototype`を実行すると必要レイヤーと仮素材を再生成し、本番用バイオーム土地をSampleSceneへ再接続できる。
+2026-10-15時点で、`ChunkTilemapPresenter`には上面16 pxと断面8 pxを結合した土地、上面16 pxと側面12 pxを結合した岩壁、土地より8 px下へ投影する静止液面・液面アニメーション、岩壁上資源を16×16サブチャンク単位で表示・消去する仕組みを実装済みである。土地は論理バイオームだけを表示し、標準・肥沃・砂質のSoilType差は通常表示へ反映しない。本番用を含む7枚の通常土地Baseは、上面をBiome代表色一色、断面を対応する一色で構成し、草・葉・砂紋、ランダムな色むら、A・B差分、SoilType別派生を持たない。マップ全体の賑わいとバイオームらしさは、資源、植生、動物、地形障害物、プレイヤー配置物など、配置に意味を持つ別要素で表現する。断面は隣接判定で出し分けず、画面手前の一体型ブロックが奥側の断面を隠す。`Build Fallback Map Prototype`を実行すると必要レイヤーと仮素材を再生成し、本番用バイオーム土地と岩壁をSampleSceneへ再接続できる。
 
 ### 1.1 チェック欄の意味
 
@@ -82,7 +82,7 @@ Editorの構築メニューが `Assets/Farmware/Art/WorldGeneration/Fallback/` �
 #### 段階B: 製品表示としての接続と反復の確認
 
 段階Aで採用した色と形を基準に、16×24土地と16×28岩壁の一体型ブロック、液面アニメーション、装飾レイヤーを追加する。
-ロードマップ上は、完了した`ART-00B`に続き、`ART-00C`で本番用岩壁タイルを適用する。2026-10-15に、関連EditMode 23件とSampleScene PlayMode 25件の成功、Consoleエラー0件をAIが確認し、14形状と各回転、斜め内角、土地と岩壁の表示高さ、チャンク往復後の残留がないことを含むGameビュー確認を開発者が承認した。
+ロードマップ上は、完了した`ART-00B`に続き、`ART-00C`で本番用岩壁タイルを適用する。`ART-00B`は2026-10-15に、関連EditMode 23件とSampleScene PlayMode 25件の成功、Consoleエラー0件をAIが確認し、14形状と各回転、斜め内角、土地と岩壁の表示高さ、チャンク往復後の残留がないことを含むGameビュー確認を開発者が承認した。`ART-00C`は同日に本番PNG、専用Tile、Atlas、SampleScene、再構築処理、関連テストの更新まで完了し、Gameビューでの最終確認を残している。
 
 - [ ] 全11種類のBase地形を各1枚用意し、同じ分類では常に同じTileを表示
 - [x] 通常地形は上面16 pxと断面8 pxを一枚にし、手前の土地が奥側の断面を自然に隠す
@@ -467,11 +467,11 @@ Top-down oblique 2D pixel art rock-wall block for a cozy agricultural and indust
 Use readable medium cool gray, warm gray-brown, and limited charcoal accents while keeping the overall block bright enough for a cheerful daylight world. Give the top two to four subtle broad 1-to-3-pixel color clusters totaling approximately four to eight changed pixels. Give the matching face restrained horizontal strata without turning it into separate stones. Do not put a unique crack, mineral speck, or landmark in the Base Tile. The material must read as one continuous solid unbuildable rock mass. Never outline individual rock pieces. Avoid isometric diamond grid, corner, left or right side face, beveled cube, tile border, grid line, black seam, overall black or dull gray surface, cobblestone, brick pattern, gravel, dark grout, dense cracks, cave opening, loose boulder, large centered crack, high-contrast vein, strong directional shadow, gradient, blur, anti-aliasing, and dense speckles.
 ```
 
-- [ ] 生成
-- [ ] 取込
-- [ ] 設定
+- [x] 生成
+- [x] 取込
+- [x] 設定
 - [ ] 確認
-- [ ] `RockWallAtlas`、専用Tile、SampleSceneが本番用Spriteを参照し、Editor構築ツールの再実行後もFallback参照へ戻らない
+- [x] `RockWallAtlas`、専用Tile、SampleSceneが本番用Spriteを参照し、Editor構築ツールの再実行後もFallback参照へ戻らない
 - [ ] 連続岩壁の側面、内部影、岩壁上資源、境界ハイライト、水・マグマに面した下層土地断面をGameビューで確認
 
 ### 4.8 岩壁内部影
@@ -932,6 +932,7 @@ Editor構築ツールとPlayerビルド前処理は、`terrain_biomes_base.png`�
 | 日付 | Asset ID | PixelLab Tool | Seed | 主な設定変更 | 出力ファイル | 採用・却下理由 |
 |---|---|---|---|---|---|---|
 | 2026-10-15 | `terrain_biomes_base` | 未共有 | 未共有 | 112×24 px、16×24 px×7枚、上面・断面は各一色、Base差分なし | `Terrain/Base/terrain_biomes_base.png` | 単色Base方針、7バイオームへの割り当て、Gameビュー確認に問題がないため採用 |
+| 2026-10-15 | `terrain_rock_wall_01` | 未共有 | 未共有 | 16×28 px、上面16 px＋側面12 px、単一Base Tile | `Terrain/Base/terrain_rock_wall_01.png` | Import・専用Tile・Atlas・SampleSceneへの適用済み。Gameビュー最終確認後に採否を確定する |
 
 ## 12. 後続段階で追加するスプライト
 

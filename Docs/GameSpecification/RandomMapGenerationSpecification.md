@@ -373,7 +373,7 @@ WorldSeed
 - Sorting Orderは静止液面を-2、液面アニメーションを-1、`Ground Tilemap`を0、土地境界ハイライトを1、岩壁背面資源を2、`Rock Wall Tilemap`を3、岩壁境界ハイライトを4、岩壁内部影を5、通常前面資源を10、岩壁上資源を11とする。GroundとRock WallはIndividual ModeかつTop Left順を使用し、他のTilemapはChunk ModeかつBottom Left順を使用する。
 - `GroundTerrainAtlas`と`RockWallAtlas`はSprite Atlas V2、Built-in配信、Point、Mip Maps Off、RGBA32、無圧縮、回転なし、矩形Packingで生成する。Editor構築時とPlayerビルド前に再パックし、各Atlasが複数ページへ分割された場合は検証を失敗させる。
 - 通常地形は`Ground Tilemap`、水域・マグマは`Liquid Base Tilemap`で排他的に表示する。液体2レイヤーは同じ`-8/16セル`へ移動し、手前土地と重なる液面下辺は一体型土地ブロックで隠す。岩壁セルではBiome由来の土地へ、一体型岩壁・内部影・露出資源をPresentationとして重ねる。
-- 一体型土地・岩壁と液面アニメーションは実装済みである。プレイヤー向け土地は`terrain_biomes_base.png`を左からBiome ID順に7分割した本番用Tileを参照し、各Biomeで常に同じ1枚を使う。岩壁、液体、資源、液面アニメーションはEditor構築ツールが生成する交換可能なフォールバック素材を参照する。Soil差は通常土地へ反映せずEditor専用Debug Visualizationでのみ確認でき、追加のバイオーム移行装飾は未実装である。
+- 一体型土地・岩壁と液面アニメーションは実装済みである。プレイヤー向け土地は`terrain_biomes_base.png`を左からBiome ID順に7分割した本番用Tileを参照し、各Biomeで常に同じ1枚を使う。岩壁は`terrain_rock_wall_01.png`を参照する本番用専用Tileを全岩壁セルで使用する。液体、資源、液面アニメーションはEditor構築ツールが生成する交換可能なフォールバック素材を参照する。Soil差は通常土地へ反映せずEditor専用Debug Visualizationでのみ確認でき、追加のバイオーム移行装飾は未実装である。
 - 固定レイヤーの基本順は、静止液面、液面アニメーション、一体型土地、岩壁背面資源、一体型岩壁、岩壁内部影、通常前面資源、岩壁上資源とする。通常資源は直前方の岩壁有無から背面用または前面用へ分ける。
 - `Liquid Base Tilemap`は淡水、海水、マグマの静止Base Tileを8 px下へ表示する。`Liquid Surface Animation Tilemap`も同じTransformで透明な4フレームLoopだけを重ね、外周1 pxを常に透明に保つ。タイルごとのGameObjectやSpriteRendererは作成しない。
 - `Ground Tilemap`と`Rock Wall Tilemap`では、上面と前面を一枚のSpriteとしてセル単位でYソートする。旧Terrain Front Edge、Rock Wall Front Face、Rock Wall Top Tilemapは使用しない。
@@ -1053,6 +1053,6 @@ Unrequested
 以下は未実装であり、後続の縦切りで追加する。
 
 - 最大ズームアウト・高速パン時の実測に基づくプリロード幅とカメラ速度抑制。
-- `ART-00C`で行う、16×28 pxのPixelLab製本番岩壁タイルへの差し替え。フォールバック岩壁は構築確認用として残し、`RockWallAtlas`、専用Tile、SampleSceneは本番Spriteを参照する。
+- `ART-00C`の16×28 px本番岩壁タイル差し替えは実装済みである。フォールバック岩壁は構築確認用として残し、`RockWallAtlas`、専用Tile、SampleSceneは本番Spriteを参照する。Gameビューでの最終受け入れ確認を残している。
 - 初期スポーン地点へのドローン生成、中央コアの固定配置、セーブデータへの永続化。
 - セーブ差分、GeneratedWithVersionの復元、GenerationUpgradeEpochの境界ブレンディング。
