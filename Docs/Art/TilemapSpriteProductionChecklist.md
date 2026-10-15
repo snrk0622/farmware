@@ -1,4 +1,4 @@
-# Farmware タイルマップ用スプライト制作・導入チェックリスト v0.19
+# Farmware タイルマップ用スプライト制作・導入チェックリスト v0.20
 
 - 作成日: 2026-10-11
 - 最終更新日: 2026-10-15
@@ -13,7 +13,7 @@ PixelLabだけで制作する製品用スプライトを漏れなく管理し、
 
 Editorの構築メニューが `Assets/Farmware/Art/WorldGeneration/Fallback/` へ生成する、上面をBiome基準色一色で塗った7種類の16×24土地Tile、3種類の16×16液体Tile、1種類の16×28岩壁Tile、3種類の資源Tile、淡水・海水・マグマの各4フレームAnimatedTileは表示を成立させるための仮素材である。現在、7バイオームの土地だけは`Terrain/Base/terrain_biomes_base.png`の本番候補をSampleSceneへ適用済みで、フォールバック土地は生成確認用として残す。本書のチェックは、本番候補へ置き換えた素材から付け、仮素材が存在するだけではチェックしない。
 
-2026-10-15時点で、`ChunkTilemapPresenter`には上面16 pxと断面8 pxを結合した土地、上面16 pxと側面12 pxを結合した岩壁、土地より8 px下へ投影する静止液面・液面アニメーション、岩壁上資源を16×16サブチャンク単位で表示・消去する仕組みを実装済みである。土地は論理バイオームだけを表示し、標準・肥沃・砂質のSoilType差は通常表示へ反映しない。フォールバック7枚の上面はBiome基準色一色で、草・葉・砂紋などの固有模様も持たない。本番用Base地形はBiomeらしい質感を持つ各分類1枚とし、A・B差分およびSoilType別の派生素材は作らない。断面は隣接判定で出し分けず、画面手前の一体型ブロックが奥側の断面を隠す。`Build Fallback Map Prototype`を実行すると必要レイヤーと仮素材を再生成し、本番用バイオーム土地をSampleSceneへ再接続できる。
+2026-10-15時点で、`ChunkTilemapPresenter`には上面16 pxと断面8 pxを結合した土地、上面16 pxと側面12 pxを結合した岩壁、土地より8 px下へ投影する静止液面・液面アニメーション、岩壁上資源を16×16サブチャンク単位で表示・消去する仕組みを実装済みである。土地は論理バイオームだけを表示し、標準・肥沃・砂質のSoilType差は通常表示へ反映しない。本番用を含む7枚の通常土地Baseは、上面をBiome代表色一色、断面を対応する一色で構成し、草・葉・砂紋、ランダムな色むら、A・B差分、SoilType別派生を持たない。マップ全体の賑わいとバイオームらしさは、資源、植生、動物、地形障害物、プレイヤー配置物など、配置に意味を持つ別要素で表現する。断面は隣接判定で出し分けず、画面手前の一体型ブロックが奥側の断面を隠す。`Build Fallback Map Prototype`を実行すると必要レイヤーと仮素材を再生成し、本番用バイオーム土地をSampleSceneへ再接続できる。
 
 ### 1.1 チェック欄の意味
 
@@ -35,13 +35,13 @@ Editorの構築メニューが `Assets/Farmware/Art/WorldGeneration/Fallback/` �
 
 ### 1.2 次の作業: 画風を固定してから行うマップ全体の世界観検証
 
-以前に生成した草原、森林地面、砂漠、淡水面、岩壁上面は、素材間で模様密度、コントラスト、ピクセル塊の大きさが揃っていなかったため、製品候補としては採用せず一から生成し直す。
+以前に生成した草原、森林地面、砂漠、淡水面、岩壁上面は、素材間で配色、コントラスト、輪郭方針が揃っていなかったため、製品候補としては採用せず一から生成し直す。
 本番スプライトへの差し替えは、すべての素材、境界、アニメーションを完成させてから一度に確認するのではなく、次の3段階で行う。
 すべての段階で本番候補の可視ピクセルはPixelLabから生成し、採用画像、Seed、設定を制作記録へ残す。Style referenceに対応するツールでは、使用した参照画像も記録する。
 
 #### 段階0: マスタースタイルの固定
 
-最初に草原だけを生成し、16×24 pxの上面16 pxと断面8 pxで使用するピクセル塊、色数、コントラスト、模様密度の基準を決める。
+最初に草原だけを生成し、16×24 pxの上面16 pxと断面8 pxで使用する代表色、断面色、コントラストの基準を決める。
 草原を採用するまでは、森林、砂漠、水面、岩壁などの量産へ進まない。
 
 - [x] 草原を1枚生成し、設備の背景として十分に静かであることを確認
@@ -50,8 +50,8 @@ Editorの構築メニューが `Assets/Farmware/Art/WorldGeneration/Fallback/` �
 - [ ] 採用した草原画像、Seed、PixelLab設定をマスタースタイルとして制作記録へ登録
 - [ ] 以降の全地形で、採用した草原画像をStyle referenceへ指定
 
-草原以外の素材は、色や材質だけを変更し、ピクセル塊の大きさ、模様密度、陰影段階、輪郭方針を変更しない。
-Style referenceを指定しても描画密度が揃わない場合は採用せず、プロンプトや設定を調整して再生成する。
+草原以外の通常土地はBiome代表色と断面色だけを変更し、単色面、輪郭、寸法の方針を変更しない。
+通常土地Baseへ材質模様やランダムな色むらが生成された場合は採用せず、単色面になるよう修正または再出力する。
 
 #### 段階A: 全体配色とシルエットの確認
 
@@ -63,7 +63,7 @@ Style referenceを指定しても描画密度が揃わない場合は採用せ�
 - [ ] 木、石、砂資源の代表スプライトを各1枚選定
 - [ ] 代表地形11種類と資源3種類をUnityへ取り込み、既存の全分類へ割り当て
 - [ ] 原点付近、海岸、川、岩壁、火山、雪原を含む複数地点でGameビューを撮影
-- [ ] 480×270の実表示で、地形同士と資源の識別性、彩度、明度、模様密度を確認
+- [ ] 480×270の実表示で、地形同士と資源の識別性、彩度、明度、単色面の読みやすさを確認
 - [x] F4境界表示を一時的に重ね、16×16サブチャンクと64×64チャンクをまたぐ表示欠けがないことを確認
 
 段階Aでは同じTileの繰り返しが見えることを既知の未完成項目として扱う。基本地形同士の直線的な切り替わりと、島や岸の直角を含む単純な輪郭は完成方針の一部として評価する。
@@ -88,7 +88,7 @@ Style referenceを指定しても描画密度が揃わない場合は採用せ�
 - [ ] 岩壁は上面16 pxと側面12 pxを一枚にし、手前の岩壁が奥側の側面を自然に隠す
 - [ ] 岩壁セルでも下層の16×24土地ブロックを残し、水・マグマに面した場所で土地断面が欠けない
 - [ ] 水面・マグマの岸の位置を固定したまま、内部の波紋と明暗だけをアニメーション
-- [ ] 地面装飾を低密度で別レイヤーへ追加
+- [ ] 資源、植生、動物、地形障害物など、配置に意味を持つ要素を別レイヤーへ追加
 - [ ] 水・マグマに接する土地の外周辺・内角と、岩壁領域の外周辺・内角へ、白い共通デザインの境界ハイライトを透明な専用オーバーレイとして追加
 - [ ] 連続する模様、境界の欠け、ちらつき、Tilemapの継ぎ目がないことを確認
 
@@ -105,11 +105,10 @@ Style referenceを指定しても描画密度が揃わない場合は採用せ�
 | 1 | 残りのBase地形 | 森林、砂漠、岩地、湿地、雪原、火山は16×24、淡水、海水、マグマは16×16、岩壁は16×28。各1枚 | 10 Sprite |
 | 2 | 土地・岩壁境界ハイライト | 土地上面と岩壁上面で共有する16×16の透明素材。14形状を90度回転して47接続状態へ展開 | 14 Sprite |
 | 3 | 基礎資源 | 木3、石3、砂資源3 | 9 Sprite |
-| 4 | 地面装飾 | 草原8、森林8、砂漠8、水面6 | 30 Sprite |
 | 5 | ドローン | 8方向×待機4フレーム、8方向×移動4フレーム | 64 Sprite frame |
 | 6 | 開始コア | 待機4フレーム、稼働4フレーム | 8 Sprite frame |
 
-初期必須合計は、静止Spriteとアニメーションフレームを合わせて136点とする。水面・マグマの任意アニメーション、後続段階の設備や固有資源はこの合計へ含めない。`ART-00B`の土地・岩壁境界ハイライトは、透明状態をTilemapへ配置せず、方向による色・陰影差を持たない14枚の可視Spriteを土地上面と岩壁上面で共有する。
+初期必須合計は、静止Spriteとアニメーションフレームを合わせて106点とする。水面・マグマの任意アニメーション、後続段階の設備、固有資源、ゲーム上の役割が未定義な純粋装飾はこの合計へ含めない。`ART-00B`の土地・岩壁境界ハイライトは、透明状態をTilemapへ配置せず、方向による色・陰影差を持たない14枚の可視Spriteを土地上面と岩壁上面で共有する。
 最初の世界観確認に必要な最小セットは、11地形の代表各1枚と木・石・砂資源の代表各1枚の合計14点である。
 
 Base地形は合計11種類×1枚の11 Spriteとなる。段階Aの世界観確認では各地形をUnityへ接続し、配色と情報量を確認する。
@@ -141,30 +140,30 @@ Base地形は合計11種類×1枚の11 Spriteとなる。段階Aの世界観確�
 ### 2.2 色、明度、情報量
 
 - 明るく親しみやすい自然色を基本にする。Foragerの地表のような高い彩度差、広い色面、遠目での識別しやすさを配色の参考にするが、既存Sprite、輪郭、模様、地形配置は複製しない。
-- 単純な輪郭を採用してもチープな単色面にはしない。各Base地形は1枚だけを用意し、低コントラストの色むらと材質に合う小さな模様で奥行きを保つ。目立つアクセントはBase Tileへ焼き込まず装飾オーバーレイへ分離する。
+- 通常土地のBase Tileは、設備、物流、資源、配置表示を読みやすくする単色背景として意図的に簡素化する。上面はBiome代表色一色、断面は対応する一色とし、低コントラストであっても材質模様やランダムな色むらを焼き込まない。
 - 配色の基準関係は、草原を明るい自然な緑、海を草原と明確に分離する鮮やかな青、前面断面を両者より暗い暖色の土色とする。個別のRGB値は採用画像から決め、既存作品のパレットをそのまま抽出しない。
-- 1枚のBase Tileでは主色に加えて2〜3段階の近似色を使い、平坦さを抑える。黒に近い輪郭は地形外周や前面断面の下端などシルエットを読む箇所へ限定し、地面模様の一つ一つには付けない。
+- 1枚の通常土地Base Tileでは上面色と断面色を明確に分ける。必要な輪郭は地形外周や前面断面の下端などシルエットを読む箇所へ限定し、上面へ模様や輪郭を追加しない。
 - 草原は自然光の下の若草色を基準とし、黄緑へ寄せすぎない緑主体の中高明度・中彩度にする。蛍光ライム、蛍光黄色、白に近い広い色面、全画面へ灰色や茶色を重ねたようなくすんだ色調、暗いオリーブ色、陰鬱な照明は避ける。
-- 明るさは白飛び、蛍光色、高コントラストを意味しない。地面の広い色面を明るく保ち、模様のコントラストと密度を抑えることで、工業設備、資源、ベルト、柵を読みやすくする。
-- バイオームは色だけに依存せず、草、落ち葉、砂粒などの模様でも区別する。
+- 明るさは白飛び、蛍光色、高コントラストを意味しない。地面の広い単色面を明るく保ち、工業設備、資源、ベルト、柵を読みやすくする。
+- Base Tile上ではバイオームを代表色で区別し、マップ全体では資源、植生、動物、地形障害物、環境演出など意味を持つ要素も組み合わせて識別する。
 - SoilTypeはプレイヤー向け土地表示へ反映しない。標準・肥沃・砂質の派生Tileや共通模様マスクを制作せず、土地素材はBiomeごとの見た目だけを設計する。土壌分布の確認にはEditor専用Debug Visualizationを使用する。
 - 同じ地形を連続配置しても規則的な明暗格子や強い方向性が見えないようにする。
-- 目立つ花、ひび、大石などは通常地面へ大量に焼き込まず、低密度の装飾オーバーレイへ分離する。
+- 花、ひび、大石、草束などは通常土地Baseへ焼き込まない。追加する場合は、採取、通行、環境状態、プレイヤー配置などの意味を定義した別要素へ分離する。
 - 地面には方向性の強い影を置かない。自然物と設備の光源は左上に統一する。
 - 16×16 pxでは1 px単位の形を優先し、アンチエイリアス、半透明の縁、縮小前提の細部を使用しない。
 - 通常地面では、個々の石、土塊、草へ黒い輪郭を付けない。暗い線で素材を細かく区切る表現は、石畳やタイル床に見えるため使用しない。
-- 地形ごとに色相と平均明度は変えてよいが、1タイル内の明暗差、陰影段階、模様の大きさはマスタースタイルへ合わせる。
-- 単独の1 pxを無数に散らさず、1〜3 px程度の小さなまとまりを疎らに配置する。意味のない高周波ノイズで材質を表現しない。
+- 地形ごとに色相と平均明度は変えてよいが、通常土地上面は1色、断面も1色に統一し、タイル内へ陰影段階や模様を追加しない。
+- 意味のない高周波ノイズ、ランダムな1 px、材質らしさだけを目的とした模様を通常土地Baseへ配置しない。
 - 森林地面、岩地、火山などは草原より暗くしてよいが、画面全体を重くするほど黒くしない。岩壁上面も細かな石の集合ではなく、連続した一枚岩として表現する。
 
-### 2.3 Base Tileの反復と装飾分離
+### 2.3 Base Tileと意味を持つ配置要素の分離
 
 各Base地形は分類ごとに1枚だけを持ち、同じBiomeではワールド座標、Seed、Entity生成順、チャンクのロード順にかかわらず同じTileを表示する。
 
-- Base Tileには花、大石、大きなひび、強い反射など、反復が目立つ低頻度アクセントを入れない。
-- 地形の主色、平均明度、模様密度は1枚の中で偏らせず、縦横へ連続配置しても境界線や方向性が見えないようにする。
-- 低頻度アクセントが必要な場合はBase地形の差分を増やさず、座標ベースで配置する専用の装飾オーバーレイとして追加する。
-- 装飾オーバーレイを追加しても、SimulationのBiome、Ground、SoilTypeやゲーム結果は変更しない。
+- 通常土地Base Tileには花、大石、大きなひび、強い反射、材質模様などのアクセントを入れない。
+- 上面と断面をそれぞれ単色にして、縦横へ連続配置しても境界線や方向性が見えないようにする。
+- マップへ見た目の変化を加える場合は、Base地形の差分や座標だけで散布する純粋装飾ではなく、資源、植生、動物、地形障害物、環境状態、プレイヤー配置物など意味を持つ別データとして追加する。
+- 表示要素の種類、位置、状態はECSまたはセーブデータを正とし、Base TileやTilemapの画素からゲーム上の意味を逆算しない。
 
 ## 3. PixelLab共通設定
 
@@ -177,7 +176,7 @@ PixelLabのUI更新により項目名や段階数が変わった場合は、次�
 地形Promptへ展開する共通方針の参照用である。このコードブロック単体は入力せず、4.1の全文Promptを使用する。
 
 ```text
-Top-down oblique 2D pixel art ground block for a cozy agricultural and industrial automation game, using an orthogonal square grid rather than an isometric diamond grid. Each land tile is exactly 16 by 24 pixels: the upper 16 by 16 pixels are a seamless top surface and the lower 16 by 8 pixels are one straight front-facing cross-section belonging to the same block. Use bright, clearly separated biome colors and broad calm color fields with the immediate readability of a cheerful island-building game, while creating original terrain textures and motifs. Keep the ground comfortably less bright than pale UI highlights, placement overlays, and machine indicator lights. Nothing on the ground should look luminous, fluorescent, or self-illuminated. Use two or three restrained value steps, crisp hand-placed pixel clusters, and sparse material-specific texture. Create one repeatable Base Tile for the biome, keeping material clusters subtle so repeated placement does not reveal a strong grid or direction. Match the face material to that tile. The ground must remain subordinate to small machines, logistics links, resource icons, and placement overlays. No outline around ordinary ground details, no visible tile boundary, and no corners or side-facing edges.
+Top-down oblique 2D pixel art ground block for a cozy agricultural and industrial automation game, using an orthogonal square grid rather than an isometric diamond grid. Each land tile is exactly 16 by 24 pixels: the upper 16 by 16 pixels are one completely solid biome color and the lower 16 by 8 pixels are one completely solid, darker front-face color belonging to the same block. Create one repeatable Base Tile for the biome. Do not add texture, material motifs, random color variation, highlights, speckles, grass, leaves, sand ripples, stones, cracks, or landmarks. The ground is a quiet background for machines, logistics links, resources, animals, and placement overlays. No visible tile boundary, no corner, and no left or right side face.
 ```
 
 ### 3.2 共通ネガティブプロンプト
@@ -193,7 +192,7 @@ isometric diamond grid, side-scroller view, strong perspective, isometric voxel 
 草原以外の地形Promptへ展開する共通方針の参照用である。このコードブロック単体は入力せず、4.2以降の各素材に記載した全文Promptを使用する。生成時は採用済み草原画像をStyle referenceへ指定する。
 
 ```text
-Match the approved grassland reference exactly in average brightness, moderate saturation, pixel-cluster size, texture density, contrast range, shading complexity, outline policy, and cheerful natural-daylight color clarity. Change only the material and its biome palette. Preserve clear natural colors without making them fluorescent, luminous, dull gray, muddy brown, or nearly black. Use the same visual scale and the same amount of quiet surface. Do not introduce finer details, darker outlines, additional shading levels, or more isolated single-pixel noise than the reference. Create one quiet repeatable Base Tile. Give it two to four subtle low-contrast 1-to-3-pixel material clusters, totaling approximately four to eight changed pixels. Do not place a unique landmark or accent in the Base Tile. The tile may not be completely flat or solid-colored.
+Match the approved grassland reference in canvas size, top-and-face layout, outline policy, and cheerful natural-daylight color clarity. Change only the biome's solid top color and solid front-face color. Preserve clear natural colors without making them fluorescent, luminous, dull gray, muddy brown, or nearly black. Do not add texture, random variation, shading clusters, isolated pixels, or landmarks. The normal-land Base Tile must remain completely flat and solid-colored within each of its two planes.
 ```
 
 ### 3.4 Base地形共通設定
@@ -205,13 +204,13 @@ Match the approved grassland reference exactly in average brightness, moderate s
 - Tile thickness: 土地8 px、岩壁12 px。液体は0
 - Outline mode: `No outline`
 - Shading: `Low`
-- Details: `Low`。マスタースタイルより情報量が減りすぎる場合だけ`Medium`を比較する
+- Details: 通常土地は`None`または最小。液体と岩壁は用途に応じて`Low`を比較する
 - Seed: 生成ごとに記録する
 - Style reference: 最初に採用した草原タイルを基準画像とし、それ以降の地形へ使用する
 - 出力数: 各地形1枚
 - 出力配置: 土地7バイオームはBiome ID順に左から並べた112×24 pxの横一列シートへまとめる。液体と岩壁は各1枚の個別画像を基本とする
-- 基本模様の密度: 各Tileへ1〜3 pxの低コントラストな色むらを2〜4か所、合計4〜8 px程度入れる
-- 禁止: 完全な単色Tile、孤立した暗い1 pxの大量散布、大きな固有模様、全体を灰色や茶色へ寄せるくすんだ色調
+- 通常土地の色: 上面はBiome代表色一色、断面は対応する一色に統一する
+- 通常土地で禁止: 色むら、材質模様、ランダムな1 px、固有模様、グラデーション、上面内の陰影段階
 
 `Create tiles (Pro)`のTiles機能は独立したBase地形生成に使う。PixelLabが16×24または16×28を直接生成できない場合は、同じ生成内の上面と前面を縦に結合して最終寸法へ整えるが、可視ピクセルの拡大縮小や補間は行わない。Base地形を相互に混ぜる接続Tilesetは制作せず、オートタイルによる接続表現は`ART-00B`の土地・岩壁境界ハイライト専用オーバーレイに限定する。
 
@@ -266,12 +265,12 @@ Match the approved grassland reference exactly in average brightness, moderate s
 
 Unityへ取り込む前に、PixelLabの出力ごとに次を確認する。
 
-- [ ] 各Base Tileの平均明度、主色、模様密度が隣接する分類と意図どおり区別できる
-- [ ] 各Base Tileに低コントラストな色むらがあり、完全な単色Tileになっていない
+- [ ] 各通常土地Base Tileの代表色と平均明度が、隣接する分類と意図どおり区別できる
+- [ ] 各通常土地Base Tileの上面と断面がそれぞれ完全な単色で、色むら、材質模様、ランダムな画素を含まない
 - [ ] 草原が明るい黄緑を保ち、灰緑、暗いオリーブ、茶色のフィルターが全体へ掛かって見えない
 - [ ] 草原以外も昼間の明快な色調を保ち、Style referenceより不必要に暗く、灰色に、またはくすんでいない
-- [ ] 草原のマスタースタイルと並べ、ピクセル塊の大きさとコントラストが一致する
-- [ ] 16×16の各辺を接続しても、線、色面、模様が不自然に途切れない
+- [ ] 草原のマスタースタイルと並べ、上面・断面の色分離とコントラストが一致する
+- [ ] 16×16の各辺を接続しても、線や色面が不自然に途切れない
 - [ ] 黒い区切り線がタイル画像自体へ描かれていない
 - [ ] 7バイオーム土地シートは左から草原、森林、砂漠、岩地、湿地、雪原、火山の順に並び、各Spriteが16×24 pxである
 - [ ] 同じTileを縦横に連続配置して最近傍表示で拡大し、アンチエイリアス、半透明の縁、意図しない中間色、目立つ明暗格子がない
@@ -281,15 +280,13 @@ Unityへ取り込む前に、PixelLabの出力ごとに次を確認する。
 
 ### 4.1 草原 `terrain_grassland`
 
-- 必要数: 静かなBase Tile 1枚。小花や目立つ土斑点は装飾オーバーレイへ分離する
+- 必要数: 単色Base Tile 1枚。小花や土斑点はBaseへ含めず、意味を持つ資源・植生などへ分離する
 - PixelLabツール: `Create tiles (Pro)`
 - 設定: 3.4の共通設定。最初はStyle referenceを使わず、この結果からマスタースタイルを決める
 - Prompt（全文をそのまま入力）:
 
 ```text
-Top-down oblique 2D pixel art ground block for a cozy agricultural and industrial automation game, using an orthogonal square grid rather than an isometric diamond grid. Create one repeatable meadow land block exactly 16 by 24 pixels for a cheerful automation world in clear natural daylight. The upper 16 by 16 pixels are one seamless grassy top surface and the lower 16 by 8 pixels are one straight front-facing soil cross-section belonging to the same block. The face must extend downward from the top surface, with its upper four rows as a slightly darker shadowed grass-and-soil band and its lower four rows as compact warm earth. Keep both horizontal endpoints at identical heights and colors. Use bright, clearly separated biome colors, broad calm color fields, two or three restrained value steps, crisp hand-placed pixel clusters, and sparse material-specific texture. Keep the ground comfortably less bright than pale UI highlights, placement overlays, machine indicator lights, resource icons, and logistics links. Nothing on the ground should look luminous, fluorescent, or self-illuminated. No transparent gap between top and face, no corner, no left or right side face, no beveled cube, no cast shadow, and no visible tile boundary.
-
-Use a fresh spring-meadow green base that is only slightly yellow-leaning and remains unmistakably green. Keep the base at a medium-light value with moderate saturation: brighter than forest ground, but clearly darker and less saturated than pale UI highlights or placement overlays. Reserve the lightest green for a few tiny highlight pixels rather than broad areas. Give the tile two to four subtle clusters of 1-to-3-pixel low-contrast color variation, totaling approximately four to eight changed pixels. The tile may not be completely flat or solid-colored, but most of it must remain a broad clean color area. Do not put a flower, landmark, or other unique accent in the Base Tile. Do not outline individual grass blades, flowers, soil marks, or pebbles. Avoid isometric diamond grid, side-scroller view, strong perspective, voxel block, cube terrain, 3D block, visible sides, thick bevel, tile border, grid line, black seam, cobblestone, brick pattern, gravel, long directional shadow, gloomy lighting, gray or brown color cast, fluorescent green, neon lime, acid green, chartreuse-dominant color, yellow-dominant grass, highlighter yellow, near-white ground, clipped highlights, gradient, blur, anti-aliasing, dense speckles, random isolated dark pixels, and recognizable repeated landmarks.
+Top-down oblique 2D pixel art ground block for a cozy agricultural and industrial automation game, using an orthogonal square grid rather than an isometric diamond grid. Create one repeatable meadow land block exactly 16 by 24 pixels. Fill the upper 16 by 16 pixels with one solid fresh spring-meadow green. Fill the lower 16 by 8 pixels with one solid darker warm-earth color. Keep both horizontal endpoints identical. Do not add texture, shading clusters, highlights, grass blades, flowers, soil marks, pebbles, random pixels, gradients, outlines, tile borders, corners, left or right side faces, cast shadows, or transparent gaps. The result must be a flat two-color block that remains subordinate to resources, machines, logistics, and placement overlays.
 ```
 
 - 再生成理由（2026-10-12）: 最初の候補はGameビューで蛍光ライムに近く、他地形や将来の配置表示より強く見えたため不採用。Style referenceには使用しない。
@@ -302,15 +299,13 @@ Use a fresh spring-meadow green base that is only slightly yellow-leaning and re
 
 ### 4.2 森林地面 `terrain_forest_floor`
 
-- 必要数: 静かなBase Tile 1枚。目立つ根やシダは装飾オーバーレイへ分離する
+- 必要数: 単色Base Tile 1枚。根やシダはBaseへ含めず、意味を持つ資源・植生などへ分離する
 - PixelLabツール: `Create tiles (Pro)`
 - 設定: 3.4の共通設定。採用した草原をStyle referenceへ指定する
 - Prompt（全文をそのまま入力）:
 
 ```text
-Top-down oblique 2D pixel art forest ground block for a cozy agricultural and industrial automation game, using an orthogonal square grid rather than an isometric diamond grid. Create one repeatable moist forest-floor block exactly 16 by 24 pixels. The upper 16 by 16 pixels are one seamless forest-floor top and the lower 16 by 8 pixels are one straight front-facing earth cross-section belonging to the same block. Use the upper four face rows as a slightly darker shadowed forest-soil band and the lower four rows as compact earth; keep both endpoints identical. Match the approved grassland reference exactly in pixel-cluster size, texture density, contrast range, shading complexity, outline policy, broad quiet areas, and cheerful natural-daylight color clarity. Change only the material and biome palette. Use two or three restrained value steps and crisp hand-placed pixel clusters. Do not introduce finer details, darker outlines, additional shading levels, or more isolated single-pixel noise than the grassland reference. No transparent gap, corner, left or right side face, beveled cube, cast shadow, or visible tile boundary.
-
-Use a clear medium leaf green with warm readable brown soil accents. Keep the average value only moderately darker than the grassland reference and never make the surface muddy, dull gray, nearly black, or gloomy. Give the tile two to four subtle low-contrast clusters of 1-to-3-pixel forest-soil, leaf-green, or moss-green variation, totaling approximately four to eight changed pixels. The tile may not be completely flat or solid-colored. Do not put a root, fern, or other unique landmark in the Base Tile. Avoid isometric diamond grid, visible sides, tile border, grid line, black seam, outlined leaf, outlined pebble, dense speckle, tree, trunk, large plant, deep hole, cobblestone, brick pattern, gravel, strong directional shadow, fluorescent color, glowing ground, muddy brown cast, gray filter, gradient, blur, anti-aliasing, and high visual noise.
+Top-down oblique 2D pixel art forest ground block for a cozy agricultural and industrial automation game, using an orthogonal square grid rather than an isometric diamond grid. Create one repeatable forest land block exactly 16 by 24 pixels. Fill the upper 16 by 16 pixels with one solid medium forest green that is darker than the approved grassland. Fill the lower 16 by 8 pixels with one solid darker earth color. Keep both horizontal endpoints identical. Do not add texture, shading clusters, highlights, leaves, moss, roots, ferns, stones, random pixels, gradients, outlines, tile borders, corners, left or right side faces, cast shadows, or transparent gaps.
 ```
 
 - [ ] 生成
@@ -320,15 +315,13 @@ Use a clear medium leaf green with warm readable brown soil accents. Keep the av
 
 ### 4.3 砂漠 `terrain_desert_sand`
 
-- 必要数: 静かなBase Tile 1枚。目立つ小石や砂紋は装飾オーバーレイへ分離する
+- 必要数: 単色Base Tile 1枚。小石や砂紋はBaseへ含めず、意味を持つ資源・地形要素などへ分離する
 - PixelLabツール: `Create tiles (Pro)`
 - 設定: 3.4の共通設定。採用した草原をStyle referenceへ指定する
 - Prompt（全文をそのまま入力）:
 
 ```text
-Top-down oblique 2D pixel art desert ground block for a cozy agricultural and industrial automation game, using an orthogonal square grid rather than an isometric diamond grid. Create one repeatable compact inland-desert block exactly 16 by 24 pixels. The upper 16 by 16 pixels are one seamless sand top and the lower 16 by 8 pixels are one straight front-facing compact-sand cross-section belonging to the same block. Use the upper four face rows as a slightly darker shadowed sand band and the lower four rows as compact layered sand; keep both endpoints identical. Match the approved grassland reference exactly in pixel-cluster size, texture density, contrast range, shading complexity, outline policy, broad quiet areas, and cheerful natural-daylight color clarity. Change only the material and biome palette. Use two or three restrained value steps and crisp hand-placed pixel clusters. Do not introduce finer details, darker outlines, additional shading levels, or more isolated single-pixel noise than the grassland reference. No transparent gap, corner, left or right side face, beveled cube, cast shadow, or visible tile boundary.
-
-Use bright warm ochre, clear golden sand, and a small amount of pale sunlit yellow. Give the tile two to four subtle low-contrast clusters of 1-to-3-pixel darker or lighter sand variation, totaling approximately four to eight changed pixels. The tile may not be completely flat or solid-colored. Do not put a pebble, long ripple, or other unique landmark in the Base Tile. Do not outline individual grains or pebbles. Avoid isometric diamond grid, visible sides, tile border, grid line, black seam, dull beige, gray-brown dust, muddy desaturation, tropical beach cyan, long continuous lines, large dunes, footprints, bones, shells, dense speckles, high-contrast patterns, cobblestone, brick pattern, strong directional shadow, fluorescent color, glowing ground, gradient, blur, and anti-aliasing.
+Top-down oblique 2D pixel art desert ground block for a cozy agricultural and industrial automation game, using an orthogonal square grid rather than an isometric diamond grid. Create one repeatable desert land block exactly 16 by 24 pixels. Fill the upper 16 by 16 pixels with one solid bright warm ochre or golden-sand color. Fill the lower 16 by 8 pixels with one solid darker compact-sand color. Keep both horizontal endpoints identical. Do not add texture, shading clusters, highlights, grains, pebbles, ripples, dunes, footprints, random pixels, gradients, outlines, tile borders, corners, left or right side faces, cast shadows, or transparent gaps.
 ```
 
 - [ ] 生成
@@ -344,7 +337,7 @@ Use bright warm ochre, clear golden sand, and a small amount of pale sunlit yell
 - Static Prompt（全文をそのまま入力）:
 
 ```text
-Top-down 2D pixel art water surface for a cozy agricultural and industrial automation game, using an orthogonal square grid rather than an isometric diamond grid. Create one repeatable seamless calm freshwater surface viewed directly from above, exactly 16 by 16 pixels. The tile must form a flat seamless surface with no visible tile boundary, shore, side face, thickness, outline, or cast shadow. Match the approved grassland reference exactly in pixel-cluster size, texture density, contrast range, shading complexity, broad quiet areas, and cheerful natural-daylight color clarity. Change only the material and biome palette. Use two or three restrained value steps and crisp hand-placed pixel clusters. Do not introduce finer details, darker outlines, additional shading levels, or more isolated single-pixel noise than the grassland reference.
+Top-down 2D pixel art water surface for a cozy agricultural and industrial automation game, using an orthogonal square grid rather than an isometric diamond grid. Create one repeatable seamless calm freshwater surface viewed directly from above, exactly 16 by 16 pixels. The tile must form a flat seamless surface with no visible tile boundary, shore, side face, thickness, outline, or cast shadow. Match the approved grassland reference only in visual scale and cheerful natural-daylight color clarity. Unlike solid normal land, liquid may use two or three restrained value steps and sparse internal ripple clusters. Do not add darker outlines or high-frequency noise.
 
 Use clear medium blue-green with a small amount of fresh cyan-blue and pale sunlit reflection. Keep the surface bright and clean without becoming neon, mirror-like, or self-illuminated. Give the tile two to four subtle low-contrast blue or blue-green clusters totaling approximately four to eight changed pixels. The tile may not be completely flat or solid-colored. Do not put a unique reflection or landmark in the Base Tile. Ripples must be short broken pixel clusters rather than symbols or repeated lines. Avoid isometric diamond grid, visible sides, tile border, grid line, black seam, gray or muddy water, outlined ripples, parallel wave stripes, ocean swell, foam, shoreline, fish, boats, floating objects, large reflections, strong directional highlights, fluorescent cyan, glowing water, gradient, blur, anti-aliasing, and dense speckles.
 ```
@@ -371,7 +364,7 @@ Create a transparent four-frame pixel-art overlay that animates only tiny water 
 - Static Prompt（全文をそのまま入力）:
 
 ```text
-Top-down 2D pixel art water surface for a cozy agricultural and industrial automation game, using an orthogonal square grid rather than an isometric diamond grid. Create one repeatable seamless calm saltwater surface viewed directly from above, exactly 16 by 16 pixels. The tile must form a flat seamless surface with no visible tile boundary, shore, side face, thickness, outline, or cast shadow. Match the approved grassland and freshwater references exactly in pixel-cluster size, texture density, contrast range, shading complexity, broad quiet areas, and cheerful natural-daylight color clarity. Change only the material and ocean palette. Use two or three restrained value steps and crisp hand-placed pixel clusters. Do not introduce finer details, darker outlines, additional shading levels, or more isolated single-pixel noise than the references.
+Top-down 2D pixel art water surface for a cozy agricultural and industrial automation game, using an orthogonal square grid rather than an isometric diamond grid. Create one repeatable seamless calm saltwater surface viewed directly from above, exactly 16 by 16 pixels. The tile must form a flat seamless surface with no visible tile boundary, shore, side face, thickness, outline, or cast shadow. Match the approved grassland reference only in visual scale and color clarity, and match freshwater in ripple density and contrast. Unlike solid normal land, liquid may use two or three restrained value steps and sparse internal ripple clusters. Do not add darker outlines or high-frequency noise.
 
 Use a clear medium ocean blue that is slightly deeper than the freshwater reference while remaining bright and colorful in daylight. Give the tile two to four subtle low-contrast blue clusters totaling approximately four to eight changed pixels. The tile may not be completely flat or solid-colored. Do not put a unique reflection or landmark in the Base Tile. Keep the surface readable as ocean water without drawing foam or a shoreline. Avoid isometric diamond grid, visible sides, tile border, grid line, black seam, gray navy, murky water, tropical neon cyan, outlined waves, large ocean swell, parallel stripes, foam, shoreline, fish, boats, floating objects, large reflections, strong directional highlights, glowing water, gradient, blur, anti-aliasing, and dense speckles.
 ```
@@ -396,22 +389,20 @@ Create a transparent four-frame pixel-art overlay that animates only small saltw
 
 | 用途 | 推奨ファイル接頭辞 | 主な見分け方 |
 | --- | --- | --- |
-| 岩地 | `terrain_rockland` | 岩壁より低く平坦な灰褐色地面。建築可能地と読める密度にする。 |
-| 湿地 | `terrain_wetland` | 草原より少し深い緑の湿潤土と、明るい苔。灰色や黒へ寄せず淡水面と区別する。 |
+| 岩地 | `terrain_rockland` | 岩壁より低く平坦な灰色地面。建築可能地と読める明度にする。 |
+| 湿地 | `terrain_wetland` | 草原より深い緑の湿潤地面。灰色や黒へ寄せず淡水面と区別する。 |
 | 雪原 | `terrain_snowfield` | 青みのある雪面。完全な白を避け、HUDや配置表示の白を残す。 |
 | 火山 | `terrain_volcanic` | 深い赤褐色の火山岩。黒く潰さず、マグマの橙色より低彩度にする。 |
-| マグマ | `terrain_magma` | 高彩度の橙と黄。大面積でもちらつかない模様密度にする。 |
+| マグマ | `terrain_magma` | 高彩度の橙と黄。大面積でもちらつかない情報量にする。 |
 
-各地面は静かなBase Tile 1枚とし、採用した草原を必ずStyle referenceへ指定する。色と材質だけを変更し、明るく明快な昼間の色調、広い静かな色面、各Tileにつき4〜8 pxの基本色むらを維持する。目立つ固有模様を入れず、マスタースタイルより細かな模様、強い輪郭、灰色のフィルターを追加しない。マグマをアニメーションさせる場合も、3.8に従って外周と岸を固定し、内部の流れと明暗だけを動かす。
+岩地、湿地、雪原、火山の通常土地は、上面をBiome代表色一色、断面を対応する一色にする。材質模様、色むら、ランダムな画素、固有アクセントを入れない。マグマは液体として別扱いとし、アニメーションさせる場合も3.8に従って外周と岸を固定し、内部の流れと明暗だけを動かす。
 
 #### 4.6.1 岩地 `terrain_rockland`
 
 - Static Prompt（全文をそのまま入力）:
 
 ```text
-Top-down oblique 2D pixel art rockland ground block for a cozy agricultural and industrial automation game, using an orthogonal square grid rather than an isometric diamond grid. Create one repeatable buildable rockland block exactly 16 by 24 pixels. The upper 16 by 16 pixels are one seamless flat rock top and the lower 16 by 8 pixels are one straight front-facing rock cross-section belonging to the same block. Use the upper four face rows as a slightly darker shadowed rock band and the lower four rows as continuous bedrock; keep both endpoints identical. Match the approved grassland reference exactly in pixel-cluster size, texture density, contrast range, shading complexity, outline policy, broad quiet areas, and cheerful natural-daylight color clarity. Change only the material and biome palette. Use two or three restrained value steps and crisp hand-placed pixel clusters. Do not introduce finer details, darker outlines, additional shading levels, or more isolated single-pixel noise than the grassland reference. No transparent gap, corner, left or right side face, stone wall, cast shadow, or visible tile boundary.
-
-Use readable medium warm gray, cool gray, and restrained gray-brown tones. Keep this ground clearly lighter, flatter, and less massive than the unbuildable rock-wall top. Give the tile two to four subtle broad 1-to-3-pixel color clusters totaling approximately four to eight changed pixels. The tile may not be completely flat or solid-colored. Do not put a unique crack, mineral speck, or landmark in the Base Tile. The surface must read as compact natural rock ground, not separate stones. Avoid isometric diamond grid, visible cliff side, tile border, grid line, black seam, cobblestone, brick pattern, gravel, dark grout, outlined stones, dense cracks, loose boulder, cave, crater, black surface, dull gray filter, high-contrast veins, long shadow, gradient, blur, anti-aliasing, and dense speckles.
+Top-down oblique 2D pixel art rockland ground block for a cozy agricultural and industrial automation game, using an orthogonal square grid rather than an isometric diamond grid. Create one repeatable buildable rockland block exactly 16 by 24 pixels. Fill the upper 16 by 16 pixels with one solid readable medium gray. Fill the lower 16 by 8 pixels with one solid darker rock color. Keep this ground lighter than the unbuildable rock wall and keep both horizontal endpoints identical. Do not add texture, shading clusters, stones, cracks, mineral specks, random pixels, gradients, outlines, tile borders, corners, side faces, cast shadows, or transparent gaps.
 ```
 
 #### 4.6.2 湿地 `terrain_wetland`
@@ -419,9 +410,7 @@ Use readable medium warm gray, cool gray, and restrained gray-brown tones. Keep 
 - Static Prompt（全文をそのまま入力）:
 
 ```text
-Top-down oblique 2D pixel art wetland ground block for a cozy agricultural and industrial automation game, using an orthogonal square grid rather than an isometric diamond grid. Create one repeatable moist wetland-ground block exactly 16 by 24 pixels. The upper 16 by 16 pixels are one seamless buildable wetland top and the lower 16 by 8 pixels are one straight front-facing damp-earth cross-section belonging to the same block. Use the upper four face rows as a slightly darker shadowed wet-soil band and the lower four rows as compact damp earth; keep both endpoints identical. Match the approved grassland reference exactly in pixel-cluster size, texture density, contrast range, shading complexity, outline policy, broad quiet areas, and cheerful natural-daylight color clarity. Change only the material and biome palette. Use two or three restrained value steps and crisp hand-placed pixel clusters. Do not introduce finer details, darker outlines, additional shading levels, or more isolated single-pixel noise than the grassland reference. No transparent gap, corner, left or right side face, water hole, cast shadow, or visible tile boundary.
-
-Use a clear medium deep green for moist soil with restrained blue-green and bright moss-green accents. Keep the average value only moderately darker than grassland, while remaining colorful and readable in daylight. Give the tile two to four subtle low-contrast 1-to-3-pixel moist-soil or moss color clusters totaling approximately four to eight changed pixels. The tile may not be completely flat or solid-colored. Do not put a reed sprout, dark patch, or other unique landmark in the Base Tile. The surface must remain ground rather than open water. Avoid isometric diamond grid, visible sides, tile border, grid line, black seam, muddy black soil, gray-green filter, large puddle, reflective water, foam, bubbles, outlined mud clumps, dense moss carpet, large reeds, lily pad, tree root network, strong shadow, fluorescent green, gradient, blur, anti-aliasing, and dense speckles.
+Top-down oblique 2D pixel art wetland ground block for a cozy agricultural and industrial automation game, using an orthogonal square grid rather than an isometric diamond grid. Create one repeatable buildable wetland block exactly 16 by 24 pixels. Fill the upper 16 by 16 pixels with one solid clear deep green that remains distinct from grassland and freshwater. Fill the lower 16 by 8 pixels with one solid darker damp-earth color. Keep both horizontal endpoints identical. Do not add texture, shading clusters, moss, reeds, puddles, roots, random pixels, gradients, outlines, tile borders, corners, side faces, cast shadows, or transparent gaps.
 ```
 
 #### 4.6.3 雪原 `terrain_snowfield`
@@ -429,9 +418,7 @@ Use a clear medium deep green for moist soil with restrained blue-green and brig
 - Static Prompt（全文をそのまま入力）:
 
 ```text
-Top-down oblique 2D pixel art snowfield ground block for a cozy agricultural and industrial automation game, using an orthogonal square grid rather than an isometric diamond grid. Create one repeatable snowfield block exactly 16 by 24 pixels. The upper 16 by 16 pixels are one seamless buildable snow top and the lower 16 by 8 pixels are one straight front-facing frozen-soil cross-section belonging to the same block. Use the upper four face rows as a slightly darker blue-gray snow-shadow band and the lower four rows as compact frozen earth or rock; keep both endpoints identical. Match the approved grassland reference exactly in pixel-cluster size, texture density, contrast range, shading complexity, outline policy, broad quiet areas, and cheerful natural-daylight color clarity. Change only the material and biome palette. Use two or three restrained value steps and crisp hand-placed pixel clusters. Do not introduce finer details, darker outlines, additional shading levels, or more isolated single-pixel noise than the grassland reference. No transparent gap, corner, left or right side face, rounded snow bank, cast shadow, or visible tile boundary.
-
-Use pale blue-white snow with restrained light blue-gray shadows, keeping pure white highlights extremely limited so white UI, placement overlays, and machine indicators remain readable. Give the tile two to four subtle low-contrast 1-to-3-pixel blue-white variation clusters totaling approximately four to eight changed pixels. The tile may not be completely flat or solid-colored. Do not put exposed ice, soil, or another unique landmark in the Base Tile. Avoid isometric diamond grid, visible snow-bank side, tile border, grid line, black seam, completely pure-white tile, clipped highlights, reflective ice sheet, crystalline cave, icicle, deep footprint, long wind stripe, snowman, rock pile, strong blue outline, dark shadow, gradient, blur, anti-aliasing, and dense speckles.
+Top-down oblique 2D pixel art snowfield ground block for a cozy agricultural and industrial automation game, using an orthogonal square grid rather than an isometric diamond grid. Create one repeatable snowfield block exactly 16 by 24 pixels. Fill the upper 16 by 16 pixels with one solid pale blue-white that remains darker than white UI and placement overlays. Fill the lower 16 by 8 pixels with one solid darker frozen-earth color. Keep both horizontal endpoints identical. Do not add texture, shading clusters, highlights, ice, footprints, wind stripes, random pixels, gradients, outlines, tile borders, corners, side faces, cast shadows, or transparent gaps.
 ```
 
 #### 4.6.4 火山地面 `terrain_volcanic`
@@ -439,9 +426,7 @@ Use pale blue-white snow with restrained light blue-gray shadows, keeping pure w
 - Static Prompt（全文をそのまま入力）:
 
 ```text
-Top-down oblique 2D pixel art volcanic ground block for a cozy agricultural and industrial automation game, using an orthogonal square grid rather than an isometric diamond grid. Create one repeatable buildable volcanic-ground block exactly 16 by 24 pixels. The upper 16 by 16 pixels are one seamless volcanic top and the lower 16 by 8 pixels are one straight front-facing dark-rock cross-section belonging to the same block. Use the upper four face rows as a slightly darker shadowed volcanic band and the lower four rows as continuous rock; keep both endpoints identical. Match the approved grassland reference exactly in pixel-cluster size, texture density, contrast range, shading complexity, outline policy, broad quiet areas, and cheerful natural-daylight color clarity. Change only the material and biome palette. Use two or three restrained value steps and crisp hand-placed pixel clusters. Do not introduce finer details, darker outlines, additional shading levels, or more isolated single-pixel noise than the grassland reference. No transparent gap, corner, left or right side face, lava glow, cast shadow, or visible tile boundary.
-
-Use deep but readable red-brown, warm charcoal-brown, and restrained muted rust tones. Keep the ground clearly less saturated and less bright than magma, and do not let the large surface collapse into black. Give the tile two to four subtle broad 1-to-3-pixel color clusters totaling approximately four to eight changed pixels. The tile may not be completely flat or solid-colored. Do not put an ember speck, large crack, or other unique landmark in the Base Tile. Avoid isometric diamond grid, visible cliff side, tile border, grid line, black seam, glowing lava line, magma pool, bright yellow crack, ash cloud, smoke, crater, separate outlined stones, cobblestone, brick pattern, gravel, nearly black surface, dense cracks, strong shadow, gradient, blur, anti-aliasing, and dense speckles.
+Top-down oblique 2D pixel art volcanic ground block for a cozy agricultural and industrial automation game, using an orthogonal square grid rather than an isometric diamond grid. Create one repeatable buildable volcanic block exactly 16 by 24 pixels. Fill the upper 16 by 16 pixels with one solid deep but readable red-brown that is less bright and less saturated than magma. Fill the lower 16 by 8 pixels with one solid darker volcanic-rock color. Keep both horizontal endpoints identical. Do not add texture, shading clusters, embers, cracks, lava lines, stones, random pixels, gradients, outlines, tile borders, corners, side faces, cast shadows, or transparent gaps.
 ```
 
 #### 4.6.5 マグマ `terrain_magma`
@@ -449,7 +434,7 @@ Use deep but readable red-brown, warm charcoal-brown, and restrained muted rust 
 - Static Prompt（全文をそのまま入力）:
 
 ```text
-Top-down 2D pixel art molten magma surface for a cozy agricultural and industrial automation game, using an orthogonal square grid rather than an isometric diamond grid. Create one repeatable seamless magma surface viewed directly from above, exactly 16 by 16 pixels. The tile must form a flat lowland liquid surface with no visible tile boundary, shore, side face, thickness, outline, or cast shadow. Match the approved grassland and volcanic-ground references in pixel-cluster size, texture density, contrast range, shading complexity, broad quiet areas, and clear natural-daylight readability. Change only the material and magma palette. Use three controlled value steps and crisp hand-placed pixel clusters. Do not introduce finer details, heavier outlines, or more isolated single-pixel noise than the references.
+Top-down 2D pixel art molten magma surface for a cozy agricultural and industrial automation game, using an orthogonal square grid rather than an isometric diamond grid. Create one repeatable seamless magma surface viewed directly from above, exactly 16 by 16 pixels. The tile must form a flat lowland liquid surface with no visible tile boundary, shore, side face, thickness, outline, or cast shadow. Match normal land only in visual scale and readable color separation. Unlike solid normal land, magma may use three controlled value steps and sparse internal flow clusters. Do not add heavy outlines or high-frequency noise.
 
 Use a strong orange base, warm red-orange darker clusters, and a very limited amount of pale yellow highlights. Keep broad calm color fields so a large magma area does not flicker or overpower machines and UI. Give the tile two to four subtle internal 1-to-3-pixel flow-color clusters totaling approximately four to eight changed pixels. The tile may not be completely flat or solid-colored. Do not put a bright molten knot or other unique landmark in the Base Tile. Avoid isometric diamond grid, visible sides, tile border, grid line, black seam, shoreline, crust edge, white-hot broad area, neon yellow, flashing highlight, long continuous lava stripe, large eruption, splash, smoke, flying ember, rock island, outlined crack network, strong bloom, gradient, blur, anti-aliasing, and dense speckles.
 ```
@@ -475,7 +460,7 @@ Create a transparent four-frame pixel-art overlay that animates only small inter
 - Prompt（全文をそのまま入力）:
 
 ```text
-Top-down oblique 2D pixel art rock-wall block for a cozy agricultural and industrial automation game, using an orthogonal square grid rather than an isometric diamond grid. Create one repeatable block of a continuous natural rock mass exactly 16 by 28 pixels. The upper 16 by 16 pixels are one seamless unbuildable rock-wall top and the lower 16 by 12 pixels are one straight front-facing rock wall belonging to the same block. Add a one-pixel boundary at the top of the face, keep both horizontal endpoints at identical heights and colors, and connect the face directly to the top without a transparent gap. Match the approved grassland and rockland references in pixel-cluster size, texture density, contrast range, shading complexity, outline policy, broad quiet areas, and cheerful natural-daylight color clarity. Change only the material and rock palette. Use two or three restrained value steps and crisp hand-placed pixel clusters. Do not introduce finer details, darker outlines, additional shading levels, or more isolated single-pixel noise than the references.
+Top-down oblique 2D pixel art rock-wall block for a cozy agricultural and industrial automation game, using an orthogonal square grid rather than an isometric diamond grid. Create one repeatable block of a continuous natural rock mass exactly 16 by 28 pixels. The upper 16 by 16 pixels are one seamless unbuildable rock-wall top and the lower 16 by 12 pixels are one straight front-facing rock wall belonging to the same block. Add a one-pixel boundary at the top of the face, keep both horizontal endpoints at identical heights and colors, and connect the face directly to the top without a transparent gap. Match normal land only in visual scale, outline policy, and cheerful natural-daylight color clarity. Unlike solid normal land, the unbuildable rock wall may use two or three restrained value steps and sparse rock texture so its height and obstruction are readable. Do not add high-frequency noise or isolated dark pixels.
 
 Use readable medium cool gray, warm gray-brown, and limited charcoal accents while keeping the overall block bright enough for a cheerful daylight world. Give the top two to four subtle broad 1-to-3-pixel color clusters totaling approximately four to eight changed pixels. Give the matching face restrained horizontal strata without turning it into separate stones. Do not put a unique crack, mineral speck, or landmark in the Base Tile. The material must read as one continuous solid unbuildable rock mass. Never outline individual rock pieces. Avoid isometric diamond grid, corner, left or right side face, beveled cube, tile border, grid line, black seam, overall black or dull gray surface, cobblestone, brick pattern, gravel, dark grout, dense cracks, cave opening, loose boulder, large centered crack, high-contrast vein, strong directional shadow, gradient, blur, anti-aliasing, and dense speckles.
 ```
@@ -618,9 +603,9 @@ Gameビューで高さが読めない場合だけ、チャンク単位のMeshま
 - [ ] チャンクのアンロード時に土地・岩壁を同じサブチャンク単位で消去する
 - [ ] 再ロード後も同じ座標へ同じ一体型Tileが出る
 
-## 6. 地面装飾オーバーレイ
+## 6. 意味を持つ地表要素とオーバーレイ
 
-プレイヤーが配置する床、道、模様、舗装、耕地と、ワールド生成による草束、小花、小石などの平面的な装飾は、専用の`Ground Overlay Tilemap`へ表示する。土地より前、岩壁、木、岩、動物、柵、作業台、機械などの立体物より後ろに描く。
+プレイヤーが配置する床、道、模様、舗装、耕地など、配置や状態に意味を持つ平面的な要素は、専用の`Ground Overlay Tilemap`へ表示する。土地より前、岩壁、木、岩、動物、柵、作業台、機械などの立体物より後ろに描く。ワールド生成では単色Base Tileの反復を隠すことだけを目的に、草束、小花、小石、土斑点をランダム散布しない。採取、通行、環境状態、バイオーム固有性などの役割が決まった要素だけを追加する。
 
 装飾は16×16 pxの透明背景とし、ゲームルール用の`GroundType`を変更しない。木、石などの採取資源とも別レイヤーにする。装飾の配置座標、種類、回転、所有者、ゲーム効果はECSまたはセーブデータを正とし、Tilemapは16×16サブチャンク単位で再構築できる表示キャッシュとする。
 
@@ -630,7 +615,9 @@ Gameビューで高さが読めない場合だけ、チャンク単位のMeshま
 - ゲーム効果を持つ床や耕地は、見た目と効果Componentを分離する。Tilemap画像の種類から効果を逆算しない。
 - プレイヤーによる配置、変更、撤去では、変更セルを含むDirtyサブチャンクだけを更新する。
 
-### 6.1 草原装飾 `decor_grassland`
+### 6.1 草原の意味を持つ地表要素 `decor_grassland`
+
+以下の候補は、ゲーム上または世界表現上の役割と配置データを定義したものだけ制作する。純粋に画面を埋めるためのランダム装飾としては使用しない。
 
 - 必要数: 草束2、小花2、小石2、土斑点2
 - PixelLabツール: `Create tiles (Pro)`
@@ -909,7 +896,7 @@ Editor構築ツールとPlayerビルド前処理は、`terrain_biomes_base.png`�
 
 - [ ] 各地形を16×16タイル以上の面積で敷き、繰り返し模様を確認
 - [x] 各Biomeが座標、Seed、チャンクの生成・ロード順にかかわらず、対応する同じBase Tileを表示することを確認
-- [x] 同じBase Tileを16×16タイル以上並べても継ぎ目が出ず、低頻度の見た目の変化が必要な箇所は地表装飾で補えることを確認
+- [x] 同じ単色Base Tileを16×16タイル以上並べても継ぎ目が出ず、マップの賑わいを資源など意味を持つ配置要素で補えることを確認
 - [x] 連続する土地では奥側の8 px断面が手前ブロックに隠れ、水・マグマに面した場所では断面が露出することを確認
 - [x] Base Spriteと前面断面には外角、内角、左右端の補完Spriteがなく、輪郭が直角のままであることを確認
 - [ ] 境界ハイライトでは14形状の全外周・内角と90度回転を確認し、斜めだけが欠ける地形でも内角線が途切れないことを確認
@@ -936,7 +923,7 @@ Editor構築ツールとPlayerビルド前処理は、`terrain_biomes_base.png`�
 
 | 日付 | Asset ID | PixelLab Tool | Seed | 主な設定変更 | 出力ファイル | 採用・却下理由 |
 |---|---|---|---|---|---|---|
-| 2026-10-15 | `terrain_biomes_base` | 未共有 | 未共有 | 112×24 px、16×24 px×7枚、Base差分なし | `Terrain/Base/terrain_biomes_base.png` | 7バイオームへの割り当てとGameビュー確認に問題がないため採用 |
+| 2026-10-15 | `terrain_biomes_base` | 未共有 | 未共有 | 112×24 px、16×24 px×7枚、上面・断面は各一色、Base差分なし | `Terrain/Base/terrain_biomes_base.png` | 単色Base方針、7バイオームへの割り当て、Gameビュー確認に問題がないため採用 |
 
 ## 12. 後続段階で追加するスプライト
 
