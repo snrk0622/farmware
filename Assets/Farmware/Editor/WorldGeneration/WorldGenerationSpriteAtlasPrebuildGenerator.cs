@@ -1,6 +1,7 @@
 // [UNITY-SKILL:SPRITEATLAS]
 // [TYPE:PREBUILD]
-// このファイルは、一体型土地・岩壁SpriteをSprite Atlas V2へまとめ、異なる元Texture間でもTilemapの行ソートを維持します。
+// [VERSION:2.0.1]
+// このファイルは、本番用バイオーム土地とフォールバック岩壁のSpriteをSprite Atlas V2へまとめ、Tilemapの行ソートを維持します。
 // WorldGenerationSceneBootstrapからEditor確認用に呼ばれ、Playerビルド前にはIPreprocessBuildWithReportから同じ設定を再適用します。
 
 using System;
@@ -43,7 +44,7 @@ namespace Farmware.WorldGeneration.Editor
     }
 
     /// <summary>
-    /// 一体型土地と岩壁のSprite Atlas V2を、フォールバック素材または同じパスへ差し替えた製品用素材から冪等に生成します。
+    /// 本番用の一体型バイオーム土地とフォールバック岩壁のSprite Atlas V2を冪等に生成します。
     /// </summary>
     public static class WorldGenerationSpriteAtlasBuilder
     {
@@ -58,26 +59,39 @@ namespace Farmware.WorldGeneration.Editor
         public const string RockWallAtlasPath =
             AtlasAssetFolder + "/RockWallAtlas.spriteatlasv2";
 
+        /// <summary>7種類の本番用バイオーム土地Spriteを横一列に収録した元Textureパスです。</summary>
+        public const string ProductionBiomeTerrainTexturePath =
+            "Assets/Farmware/Art/WorldGeneration/Terrain/Base/terrain_biomes_base.png";
+
+        /// <summary>本番用土地シートに必ず存在するSprite数です。</summary>
+        public const int ExpectedBiomeSpriteCount = 7;
+
         /// <summary>Atlasの1ページへ許可する最大辺長です。単位はピクセルです。</summary>
         public const int AtlasMaxTextureSize = 512;
 
         /// <summary>隣接Spriteの色がにじまないように確保する余白です。単位はピクセルです。</summary>
         public const int AtlasPaddingInPixels = 4;
 
-        /// <summary>製品用画像と同じパスへ差し替え可能なフォールバック素材フォルダです。</summary>
+        /// <summary>岩壁の本番素材が用意されるまで使用するフォールバック素材フォルダです。</summary>
         private const string FallbackAssetFolder =
             "Assets/Farmware/Art/WorldGeneration/Fallback";
 
-        /// <summary>プレイヤー向け表示に使う7種類のバイオーム土地Textureパスです。</summary>
+        /// <summary>プレイヤー向け表示に使う本番バイオーム土地Textureパスです。</summary>
         private static readonly string[] GroundTerrainSourceTexturePaths =
         {
-            FallbackAssetFolder + "/Grassland.png",
-            FallbackAssetFolder + "/Forest.png",
-            FallbackAssetFolder + "/Desert.png",
-            FallbackAssetFolder + "/Rockland.png",
-            FallbackAssetFolder + "/Wetland.png",
-            FallbackAssetFolder + "/Snowfield.png",
-            FallbackAssetFolder + "/Volcanic.png"
+            ProductionBiomeTerrainTexturePath
+        };
+
+        /// <summary>土地シートを左から右へSliceしたときの、Biome IDと対応する安定したSprite名です。</summary>
+        private static readonly string[] ExpectedBiomeSpriteNames =
+        {
+            "terrain_grassland",
+            "terrain_forest",
+            "terrain_desert",
+            "terrain_rockland",
+            "terrain_wetland",
+            "terrain_snowfield",
+            "terrain_volcanic"
         };
 
         /// <summary>岩壁Atlasへ収録する元Textureパスです。</summary>
@@ -93,6 +107,15 @@ namespace Farmware.WorldGeneration.Editor
         public static string[] GetGroundTerrainSourceTexturePaths()
         {
             return (string[])GroundTerrainSourceTexturePaths.Clone();
+        }
+
+        /// <summary>
+        /// 本番用土地シートへ必要なSprite名を、呼び出し元が書き換えられないコピーとして返します。
+        /// </summary>
+        /// <returns>Biome ID順の7個のSprite名です。</returns>
+        public static string[] GetExpectedBiomeSpriteNames()
+        {
+            return (string[])ExpectedBiomeSpriteNames.Clone();
         }
 
         /// <summary>
@@ -122,6 +145,7 @@ namespace Farmware.WorldGeneration.Editor
         {
             EnsureSpritePackerV2Enabled();
             EnsureFolderHierarchy(AtlasAssetFolder);
+            ValidateProductionBiomeSpriteSheet();
 
             GenerateOrUpdateAtlas(GroundTerrainAtlasPath, GroundTerrainSourceTexturePaths);
             GenerateOrUpdateAtlas(RockWallAtlasPath, RockWallSourceTexturePaths);
@@ -190,13 +214,45 @@ namespace Farmware.WorldGeneration.Editor
                 serializedAtlas.ApplyModifiedPropertiesWithoutUndo();
             }
 
-            // Texture自体をPackableにすると、将来2×1へSliceするA・Bの2差分も同じ画像から自動収録されます。
+            // Texture自体をPackableにすると、横一列へSliceした7バイオームすべてを一つの参照で自動収録できます。
             atlasAsset.Add(sourceTextures);
             SpriteAtlasAsset.Save(atlasAsset, atlasPath);
             AssetDatabase.ImportAsset(
                 atlasPath,
                 ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
             ConfigureAtlasImporter(atlasPath);
+        }
+
+        /// <summary>
+        /// 本番用土地シートがBiome ID順の7枚へ正しくSliceされていることをAtlas更新前に確認します。
+        /// </summary>
+        /// <exception cref="InvalidOperationException">Sprite数または名前が期待と異なる場合に送出します。</exception>
+        private static void ValidateProductionBiomeSpriteSheet()
+        {
+            Sprite[] sprites = AssetDatabase.LoadAllAssetsAtPath(ProductionBiomeTerrainTexturePath)
+                .OfType<Sprite>()
+                .OrderBy(sprite => sprite.rect.x)
+                .ToArray();
+
+            if (sprites.Length != ExpectedBiomeSpriteCount)
+            {
+                throw new InvalidOperationException(
+                    $"本番用バイオーム土地シートは{ExpectedBiomeSpriteCount}枚へSliceしてください: "
+                    + $"{ProductionBiomeTerrainTexturePath}, actual={sprites.Length}");
+            }
+
+            for (int index = 0; index < ExpectedBiomeSpriteNames.Length; index++)
+            {
+                if (!string.Equals(
+                        sprites[index].name,
+                        ExpectedBiomeSpriteNames[index],
+                        StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        $"本番用バイオームSpriteの順序または名前が不正です: index={index}, "
+                        + $"expected={ExpectedBiomeSpriteNames[index]}, actual={sprites[index].name}");
+                }
+            }
         }
 
         /// <summary>

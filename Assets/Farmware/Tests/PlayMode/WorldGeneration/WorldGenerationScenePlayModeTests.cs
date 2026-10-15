@@ -1138,7 +1138,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
         /// </summary>
         /// <returns>非同期Sceneロードと複数フレームの生成・表示完了を待つIEnumeratorです。</returns>
         [UnityTest]
-        public IEnumerator SampleScene_StreamsAndDeterministicallyRegeneratesFallbackTiles()
+        public IEnumerator SampleScene_StreamsAndDeterministicallyRegeneratesTerrainTiles()
         {
             AsyncOperation loadOperation = SceneManager.LoadSceneAsync("SampleScene", LoadSceneMode.Single);
             Assert.That(loadOperation, Is.Not.Null, "Build SettingsからSampleSceneを読み込めませんでした。");
@@ -1153,6 +1153,61 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 ? null
                 : groundTilemapObject.GetComponent<Tilemap>();
             Assert.That(tilemap, Is.Not.Null, "SampleSceneに地形表示用Ground Tilemapがありません。");
+
+            ChunkTilemapPresenter terrainPresenter =
+                Object.FindFirstObjectByType<ChunkTilemapPresenter>();
+            Assert.That(
+                terrainPresenter,
+                Is.Not.Null,
+                "SampleSceneに地形Tileを割り当てるChunkTilemapPresenterがありません。");
+
+            string[] biomeTileFieldNames =
+            {
+                "grasslandTile",
+                "forestTile",
+                "desertTile",
+                "rocklandTile",
+                "wetlandTile",
+                "snowfieldTile",
+                "volcanicTile"
+            };
+            string[] expectedBiomeSpriteNames =
+            {
+                "terrain_grassland",
+                "terrain_forest",
+                "terrain_desert",
+                "terrain_rockland",
+                "terrain_wetland",
+                "terrain_snowfield",
+                "terrain_volcanic"
+            };
+
+            // Sceneの参照先まで検証し、Tileアセットだけ作成されて表示には旧Fallbackが残る回帰を防ぎます。
+            for (int biomeIndex = 0; biomeIndex < biomeTileFieldNames.Length; biomeIndex++)
+            {
+                FieldInfo tileField = typeof(ChunkTilemapPresenter).GetField(
+                    biomeTileFieldNames[biomeIndex],
+                    BindingFlags.NonPublic | BindingFlags.Instance);
+                Assert.That(
+                    tileField,
+                    Is.Not.Null,
+                    $"Biome Tileフィールドが見つかりません: {biomeTileFieldNames[biomeIndex]}");
+
+                Tile biomeTile = tileField.GetValue(terrainPresenter) as Tile;
+                Assert.That(
+                    biomeTile,
+                    Is.Not.Null,
+                    $"SampleSceneのBiome Tile参照がありません: {biomeTileFieldNames[biomeIndex]}");
+                Assert.That(
+                    biomeTile.sprite,
+                    Is.Not.Null,
+                    $"SampleSceneのBiome TileにSpriteがありません: {biomeTileFieldNames[biomeIndex]}");
+                Assert.That(
+                    biomeTile.sprite.name,
+                    Is.EqualTo(expectedBiomeSpriteNames[biomeIndex]),
+                    $"SampleSceneが本番用Biome Spriteを参照していません: {biomeTileFieldNames[biomeIndex]}");
+            }
+
             GameObject resourceTilemapObject = GameObject.Find("World Grid/Resource Tilemap");
             Tilemap resourceTilemap = resourceTilemapObject == null
                 ? null

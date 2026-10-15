@@ -1,5 +1,5 @@
-// このファイルは、一体型の土地・岩壁、共通Sprite Atlas、資源、液面アニメーションの仮素材と、マップ生成を確認できるSampleScene構成をUnity Editor APIで再現可能に作ります。
-// Runtimeの生成規則には関与せず、フォールバック表示素材、Sprite Atlas、SubScene、Camera、Grid、TilemapのAuthoring接続だけを担当します。
+// このファイルは、本番用バイオーム土地と、岩壁・資源・液面アニメーションの仮素材を組み合わせ、マップ生成を確認できるSampleScene構成を再現可能に作ります。
+// Runtimeの生成規則には関与せず、製品・フォールバック表示素材、Sprite Atlas、SubScene、Camera、Grid、TilemapのAuthoring接続だけを担当します。
 
 using System;
 using System.IO;
@@ -18,13 +18,17 @@ using UnityEngine.Tilemaps;
 namespace Farmware.WorldGeneration.Editor
 {
     /// <summary>
-    /// フォールバック地形Tile、共通Sprite Atlas、資源アイコンを生成し、SampleSceneと設定用SubSceneを安全に構築するEditor専用ツールです。
+    /// 本番用バイオーム土地、フォールバック地形、共通Sprite Atlas、資源アイコンを接続し、SampleSceneと設定用SubSceneを安全に構築するEditor専用ツールです。
     /// メニューまたはバッチモードのexecuteMethodから呼び出し、同じ名前の構成は再利用して重複作成を防ぎます。
     /// </summary>
     public static class WorldGenerationSceneBootstrap
     {
         /// <summary>表示用フォールバック素材をまとめるUnityプロジェクト相対フォルダです。</summary>
         private const string FallbackAssetFolder = "Assets/Farmware/Art/WorldGeneration/Fallback";
+
+        /// <summary>本番用バイオーム土地のTileアセットをまとめるUnityプロジェクト相対フォルダです。</summary>
+        private const string ProductionBiomeTileFolder =
+            "Assets/Farmware/Art/WorldGeneration/Terrain/Base";
 
         // 旧Soil派生Tileを確実に削除するために列挙する、7種類の土地アセット共通英語名です。
         private static readonly string[] FallbackBiomeAssetNames =
@@ -387,21 +391,21 @@ namespace Farmware.WorldGeneration.Editor
             }
 
             // PNGのSaveAndReimport中に以前読み込んだUnity Object参照が無効化される場合があります。
-            // 7枚のバイオーム土地、液体・岩壁・資源を生成した後、最新のTileを読み直してSceneへ保存します。
+            // 液体・岩壁・資源を生成した後、本番用土地を含む最新のTileを読み直してSceneへ保存します。
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
 
             // 一体型土地はセル同士を8px重ねるため、元PNGが異なっても行ソートを維持できる共通Atlasへまとめます。
-            // 岩壁も同じ制作・ビルド手順で管理し、将来差分が増えたときのTexture分割を防ぎます。
+            // 岩壁も同じ制作・ビルド手順で管理し、本番素材へ差し替えた後のTexture分割を防ぎます。
             WorldGenerationSpriteAtlasBuilder.GenerateOrUpdateAtlases();
 
-            Tile grasslandTile = LoadRequiredFallbackTile("Grassland");
-            Tile forestTile = LoadRequiredFallbackTile("Forest");
-            Tile desertTile = LoadRequiredFallbackTile("Desert");
-            Tile rocklandTile = LoadRequiredFallbackTile("Rockland");
-            Tile wetlandTile = LoadRequiredFallbackTile("Wetland");
-            Tile snowfieldTile = LoadRequiredFallbackTile("Snowfield");
-            Tile volcanicTile = LoadRequiredFallbackTile("Volcanic");
+            Tile grasslandTile = LoadRequiredProductionBiomeTile("terrain_grassland");
+            Tile forestTile = LoadRequiredProductionBiomeTile("terrain_forest");
+            Tile desertTile = LoadRequiredProductionBiomeTile("terrain_desert");
+            Tile rocklandTile = LoadRequiredProductionBiomeTile("terrain_rockland");
+            Tile wetlandTile = LoadRequiredProductionBiomeTile("terrain_wetland");
+            Tile snowfieldTile = LoadRequiredProductionBiomeTile("terrain_snowfield");
+            Tile volcanicTile = LoadRequiredProductionBiomeTile("terrain_volcanic");
             Tile magmaTile = LoadRequiredFallbackTile("Magma");
             Tile freshWaterTile = LoadRequiredFallbackTile("FreshWater");
             Tile saltWaterTile = LoadRequiredFallbackTile("SaltWater");
@@ -441,7 +445,7 @@ namespace Farmware.WorldGeneration.Editor
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
             ValidateSavedPrototype();
-            Debug.Log("Farmwareのフォールバック地形Tileとマップ生成用SampleSceneを構築しました。");
+            Debug.Log("Farmwareの本番用バイオーム土地、フォールバック地形、マップ生成用SampleSceneを構築しました。");
         }
 
         /// <summary>
@@ -1050,6 +1054,36 @@ namespace Farmware.WorldGeneration.Editor
             if (tile == null || tile.sprite == null)
             {
                 throw new InvalidOperationException($"フォールバックTileを再読込できませんでした: {tileAssetPath}");
+            }
+
+            return tile;
+        }
+
+        /// <summary>
+        /// 本番用土地シートから作成済みのBiome Tileを読み直し、Sceneへ保存できる有効なSprite参照を確認します。
+        /// </summary>
+        /// <param name="assetName">読み込むTileアセットとSpriteの共通名です。</param>
+        /// <returns>本番用土地シート内の対応Spriteを参照するTileアセットです。</returns>
+        private static Tile LoadRequiredProductionBiomeTile(string assetName)
+        {
+            string tileAssetPath = $"{ProductionBiomeTileFolder}/{assetName}.asset";
+            Tile tile = AssetDatabase.LoadAssetAtPath<Tile>(tileAssetPath);
+            if (tile == null || tile.sprite == null)
+            {
+                throw new InvalidOperationException(
+                    $"本番用バイオームTileを再読込できませんでした: {tileAssetPath}");
+            }
+
+            string spriteAssetPath = AssetDatabase.GetAssetPath(tile.sprite);
+            if (!string.Equals(tile.sprite.name, assetName, StringComparison.Ordinal)
+                || !string.Equals(
+                    spriteAssetPath,
+                    WorldGenerationSpriteAtlasBuilder.ProductionBiomeTerrainTexturePath,
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"本番用バイオームTileが別のSpriteを参照しています: "
+                    + $"{tileAssetPath}, sprite={tile.sprite.name}, texture={spriteAssetPath}");
             }
 
             return tile;

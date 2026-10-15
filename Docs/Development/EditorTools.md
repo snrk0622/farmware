@@ -23,7 +23,7 @@
 
 - 上面16pxと断面8pxを結合した16×24の仮色土地Tile、16×16の仮色液体・資源Tileを生成または更新する。土地上面は7種類のBiome基準色だけで塗り、草、葉、砂紋などの固有模様やSoilType別派生Tileは生成しない。旧14枚の肥沃・砂質派生アセットが存在する場合は削除する。
 - 上面16pxと側面12pxを結合した16×28岩壁Tile、淡水・海水・マグマ各4枚の透明フレームとAnimatedTileを生成または更新する。Sprite PivotはSprite Editor Data Provider経由で設定する。
-- 7枚のBiome土地を同じTextureページへ収める`GroundTerrainAtlas.spriteatlasv2`と、岩壁用の`RockWallAtlas.spriteatlasv2`を生成または更新し、現在のBuild Target向けにパックする。
+- 本番用シートからSliceした7枚のBiome土地を同じTextureページへ収める`GroundTerrainAtlas.spriteatlasv2`と、岩壁用の`RockWallAtlas.spriteatlasv2`を生成または更新し、現在のBuild Target向けにパックする。
 - `WorldGenerationSettingsSubScene`へ生成設定のAuthoringを配置する。
 - `SampleScene`へCamera、Grid、Ground・静止液面・液面アニメーション・岩壁・岩壁背面資源・通常前面資源・岩壁上資源の7枚のTilemap、表示用Component、SubScene参照を接続する。静止液面と液面アニメーションは土地より8px下、岩壁上資源は土地基準面より12px上へ設定する。GroundとRock WallはIndividual ModeかつTop Left順で描画する。通常資源は直前方の岩壁有無からOrder 2の背面用TilemapとOrder 10の前面用Tilemapへ振り分け、遠方座標でも岩壁との前後関係を固定レイヤーで保証する。
 - Pixel Perfect Cameraの基準解像度480×270を含む、再現可能な確認環境を構築する。
@@ -49,7 +49,7 @@
 
 1. Consoleに例外または新規警告が出ていない。
 2. メニュー実行をキャンセルした場合はアセットやSceneが変更されず、実行した場合は成功・失敗のどちらでも元の複数Scene構成、読込状態、Active Sceneへ戻る。
-3. 必要なPNG、Tile、AnimatedTile、Sprite Atlas、`.meta`が揃っている。7枚の基準土地上面はBiome基準色一色で、草・葉・砂紋やSoil模様を含まない。旧肥沃・砂質派生14枚は存在せず、7枚の土地Spriteが`GroundTerrainAtlas`の同じパック後Textureを参照し、岩壁が`RockWallAtlas`へ分離されている。
+3. 必要なPNG、Tile、AnimatedTile、Sprite Atlas、`.meta`が揃っている。フォールバック7枚の基準土地上面はBiome基準色一色で、草・葉・砂紋やSoil模様を含まない。本番用`terrain_biomes_base.png`はBiome ID順の7枚へ16×24でSliceされ、旧肥沃・砂質派生14枚は存在せず、7枚の本番土地Spriteが`GroundTerrainAtlas`の同じパック後Textureを参照し、岩壁が`RockWallAtlas`へ分離されている。
 4. SampleSceneとSubSceneの参照がMissingになっていない。
 5. PlayModeで土地が16×24、岩壁が16×28の一体型ブロックとして表示される。土地は論理Biomeだけを反映し、同じBiome内では標準・肥沃・砂質のいずれも同じTileに見える。静止液面と透明アニメーションは同じ8px下、岩壁内部影・露出資源は12px上へ表示される。液体はGround Tilemapへ重複せず、液面下辺と奥側ブロックの断面・側面は手前ブロックに隠れる。岩壁セルでも下層の土地断面が欠けない。直前方が岩壁の通常資源は背面用Tilemapへ入り岩壁に隠れ、それ以外は前面用Tilemapへ入って岩壁より前に見える。カメラを論理チャンク境界へ寄せても、画面外の接地セルからはみ出す土地断面と岩壁上部が途中で消えない。
 6. Gameビューの地形描画領域が480×270基準の黒帯内へ収まり、HUDとF4表示も同じ領域を使用する。F3には現在タイルのサブチャンク座標、Biome、GeneratorVersion、16桁16進数のワールドシードが表示される。
@@ -62,7 +62,7 @@
 #### 用途
 
 - Sprite Packer Modeを`Sprite Atlas V2`へ統一する。
-- 7枚のBiome土地Textureを`GroundTerrainAtlas`、岩壁の元Textureを`RockWallAtlas`のPackableへ登録する。Texture単位で登録するため、同じPNGを2×1へSliceした将来のA・Bの2差分も自動収録される。
+- 7バイオームを横一列に収録した本番用`terrain_biomes_base.png`を`GroundTerrainAtlas`、岩壁の元Textureを`RockWallAtlas`のPackableへ登録する。土地はTexture内の7枚すべてを収録し、Base地形の差分は増やさない。
 - Built-in配信、Point、Mip Maps Off、Read/Write Off、RGBA32、無圧縮、Padding 4 px、Rotation/Tight Packing/Alpha Dilation Off、Max Texture Size 512を再適用する。
 - 対象Build Target向けにパックし、各Atlas内のSpriteが1枚のTextureページへ収まらない場合はビルドを中止する。特に土地の複数ページ化は、バイオーム境界をまたぐIndividual Yソートを壊すため許可しない。
 
