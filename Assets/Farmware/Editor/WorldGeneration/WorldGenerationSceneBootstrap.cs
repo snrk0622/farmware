@@ -247,12 +247,16 @@ namespace Farmware.WorldGeneration.Editor
         private const int PrototypeSandResourceClusterRadiusInTiles = 6;
 
         /// <summary>
-        /// Unityメニューからフォールバック表示付きマップ生成Sceneを構築します。
+        /// Unityメニューから、現在のScene作業状態を保護しながらフォールバック表示付きマップ生成Sceneを構築します。
         /// </summary>
         [MenuItem("Farmware/World Generation/Build Fallback Map Prototype")]
         public static void BuildFromMenu()
         {
-            BuildFallbackMapPrototype();
+            RunInteractiveBuild(
+                EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo,
+                EditorSceneManager.GetSceneManagerSetup,
+                BuildFallbackMapPrototype,
+                EditorSceneManager.RestoreSceneManagerSetup);
         }
 
         /// <summary>
@@ -261,6 +265,40 @@ namespace Farmware.WorldGeneration.Editor
         public static void Execute()
         {
             BuildFallbackMapPrototype();
+        }
+
+        /// <summary>
+        /// 対話実行前に未保存Sceneの扱いを確認し、構築の成否にかかわらず元のScene構成へ戻します。
+        /// </summary>
+        /// <param name="confirmSceneSave">
+        /// 未保存Sceneを保存するか確認する処理です。ユーザーがキャンセルした場合はfalseを返します。
+        /// </param>
+        /// <param name="captureSceneSetup">現在開いているScene、読込状態、Active Sceneを退避する処理です。</param>
+        /// <param name="build">アセット、設定SubScene、SampleSceneを構築・保存する処理です。</param>
+        /// <param name="restoreSceneSetup">退避したScene構成をUnity Editorへ復元する処理です。</param>
+        private static void RunInteractiveBuild(
+            Func<bool> confirmSceneSave,
+            Func<SceneSetup[]> captureSceneSetup,
+            Action build,
+            Action<SceneSetup[]> restoreSceneSetup)
+        {
+            // 保存確認をアセット生成より先に行い、キャンセルされた場合はプロジェクトを一切変更せず終了します。
+            if (!confirmSceneSave())
+            {
+                return;
+            }
+
+            SceneSetup[] originalSceneSetup = captureSceneSetup();
+            try
+            {
+                // 構築中は設定SubSceneとSampleSceneをSingleで開くため、元の複数Scene構成は一時的に閉じられます。
+                build();
+            }
+            finally
+            {
+                // 途中で例外が発生しても、ユーザーが作業していたScene構成とActive Sceneを必ず復元します。
+                restoreSceneSetup(originalSceneSetup);
+            }
         }
 
         /// <summary>

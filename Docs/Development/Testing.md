@@ -63,6 +63,10 @@ Editor構築ツールが生成した7種類の16×24土地PNGと16×28岩壁PNG�
 
 Sprite Packer ModeがV2であること、土地Atlasが7種類のBiome Textureだけ、岩壁Atlasが岩壁TextureだけをPackableに持つこと、両AtlasがBuilt-in配信とPixel Art向け設定を持つことを検証する。さらに実際のパック結果を読み、7枚の土地Spriteが同じTextureページへ収まることを保証して、バイオーム境界でTilemapのYソートがTexture単位に分断される再発を防ぐ。
 
+#### `WorldGenerationSceneBootstrapTests`
+
+`Build Fallback Map Prototype`の対話メニューについて、保存確認をキャンセルした場合は構築を開始しないこと、構築成功後は退避したScene構成を復元すること、構築中に例外が発生しても復元後に例外を呼び出し元へ返すことを保証する。実際のSceneやアセットは変更せず、保存確認、構築、復元をDelegateで差し替えて制御フローだけをEditModeで検証する。
+
 ### 3.2 PlayMode: `Farmware.WorldGeneration.PlayModeTests`
 
 #### `WorldGenerationScenePlayModeTests`

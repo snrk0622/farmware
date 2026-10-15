@@ -30,6 +30,10 @@
 
 #### 実行後の注意
 
+メニューから実行すると、アセットを変更する前に、未保存Sceneがある場合は保存確認を表示する。キャンセルした場合は構築を開始しない。
+実行前に開いていたScene、各Sceneの読込状態、Active Sceneは退避され、構築の成功・失敗にかかわらず復元される。構築対象の`SampleScene`と`WorldGenerationSettingsSubScene`自体は保存されるため、復元後に同じSceneを開いていた場合は更新後の内容になる。
+バッチモードの`WorldGenerationSceneBootstrap.Execute`は対話確認を行わないため、未保存Sceneを持たない専用Editorプロセスで実行する。
+
 このツールはアセットとSceneを保存する。実行後は必ずGit差分を確認し、意図しないScene全体の書き換え、不要アセット、`.meta`のGUID変更がないことを確認する。
 
 #### 次の修正をしたら確認する
@@ -44,10 +48,11 @@
 #### 確認内容
 
 1. Consoleに例外または新規警告が出ていない。
-2. 必要なPNG、Tile、AnimatedTile、Sprite Atlas、`.meta`が揃っている。7枚の基準土地上面はBiome基準色一色で、草・葉・砂紋やSoil模様を含まない。旧肥沃・砂質派生14枚は存在せず、7枚の土地Spriteが`GroundTerrainAtlas`の同じパック後Textureを参照し、岩壁が`RockWallAtlas`へ分離されている。
-3. SampleSceneとSubSceneの参照がMissingになっていない。
-4. PlayModeで土地が16×24、岩壁が16×28の一体型ブロックとして表示される。土地は論理Biomeだけを反映し、同じBiome内では標準・肥沃・砂質のいずれも同じTileに見える。静止液面と透明アニメーションは同じ8px下、岩壁内部影・露出資源は12px上へ表示される。液体はGround Tilemapへ重複せず、液面下辺と奥側ブロックの断面・側面は手前ブロックに隠れる。岩壁セルでも下層の土地断面が欠けない。直前方が岩壁の通常資源は背面用Tilemapへ入り岩壁に隠れ、それ以外は前面用Tilemapへ入って岩壁より前に見える。カメラを論理チャンク境界へ寄せても、画面外の接地セルからはみ出す土地断面と岩壁上部が途中で消えない。
-5. Gameビューの地形描画領域が480×270基準の黒帯内へ収まり、HUDとF4表示も同じ領域を使用する。F3には現在タイルのサブチャンク座標、Biome、GeneratorVersion、16桁16進数のワールドシードが表示される。
+2. メニュー実行をキャンセルした場合はアセットやSceneが変更されず、実行した場合は成功・失敗のどちらでも元の複数Scene構成、読込状態、Active Sceneへ戻る。
+3. 必要なPNG、Tile、AnimatedTile、Sprite Atlas、`.meta`が揃っている。7枚の基準土地上面はBiome基準色一色で、草・葉・砂紋やSoil模様を含まない。旧肥沃・砂質派生14枚は存在せず、7枚の土地Spriteが`GroundTerrainAtlas`の同じパック後Textureを参照し、岩壁が`RockWallAtlas`へ分離されている。
+4. SampleSceneとSubSceneの参照がMissingになっていない。
+5. PlayModeで土地が16×24、岩壁が16×28の一体型ブロックとして表示される。土地は論理Biomeだけを反映し、同じBiome内では標準・肥沃・砂質のいずれも同じTileに見える。静止液面と透明アニメーションは同じ8px下、岩壁内部影・露出資源は12px上へ表示される。液体はGround Tilemapへ重複せず、液面下辺と奥側ブロックの断面・側面は手前ブロックに隠れる。岩壁セルでも下層の土地断面が欠けない。直前方が岩壁の通常資源は背面用Tilemapへ入り岩壁に隠れ、それ以外は前面用Tilemapへ入って岩壁より前に見える。カメラを論理チャンク境界へ寄せても、画面外の接地セルからはみ出す土地断面と岩壁上部が途中で消えない。
+6. Gameビューの地形描画領域が480×270基準の黒帯内へ収まり、HUDとF4表示も同じ領域を使用する。F3には現在タイルのサブチャンク座標、Biome、GeneratorVersion、16桁16進数のワールドシードが表示される。
 
 ### 2.2 World Generation Sprite Atlas Prebuild
 
