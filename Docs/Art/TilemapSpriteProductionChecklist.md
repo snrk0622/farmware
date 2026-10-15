@@ -1,7 +1,7 @@
-# Farmware タイルマップ用スプライト制作・導入チェックリスト v0.23
+# Farmware タイルマップ用スプライト制作・導入チェックリスト v0.24
 
 - 作成日: 2026-10-11
-- 最終更新日: 2026-10-15
+- 最終更新日: 2026-10-16
 - 対象: ランダムマップ生成の地形・資源と、後続のドローン、設備、ベルト、橋、柵、施設表示
 - 関連仕様: [ランダムマップ生成仕様](../GameSpecification/RandomMapGenerationSpecification.md)
 - 関連仕様: [ゲームコンセプト仕様](../GameSpecification/2026-10-11_casual_factory_concept_v0.1.md)
@@ -222,7 +222,7 @@ Match the approved grassland reference in canvas size, top-and-face layout, outl
 - 前面の左右端は同じ高さと色へ揃え、横に並べたときに継ぎ目を作らない
 - 土地断面は上側4 pxを上面が影になった近似暗色、下側4 pxを土・砂・岩・雪の地盤として描き分けてもよい
 - 岩壁上面は16×16 px全体を使う大きな菱形の面構成を固定意匠とする。同じTileを並べた際にセル単位で模様が反復することは意図した見た目であり、透明な隙間や位置ずれによる描画不良とは区別する
-- 岩壁側面は上端1 pxの境界と、その下の連続した岩盤を描く。個別の石積みにはしない
+- 岩壁側面の16×12 pxは全画素を同じ暗い無彩色で塗る。上端の境界線、水平層理、陰影、材質模様を描かず、最前列に露出した場合も平坦な一色面として見せる
 - Base Spriteと前面断面には、外角、内角、縦側面、斜線、透明な接続形状を作らない。内角を含む透明な接続形状は5.2の境界ハイライトとして別に制作する
 - SeedとStyle referenceを上面と同じ制作記録へ残す
 
@@ -463,19 +463,20 @@ Create a transparent four-frame pixel-art overlay that animates only small inter
 - Prompt（全文をそのまま入力）:
 
 ```text
-Top-down oblique 2D pixel art rock-wall block for a cozy agricultural and industrial automation game. The gameplay and Tilemap use an orthogonal square grid, while the rock surface itself deliberately uses a large diamond-shaped faceted motif. Create exactly one 16 by 28 pixel block. The upper 16 by 16 pixels are one unbuildable rock-wall top divided into four broad triangular faces that meet as a centered diamond-like form. This full-cell motif must repeat clearly when the same tile is placed in adjacent square-grid cells. The lower 16 by 12 pixels are one straight front-facing rock wall belonging to the same block. Add a one-pixel boundary at the top of the face, keep both horizontal endpoints at identical heights and colors, and connect the face directly to the top without a transparent gap.
+Top-down oblique 2D pixel art rock-wall block for a cozy agricultural and industrial automation game. The gameplay and Tilemap use an orthogonal square grid, while the rock surface itself deliberately uses a large diamond-shaped faceted motif. Create exactly one 16 by 28 pixel block. The upper 16 by 16 pixels are one unbuildable rock-wall top divided into four broad triangular faces that meet as a centered diamond-like form. This full-cell motif must repeat clearly when the same tile is placed in adjacent square-grid cells. The lower 16 by 12 pixels are one straight front-facing rock wall belonging to the same block. Fill every pixel of this 16 by 12 face with exactly one uniform dark neutral-gray color, and connect it directly to the top without a transparent gap.
 
-Use readable medium cool gray, warm gray-brown, and limited charcoal accents while keeping the overall block bright enough for a cheerful daylight world. Use two or three controlled value steps across the broad top faces so the deliberate diamond facet is immediately readable. Give the matching face restrained horizontal strata without turning it into separate stones. Do not put a unique crack, mineral speck, or random landmark in the Base Tile. Never outline individual small rock pieces. The diamond is a surface motif only and must not change the square outer silhouette, Sprite bounds, or orthogonal gameplay grid. Avoid transparent gaps, mismatched left and right face edges, corner cutouts, separate left or right side faces, cobblestone, brick pattern, gravel, dark grout, dense cracks, cave opening, loose boulder, high-contrast vein, blur, anti-aliasing, and dense speckles.
+Use readable medium cool gray, warm gray-brown, and limited charcoal accents on the upper rock-wall top while keeping the overall block bright enough for a cheerful daylight world. Use two or three controlled value steps across the broad top faces so the deliberate diamond facet is immediately readable. Keep the entire lower face perfectly flat and solid-colored: no top border line, horizontal strata, texture, shading, gradient, highlights, or isolated pixels. Do not put a unique crack, mineral speck, or random landmark in the Base Tile. Never outline individual small rock pieces. The diamond is a surface motif only and must not change the square outer silhouette, Sprite bounds, or orthogonal gameplay grid. Avoid transparent gaps, corner cutouts, separate left or right side faces, cobblestone, brick pattern, gravel, dark grout, dense cracks, cave opening, loose boulder, high-contrast vein, blur, anti-aliasing, and dense speckles.
 ```
 
-この菱形は岩壁の表面意匠であり、アイソメトリックの論理グリッド、菱形セル、接続RuleTileを意味しない。隣接セルで同じ菱形が反復して見えることを採用画像どおりの仕様とし、検品では透明な隙間、Sprite位置ずれ、側面端の不一致だけを不具合として扱う。
+この菱形は岩壁の表面意匠であり、アイソメトリックの論理グリッド、菱形セル、接続RuleTileを意味しない。隣接セルで同じ菱形が反復して見えることを採用画像どおりの仕様とする。側面12 pxは全画素が同じ色であることを仕様とし、境界線や層理がない状態を欠落扱いにしない。検品では透明な隙間、Sprite位置ずれ、側面色の不一致だけを不具合として扱う。
 
 - [x] 生成
 - [x] 取込
 - [x] 設定
 - [ ] 確認
 - [x] `RockWallAtlas`、専用Tile、SampleSceneが本番用Spriteを参照し、Editor構築ツールの再実行後もFallback参照へ戻らない
-- [ ] 連続岩壁の側面、内部影、岩壁上資源、境界ハイライト、水・マグマに面した下層土地断面をGameビューで確認
+- [ ] 連続岩壁の側面が境界線や層理のない一色面として表示され、奥側の側面が手前ブロックに隠れることをGameビューで確認
+- [ ] 内部影、岩壁上資源、境界ハイライト、水・マグマに面した下層土地断面をGameビューで確認
 
 ### 4.8 岩壁内部影
 
@@ -914,6 +915,7 @@ Editor構築ツールとPlayerビルド前処理は、`terrain_biomes_base.png`�
 - [ ] 土、砂、岩、雪の断面色を持つ16×24土地を淡水・海水・マグマへ重ねて確認
 - [x] 16タイル以上続く土地断面で継ぎ目や過度な反復がないことを確認
 - [ ] 連続する岩壁では奥側の12 px側面が手前ブロックに隠れ、最前列では側面が読めることを確認
+- [ ] 最前列に露出する岩壁側面の全12 pxが一色で、上端境界線、水平層理、陰影、材質模様を含まないことを確認
 - [ ] 岩壁上面の大きな菱形模様がセル単位で意図どおり反復し、論理上の正方形グリッドと混同されないことを確認
 - [ ] 岩壁上面、内部影、岩壁上資源が基準面より12 px上に揃うことを確認
 - [ ] 岩壁が淡水・海水・マグマへ面する場所で、下層の土地断面が欠けないことを確認
@@ -936,7 +938,7 @@ Editor構築ツールとPlayerビルド前処理は、`terrain_biomes_base.png`�
 | 日付 | Asset ID | PixelLab Tool | Seed | 主な設定変更 | 出力ファイル | 採用・却下理由 |
 |---|---|---|---|---|---|---|
 | 2026-10-15 | `terrain_biomes_base` | 未共有 | 未共有 | 112×24 px、16×24 px×7枚、上面・断面は各一色、Base差分なし | `Terrain/Base/terrain_biomes_base.png` | 単色Base方針、7バイオームへの割り当て、Gameビュー確認に問題がないため採用 |
-| 2026-10-15 | `terrain_rock_wall_01` | 未共有 | 未共有 | 16×28 px、上面16 px＋側面12 px、上面全体に大きな菱形の面構成を持つ単一Base Tile | `Terrain/Base/terrain_rock_wall_01.png` | 菱形模様のセル単位反復を意図したデザインとして採用。Import・専用Tile・Atlas・SampleSceneへの適用済みで、Gameビューでは表示連携だけを最終確認する |
+| 2026-10-15 | `terrain_rock_wall_01` | 未共有 | 未共有 | 16×28 px、上面16 px＋側面12 px。上面全体は大きな菱形の面構成、側面全体は境界線や層理のない一色面 | `Terrain/Base/terrain_rock_wall_01.png` | 菱形模様のセル単位反復と単色側面を意図したデザインとして採用。Import・専用Tile・Atlas・SampleSceneへの適用済みで、Gameビューでは表示連携だけを最終確認する |
 
 ## 12. 後続段階で追加するスプライト
 

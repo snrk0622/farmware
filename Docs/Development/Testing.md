@@ -1,6 +1,6 @@
 # テスト
 
-- 最終更新日: 2026-10-15
+- 最終更新日: 2026-10-16
 - 対象: `Assets/Farmware/Tests/`
 
 ## 1. 用途
@@ -97,7 +97,7 @@ Sprite Packer ModeがV2であること、土地Atlasが7バイオームの本番
 | 土地・岩壁境界ハイライト | 8方向入力から47接続状態を正規化し、14可視形状と90度回転へ一意に割り当てる純粋計算テスト。異なる土地バイオーム間では表示せず、水・マグマとの外周・内角および岩壁領域の外周・内角だけを選ぶ境界値、負座標、16×16サブチャンク境界、64×64チャンク境界、ロード順変更後の再計算を扱うEditMode／PlayModeテスト | 14形状と全回転、斜めだけが欠ける内角、土地・岩壁の表示高さ、アンロード・再ロード後の残留がないことをGameビューで確認 |
 | Sprite Atlas、地形Texture、Sprite Slice、Atlas Importer設定 | `WorldGenerationSpriteAtlasTests`と`WorldGenerationFallbackArtTests` | 異なるバイオーム境界を含むGameビュー、Playerビルド前処理 |
 | Base地形の固定Biome割り当て | 本番用横一列シートのSprite名・並び順・16×24 Slice・Pivotと、各Tileが同名Spriteを参照することを検証するEditModeテスト。正負座標、原点、16×16サブチャンク境界、64×64チャンク境界、Seed変更、チャンクの生成・ロード順変更でも論理Biomeに対応する同じTileを選ぶことを確認する | 各Biomeが1種類のBase Tileで安定して表示され、カメラ往復後も別BiomeのTileへ入れ替わらないことをGameビューで確認 |
-| 本番用岩壁の固定割り当て | 本番PNGが16×28 px、PPU 16、Point、Mip Maps Off、Compression None、Full Rect、Pivot Y `8/28`であること、専用Tile、`RockWallAtlas`、SampleSceneが同じ本番Spriteを参照すること、Editor構築ツールの再実行後もFallback参照へ戻らないことをEditMode／PlayModeテストで保証する | 連続岩壁の側面遮蔽、12 px持ち上げた上面・内部影・資源・境界ハイライトの整列、水・マグマに面した下層土地断面、にじみ、チャンク境界の透明な隙間と位置ずれをGameビューで確認する。上面の大きな菱形模様がセル単位で反復することは意図したデザインとして合格扱いにする |
+| 本番用岩壁の固定割り当て | 本番PNGが16×28 px、PPU 16、Point、Mip Maps Off、Compression None、Full Rect、Pivot Y `8/28`であること、専用Tile、`RockWallAtlas`、SampleSceneが同じ本番Spriteを参照すること、Editor構築ツールの再実行後もFallback参照へ戻らないことをEditMode／PlayModeテストで保証する | 連続岩壁の側面遮蔽、12 px持ち上げた上面・内部影・資源・境界ハイライトの整列、水・マグマに面した下層土地断面、にじみ、チャンク境界の透明な隙間と位置ずれをGameビューで確認する。上面の大きな菱形模様がセル単位で反復することと、側面12 pxが境界線や層理のない一色面であることは意図したデザインとして合格扱いにする |
 | Scene、SubScene、Authoring、Baker、参照 | SampleScene縦切りPlayModeテストとMap Viewerテスト | Scene内のMissing参照確認 |
 | asmdef、パッケージ、プラットフォーム条件 | 影響するEditModeとPlayMode Assembly | Playerビルドへの混入確認 |
 | 複数タイル設備、ベルト、橋 | 占有、回転、接続方向、分岐・合流、詰まり、地形配置可否、単体・範囲配置と撤去の即時反映、同種既設物の無償再利用、資材不足または配置不可セルがある場合に一部だけ建築されないことを扱うEditModeテスト | 再利用セル、問題セル、総必要数・在庫数・不足数のプレビュー、範囲保持と再確定、ドローン演出を待たず操作できること、操作プロトタイプ、Gameビュー、Profiler |
