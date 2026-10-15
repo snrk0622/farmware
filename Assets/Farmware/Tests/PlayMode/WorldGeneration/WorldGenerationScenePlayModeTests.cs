@@ -90,6 +90,74 @@ namespace Farmware.WorldGeneration.PlayModeTests
         }
 
         /// <summary>
+        /// CameraのViewportをGridの64タイル境界へ正確に揃え、面積を持たない右上側セルと隣接チャンクを要求しないことを保証します。
+        /// 正負両側で、上下方向はSpriteのはみ出し用チャンクだけが加わり、水平方向へ余分なチャンクが増えないことを確認します。
+        /// </summary>
+        /// <param name="cameraCenterX">64タイル幅Viewportの中心X座標です。</param>
+        /// <param name="expectedMinimumChunkX">期待する最小可視チャンクXです。</param>
+        /// <param name="expectedMaximumChunkX">期待する最大可視チャンクXです。</param>
+        [TestCase(32f, 0, 0)]
+        [TestCase(-32f, -1, -1)]
+        public void CalculateVisibleChunkBounds_GridBoundaryTreatsUpperRightAsExclusive(
+            float cameraCenterX,
+            int expectedMinimumChunkX,
+            int expectedMaximumChunkX)
+        {
+            GameObject gridObject = null;
+            GameObject cameraObject = null;
+
+            try
+            {
+                gridObject = new GameObject("Upper Exclusive Test Grid");
+                Grid grid = gridObject.AddComponent<Grid>();
+
+                cameraObject = new GameObject("Upper Exclusive Test Camera");
+                cameraObject.transform.position = new Vector3(cameraCenterX, 32f, -10f);
+                Camera camera = cameraObject.AddComponent<Camera>();
+                camera.orthographic = true;
+                camera.orthographicSize = 32f;
+                camera.aspect = 1f;
+                CameraChunkStreamingBridge bridge =
+                    cameraObject.AddComponent<CameraChunkStreamingBridge>();
+
+                // Sceneを変更せずprivateなInspector参照を設定し、通常処理と同じCamera/Grid座標変換を直接検証します。
+                FieldInfo targetGridField = typeof(CameraChunkStreamingBridge).GetField(
+                    "targetGrid",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                MethodInfo calculateVisibleChunkBounds =
+                    typeof(CameraChunkStreamingBridge).GetMethod(
+                        "CalculateVisibleChunkBounds",
+                        BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.That(targetGridField, Is.Not.Null);
+                Assert.That(calculateVisibleChunkBounds, Is.Not.Null);
+                targetGridField.SetValue(bridge, grid);
+
+                ChunkStreamingObserver bounds = (ChunkStreamingObserver)
+                    calculateVisibleChunkBounds.Invoke(bridge, null);
+
+                Assert.That(bounds.MinimumVisibleChunkX, Is.EqualTo(expectedMinimumChunkX));
+                Assert.That(
+                    bounds.MaximumVisibleChunkX,
+                    Is.EqualTo(expectedMaximumChunkX),
+                    "Viewport右端は上限排他なので、正負どちらでも右隣チャンクを可視扱いにしてはいけません。");
+                Assert.That(bounds.MinimumVisibleChunkY, Is.EqualTo(-1));
+                Assert.That(bounds.MaximumVisibleChunkY, Is.EqualTo(1));
+            }
+            finally
+            {
+                if (cameraObject != null)
+                {
+                    Object.DestroyImmediate(cameraObject);
+                }
+
+                if (gridObject != null)
+                {
+                    Object.DestroyImmediate(gridObject);
+                }
+            }
+        }
+
+        /// <summary>
         /// 現在の負座標と記録済み初期スポーンを準備し、F3文字列が両者を混同せずタイル・チャンク座標として表示することを保証します。
         /// </summary>
         [Test]

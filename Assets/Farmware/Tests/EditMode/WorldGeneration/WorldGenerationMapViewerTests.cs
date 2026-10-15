@@ -18,6 +18,50 @@ namespace Farmware.WorldGeneration.Tests
     public sealed class WorldGenerationMapViewerTests
     {
         /// <summary>
+        /// 1つのRoot配下の兄弟GameObjectへAuthoringを2件配置し、設定取得が重複を見逃さないことを保証します。
+        /// Bakerが複数の設定Entityを生成するSceneをMap Viewerだけが正常と誤認する退行を防ぎます。
+        /// </summary>
+        [Test]
+        public void TryFindSingleAuthoring_SameRootDuplicatesAreRejected()
+        {
+            GameObject root = new GameObject("Duplicate Authoring Root");
+
+            try
+            {
+                GameObject firstObject = new GameObject("First Authoring");
+                firstObject.transform.SetParent(root.transform);
+                firstObject.AddComponent<WorldGenerationAuthoring>();
+                GameObject secondObject = new GameObject("Second Authoring");
+                secondObject.transform.SetParent(root.transform);
+                WorldGenerationAuthoring secondAuthoring =
+                    secondObject.AddComponent<WorldGenerationAuthoring>();
+
+                MethodInfo tryFindSingleAuthoring =
+                    typeof(WorldGenerationEditorSettingsProvider).GetMethod(
+                        "TryFindSingleAuthoring",
+                        BindingFlags.Static | BindingFlags.NonPublic);
+                Assert.That(tryFindSingleAuthoring, Is.Not.Null);
+
+                object[] arguments =
+                {
+                    new[] { root },
+                    null
+                };
+                bool succeeded = (bool)tryFindSingleAuthoring.Invoke(null, arguments);
+
+                Assert.That(succeeded, Is.False);
+                Assert.That(
+                    arguments[1],
+                    Is.SameAs(secondAuthoring),
+                    "複数時は0件と区別できるよう、検出した2件目を呼び出し側へ返す必要があります。");
+            }
+            finally
+            {
+                Object.DestroyImmediate(root);
+            }
+        }
+
+        /// <summary>
         /// 小さな表示範囲を生成し、全ピクセルが同じ座標へ直接GenerateTileした結果の色と一致することを検証します。
         /// ビューア専用の簡易バイオーム計算を追加して実マップとずれる退行を防ぎます。
         /// </summary>

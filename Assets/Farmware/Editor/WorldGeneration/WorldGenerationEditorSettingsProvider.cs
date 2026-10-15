@@ -156,32 +156,12 @@ namespace Farmware.WorldGeneration.Editor
             {
                 previewScene = EditorSceneManager.OpenPreviewScene(SettingsSubScenePath);
                 GameObject[] roots = previewScene.GetRootGameObjects();
-                WorldGenerationAuthoring foundAuthoring = null;
-
-                // SubScene内の階層名へ依存せず、唯一のAuthoring Componentを型で探します。
-                for (int rootIndex = 0; rootIndex < roots.Length; rootIndex++)
-                {
-                    WorldGenerationAuthoring candidate =
-                        roots[rootIndex].GetComponentInChildren<WorldGenerationAuthoring>(true);
-                    if (candidate == null)
-                    {
-                        continue;
-                    }
-
-                    if (foundAuthoring != null)
-                    {
-                        errorMessage =
-                            $"{SettingsSubScenePath} にWorldGenerationAuthoringが複数あります。";
-                        return false;
-                    }
-
-                    foundAuthoring = candidate;
-                }
-
-                if (foundAuthoring == null)
+                if (!TryFindSingleAuthoring(roots, out WorldGenerationAuthoring foundAuthoring))
                 {
                     errorMessage =
-                        $"{SettingsSubScenePath} にWorldGenerationAuthoringがありません。";
+                        foundAuthoring == null
+                            ? $"{SettingsSubScenePath} にWorldGenerationAuthoringがありません。"
+                            : $"{SettingsSubScenePath} にWorldGenerationAuthoringが複数あります。";
                     return false;
                 }
 
@@ -201,6 +181,40 @@ namespace Farmware.WorldGeneration.Editor
                     EditorSceneManager.ClosePreviewScene(previewScene);
                 }
             }
+        }
+
+        /// <summary>
+        /// Preview Sceneの全Rootと全子孫を列挙し、WorldGenerationAuthoringが正確に1件だけ存在するか確認します。
+        /// 同じRoot配下に複数ある場合もBakerは複数Entityを生成するため、最初の1件だけを採用せず設定エラーにします。
+        /// </summary>
+        /// <param name="roots">Preview Sceneから取得したRoot GameObject一覧です。</param>
+        /// <param name="foundAuthoring">1件ならそのComponent、0件ならnull、複数なら2件目を返します。</param>
+        /// <returns>全階層を通してWorldGenerationAuthoringが正確に1件の場合はtrueです。</returns>
+        private static bool TryFindSingleAuthoring(
+            GameObject[] roots,
+            out WorldGenerationAuthoring foundAuthoring)
+        {
+            foundAuthoring = null;
+
+            // Rootごとに全子孫を列挙し、兄弟GameObjectに置かれた重複も見落とさないようにします。
+            for (int rootIndex = 0; rootIndex < roots.Length; rootIndex++)
+            {
+                WorldGenerationAuthoring[] candidates =
+                    roots[rootIndex].GetComponentsInChildren<WorldGenerationAuthoring>(true);
+                for (int candidateIndex = 0; candidateIndex < candidates.Length; candidateIndex++)
+                {
+                    if (foundAuthoring != null)
+                    {
+                        // 呼び出し側が「0件」と「複数」を区別できるよう、複数時は2件目を保持して返します。
+                        foundAuthoring = candidates[candidateIndex];
+                        return false;
+                    }
+
+                    foundAuthoring = candidates[candidateIndex];
+                }
+            }
+
+            return foundAuthoring != null;
         }
     }
 }

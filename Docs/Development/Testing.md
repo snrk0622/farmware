@@ -77,7 +77,7 @@ Sprite Packer ModeがV2であること、土地Atlasが7種類のBiome Texture�
 | F3 | 現在座標、サブチャンク座標、ECSのBiome・GeneratorVersion・ワールドシード、記録済み初期スポーン座標を保証する。初期スポーン探索失敗時は探索中表示を残さず、Scene保存位置を使用中であることを示すHUD文字列も検証する。 |
 | F4 | 初期スポーンの赤いTile・Chunk表示と、縦横グリッド線の矩形計算を保証する。 |
 | 初期スポーン失敗 | Scene保存位置を維持し、失敗状態の確定後にチャンクストリーミングを開始できることを保証する。 |
-| Presentation寿命 | Camera GameObjectを維持したDefault World再作成時に新しい初期スポーンを再適用する。Camera Bridgeは新Worldの初期スポーン探索中でも旧WorldのObserverを直ちに破棄し、初期位置の確定前は新Observerを作らず、確定後に1件だけ作り直す。同一Worldでカメラ制御を再有効化した場合はプレイヤーの移動後位置を保つ。Tilemap PresenterがWorld切替または無効化時に表示済み・反映途中・消去途中の旧表示を残さないことも保証する。 |
+| Presentation寿命 | Camera GameObjectを維持したDefault World再作成時に新しい初期スポーンを再適用する。Camera Bridgeは新Worldの初期スポーン探索中でも旧WorldのObserverを直ちに破棄し、初期位置の確定前は新Observerを作らず、確定後に1件だけ作り直す。同一Worldでカメラ制御を再有効化した場合はプレイヤーの移動後位置を保つ。正負座標のGrid 64タイル境界へViewport右上端が一致しても、上限側の面積を持たない隣接チャンクを要求しない。Tilemap PresenterがWorld切替または無効化時に表示済み・反映途中・消去途中の旧表示を残さないことも保証する。 |
 | 開発者用可視化 | バイオーム、ノイズ、水域、移行帯、岩壁、マグマ、資源の色写像がSimulationを変更しないことを保証する。 |
 | 岩壁表示 | チャンク境界をまたぐ内部影が連続したグラデーションになり、一体型岩壁の上面・内部影・露出資源が同じ12px高へ揃うことを保証する。 |
 | SampleScene縦切り | SubSceneロード、Authoringと共通既定閾値、初期カメラ、チャンク生成、7枚のTilemap、Ground・Rock WallのIndividual ModeおよびTop Left順、同じBiomeなら標準・肥沃・砂質のいずれも同じプレイヤー向けTileを選ぶこと、7枚の土地上面がBiome基準色一色で旧Soil派生アセットが残らないこと、Editor専用Soil可視化が3種類を別色にすること、通常資源の岩壁背面用Order 2・前面用Order 10への振り分け、静止液面・アニメーションの-8pxオフセット、液体セルのGround Tilemapとの排他表示、岩壁セルの下層土地、岩壁上資源の12pxオフセット、土地・岩壁Spriteの上下はみ出しを含む可視チャンク範囲、液面4fps設定、アンロード、同一地形の再生成を保証する。EditModeでは、資源がある通常地面の直前方だけが岩壁の場合に背面用へ分類する純粋計算を保証する。 |

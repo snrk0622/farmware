@@ -31,6 +31,12 @@ namespace Farmware.WorldGeneration.Presentation
                 + TerrainLayerPresentationUtility.TerrainSurfaceHeightInPixels - 1)
             / TerrainLayerPresentationUtility.TerrainSurfaceHeightInPixels;
 
+        /// <summary>
+        /// Camera行列から得た連続セル座標を整数境界へ戻す許容幅です。単位はタイルです。
+        /// 0.001タイルは16 PPUで0.016ピクセルに相当し、描画上は区別できない丸め誤差だけを吸収します。
+        /// </summary>
+        private const float CellBoundarySnapToleranceInTiles = 0.001f;
+
         // 表示範囲を取得する2Dカメラです。未指定なら同じGameObjectのCameraをAwakeで取得します。
         [Tooltip("チャンク読み込み範囲を決める2Dカメラです。未指定なら同じGameObjectのCameraを使用します。")]
         [SerializeField] private Camera targetCamera;
@@ -227,12 +233,23 @@ namespace Farmware.WorldGeneration.Presentation
 
             if (targetGrid != null)
             {
-                Vector3Int bottomLeftCell = targetGrid.WorldToCell(bottomLeftWorld);
-                Vector3Int topRightCell = targetGrid.WorldToCell(topRightWorld);
-                minimumTileX = Mathf.Min(bottomLeftCell.x, topRightCell.x);
-                maximumTileX = Mathf.Max(bottomLeftCell.x, topRightCell.x);
-                minimumTileY = Mathf.Min(bottomLeftCell.y, topRightCell.y);
-                maximumTileY = Mathf.Max(bottomLeftCell.y, topRightCell.y);
+                Vector3 bottomLeftLocal =
+                    targetGrid.transform.InverseTransformPoint(bottomLeftWorld);
+                Vector3 topRightLocal =
+                    targetGrid.transform.InverseTransformPoint(topRightWorld);
+                Vector3 bottomLeftCell = targetGrid.LocalToCellInterpolated(bottomLeftLocal);
+                Vector3 topRightCell = targetGrid.LocalToCellInterpolated(topRightLocal);
+
+                // 2端点を連続セル座標の最小・最大へ直してから、下限を包含、上限を排他として整数化します。
+                // Camera行列の丸めで64が64.00000…になる場合も、描画上識別不能な範囲だけ整数へ戻して隣接チャンクを除外します。
+                float minimumCellX = Mathf.Min(bottomLeftCell.x, topRightCell.x);
+                float maximumCellX = Mathf.Max(bottomLeftCell.x, topRightCell.x);
+                float minimumCellY = Mathf.Min(bottomLeftCell.y, topRightCell.y);
+                float maximumCellY = Mathf.Max(bottomLeftCell.y, topRightCell.y);
+                minimumTileX = Mathf.FloorToInt(minimumCellX);
+                maximumTileX = CalculateUpperExclusiveMaximumTile(maximumCellX);
+                minimumTileY = Mathf.FloorToInt(minimumCellY);
+                maximumTileY = CalculateUpperExclusiveMaximumTile(maximumCellY);
             }
             else
             {
@@ -251,6 +268,23 @@ namespace Farmware.WorldGeneration.Presentation
                 maximumTileX,
                 minimumTileY,
                 maximumTileY);
+        }
+
+        /// <summary>
+        /// 連続セル座標の上限を上限排他的な最大タイル座標へ変換します。
+        /// Camera行列由来の微小な整数境界誤差だけを丸め、実際に面積を持つセルを欠落させないようにします。
+        /// </summary>
+        /// <param name="upperExclusiveCellCoordinate">Viewport上限の連続セル座標です。</param>
+        /// <returns>Viewport内に面積を持つ最大の整数タイル座標です。</returns>
+        private static int CalculateUpperExclusiveMaximumTile(float upperExclusiveCellCoordinate)
+        {
+            float nearestInteger = Mathf.Round(upperExclusiveCellCoordinate);
+            float stabilizedCoordinate =
+                Mathf.Abs(upperExclusiveCellCoordinate - nearestInteger)
+                <= CellBoundarySnapToleranceInTiles
+                    ? nearestInteger
+                    : upperExclusiveCellCoordinate;
+            return Mathf.CeilToInt(stabilizedCoordinate) - 1;
         }
 
         /// <summary>
