@@ -1,4 +1,4 @@
-# Farmware タイルマップ用スプライト制作・導入チェックリスト v0.22
+# Farmware タイルマップ用スプライト制作・導入チェックリスト v0.23
 
 - 作成日: 2026-10-11
 - 最終更新日: 2026-10-15
@@ -66,7 +66,7 @@ Editorの構築メニューが `Assets/Farmware/Art/WorldGeneration/Fallback/` �
 - [ ] 480×270の実表示で、地形同士と資源の識別性、彩度、明度、単色面の読みやすさを確認
 - [x] F4境界表示を一時的に重ね、16×16サブチャンクと64×64チャンクをまたぐ表示欠けがないことを確認
 
-段階Aでは同じTileの繰り返しが見えることを既知の未完成項目として扱う。基本地形同士の直線的な切り替わりと、島や岸の直角を含む単純な輪郭は完成方針の一部として評価する。
+段階Aでは、通常土地や液体で同じTileの意図しない繰り返しが見えることを既知の未完成項目として扱う。岩壁上面の菱形模様はセル単位で反復させる固定意匠であり、この未完成項目には含めない。基本地形同士の直線的な切り替わりと、島や岸の直角を含む単純な輪郭は完成方針の一部として評価する。
 ここで評価するのは、Foragerのように明るく即座に地形を識別できる配色、工業設備を置ける背景密度、バイオームの見分けやすさである。ただし既存作品のSprite、地形配置、固有意匠は複製しない。
 
 ##### ART-00A 受け入れ記録（2026-10-15）
@@ -91,7 +91,7 @@ Editorの構築メニューが `Assets/Farmware/Art/WorldGeneration/Fallback/` �
 - [ ] 水面・マグマの岸の位置を固定したまま、内部の波紋と明暗だけをアニメーション
 - [ ] 資源、植生、動物、地形障害物など、配置に意味を持つ要素を別レイヤーへ追加
 - [x] 水・マグマに接する土地の外周辺・内角と、岩壁領域の外周辺・内角へ、白い共通デザインの境界ハイライトを透明な専用オーバーレイとして追加
-- [ ] 連続する模様、境界の欠け、ちらつき、Tilemapの継ぎ目がないことを確認
+- [ ] 境界の欠け、ちらつき、透明な隙間、位置ずれによるTilemapの継ぎ目がないことを確認。岩壁上面の菱形模様とセル単位の反復は意図したデザインとして許容する
 
 本番候補は`Assets/Farmware/Art/WorldGeneration/Fallback/`へ上書きしない。
 このフォルダは構築メニューが再生成する仮素材専用であるため、本番候補は9章の推奨配置先へ追加し、採用後にSceneまたは表示設定から参照する。
@@ -148,21 +148,21 @@ Base地形は合計11種類×1枚の11 Spriteとなる。段階Aの世界観確�
 - 明るさは白飛び、蛍光色、高コントラストを意味しない。地面の広い単色面を明るく保ち、工業設備、資源、ベルト、柵を読みやすくする。
 - Base Tile上ではバイオームを代表色で区別し、マップ全体では資源、植生、動物、地形障害物、環境演出など意味を持つ要素も組み合わせて識別する。
 - SoilTypeはプレイヤー向け土地表示へ反映しない。標準・肥沃・砂質の派生Tileや共通模様マスクを制作せず、土地素材はBiomeごとの見た目だけを設計する。土壌分布の確認にはEditor専用Debug Visualizationを使用する。
-- 同じ地形を連続配置しても規則的な明暗格子や強い方向性が見えないようにする。
+- 通常土地と液体は、同じ地形を連続配置しても規則的な明暗格子や強い方向性が見えないようにする。岩壁上面だけは、地形の高さと硬さを読みやすくするため、1セル全体を使った規則的な菱形の面構成を意図的に反復してよい。
 - 花、ひび、大石、草束などは通常土地Baseへ焼き込まない。追加する場合は、採取、通行、環境状態、プレイヤー配置などの意味を定義した別要素へ分離する。
 - 地面には方向性の強い影を置かない。自然物と設備の光源は左上に統一する。
 - 16×16 pxでは1 px単位の形を優先し、アンチエイリアス、半透明の縁、縮小前提の細部を使用しない。
 - 通常地面では、個々の石、土塊、草へ黒い輪郭を付けない。暗い線で素材を細かく区切る表現は、石畳やタイル床に見えるため使用しない。
 - 地形ごとに色相と平均明度は変えてよいが、通常土地上面は1色、断面も1色に統一し、タイル内へ陰影段階や模様を追加しない。
 - 意味のない高周波ノイズ、ランダムな1 px、材質らしさだけを目的とした模様を通常土地Baseへ配置しない。
-- 森林地面、岩地、火山などは草原より暗くしてよいが、画面全体を重くするほど黒くしない。岩壁上面も細かな石の集合ではなく、連続した一枚岩として表現する。
+- 森林地面、岩地、火山などは草原より暗くしてよいが、画面全体を重くするほど黒くしない。岩壁上面は細かな石の集合にはせず、連続した岩盤の表面を大きな菱形の面で構成した意匠として表現する。
 
 ### 2.3 Base Tileと意味を持つ配置要素の分離
 
 各Base地形は分類ごとに1枚だけを持ち、同じBiomeではワールド座標、Seed、Entity生成順、チャンクのロード順にかかわらず同じTileを表示する。
 
 - 通常土地Base Tileには花、大石、大きなひび、強い反射、材質模様などのアクセントを入れない。
-- 上面と断面をそれぞれ単色にして、縦横へ連続配置しても境界線や方向性が見えないようにする。
+- 通常土地の上面と断面はそれぞれ単色にして、縦横へ連続配置しても境界線や方向性が見えないようにする。岩壁上面にはこの通常土地向け規則を適用しない。
 - マップへ見た目の変化を加える場合は、Base地形の差分や座標だけで散布する純粋装飾ではなく、資源、植生、動物、地形障害物、環境状態、プレイヤー配置物など意味を持つ別データとして追加する。
 - 表示要素の種類、位置、状態はECSまたはセーブデータを正とし、Base TileやTilemapの画素からゲーム上の意味を逆算しない。
 
@@ -221,6 +221,7 @@ Match the approved grassland reference in canvas size, top-and-face layout, outl
 - 岩壁のFinal canvasは`16×28`。上側16×16を上面、下側16×12を前面側面とする
 - 前面の左右端は同じ高さと色へ揃え、横に並べたときに継ぎ目を作らない
 - 土地断面は上側4 pxを上面が影になった近似暗色、下側4 pxを土・砂・岩・雪の地盤として描き分けてもよい
+- 岩壁上面は16×16 px全体を使う大きな菱形の面構成を固定意匠とする。同じTileを並べた際にセル単位で模様が反復することは意図した見た目であり、透明な隙間や位置ずれによる描画不良とは区別する
 - 岩壁側面は上端1 pxの境界と、その下の連続した岩盤を描く。個別の石積みにはしない
 - Base Spriteと前面断面には、外角、内角、縦側面、斜線、透明な接続形状を作らない。内角を含む透明な接続形状は5.2の境界ハイライトとして別に制作する
 - SeedとStyle referenceを上面と同じ制作記録へ残す
@@ -274,7 +275,7 @@ Unityへ取り込む前に、PixelLabの出力ごとに次を確認する。
 - [ ] 16×16の各辺を接続しても、線や色面が不自然に途切れない
 - [ ] 黒い区切り線がタイル画像自体へ描かれていない
 - [ ] 7バイオーム土地シートは左から草原、森林、砂漠、岩地、湿地、雪原、火山の順に並び、各Spriteが16×24 pxである
-- [ ] 同じTileを縦横に連続配置して最近傍表示で拡大し、アンチエイリアス、半透明の縁、意図しない中間色、目立つ明暗格子がない
+- [ ] 同じTileを縦横に連続配置して最近傍表示で拡大し、アンチエイリアス、半透明の縁、意図しない中間色、目立つ明暗格子がない。岩壁上面の意図した菱形の明暗反復は除外する
 - [ ] 不採用画像もSeedと却下理由を制作記録へ残し、同じ失敗条件を繰り返さない
 
 ## 4. 地形ベーススプライト
@@ -455,17 +456,19 @@ Create a transparent four-frame pixel-art overlay that animates only small inter
 
 ### 4.7 一体型岩壁 `terrain_rock_wall`
 
-- 必要数: 静かなBase Tile 1枚。目立つひびや鉱物色の点は装飾または資源表示へ分離する
+- 必要数: Base Tile 1枚。上面にはセル全体を使う大きな菱形の面構成を固定で入れ、目立つひびや鉱物色の点は装飾または資源表示へ分離する
 - 本番配置先: `Assets/Farmware/Art/WorldGeneration/Terrain/Base/terrain_rock_wall_01.png`。`Fallback/RockWall.png`は構築確認用として残し、本番候補で上書きしない
 - PixelLabツール: `Create tiles (Pro)`
 - 設定: 3.4の共通設定。採用した草原と岩地をStyle referenceへ指定し、上面と側面を一枚へ含める
 - Prompt（全文をそのまま入力）:
 
 ```text
-Top-down oblique 2D pixel art rock-wall block for a cozy agricultural and industrial automation game, using an orthogonal square grid rather than an isometric diamond grid. Create one repeatable block of a continuous natural rock mass exactly 16 by 28 pixels. The upper 16 by 16 pixels are one seamless unbuildable rock-wall top and the lower 16 by 12 pixels are one straight front-facing rock wall belonging to the same block. Add a one-pixel boundary at the top of the face, keep both horizontal endpoints at identical heights and colors, and connect the face directly to the top without a transparent gap. Match normal land only in visual scale, outline policy, and cheerful natural-daylight color clarity. Unlike solid normal land, the unbuildable rock wall may use two or three restrained value steps and sparse rock texture so its height and obstruction are readable. Do not add high-frequency noise or isolated dark pixels.
+Top-down oblique 2D pixel art rock-wall block for a cozy agricultural and industrial automation game. The gameplay and Tilemap use an orthogonal square grid, while the rock surface itself deliberately uses a large diamond-shaped faceted motif. Create exactly one 16 by 28 pixel block. The upper 16 by 16 pixels are one unbuildable rock-wall top divided into four broad triangular faces that meet as a centered diamond-like form. This full-cell motif must repeat clearly when the same tile is placed in adjacent square-grid cells. The lower 16 by 12 pixels are one straight front-facing rock wall belonging to the same block. Add a one-pixel boundary at the top of the face, keep both horizontal endpoints at identical heights and colors, and connect the face directly to the top without a transparent gap.
 
-Use readable medium cool gray, warm gray-brown, and limited charcoal accents while keeping the overall block bright enough for a cheerful daylight world. Give the top two to four subtle broad 1-to-3-pixel color clusters totaling approximately four to eight changed pixels. Give the matching face restrained horizontal strata without turning it into separate stones. Do not put a unique crack, mineral speck, or landmark in the Base Tile. The material must read as one continuous solid unbuildable rock mass. Never outline individual rock pieces. Avoid isometric diamond grid, corner, left or right side face, beveled cube, tile border, grid line, black seam, overall black or dull gray surface, cobblestone, brick pattern, gravel, dark grout, dense cracks, cave opening, loose boulder, large centered crack, high-contrast vein, strong directional shadow, gradient, blur, anti-aliasing, and dense speckles.
+Use readable medium cool gray, warm gray-brown, and limited charcoal accents while keeping the overall block bright enough for a cheerful daylight world. Use two or three controlled value steps across the broad top faces so the deliberate diamond facet is immediately readable. Give the matching face restrained horizontal strata without turning it into separate stones. Do not put a unique crack, mineral speck, or random landmark in the Base Tile. Never outline individual small rock pieces. The diamond is a surface motif only and must not change the square outer silhouette, Sprite bounds, or orthogonal gameplay grid. Avoid transparent gaps, mismatched left and right face edges, corner cutouts, separate left or right side faces, cobblestone, brick pattern, gravel, dark grout, dense cracks, cave opening, loose boulder, high-contrast vein, blur, anti-aliasing, and dense speckles.
 ```
+
+この菱形は岩壁の表面意匠であり、アイソメトリックの論理グリッド、菱形セル、接続RuleTileを意味しない。隣接セルで同じ菱形が反復して見えることを採用画像どおりの仕様とし、検品では透明な隙間、Sprite位置ずれ、側面端の不一致だけを不具合として扱う。
 
 - [x] 生成
 - [x] 取込
@@ -911,6 +914,7 @@ Editor構築ツールとPlayerビルド前処理は、`terrain_biomes_base.png`�
 - [ ] 土、砂、岩、雪の断面色を持つ16×24土地を淡水・海水・マグマへ重ねて確認
 - [x] 16タイル以上続く土地断面で継ぎ目や過度な反復がないことを確認
 - [ ] 連続する岩壁では奥側の12 px側面が手前ブロックに隠れ、最前列では側面が読めることを確認
+- [ ] 岩壁上面の大きな菱形模様がセル単位で意図どおり反復し、論理上の正方形グリッドと混同されないことを確認
 - [ ] 岩壁上面、内部影、岩壁上資源が基準面より12 px上に揃うことを確認
 - [ ] 岩壁が淡水・海水・マグマへ面する場所で、下層の土地断面が欠けないことを確認
 - [ ] 同じ岩壁Tileの上で、内部だけが滑らかな黒い影になり、露出面の模様が読めることを確認
@@ -923,7 +927,7 @@ Editor構築ツールとPlayerビルド前処理は、`terrain_biomes_base.png`�
 - [ ] ドローン、開始コア、配置可能・不可表示を各地形へ重ねて確認
 - [x] カメラの最小・標準・最大ズームでピクセルがにじまないことを確認
 - [x] Game Viewの実解像度で細部がちらつかないことを確認
-- [x] 64×64チャンク境界および16×16サブチャンク境界に見た目の継ぎ目がないことを確認
+- [x] 64×64チャンク境界および16×16サブチャンク境界に、透明な隙間や位置ずれによる継ぎ目がないことを確認。岩壁上面の意図した菱形反復は継ぎ目に含めない
 
 ## 11. 制作記録
 
@@ -932,7 +936,7 @@ Editor構築ツールとPlayerビルド前処理は、`terrain_biomes_base.png`�
 | 日付 | Asset ID | PixelLab Tool | Seed | 主な設定変更 | 出力ファイル | 採用・却下理由 |
 |---|---|---|---|---|---|---|
 | 2026-10-15 | `terrain_biomes_base` | 未共有 | 未共有 | 112×24 px、16×24 px×7枚、上面・断面は各一色、Base差分なし | `Terrain/Base/terrain_biomes_base.png` | 単色Base方針、7バイオームへの割り当て、Gameビュー確認に問題がないため採用 |
-| 2026-10-15 | `terrain_rock_wall_01` | 未共有 | 未共有 | 16×28 px、上面16 px＋側面12 px、単一Base Tile | `Terrain/Base/terrain_rock_wall_01.png` | Import・専用Tile・Atlas・SampleSceneへの適用済み。Gameビュー最終確認後に採否を確定する |
+| 2026-10-15 | `terrain_rock_wall_01` | 未共有 | 未共有 | 16×28 px、上面16 px＋側面12 px、上面全体に大きな菱形の面構成を持つ単一Base Tile | `Terrain/Base/terrain_rock_wall_01.png` | 菱形模様のセル単位反復を意図したデザインとして採用。Import・専用Tile・Atlas・SampleSceneへの適用済みで、Gameビューでは表示連携だけを最終確認する |
 
 ## 12. 後続段階で追加するスプライト
 
