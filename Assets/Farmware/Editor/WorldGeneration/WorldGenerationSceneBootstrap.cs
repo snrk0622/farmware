@@ -2,6 +2,7 @@
 // Runtimeの生成規則には関与せず、製品・フォールバック表示素材、Sprite Atlas、SubScene、Camera、Grid、TilemapのAuthoring接続だけを担当します。
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using Farmware.WorldGeneration.Authoring;
 using Farmware.WorldGeneration.Presentation;
@@ -390,6 +391,9 @@ namespace Farmware.WorldGeneration.Editor
                 DeleteObsoleteFallbackTile(FallbackBiomeAssetNames[index] + "Sandy");
             }
 
+            // ユーザー制作の224×16画像を、Sprite Editorの公式Data Providerで14枚へ安全に分割します。
+            ConfigureBoundaryHighlightSpriteSheet();
+
             // PNGのSaveAndReimport中に以前読み込んだUnity Object参照が無効化される場合があります。
             // 液体・岩壁・資源を生成した後、本番用土地を含む最新のTileを読み直してSceneへ保存します。
             AssetDatabase.SaveAssets();
@@ -419,6 +423,7 @@ namespace Farmware.WorldGeneration.Editor
                 LoadRequiredFallbackAnimatedTile("SaltWaterAnimation");
             AnimatedTile magmaAnimationTile =
                 LoadRequiredFallbackAnimatedTile("MagmaAnimation");
+            Sprite[] boundaryHighlightSprites = LoadRequiredBoundaryHighlightSprites();
 
             SceneAsset settingsSubSceneAsset = CreateOrUpdateSettingsSubScene();
             ConfigureMainScene(
@@ -439,7 +444,8 @@ namespace Farmware.WorldGeneration.Editor
                 sandResourceTile,
                 freshWaterAnimationTile,
                 saltWaterAnimationTile,
-                magmaAnimationTile);
+                magmaAnimationTile,
+                boundaryHighlightSprites);
             ConfigurePixelArtQualitySettings();
 
             AssetDatabase.SaveAssets();
@@ -1043,6 +1049,150 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>
+        /// 境界ハイライト画像をPoint・PPU 16のMultiple Spriteへ設定し、左から右へ14区画を作ります。
+        /// 既に正しい区画がある場合はSprite IDを維持し、Scene参照やAtlas参照の不要な変更を防ぎます。
+        /// </summary>
+        /// <exception cref="InvalidOperationException">画像寸法、Importer、編集能力のいずれかが不正な場合に送出します。</exception>
+        private static void ConfigureBoundaryHighlightSpriteSheet()
+        {
+            string texturePath = WorldGenerationSpriteAtlasBuilder.BoundaryHighlightTexturePath;
+            AssetDatabase.ImportAsset(texturePath, ImportAssetOptions.ForceSynchronousImport);
+            Texture2D texture = AssetDatabase.LoadAssetAtPath<Texture2D>(texturePath);
+            if (texture == null || texture.width != 224 || texture.height != 16)
+            {
+                throw new InvalidOperationException(
+                    $"境界ハイライト画像は224×16ピクセルで配置してください: {texturePath}");
+            }
+
+            TextureImporter importer = AssetImporter.GetAtPath(texturePath) as TextureImporter;
+            if (importer == null)
+            {
+                throw new InvalidOperationException(
+                    $"境界ハイライト画像のTextureImporterを取得できません: {texturePath}");
+            }
+
+            importer.textureType = TextureImporterType.Sprite;
+            importer.spriteImportMode = SpriteImportMode.Multiple;
+            importer.spritePixelsPerUnit = AssetsPixelsPerUnit;
+            importer.filterMode = FilterMode.Point;
+            importer.mipmapEnabled = false;
+            importer.textureCompression = TextureImporterCompression.Uncompressed;
+            importer.alphaIsTransparency = true;
+            importer.wrapMode = TextureWrapMode.Clamp;
+            importer.isReadable = false;
+            importer.npotScale = TextureImporterNPOTScale.None;
+            TextureImporterSettings importerSettings = new TextureImporterSettings();
+            importer.ReadTextureSettings(importerSettings);
+            importerSettings.spriteMeshType = SpriteMeshType.FullRect;
+            importerSettings.spriteGenerateFallbackPhysicsShape = false;
+            importer.SetTextureSettings(importerSettings);
+
+            // Texture全体の設定を先に確定し、Multiple Sprite編集に対応するData Providerを再取得します。
+            importer.SaveAndReimport();
+            SpriteDataProviderFactories factories = new SpriteDataProviderFactories();
+            factories.Init();
+            ISpriteEditorDataProvider dataProvider =
+                factories.GetSpriteEditorDataProviderFromObject(importer);
+            if (dataProvider == null)
+            {
+                throw new InvalidOperationException(
+                    $"境界ハイライト画像のSprite Editor Data Providerを取得できません: {texturePath}");
+            }
+
+            dataProvider.InitSpriteEditorDataProvider();
+            ISpriteFrameEditCapability editCapability =
+                dataProvider.GetDataProvider<ISpriteFrameEditCapability>();
+            if (editCapability == null)
+            {
+                throw new InvalidOperationException(
+                    $"境界ハイライト画像のSprite編集能力を確認できません: {texturePath}");
+            }
+
+            var capability = editCapability.GetEditCapability();
+            bool supportsRequiredEdits =
+                capability.HasCapability(EEditCapability.CreateAndDeleteSprite)
+                && capability.HasCapability(EEditCapability.EditSpriteName)
+                && capability.HasCapability(EEditCapability.EditSpriteRect)
+                && capability.HasCapability(EEditCapability.EditPivot);
+            if (!supportsRequiredEdits)
+            {
+                // 編集能力を満たさないImporterへ書き込むとSprite IDを破損する可能性があるため、変更せず中断します。
+                throw new InvalidOperationException(
+                    $"境界ハイライト画像の分割に必要なSprite編集能力がありません: {texturePath}");
+            }
+
+            string[] expectedNames =
+                WorldGenerationSpriteAtlasBuilder.GetExpectedBoundaryHighlightSpriteNames();
+            SpriteRect[] existingRects = dataProvider.GetSpriteRects();
+            var configuredRects = new SpriteRect[expectedNames.Length];
+            var nameFileIdPairs = new List<SpriteNameFileIdPair>(expectedNames.Length);
+            for (int index = 0; index < configuredRects.Length; index++)
+            {
+                Rect expectedRect = new Rect(index * 16f, 0f, 16f, 16f);
+                GUID spriteId = FindExistingSpriteId(existingRects, expectedRect);
+                if (spriteId.Empty())
+                {
+                    spriteId = GUID.Generate();
+                }
+
+                configuredRects[index] = new SpriteRect
+                {
+                    name = expectedNames[index],
+                    rect = expectedRect,
+                    alignment = SpriteAlignment.Center,
+                    pivot = new Vector2(0.5f, 0.5f),
+                    border = Vector4.zero,
+                    spriteID = spriteId
+                };
+                nameFileIdPairs.Add(new SpriteNameFileIdPair(expectedNames[index], spriteId));
+            }
+
+            ISpriteNameFileIdDataProvider nameFileIdProvider =
+                dataProvider.GetDataProvider<ISpriteNameFileIdDataProvider>();
+            if (nameFileIdProvider == null)
+            {
+                throw new InvalidOperationException(
+                    $"境界ハイライト画像のSprite名とIDを保存できません: {texturePath}");
+            }
+
+            dataProvider.SetSpriteRects(configuredRects);
+            nameFileIdProvider.SetNameFileIdPairs(nameFileIdPairs);
+            dataProvider.Apply();
+            importer.SaveAndReimport();
+        }
+
+        /// <summary>
+        /// 既存のSprite区画から同じ位置・寸法のIDを探し、再構築時にも参照を維持します。
+        /// </summary>
+        /// <param name="existingRects">Importerへ現在保存されているSprite区画です。</param>
+        /// <param name="expectedRect">今回作成する16×16区画です。</param>
+        /// <returns>同じ区画があれば既存ID、なければ空IDです。</returns>
+        private static GUID FindExistingSpriteId(
+            SpriteRect[] existingRects,
+            Rect expectedRect)
+        {
+            if (existingRects == null)
+            {
+                return default;
+            }
+
+            for (int index = 0; index < existingRects.Length; index++)
+            {
+                Rect existingRect = existingRects[index].rect;
+                bool isSameRect = Mathf.Approximately(existingRect.x, expectedRect.x)
+                    && Mathf.Approximately(existingRect.y, expectedRect.y)
+                    && Mathf.Approximately(existingRect.width, expectedRect.width)
+                    && Mathf.Approximately(existingRect.height, expectedRect.height);
+                if (isSameRect)
+                {
+                    return existingRects[index].spriteID;
+                }
+            }
+
+            return default;
+        }
+
+        /// <summary>
         /// 全Textureの再インポート後に、指定名のフォールバックTileをAssetDatabaseから読み直します。
         /// </summary>
         /// <param name="assetName">読み込むTileアセットの拡張子を除いた名前です。</param>
@@ -1087,6 +1237,69 @@ namespace Farmware.WorldGeneration.Editor
             }
 
             return tile;
+        }
+
+        /// <summary>
+        /// 分割済みの境界ハイライトSpriteを、画像の左から右への14基本形順で読み込みます。
+        /// </summary>
+        /// <returns>Shape01〜Shape14に対応する14枚のSprite配列です。</returns>
+        /// <exception cref="InvalidOperationException">Spriteの欠落、重複、別Texture参照がある場合に送出します。</exception>
+        private static Sprite[] LoadRequiredBoundaryHighlightSprites()
+        {
+            string texturePath = WorldGenerationSpriteAtlasBuilder.BoundaryHighlightTexturePath;
+            string[] expectedNames =
+                WorldGenerationSpriteAtlasBuilder.GetExpectedBoundaryHighlightSpriteNames();
+            UnityEngine.Object[] allAssets = AssetDatabase.LoadAllAssetsAtPath(texturePath);
+            var sprites = new Sprite[expectedNames.Length];
+            int loadedSpriteCount = 0;
+
+            for (int assetIndex = 0; assetIndex < allAssets.Length; assetIndex++)
+            {
+                if (allAssets[assetIndex] is Sprite sprite)
+                {
+                    loadedSpriteCount++;
+                    for (int expectedIndex = 0; expectedIndex < expectedNames.Length; expectedIndex++)
+                    {
+                        if (string.Equals(
+                            sprite.name,
+                            expectedNames[expectedIndex],
+                            StringComparison.Ordinal))
+                        {
+                            if (sprites[expectedIndex] != null)
+                            {
+                                throw new InvalidOperationException(
+                                    $"境界ハイライトSprite名が重複しています: {sprite.name}");
+                            }
+
+                            sprites[expectedIndex] = sprite;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (loadedSpriteCount != expectedNames.Length)
+            {
+                throw new InvalidOperationException(
+                    $"境界ハイライトSpriteは{expectedNames.Length}枚必要です: "
+                    + $"{texturePath}, actual={loadedSpriteCount}");
+            }
+
+            for (int index = 0; index < sprites.Length; index++)
+            {
+                if (sprites[index] == null
+                    || !string.Equals(
+                        AssetDatabase.GetAssetPath(sprites[index]),
+                        texturePath,
+                        StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        $"境界ハイライトSpriteを順番どおり読み込めません: "
+                        + $"index={index}, expected={expectedNames[index]}");
+                }
+            }
+
+            return sprites;
         }
 
         /// <summary>
@@ -1308,6 +1521,7 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="freshWaterAnimationTile">淡水へ重ねる透明AnimatedTileです。</param>
         /// <param name="saltWaterAnimationTile">海水へ重ねる透明AnimatedTileです。</param>
         /// <param name="magmaAnimationTile">マグマへ重ねる透明AnimatedTileです。</param>
+        /// <param name="boundaryHighlightSprites">左からShape01〜Shape14の順に並ぶ境界ハイライトSpriteです。</param>
         private static void ConfigureMainScene(
             SceneAsset settingsSubSceneAsset,
             TileBase grasslandTile,
@@ -1326,7 +1540,8 @@ namespace Farmware.WorldGeneration.Editor
             TileBase sandResourceTile,
             TileBase freshWaterAnimationTile,
             TileBase saltWaterAnimationTile,
-            TileBase magmaAnimationTile)
+            TileBase magmaAnimationTile,
+            Sprite[] boundaryHighlightSprites)
         {
             Scene mainScene = EditorSceneManager.OpenScene(MainScenePath, OpenSceneMode.Single);
 
@@ -1351,6 +1566,13 @@ namespace Farmware.WorldGeneration.Editor
                 mode: TilemapRenderer.Mode.Individual,
                 sortOrder: TilemapRenderer.SortOrder.TopLeft);
             ChunkTilemapPresenter presenter = GetOrAddComponent<ChunkTilemapPresenter>(tilemapObject);
+
+            GameObject landBoundaryHighlightTilemapObject =
+                FindOrCreateDirectChild(gridObject.transform, "Land Boundary Highlight Tilemap");
+            Tilemap landBoundaryHighlightTilemap =
+                GetOrAddComponent<Tilemap>(landBoundaryHighlightTilemapObject);
+            landBoundaryHighlightTilemapObject.transform.localPosition = Vector3.zero;
+            ConfigureTilemapRenderer(landBoundaryHighlightTilemapObject, sortingOrder: 1);
 
             GameObject liquidBaseTilemapObject =
                 FindOrCreateDirectChild(gridObject.transform, "Liquid Base Tilemap");
@@ -1386,6 +1608,20 @@ namespace Farmware.WorldGeneration.Editor
                 sortingOrder: 3,
                 mode: TilemapRenderer.Mode.Individual,
                 sortOrder: TilemapRenderer.SortOrder.TopLeft);
+
+            GameObject rockWallBoundaryHighlightTilemapObject =
+                FindOrCreateDirectChild(
+                    gridObject.transform,
+                    "Rock Wall Boundary Highlight Tilemap");
+            Tilemap rockWallBoundaryHighlightTilemap =
+                GetOrAddComponent<Tilemap>(rockWallBoundaryHighlightTilemapObject);
+            rockWallBoundaryHighlightTilemapObject.transform.localPosition = new Vector3(
+                0f,
+                TerrainLayerPresentationUtility.RockWallElevationInCells,
+                0f);
+            ConfigureTilemapRenderer(
+                rockWallBoundaryHighlightTilemapObject,
+                sortingOrder: 4);
 
             // 直前方が岩壁の資源だけを壁より先に描き、岩壁Spriteと重なる下部を確実に隠します。
             // 固定レイヤーへ振り分けるため、無限ワールドの大きな絶対Y座標を透明ソート値に使いません。
@@ -1432,9 +1668,12 @@ namespace Farmware.WorldGeneration.Editor
                 liquidAnimationTilemap,
                 rockWallTilemap,
                 rockWallResourceTilemap,
+                landBoundaryHighlightTilemap,
+                rockWallBoundaryHighlightTilemap,
                 freshWaterAnimationTile,
                 saltWaterAnimationTile,
-                magmaAnimationTile);
+                magmaAnimationTile,
+                boundaryHighlightSprites);
 
             Camera camera = FindMainCamera(mainScene);
             ConfigureCamera(camera, grid);
@@ -1471,9 +1710,12 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="liquidAnimationTilemap">液面アニメーションを静止液面と同じ8px下へ描画するTilemapです。</param>
         /// <param name="rockWallTilemap">16×28の岩壁ブロックを基準セルへ描画するTilemapです。</param>
         /// <param name="rockWallResourceTilemap">露出した岩壁上の資源を12px上へ描画するTilemapです。</param>
+        /// <param name="landBoundaryHighlightTilemap">通常土地の水・マグマ側へ境界を重ねるTilemapです。</param>
+        /// <param name="rockWallBoundaryHighlightTilemap">岩壁上面の境界を12px高い位置へ重ねるTilemapです。</param>
         /// <param name="freshWaterAnimationTile">淡水へ重ねる透明AnimatedTileです。</param>
         /// <param name="saltWaterAnimationTile">海水へ重ねる透明AnimatedTileです。</param>
         /// <param name="magmaAnimationTile">マグマへ重ねる透明AnimatedTileです。</param>
+        /// <param name="boundaryHighlightSprites">左からShape01〜Shape14の順に並ぶ境界ハイライトSpriteです。</param>
         private static void ConfigurePresenter(
             ChunkTilemapPresenter presenter,
             Tilemap tilemap,
@@ -1497,9 +1739,12 @@ namespace Farmware.WorldGeneration.Editor
             Tilemap liquidAnimationTilemap,
             Tilemap rockWallTilemap,
             Tilemap rockWallResourceTilemap,
+            Tilemap landBoundaryHighlightTilemap,
+            Tilemap rockWallBoundaryHighlightTilemap,
             TileBase freshWaterAnimationTile,
             TileBase saltWaterAnimationTile,
-            TileBase magmaAnimationTile)
+            TileBase magmaAnimationTile,
+            Sprite[] boundaryHighlightSprites)
         {
             presenter.Configure(
                 tilemap,
@@ -1527,6 +1772,11 @@ namespace Farmware.WorldGeneration.Editor
                 freshWaterAnimationTile,
                 saltWaterAnimationTile,
                 magmaAnimationTile);
+            presenter.ConfigureBoundaryHighlights(
+                landBoundaryHighlightTilemap,
+                rockWallBoundaryHighlightTilemap,
+                boundaryHighlightSprites,
+                TerrainBoundaryHighlightUtility.DefaultOpacity);
             EditorUtility.SetDirty(presenter);
         }
 
@@ -1856,6 +2106,10 @@ namespace Farmware.WorldGeneration.Editor
                 gridObject.transform.Find("Rock Wall Tilemap");
             Transform rockWallResourceTilemapTransform =
                 gridObject.transform.Find("Rock Wall Resource Tilemap");
+            Transform landBoundaryHighlightTilemapTransform =
+                gridObject.transform.Find("Land Boundary Highlight Tilemap");
+            Transform rockWallBoundaryHighlightTilemapTransform =
+                gridObject.transform.Find("Rock Wall Boundary Highlight Tilemap");
             GameObject subSceneObject = FindOrCreateRoot(mainScene, "World Generation SubScene");
 
             ChunkTilemapPresenter presenter = tilemapTransform == null
@@ -1895,6 +2149,14 @@ namespace Farmware.WorldGeneration.Editor
                     != TilemapRenderer.Mode.Individual
                 || tilemapTransform.GetComponent<TilemapRenderer>().sortOrder
                     != TilemapRenderer.SortOrder.TopLeft
+                || landBoundaryHighlightTilemapTransform == null
+                || landBoundaryHighlightTilemapTransform.GetComponent<Tilemap>() == null
+                || landBoundaryHighlightTilemapTransform.GetComponent<TilemapRenderer>() == null
+                || landBoundaryHighlightTilemapTransform.GetComponent<TilemapRenderer>().sortingOrder
+                    != 1
+                || !Mathf.Approximately(
+                    landBoundaryHighlightTilemapTransform.localPosition.y,
+                    0f)
                 || resourceTilemapTransform == null
                 || resourceTilemapTransform.GetComponent<Tilemap>() == null
                 || resourceTilemapTransform.GetComponent<TilemapRenderer>() == null
@@ -1930,6 +2192,14 @@ namespace Farmware.WorldGeneration.Editor
                 || !Mathf.Approximately(
                     rockWallTilemapTransform.localPosition.y,
                     0f)
+                || rockWallBoundaryHighlightTilemapTransform == null
+                || rockWallBoundaryHighlightTilemapTransform.GetComponent<Tilemap>() == null
+                || rockWallBoundaryHighlightTilemapTransform.GetComponent<TilemapRenderer>() == null
+                || rockWallBoundaryHighlightTilemapTransform.GetComponent<TilemapRenderer>().sortingOrder
+                    != 4
+                || !Mathf.Approximately(
+                    rockWallBoundaryHighlightTilemapTransform.localPosition.y,
+                    TerrainLayerPresentationUtility.RockWallElevationInCells)
                 || rockWallResourceTilemapTransform == null
                 || rockWallResourceTilemapTransform.GetComponent<Tilemap>() == null
                 || rockWallResourceTilemapTransform.GetComponent<TilemapRenderer>() == null
@@ -2008,6 +2278,8 @@ namespace Farmware.WorldGeneration.Editor
                 "liquidAnimationTilemap",
                 "rockWallTilemap",
                 "rockWallResourceTilemap",
+                "landBoundaryHighlightTilemap",
+                "rockWallBoundaryHighlightTilemap",
                 "grasslandTile",
                 "forestTile",
                 "desertTile",
@@ -2034,6 +2306,36 @@ namespace Farmware.WorldGeneration.Editor
                 {
                     return false;
                 }
+            }
+
+            SerializedProperty boundarySpritesProperty =
+                serializedPresenter.FindProperty("boundaryHighlightSprites");
+            if (boundarySpritesProperty == null
+                || !boundarySpritesProperty.isArray
+                || boundarySpritesProperty.arraySize
+                    != TerrainBoundaryHighlightUtility.ExpectedSpriteCount)
+            {
+                return false;
+            }
+
+            for (int index = 0; index < boundarySpritesProperty.arraySize; index++)
+            {
+                SerializedProperty spriteProperty =
+                    boundarySpritesProperty.GetArrayElementAtIndex(index);
+                if (spriteProperty.objectReferenceValue == null)
+                {
+                    return false;
+                }
+            }
+
+            SerializedProperty boundaryOpacityProperty =
+                serializedPresenter.FindProperty("boundaryHighlightOpacity");
+            if (boundaryOpacityProperty == null
+                || !Mathf.Approximately(
+                    boundaryOpacityProperty.floatValue,
+                    TerrainBoundaryHighlightUtility.DefaultOpacity))
+            {
+                return false;
             }
 
             return true;
