@@ -8,6 +8,7 @@ using Farmware.WorldGeneration.Editor;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.UIElements;
 
 namespace Farmware.WorldGeneration.Tests
 {
@@ -182,6 +183,58 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(firstY, Is.EqualTo(-20));
             Assert.That(secondX, Is.EqualTo(firstX));
             Assert.That(secondY, Is.EqualTo(firstY));
+        }
+
+        /// <summary>
+        /// 偶数寸法の生成結果をEditorWindowへ適用し、Pointerが動く前のHoverが要求した中心タイルを示すことを保証します。
+        /// Canvas中央の境界を通常Pointer変換へ通し、Y座標が1サンプル下へずれる退行を防ぎます。
+        /// </summary>
+        [Test]
+        public void ApplyRenderedMap_EvenDimensionsInitialHoverUsesRequestedCenterTile()
+        {
+            const int centerTileX = 123;
+            const int centerTileY = -456;
+            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.FromString("map-viewer-initial-hover-test"),
+                1);
+            WorldGenerationMapSampleResult result = WorldGenerationMapSampler.Sample(
+                settings,
+                centerTileX,
+                centerTileY,
+                4,
+                2,
+                4,
+                WorldGenerationMapViewMode.Terrain,
+                CancellationToken.None);
+            WorldGenerationMapViewerWindow window =
+                ScriptableObject.CreateInstance<WorldGenerationMapViewerWindow>();
+
+            try
+            {
+                Label hoverLabel = new Label();
+                SetPrivateField(window, "mapCanvas", new WorldGenerationMapCanvas());
+                SetPrivateField(window, "hoverLabel", hoverLabel);
+                SetPrivateField(window, "zoomLabel", new Label());
+                SetPrivateField(window, "sourceLabel", new Label());
+                SetPrivateField(window, "settingsSourceDescription", "EditMode回帰テスト");
+
+                MethodInfo applyRenderedMap = typeof(WorldGenerationMapViewerWindow).GetMethod(
+                    "ApplyRenderedMap",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.That(applyRenderedMap, Is.Not.Null);
+
+                // contentRectが未レイアウトの0でも、初期HoverはPointer変換へ依存せず中心を評価する必要があります。
+                applyRenderedMap.Invoke(window, new object[] { result, settings });
+
+                Assert.That(
+                    hoverLabel.text,
+                    Does.StartWith($"Tile ({centerTileX}, {centerTileY}) /"));
+            }
+            finally
+            {
+                // EditorWindowが所有する一時Textureとイベント購読をOnDisable経由で確実に破棄します。
+                Object.DestroyImmediate(window);
+            }
         }
 
         /// <summary>
@@ -603,6 +656,25 @@ namespace Farmware.WorldGeneration.Tests
             {
                 Object.DestroyImmediate(authoringObject);
             }
+        }
+
+        /// <summary>
+        /// EditorWindowの非公開UI参照へテスト用要素を設定します。
+        /// Window全体のUXMLを開かず、対象の適用処理だけをEditModeで検証するために使用します。
+        /// </summary>
+        /// <param name="window">テスト対象のMap Viewer Windowです。</param>
+        /// <param name="fieldName">設定する非公開フィールド名です。</param>
+        /// <param name="value">フィールドへ設定するUI要素または説明値です。</param>
+        private static void SetPrivateField(
+            WorldGenerationMapViewerWindow window,
+            string fieldName,
+            object value)
+        {
+            FieldInfo field = typeof(WorldGenerationMapViewerWindow).GetField(
+                fieldName,
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(field, Is.Not.Null, $"非公開フィールド '{fieldName}' が見つかりません。");
+            field.SetValue(window, value);
         }
     }
 }

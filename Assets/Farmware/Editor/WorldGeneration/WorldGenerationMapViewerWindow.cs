@@ -501,10 +501,9 @@ namespace Farmware.WorldGeneration.Editor
                 result.TilesPerPixel);
 
             // 再生成前のカーソル情報を残すと、地図と異なる座標・地形を表示して誤認させます。
-            // 新しい地図の中央を即座に再評価し、Pointerが動く前も表示内容を一致させます。
-            UpdateHoverInformation(new Vector2(
-                mapCanvas.contentRect.width * 0.5f,
-                mapCanvas.contentRect.height * 0.5f));
+            // 偶数解像度のCanvas中央は2サンプルの境界になるためPointer変換へ通さず、
+            // Side Panelの「中心」と同じ生成結果の中心タイルを直接評価します。
+            UpdateHoverInformationAtWorldTile(result.CenterTileX, result.CenterTileY);
             UpdateZoomInformation();
             UpdateSourceInformation();
         }
@@ -720,6 +719,17 @@ namespace Farmware.WorldGeneration.Editor
                 localPointerPosition.y,
                 out int worldTileX,
                 out int worldTileY);
+            UpdateHoverInformationAtWorldTile(worldTileX, worldTileY);
+        }
+
+        /// <summary>
+        /// 指定ワールドタイルの生成結果を評価し、Hover欄へ座標・チャンク・地形情報を表示します。
+        /// 再生成直後の中心表示と実Pointer移動後の表示で、同じ生成・整形経路を共有するために使用します。
+        /// </summary>
+        /// <param name="worldTileX">評価する水平ワールドタイル座標です。</param>
+        /// <param name="worldTileY">評価する垂直ワールドタイル座標です。</param>
+        private void UpdateHoverInformationAtWorldTile(int worldTileX, int worldTileY)
+        {
             if (worldTileX == lastHoveredTileX && worldTileY == lastHoveredTileY)
             {
                 return;
