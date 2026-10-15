@@ -1,0 +1,15 @@
+{
+  "name": "Farmware.WorldGeneration.PlayModeTests",
+  "rootNamespace": "Farmware.WorldGeneration.PlayModeTests",
+  "references": [
+    "Farmware.WorldGeneration.Runtime",
+    "Farmware.WorldGeneration.Presentation",
+    "Unity.Collections",
+    "Unity.Entities",
+    "Unity.RenderPipelines.Universal.2D.Runtime"
+  ],
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ],
+  "autoReferenced": false
+}

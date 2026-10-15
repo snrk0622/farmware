@@ -1,0 +1,12 @@
+{
+  "name": "Farmware.WorldGeneration.Presentation",
+  "rootNamespace": "Farmware.WorldGeneration.Presentation",
+  "references": [
+    "Farmware.WorldGeneration.Runtime",
+    "Unity.Collections",
+    "Unity.Entities",
+    "Unity.InputSystem",
+    "Unity.RenderPipelines.Universal.2D.Runtime"
+  ],
+  "autoReferenced": true
+}

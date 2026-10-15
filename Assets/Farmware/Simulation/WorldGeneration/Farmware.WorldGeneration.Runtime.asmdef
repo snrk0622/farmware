@@ -1,0 +1,11 @@
+{
+  "name": "Farmware.WorldGeneration.Runtime",
+  "rootNamespace": "Farmware.WorldGeneration",
+  "references": [
+    "Unity.Burst",
+    "Unity.Collections",
+    "Unity.Entities",
+    "Unity.Mathematics"
+  ],
+  "autoReferenced": true
+}

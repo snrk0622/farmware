@@ -1,0 +1,50 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <ui:Style src="WorldGenerationMapViewerWindow.uss" />
+    <ui:VisualElement name="root" class="map-viewer-root">
+        <ui:VisualElement name="header" class="header">
+            <ui:Label text="Farmware Map Viewer" class="title" />
+            <ui:Label text="実ゲームと同じGenerator・Authoring設定から広域地形を再生成します" class="subtitle" />
+        </ui:VisualElement>
+        <ui:VisualElement name="controls" class="controls">
+            <ui:VisualElement class="control-row">
+                <ui:TextField name="seedField" label="Seed" class="seed-field" />
+                <ui:VisualElement class="coordinate-control">
+                    <ui:Label text="X" class="axis-label" />
+                    <ui:IntegerField name="centerXField" class="coordinate-field" />
+                </ui:VisualElement>
+                <ui:VisualElement class="coordinate-control">
+                    <ui:Label text="Y" class="axis-label" />
+                    <ui:IntegerField name="centerYField" class="coordinate-field" />
+                </ui:VisualElement>
+            </ui:VisualElement>
+            <ui:VisualElement class="control-row">
+                <ui:VisualElement class="mode-control">
+                    <ui:Label text="表示" class="compact-label" />
+                    <ui:DropdownField name="viewModeField" class="mode-field" />
+                </ui:VisualElement>
+                <ui:Toggle name="gridToggle" label="Grid" value="true" class="grid-toggle" />
+                <ui:Button name="goButton" text="移動・再生成" class="primary-button" />
+                <ui:Button name="reloadSettingsButton" text="実設定を再読込" />
+                <ui:Button name="originButton" text="原点" />
+                <ui:Button name="zoomInButton" text="＋" class="zoom-button" />
+                <ui:Button name="zoomOutButton" text="－" class="zoom-button" />
+            </ui:VisualElement>
+        </ui:VisualElement>
+        <ui:VisualElement name="body" class="body">
+            <ui:VisualElement name="mapPanel" class="map-panel">
+                <ui:VisualElement name="mapHost" class="map-host" />
+                <ui:Label name="hoverLabel" text="カーソルを地図へ移動すると座標と地形を表示します" class="hover-label" />
+            </ui:VisualElement>
+            <ui:ScrollView name="sidePanel" class="side-panel">
+                <ui:Label text="表示情報" class="section-title" />
+                <ui:Label name="sourceLabel" class="info-label" />
+                <ui:Label name="zoomLabel" class="info-label" />
+                <ui:Label text="操作" class="section-title" />
+                <ui:Label text="ドラッグ: 移動&#10;ホイール: カーソル中心ズーム&#10;赤い十字: ワールド原点&#10;白い十字: 現在の中心" class="help-label" />
+                <ui:Label text="凡例" class="section-title" />
+                <ui:VisualElement name="legendContainer" class="legend" />
+            </ui:ScrollView>
+        </ui:VisualElement>
+        <ui:Label name="statusLabel" text="設定を読み込んでいます…" class="status-label" />
+    </ui:VisualElement>
+</ui:UXML>
