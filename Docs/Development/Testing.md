@@ -65,7 +65,7 @@ Editor構築ツールが生成した7種類の16×24土地PNGと16×28岩壁PNG�
 
 #### `WorldGenerationSpriteAtlasTests`
 
-Sprite Packer ModeがV2であること、土地Atlasが7バイオームの本番用Textureだけ、岩壁Atlasが岩壁Textureだけ、境界Atlasが224×16の境界TextureだけをPackableに持つこと、3 AtlasがBuilt-in配信とPixel Art向け設定を持つことを検証する。本番用土地シートは左からBiome ID順の7枚へ16×24でSliceされ、各SpriteがPivot Y 2/3を持ち、同名のTileから参照されることも保証する。境界シートは左から安定名の14枚へ16×16でSliceされ、中心Pivot、透明設定、Full Rect、Collider用Fallback Shapeなしを保証する。PNG原稿も直接読み、14区画すべてに可視画素があり、可視画素が不透明白、背景が完全透明で、半透明ぼかしや別色を含まないことを確認する。さらに実際のパック結果を読み、土地7枚と境界14枚がそれぞれのAtlasで同じTextureページへ収まることを確認する。
+Sprite Packer ModeがV2であること、土地Atlasが7バイオームの本番用Textureだけ、岩壁Atlasが岩壁Textureだけ、境界Atlasが224×16の境界TextureだけをPackableに持つこと、3 AtlasがBuilt-in配信とPixel Art向け設定を持つことを検証する。本番用土地シートは左からBiome ID順の7枚へ16×24でSliceされ、各SpriteがPivot Y 2/3を持ち、同名のTileから参照されることも保証する。境界シートは左から安定名の14枚へ16×16でSliceされ、中心Pivot、透明設定、Full Rect、Collider用Fallback Shapeなしを保証する。PNG原稿も直接読み、14区画すべてに可視画素があり、可視画素が不透明白、背景が完全透明で、半透明ぼかしや別色を含まないことを確認する。各区画の外周辺と内角の実画素が`TerrainBoundaryHighlightUtility`の特徴マスクと一致し、北をTexture上端として上下反転していないことも保証する。さらに実際のパック結果を読み、土地7枚と境界14枚がそれぞれのAtlasで同じTextureページへ収まることを確認する。
 
 #### `WorldGenerationSceneBootstrapTests`
 

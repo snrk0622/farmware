@@ -5,6 +5,7 @@ using System;
 using System.IO;
 using System.Linq;
 using Farmware.WorldGeneration.Editor;
+using Farmware.WorldGeneration.Presentation;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEditor.Sprites;
@@ -241,6 +242,106 @@ namespace Farmware.WorldGeneration.Tests
             {
                 UnityEngine.Object.DestroyImmediate(texture);
             }
+        }
+
+        /// <summary>
+        /// 14形状の実画素が、選択処理で宣言した外周辺・内角の向きと完全に一致することを確認します。
+        /// PNGの上下反転や形状順の入れ替わりを、論理マスクだけのテストでは見逃さないための検証です。
+        /// </summary>
+        [Test]
+        public void BoundaryHighlightTexture_PixelsMatchCanonicalFeatureMasks()
+        {
+            const int spriteSize = 16;
+            string assetPath = WorldGenerationSpriteAtlasBuilder.BoundaryHighlightTexturePath;
+            string absolutePath = Path.GetFullPath(Path.Combine(Application.dataPath, "..", assetPath));
+            Assert.That(File.Exists(absolutePath), Is.True, $"境界ハイライトPNGが見つかりません: {assetPath}");
+
+            var texture = new Texture2D(2, 2, TextureFormat.RGBA32, mipChain: false);
+            try
+            {
+                byte[] pngBytes = File.ReadAllBytes(absolutePath);
+                Assert.That(
+                    ImageConversion.LoadImage(texture, pngBytes, markNonReadable: false),
+                    Is.True,
+                    $"境界ハイライトPNGを読み込めません: {assetPath}");
+                Assert.That(
+                    texture.width,
+                    Is.EqualTo(
+                        WorldGenerationSpriteAtlasBuilder.ExpectedBoundaryHighlightSpriteCount
+                        * spriteSize));
+                Assert.That(texture.height, Is.EqualTo(spriteSize));
+
+                Color32[] pixels = texture.GetPixels32();
+                for (int shapeIndex = 0;
+                     shapeIndex < WorldGenerationSpriteAtlasBuilder.ExpectedBoundaryHighlightSpriteCount;
+                     shapeIndex++)
+                {
+                    BoundaryHighlightShape shape = (BoundaryHighlightShape)(shapeIndex + 1);
+                    byte featureMask = TerrainBoundaryHighlightUtility.GetCanonicalFeatureMask(shape);
+
+                    // Texture2Dの画素座標は左下が原点です。北をy=15として照合し、PNG上下の取り違えを検出します。
+                    for (int y = 0; y < spriteSize; y++)
+                    {
+                        for (int localX = 0; localX < spriteSize; localX++)
+                        {
+                            int x = (shapeIndex * spriteSize) + localX;
+                            bool isVisible = pixels[(y * texture.width) + x].a != 0;
+                            bool shouldBeVisible = ShouldBoundaryHighlightPixelBeVisible(
+                                featureMask,
+                                localX,
+                                y);
+
+                            Assert.That(
+                                isVisible,
+                                Is.EqualTo(shouldBeVisible),
+                                $"境界特徴と画素配置が一致しません: shape={shapeIndex + 1}, "
+                                + $"mask=0x{featureMask:X2}, ({localX}, {y})");
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(texture);
+            }
+        }
+
+        /// <summary>
+        /// 境界特徴マスクから、16×16 Sprite内の指定画素を白く描くべきか判定します。
+        /// 外周は対応する辺全体、内角は対応する角の1画素として、制作仕様を直接表現します。
+        /// </summary>
+        /// <param name="featureMask">外周4方向と内角4方向を保持する8ビットの特徴マスクです。</param>
+        /// <param name="x">Sprite内の左端を0とする水平画素座標です。</param>
+        /// <param name="y">Sprite内の下端を0とする垂直画素座標です。</param>
+        /// <returns>指定画素が境界線または内角として可視であるべきならtrueです。</returns>
+        private static bool ShouldBoundaryHighlightPixelBeVisible(byte featureMask, int x, int y)
+        {
+            const int lastPixelCoordinate = 15;
+            // TerrainBoundaryHighlightUtilityと同じく、下位4ビットを北から時計回りの外周へ割り当てます。
+            const byte northEdge = 1 << 0;
+            const byte eastEdge = 1 << 1;
+            const byte southEdge = 1 << 2;
+            const byte westEdge = 1 << 3;
+            const byte northEastInnerCorner = 1 << 4;
+            const byte southEastInnerCorner = 1 << 5;
+            const byte southWestInnerCorner = 1 << 6;
+            const byte northWestInnerCorner = 1 << 7;
+
+            bool isOuterEdge = ((featureMask & northEdge) != 0 && y == lastPixelCoordinate)
+                || ((featureMask & eastEdge) != 0 && x == lastPixelCoordinate)
+                || ((featureMask & southEdge) != 0 && y == 0)
+                || ((featureMask & westEdge) != 0 && x == 0);
+            bool isInnerCorner = ((featureMask & northEastInnerCorner) != 0
+                    && x == lastPixelCoordinate
+                    && y == lastPixelCoordinate)
+                || ((featureMask & southEastInnerCorner) != 0
+                    && x == lastPixelCoordinate
+                    && y == 0)
+                || ((featureMask & southWestInnerCorner) != 0 && x == 0 && y == 0)
+                || ((featureMask & northWestInnerCorner) != 0
+                    && x == 0
+                    && y == lastPixelCoordinate);
+            return isOuterEdge || isInnerCorner;
         }
 
         /// <summary>
