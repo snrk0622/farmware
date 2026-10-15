@@ -190,7 +190,7 @@ namespace Farmware.WorldGeneration.Editor
                 serializedAtlas.ApplyModifiedPropertiesWithoutUndo();
             }
 
-            // Texture自体をPackableにすると、将来4×4へSliceしてSprite数が増えても同じ画像内の全差分が自動収録されます。
+            // Texture自体をPackableにすると、将来2×1へSliceするA・Bの2差分も同じ画像から自動収録されます。
             atlasAsset.Add(sourceTextures);
             SpriteAtlasAsset.Save(atlasAsset, atlasPath);
             AssetDatabase.ImportAsset(

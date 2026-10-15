@@ -62,7 +62,7 @@
 #### 用途
 
 - Sprite Packer Modeを`Sprite Atlas V2`へ統一する。
-- 7枚のBiome土地Textureを`GroundTerrainAtlas`、岩壁の元Textureを`RockWallAtlas`のPackableへ登録する。Texture単位で登録するため、同じPNGを4×4へSliceした将来の16差分も自動収録される。
+- 7枚のBiome土地Textureを`GroundTerrainAtlas`、岩壁の元Textureを`RockWallAtlas`のPackableへ登録する。Texture単位で登録するため、同じPNGを2×1へSliceした将来のA・Bの2差分も自動収録される。
 - Built-in配信、Point、Mip Maps Off、Read/Write Off、RGBA32、無圧縮、Padding 4 px、Rotation/Tight Packing/Alpha Dilation Off、Max Texture Size 512を再適用する。
 - 対象Build Target向けにパックし、各Atlas内のSpriteが1枚のTextureページへ収まらない場合はビルドを中止する。特に土地の複数ページ化は、バイオーム境界をまたぐIndividual Yソートを壊すため許可しない。
 

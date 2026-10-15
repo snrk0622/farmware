@@ -90,7 +90,9 @@ Sprite Packer ModeがV2であること、土地Atlasが7種類のBiome Texture�
 | バイオーム、水域、マグマ、岩壁、資源 | 該当分類のEditModeテスト | 分布監査とGameビュー |
 | Component、Buffer、System、Job | 関連するECS EditModeテスト | Safety Check、必要に応じてProfiler |
 | Camera、Tilemap、前面断面、液面アニメーション、HUD、F3/F4、可視化 | 関連するEditMode分類テストとPlayModeテスト | 複数アスペクト比のGameビュー、断面のはみ出しと重なり |
+| 土地・岩壁境界ハイライト | 8方向入力から47接続状態を正規化し、14可視形状と90度回転へ一意に割り当てる純粋計算テスト。異なる土地バイオーム間では表示せず、水・マグマとの外周・内角および岩壁領域の外周・内角だけを選ぶ境界値、負座標、16×16サブチャンク境界、64×64チャンク境界、ロード順変更後の再計算を扱うEditMode／PlayModeテスト | 14形状と全回転、斜めだけが欠ける内角、土地・岩壁の表示高さ、アンロード・再ロード後の残留がないことをGameビューで確認 |
 | Sprite Atlas、地形Texture、Sprite Slice、Atlas Importer設定 | `WorldGenerationSpriteAtlasTests`と`WorldGenerationFallbackArtTests` | 異なるバイオーム境界を含むGameビュー、Playerビルド前処理 |
+| Base地形のA・B交互配置 | `(x & 1) ^ (y & 1)`による2差分選択、正負座標、原点、16×16サブチャンク境界、64×64チャンク境界、Seed変更、チャンクの生成・ロード順変更で同じ座標が同じ差分を選ぶEditModeテスト | 各地形のA・Bが市松状に並び、目立つ明暗格子や継ぎ目がなく、カメラ往復後も差分が入れ替わらないことをGameビューで確認 |
 | Scene、SubScene、Authoring、Baker、参照 | SampleScene縦切りPlayModeテストとMap Viewerテスト | Scene内のMissing参照確認 |
 | asmdef、パッケージ、プラットフォーム条件 | 影響するEditModeとPlayMode Assembly | Playerビルドへの混入確認 |
 | 複数タイル設備、ベルト、橋 | 占有、回転、接続方向、分岐・合流、詰まり、地形配置可否、単体・範囲配置と撤去の即時反映、同種既設物の無償再利用、資材不足または配置不可セルがある場合に一部だけ建築されないことを扱うEditModeテスト | 再利用セル、問題セル、総必要数・在庫数・不足数のプレビュー、範囲保持と再確定、ドローン演出を待たず操作できること、操作プロトタイプ、Gameビュー、Profiler |
