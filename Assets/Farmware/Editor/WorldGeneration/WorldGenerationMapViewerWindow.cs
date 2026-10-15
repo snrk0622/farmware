@@ -556,15 +556,60 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>
-        /// ＋・－Buttonから、Canvas中央を固定したズームを実行します。
+        /// ＋・－Buttonから、現在の中心タイル座標を変えずにズームを実行します。
+        /// Canvas中央は偶数解像度では2つの表示サンプルの境界になるため、Pointer座標として再解釈しません。
         /// </summary>
         /// <param name="zoomOut">広域側へ縮小する場合はtrueです。</param>
         private void ZoomAtCenter(bool zoomOut)
         {
-            Vector2 canvasCenter = new Vector2(
-                mapCanvas.contentRect.width * 0.5f,
-                mapCanvas.contentRect.height * 0.5f);
-            ChangeZoom(zoomOut, canvasCenter);
+            int currentCenterX = displayedSample?.CenterTileX ?? serializedCenterTileX;
+            int currentCenterY = displayedSample?.CenterTileY ?? serializedCenterTileY;
+            int currentTilesPerPixel = displayedSample?.TilesPerPixel ?? serializedTilesPerPixel;
+            CalculateToolbarZoomState(
+                currentCenterX,
+                currentCenterY,
+                currentTilesPerPixel,
+                zoomOut,
+                out int nextCenterX,
+                out int nextCenterY,
+                out int nextTilesPerPixel);
+            if (nextTilesPerPixel == currentTilesPerPixel)
+            {
+                return;
+            }
+
+            serializedCenterTileX = nextCenterX;
+            serializedCenterTileY = nextCenterY;
+            serializedTilesPerPixel = nextTilesPerPixel;
+            UpdateCoordinateFields();
+            RequestRenderFromFields();
+        }
+
+        /// <summary>
+        /// ツールバーの中央ズーム後の中心座標と縮尺を、Editor状態へ依存しない純粋計算で求めます。
+        /// 偶数解像度のCanvas中央を離散ピクセルへ変換すると片側へ寄るため、中心座標は入力値をそのまま返します。
+        /// </summary>
+        /// <param name="currentCenterX">変更前の水平中心タイル座標です。</param>
+        /// <param name="currentCenterY">変更前の垂直中心タイル座標です。</param>
+        /// <param name="currentTilesPerPixel">変更前の1サンプルあたりタイル数です。</param>
+        /// <param name="zoomOut">広域側へ1段階変更する場合はtrueです。</param>
+        /// <param name="nextCenterX">変更後も維持する水平中心タイル座標です。</param>
+        /// <param name="nextCenterY">変更後も維持する垂直中心タイル座標です。</param>
+        /// <param name="nextTilesPerPixel">上下限内で2倍または半分にした縮尺です。</param>
+        private static void CalculateToolbarZoomState(
+            int currentCenterX,
+            int currentCenterY,
+            int currentTilesPerPixel,
+            bool zoomOut,
+            out int nextCenterX,
+            out int nextCenterY,
+            out int nextTilesPerPixel)
+        {
+            nextCenterX = currentCenterX;
+            nextCenterY = currentCenterY;
+            nextTilesPerPixel = zoomOut
+                ? Math.Min(MaximumTilesPerPixel, currentTilesPerPixel * 2)
+                : Math.Max(MinimumTilesPerPixel, currentTilesPerPixel / 2);
         }
 
         /// <summary>

@@ -107,6 +107,11 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 true,
                 spawnLocation,
                 true,
+                new InitialSpawnSearchStatus
+                {
+                    Phase = InitialSpawnSearchPhase.Succeeded
+                },
+                true,
                 new WorldGenerationSettings
                 {
                     GeneratorVersion = 7,
@@ -121,6 +126,31 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(text, Does.Contain("GeneratorVersion: 7"));
             Assert.That(text, Does.Contain("WorldSeed: 0x0000000000001234"));
             Assert.That(text, Does.Contain("Spawn: Tile (-65, 64) / Chunk (-2, 1)"));
+        }
+
+        /// <summary>
+        /// 初期スポーン探索が失敗した状態を準備し、F3が探索中ではなくScene保存位置の使用を表示することを保証します。
+        /// </summary>
+        [Test]
+        public void BuildCoordinateHudText_SearchFailedShowsSceneCameraFallback()
+        {
+            string text = WorldGridDebugOverlay.BuildCoordinateHudText(
+                new Vector3(123.5f, -45.25f, -10f),
+                new Vector3Int(123, -46, 0),
+                false,
+                default,
+                true,
+                new InitialSpawnSearchStatus
+                {
+                    Phase = InitialSpawnSearchPhase.Failed
+                },
+                false,
+                default,
+                false,
+                default);
+
+            Assert.That(text, Does.Contain("Spawn: Failed / Using Scene camera position"));
+            Assert.That(text, Does.Not.Contain("Spawn: Searching..."));
         }
 
         /// <summary>
@@ -143,6 +173,14 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     {
                         GeneratorVersion = 9,
                         WorldSeed = 0xFEDCBA9876543210UL
+                    });
+
+                Entity searchStatusEntity = testWorld.EntityManager.CreateEntity();
+                testWorld.EntityManager.AddComponentData(
+                    searchStatusEntity,
+                    new InitialSpawnSearchStatus
+                    {
+                        Phase = InitialSpawnSearchPhase.Failed
                     });
 
                 Entity chunkEntity = testWorld.EntityManager.CreateEntity();
@@ -173,21 +211,30 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 MethodInfo readSettings = typeof(WorldGridDebugOverlay).GetMethod(
                     "TryGetWorldGenerationSettings",
                     BindingFlags.Instance | BindingFlags.NonPublic);
+                MethodInfo readSearchStatus = typeof(WorldGridDebugOverlay).GetMethod(
+                    "TryGetInitialSpawnSearchStatus",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
                 MethodInfo readBiome = typeof(WorldGridDebugOverlay).GetMethod(
                     "TryGetCurrentTileBiome",
                     BindingFlags.Instance | BindingFlags.NonPublic);
                 Assert.That(readSettings, Is.Not.Null);
+                Assert.That(readSearchStatus, Is.Not.Null);
                 Assert.That(readBiome, Is.Not.Null);
 
                 object[] settingsArguments = { default(WorldGenerationSettings) };
+                object[] searchStatusArguments = { default(InitialSpawnSearchStatus) };
                 object[] biomeArguments = { new Vector3Int(5, -3, 0), default(BiomeId) };
                 Assert.That(readSettings.Invoke(overlay, settingsArguments), Is.EqualTo(true));
+                Assert.That(readSearchStatus.Invoke(overlay, searchStatusArguments), Is.EqualTo(true));
                 Assert.That(readBiome.Invoke(overlay, biomeArguments), Is.EqualTo(true));
 
                 WorldGenerationSettings actualSettings =
                     (WorldGenerationSettings)settingsArguments[0];
                 Assert.That(actualSettings.GeneratorVersion, Is.EqualTo(9));
                 Assert.That(actualSettings.WorldSeed, Is.EqualTo(0xFEDCBA9876543210UL));
+                Assert.That(
+                    ((InitialSpawnSearchStatus)searchStatusArguments[0]).Phase,
+                    Is.EqualTo(InitialSpawnSearchPhase.Failed));
                 Assert.That((BiomeId)biomeArguments[1], Is.EqualTo(BiomeId.Volcanic));
             }
             finally

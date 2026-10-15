@@ -125,13 +125,16 @@ namespace Farmware.WorldGeneration.Presentation
         // F3またはF4表示中に毎フレームQueryを作り直さず、初期スポーンSingletonだけを読み取るためのQueryです。
         private EntityQuery spawnLocationQuery;
 
+        // F3で探索中と探索失敗を区別するため、初期スポーン探索状態Singletonだけを読み取るQueryです。
+        private EntityQuery spawnSearchStatusQuery;
+
         // F3へGeneratorVersionとワールドシードを表示するため、生成設定Singletonだけを読み取るQueryです。
         private EntityQuery generationSettingsQuery;
 
         // F3へ現在タイルのBiomeを表示するため、生成済みチャンク座標・状態・地形Bufferを読むQueryです。
         private EntityQuery generatedChunkQuery;
 
-        // 上記3つの診断用Queryを現在のWorld向けに作成済みかを示します。
+        // 上記4つの診断用Queryを現在のWorld向けに作成済みかを示します。
         private bool diagnosticQueriesAreCreated;
 
         // 現在タイルを含むGeneratedTile BufferのEntityです。同じチャンク内で毎フレーム全チャンクを走査しないため保持します。
@@ -409,6 +412,8 @@ namespace Farmware.WorldGeneration.Presentation
                 ? new Vector3Int(Mathf.FloorToInt(worldPosition.x), Mathf.FloorToInt(worldPosition.y), 0)
                 : targetGrid.WorldToCell(worldPosition);
             bool hasSpawnLocation = TryGetInitialSpawnLocation(out InitialSpawnLocation spawnLocation);
+            bool hasSpawnSearchStatus = TryGetInitialSpawnSearchStatus(
+                out InitialSpawnSearchStatus spawnSearchStatus);
             bool hasGenerationSettings = TryGetWorldGenerationSettings(
                 out WorldGenerationSettings generationSettings);
             bool hasBiome = TryGetCurrentTileBiome(tile, out BiomeId biome);
@@ -417,6 +422,8 @@ namespace Farmware.WorldGeneration.Presentation
                 tile,
                 hasSpawnLocation,
                 spawnLocation,
+                hasSpawnSearchStatus,
+                spawnSearchStatus,
                 hasGenerationSettings,
                 generationSettings,
                 hasBiome,
@@ -451,6 +458,8 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="tile">現在のカメラ中心タイル座標です。</param>
         /// <param name="hasSpawnLocation">初期スポーン探索が完了し、記録済み座標を渡せる場合はtrueです。</param>
         /// <param name="spawnLocation">記録済みの初期スポーン座標です。未完了時は表示に使用しません。</param>
+        /// <param name="hasSpawnSearchStatus">初期スポーン探索状態Singletonを読み取れた場合はtrueです。</param>
+        /// <param name="spawnSearchStatus">現在の探索段階です。失敗時の代替カメラ位置表示に使用します。</param>
         /// <param name="hasGenerationSettings">生成設定Singletonからバージョンとシードを読めた場合はtrueです。</param>
         /// <param name="generationSettings">現在のWorldが保持する生成設定です。未準備時は表示に使用しません。</param>
         /// <param name="hasBiome">現在タイルの生成済みBiomeを読めた場合はtrueです。</param>
@@ -461,6 +470,8 @@ namespace Farmware.WorldGeneration.Presentation
             Vector3Int tile,
             bool hasSpawnLocation,
             InitialSpawnLocation spawnLocation,
+            bool hasSpawnSearchStatus,
+            InitialSpawnSearchStatus spawnSearchStatus,
             bool hasGenerationSettings,
             WorldGenerationSettings generationSettings,
             bool hasBiome,
@@ -484,6 +495,12 @@ namespace Farmware.WorldGeneration.Presentation
                     spawnLocation.TileY);
                 spawnText = $"Spawn: Tile ({spawnLocation.TileX}, {spawnLocation.TileY})"
                     + $" / Chunk ({spawnChunk.X}, {spawnChunk.Y})";
+            }
+            else if (hasSpawnSearchStatus
+                && spawnSearchStatus.Phase == InitialSpawnSearchPhase.Failed)
+            {
+                // 失敗時もストリーミングはScene保存位置から開始するため、探索中と誤認させない文言へ切り替えます。
+                spawnText = "Spawn: Failed / Using Scene camera position";
             }
 
             return $"F3  Coordinates\n"
@@ -553,6 +570,24 @@ namespace Farmware.WorldGeneration.Presentation
             }
 
             spawnLocation = spawnLocationQuery.GetSingleton<InitialSpawnLocation>();
+            return true;
+        }
+
+        /// <summary>
+        /// Default Worldから初期スポーン探索状態Singletonを読み、探索中と失敗をF3で区別できるようにします。
+        /// </summary>
+        /// <param name="searchStatus">成功時に、探索Systemが記録した現在または最終段階を返します。</param>
+        /// <returns>探索状態Singletonをちょうど1件読み取れた場合はtrueです。</returns>
+        private bool TryGetInitialSpawnSearchStatus(out InitialSpawnSearchStatus searchStatus)
+        {
+            searchStatus = default;
+            if (!TryEnsureDiagnosticQueries()
+                || spawnSearchStatusQuery.CalculateEntityCount() != 1)
+            {
+                return false;
+            }
+
+            searchStatus = spawnSearchStatusQuery.GetSingleton<InitialSpawnSearchStatus>();
             return true;
         }
 
@@ -666,6 +701,8 @@ namespace Farmware.WorldGeneration.Presentation
             EntityManager entityManager = currentWorld.EntityManager;
             spawnLocationQuery = entityManager.CreateEntityQuery(
                 ComponentType.ReadOnly<InitialSpawnLocation>());
+            spawnSearchStatusQuery = entityManager.CreateEntityQuery(
+                ComponentType.ReadOnly<InitialSpawnSearchStatus>());
             generationSettingsQuery = entityManager.CreateEntityQuery(
                 ComponentType.ReadOnly<WorldGenerationSettings>());
             generatedChunkQuery = entityManager.CreateEntityQuery(
@@ -687,12 +724,14 @@ namespace Farmware.WorldGeneration.Presentation
                 && diagnosticWorld.IsCreated)
             {
                 spawnLocationQuery.Dispose();
+                spawnSearchStatusQuery.Dispose();
                 generationSettingsQuery.Dispose();
                 generatedChunkQuery.Dispose();
             }
 
             diagnosticWorld = null;
             spawnLocationQuery = default;
+            spawnSearchStatusQuery = default;
             generationSettingsQuery = default;
             generatedChunkQuery = default;
             diagnosticQueriesAreCreated = false;

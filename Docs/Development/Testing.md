@@ -49,7 +49,7 @@ Editorの分布監査と同じAnalyzerを小さな固定サンプルで2回実�
 #### `WorldGenerationMapViewerTests`
 
 Map Viewerの全ピクセルが同じ座標へ直接`DeterministicChunkGenerator.GenerateTile`した結果と一致することを保証する。Terrain表示とBiome表示はどちらもSoilTypeを反映せず、同じ論理Biomeなら標準・肥沃・砂質のいずれも同じ所属色を保つことを検証する。
-あわせて、負座標とY反転を含むPointer座標変換、同じ表示ピクセル内のPointerが同じ代表タイルを返すこと、生成TextureとCanvasの表示解像度が異なるときの縦横比維持とリサイズ後の再生成判定、Pointer・パン・グリッド用座標変換とカーソル中心ズーム、奇数・偶数Textureでのグリッド・原点と地形サンプル境界の一致、Bakerと共有するAuthoring設定Snapshotのシード変換、新規・旧丸め値のどちらでもAuthoringと純粋計算の主要な既定気候閾値が一致することを検証する。湿度閾値をInspector上限へ設定した場合にも、乾燥・森林・湿地の境界が厳密な昇順を保つことを保証する。
+あわせて、負座標とY反転を含むPointer座標変換、同じ表示ピクセル内のPointerが同じ代表タイルを返すこと、生成TextureとCanvasの表示解像度が異なるときの縦横比維持とリサイズ後の再生成判定、Pointer・パン・グリッド用座標変換とカーソル中心ズーム、ツールバーの＋・－Buttonによる中心座標不変のズーム、奇数・偶数Textureでのグリッド・原点と地形サンプル境界の一致、Bakerと共有するAuthoring設定Snapshotのシード変換、新規・旧丸め値のどちらでもAuthoringと純粋計算の主要な既定気候閾値が一致することを検証する。湿度閾値をInspector上限へ設定した場合にも、乾燥・森林・湿地の境界が厳密な昇順を保つことを保証する。
 
 #### `TerrainLayerPresentationUtilityTests`
 
@@ -70,7 +70,7 @@ Sprite Packer ModeがV2であること、土地Atlasが7種類のBiome Texture�
 | 分類 | 用途 |
 | --- | --- |
 | Windowbox | 480×270の整数倍表示と黒帯内の描画矩形を保証する。 |
-| F3 | 現在座標、サブチャンク座標、ECSのBiome・GeneratorVersion・ワールドシード、記録済み初期スポーン座標のHUD文字列を保証する。 |
+| F3 | 現在座標、サブチャンク座標、ECSのBiome・GeneratorVersion・ワールドシード、記録済み初期スポーン座標を保証する。初期スポーン探索失敗時は探索中表示を残さず、Scene保存位置を使用中であることを示すHUD文字列も検証する。 |
 | F4 | 初期スポーンの赤いTile・Chunk表示と、縦横グリッド線の矩形計算を保証する。 |
 | 初期スポーン失敗 | Scene保存位置を維持し、失敗状態の確定後にチャンクストリーミングを開始できることを保証する。 |
 | Presentation寿命 | Camera GameObjectを維持したDefault World再作成時に新しい初期スポーンを再適用する。Camera Bridgeは新Worldの初期スポーン探索中でも旧WorldのObserverを直ちに破棄し、初期位置の確定前は新Observerを作らず、確定後に1件だけ作り直す。同一Worldでカメラ制御を再有効化した場合はプレイヤーの移動後位置を保つ。Tilemap PresenterがWorld切替または無効化時に表示済み・反映途中・消去途中の旧表示を残さないことも保証する。 |

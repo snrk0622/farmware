@@ -238,6 +238,32 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// ツールバーの＋・－Button用計算へ任意の中心座標を渡し、縮尺だけが変わって中心は維持されることを保証します。
+        /// 偶数解像度のCanvas中央をPointerとして解釈し、上下左右の片側へ中心がずれる退行を防ぎます。
+        /// </summary>
+        /// <param name="zoomOut">広域側へ変更する場合はtrueです。</param>
+        /// <param name="expectedTilesPerPixel">変更後に期待する1サンプルあたりタイル数です。</param>
+        [TestCase(false, 2)]
+        [TestCase(true, 8)]
+        public void CalculateToolbarZoomState_PreservesCenterCoordinates(
+            bool zoomOut,
+            int expectedTilesPerPixel)
+        {
+            MethodInfo calculateToolbarZoomState = typeof(WorldGenerationMapViewerWindow).GetMethod(
+                "CalculateToolbarZoomState",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.That(calculateToolbarZoomState, Is.Not.Null);
+
+            // out引数もReflectionの引数配列へ結果が戻るため、呼び出し後に中心と縮尺を個別に検証します。
+            object[] arguments = { 123, -456, 4, zoomOut, 0, 0, 0 };
+            calculateToolbarZoomState.Invoke(null, arguments);
+
+            Assert.That((int)arguments[4], Is.EqualTo(123));
+            Assert.That((int)arguments[5], Is.EqualTo(-456));
+            Assert.That((int)arguments[6], Is.EqualTo(expectedTilesPerPixel));
+        }
+
+        /// <summary>
         /// 768サンプルへ制限したTextureを大きなCanvasへ伸張し、Pointer座標が表示上の地形と一致することを検証します。
         /// 縦横で異なる倍率を使い、X側の上限だけが適用されるWindow形状でも誤変換を防ぎます。
         /// </summary>
