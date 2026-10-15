@@ -45,7 +45,7 @@ Editorの構築メニューが `Assets/Farmware/Art/WorldGeneration/Fallback/` �
 草原を採用するまでは、森林、砂漠、水面、岩壁などの量産へ進まない。
 
 - [x] 草原を1枚生成し、設備の背景として十分に静かであることを確認
-- [ ] 同じ草原Tileを連続配置し、タイル境界や目立つ反復模様が見えないことを確認
+- [x] 同じ草原Tileを連続配置し、タイル境界や目立つ反復模様が見えないことを確認
 - [ ] 木、複数タイル設備、ベルト、柵、施設領域表示を重ねられる背景密度であることを確認
 - [ ] 採用した草原画像、Seed、PixelLab設定をマスタースタイルとして制作記録へ登録
 - [ ] 以降の全地形で、採用した草原画像をStyle referenceへ指定
@@ -58,23 +58,33 @@ Style referenceを指定しても描画密度が揃わない場合は採用せ�
 ランダムマップ全体を本番候補の色と形で埋め、バイオームの識別、画面の情報量、資源の可読性を先に判断する。
 この段階では現在の`ChunkTilemapPresenter`が扱える各分類1枚のTileを使用する。断面と液面アニメーションはフォールバック素材で先に表示できるが、本番候補の完成条件には含めない。
 
-- [ ] 草原、森林、砂漠、岩地、湿地、雪原、火山の代表地面を各1枚選定
+- [x] 草原、森林、砂漠、岩地、湿地、雪原、火山の代表地面を各1枚選定
 - [ ] 淡水、海水、マグマ、岩壁上面の代表地形を各1枚選定
 - [ ] 木、石、砂資源の代表スプライトを各1枚選定
 - [ ] 代表地形11種類と資源3種類をUnityへ取り込み、既存の全分類へ割り当て
 - [ ] 原点付近、海岸、川、岩壁、火山、雪原を含む複数地点でGameビューを撮影
 - [ ] 480×270の実表示で、地形同士と資源の識別性、彩度、明度、模様密度を確認
-- [ ] F4境界表示を一時的に重ね、16×16サブチャンクと64×64チャンクをまたぐ表示欠けがないことを確認
+- [x] F4境界表示を一時的に重ね、16×16サブチャンクと64×64チャンクをまたぐ表示欠けがないことを確認
 
 段階Aでは同じTileの繰り返しが見えることを既知の未完成項目として扱う。基本地形同士の直線的な切り替わりと、島や岸の直角を含む単純な輪郭は完成方針の一部として評価する。
 ここで評価するのは、Foragerのように明るく即座に地形を識別できる配色、工業設備を置ける背景密度、バイオームの見分けやすさである。ただし既存作品のSprite、地形配置、固有意匠は複製しない。
+
+##### ART-00A 受け入れ記録（2026-10-15）
+
+- [x] `terrain_biomes_base.png`を112×24 px、左からBiome ID順の16×24 px×7枚として取り込んだ
+- [x] 土地SpriteをPPU 16、Point、Mip Maps Off、Compression None、Clamp、Full Rect、Pivot `(0.5, 0.6666667)`へ設定した
+- [x] 7枚の同名Tileを作成し、SampleSceneのBiome参照をフォールバック土地から本番用土地へ置き換えた
+- [x] 7枚を`GroundTerrainAtlas`の同じTextureページへ収録し、岩壁用Atlasと分離した
+- [x] EditMode 16件とPlayMode 25件でImport、Slice、Tile、Atlas、Scene参照、Biome割り当てを確認した
+- [x] Gameビューで継ぎ目、断面の重なり、にじみ、ちらつき、サブチャンク・チャンク境界の表示を確認した
+- [x] SimulationのBiome分類、生成規則、配置可否を変更していない
 
 #### 段階B: 製品表示としての接続と反復の確認
 
 段階Aで採用した色と形を基準に、16×24土地と16×28岩壁の一体型ブロック、液面アニメーション、装飾レイヤーを追加する。
 
 - [ ] 全11種類のBase地形を各1枚用意し、同じ分類では常に同じTileを表示
-- [ ] 通常地形は上面16 pxと断面8 pxを一枚にし、手前の土地が奥側の断面を自然に隠す
+- [x] 通常地形は上面16 pxと断面8 pxを一枚にし、手前の土地が奥側の断面を自然に隠す
 - [ ] 岩壁は上面16 pxと側面12 pxを一枚にし、手前の岩壁が奥側の側面を自然に隠す
 - [ ] 岩壁セルでも下層の16×24土地ブロックを残し、水・マグマに面した場所で土地断面が欠けない
 - [ ] 水面・マグマの岸の位置を固定したまま、内部の波紋と明暗だけをアニメーション
@@ -500,14 +510,14 @@ Use readable medium cool gray, warm gray-brown, and limited charcoal accents whi
 
 前面断面の出し分けには、オートタイル、RuleTile、4bit接続マスク、47形状Tileset、専用のTerrain Front Edge Tilemap、Rock Wall Front Face Tilemapを使用しない。`ART-00B`の土地・岩壁境界ハイライトは前面断面ではなく、上面へ重ねるPresentation専用の透明オーバーレイとして別に扱う。Base Spriteと前面断面には外角、内角、縦方向の側面を作らず、地形輪郭が直角または階段状に見えることを簡潔な世界表現として許容する。
 
-- [ ] 全土地Spriteが上面16 pxと断面8 pxを一枚に含む
+- [x] 全土地Spriteが上面16 pxと断面8 pxを一枚に含む
 - [ ] 全岩壁Spriteが上面16 pxと側面12 pxを一枚に含む
 - [ ] 土地と岩壁の左右端が同じ高さ・色で接続する
-- [ ] Base Spriteと前面断面へ、外角、内角、縦側面を補うオートタイルを追加していない
+- [x] Base Spriteと前面断面へ、外角、内角、縦側面を補うオートタイルを追加していない
 - [ ] 連続する土地・岩壁では奥側の前面が手前ブロックに隠れる
 - [ ] 岩壁内部影を一体型Spriteとは独立した既存Meshで表示する
-- [ ] 全土地Spriteが`GroundTerrainAtlas`の同じTextureページへパックされている
-- [ ] 岩壁Spriteが土地とは別の`RockWallAtlas`へパックされている
+- [x] 全土地Spriteが`GroundTerrainAtlas`の同じTextureページへパックされている
+- [x] 岩壁Spriteが土地とは別の`RockWallAtlas`へパックされている
 
 ### 5.1 表示用の高さ分類
 
@@ -823,16 +833,16 @@ Create a readable seamless four-frame active production loop with a brighter amb
 - [ ] SpriteRendererのSort Pointを`Pivot`にし、接地点のワールドY座標で前後関係を決定
 - [ ] 土地シートはCell Size 16×24、岩壁シートは16×28、液体シートは16×16でSliceする
 - [ ] 本番用バイオーム土地シートは112×24 pxを16×24 pxで左から7分割し、Padding 0×0、Offset 0×0を設定する。1 pxガター付き境界ハイライト4×4出力にはCell Size 16×16、Padding 1×1、Offset 0×0を設定する
-- [ ] 土地はSlice後の各Spriteが16×24 pxで、上側16 pxが上面、下側8 pxが可視断面になっている
+- [x] 土地はSlice後の各Spriteが16×24 pxで、上側16 pxが上面、下側8 pxが可視断面になっている
 - [ ] 岩壁はSlice後の各Spriteが16×28 pxで、上側16 pxが上面、下側12 pxが可視側面になっている
 - [ ] PixelLabで生成した一体型ブロックへ、拡大縮小、補間、可視ピクセルの描き足しを行っていない
 - [ ] PNGと`.meta`を一緒にバージョン管理対象へ追加
-- [ ] Sprite Packer Modeを`Sprite Atlas V2`へ設定
-- [ ] 7枚のBiome土地Spriteを含む`terrain_biomes_base.png`を`GroundTerrainAtlas.spriteatlasv2`、岩壁の元Textureを`RockWallAtlas.spriteatlasv2`のPackableへ設定
-- [ ] 両AtlasをBuilt-in（Include in Build）とし、Point、Mip Maps Off、Read/Write Off、RGBA32、Compression Noneへ設定
-- [ ] 両AtlasをPadding 4 px、Rotation Off、Tight Packing Off、Alpha Dilation Off、Max Texture Size 512へ設定
-- [ ] 土地Atlasが1ページに収まり、全土地Spriteのパック後Textureが同一であることを確認
-- [ ] SceneまたはPrefabに意図しない全面差分がないことを確認
+- [x] Sprite Packer Modeを`Sprite Atlas V2`へ設定
+- [x] 7枚のBiome土地Spriteを含む`terrain_biomes_base.png`を`GroundTerrainAtlas.spriteatlasv2`、岩壁の元Textureを`RockWallAtlas.spriteatlasv2`のPackableへ設定
+- [x] 両AtlasをBuilt-in（Include in Build）とし、Point、Mip Maps Off、Read/Write Off、RGBA32、Compression Noneへ設定
+- [x] 両AtlasをPadding 4 px、Rotation Off、Tight Packing Off、Alpha Dilation Off、Max Texture Size 512へ設定
+- [x] 土地Atlasが1ページに収まり、全土地Spriteのパック後Textureが同一であることを確認
+- [x] SceneまたはPrefabに意図しない全面差分がないことを確認
 
 ## 9. Unity側の表示アセット構成
 
@@ -898,13 +908,13 @@ Editor構築ツールとPlayerビルド前処理は、`terrain_biomes_base.png`�
 最低でも以下を1画面に配置し、採用前にスクリーンショットを残す。
 
 - [ ] 各地形を16×16タイル以上の面積で敷き、繰り返し模様を確認
-- [ ] 各Biomeが座標、Seed、チャンクの生成・ロード順にかかわらず、対応する同じBase Tileを表示することを確認
-- [ ] 同じBase Tileを16×16タイル以上並べても継ぎ目が出ず、低頻度の見た目の変化が必要な箇所は地表装飾で補えることを確認
-- [ ] 連続する土地では奥側の8 px断面が手前ブロックに隠れ、水・マグマに面した場所では断面が露出することを確認
-- [ ] Base Spriteと前面断面には外角、内角、左右端の補完Spriteがなく、輪郭が直角のままであることを確認
+- [x] 各Biomeが座標、Seed、チャンクの生成・ロード順にかかわらず、対応する同じBase Tileを表示することを確認
+- [x] 同じBase Tileを16×16タイル以上並べても継ぎ目が出ず、低頻度の見た目の変化が必要な箇所は地表装飾で補えることを確認
+- [x] 連続する土地では奥側の8 px断面が手前ブロックに隠れ、水・マグマに面した場所では断面が露出することを確認
+- [x] Base Spriteと前面断面には外角、内角、左右端の補完Spriteがなく、輪郭が直角のままであることを確認
 - [ ] 境界ハイライトでは14形状の全外周・内角と90度回転を確認し、斜めだけが欠ける地形でも内角線が途切れないことを確認
 - [ ] 土、砂、岩、雪の断面色を持つ16×24土地を淡水・海水・マグマへ重ねて確認
-- [ ] 16タイル以上続く土地断面で継ぎ目や過度な反復がないことを確認
+- [x] 16タイル以上続く土地断面で継ぎ目や過度な反復がないことを確認
 - [ ] 連続する岩壁では奥側の12 px側面が手前ブロックに隠れ、最前列では側面が読めることを確認
 - [ ] 岩壁上面、内部影、岩壁上資源が基準面より12 px上に揃うことを確認
 - [ ] 岩壁が淡水・海水・マグマへ面する場所で、下層の土地断面が欠けないことを確認
@@ -916,9 +926,9 @@ Editor構築ツールとPlayerビルド前処理は、`terrain_biomes_base.png`�
 - [ ] 接地点は画面外だが上部だけ画面内に見える物体が、カリングで消えないことを確認
 - [ ] 立体物が16×16サブチャンク境界をまたいでも欠けないことを確認
 - [ ] ドローン、開始コア、配置可能・不可表示を各地形へ重ねて確認
-- [ ] カメラの最小・標準・最大ズームでピクセルがにじまないことを確認
-- [ ] Game Viewの実解像度で細部がちらつかないことを確認
-- [ ] 64×64チャンク境界および16×16サブチャンク境界に見た目の継ぎ目がないことを確認
+- [x] カメラの最小・標準・最大ズームでピクセルがにじまないことを確認
+- [x] Game Viewの実解像度で細部がちらつかないことを確認
+- [x] 64×64チャンク境界および16×16サブチャンク境界に見た目の継ぎ目がないことを確認
 
 ## 11. 制作記録
 
@@ -926,7 +936,7 @@ Editor構築ツールとPlayerビルド前処理は、`terrain_biomes_base.png`�
 
 | 日付 | Asset ID | PixelLab Tool | Seed | 主な設定変更 | 出力ファイル | 採用・却下理由 |
 |---|---|---|---|---|---|---|
-|  |  |  |  |  |  |  |
+| 2026-10-15 | `terrain_biomes_base` | 未共有 | 未共有 | 112×24 px、16×24 px×7枚、Base差分なし | `Terrain/Base/terrain_biomes_base.png` | 7バイオームへの割り当てとGameビュー確認に問題がないため採用 |
 
 ## 12. 後続段階で追加するスプライト
 
