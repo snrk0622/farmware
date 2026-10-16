@@ -190,7 +190,7 @@ Presentation
 
 - Simulationの絶対位置は整数のワールドタイル座標で保持する。Transformのfloat座標を生成、占有、接続、セーブの判定に使用しない。
 - タイル座標とチャンク座標は`int2`相当とし、減算、距離、範囲端などオーバーフローし得る中間計算は`long`相当で行う。
-- チャンクストリーミングの可視・先読み・保持範囲は、64×64の全ローカルタイルを`int`絶対タイル座標へ復元できる論理チャンク範囲へクランプする。座標域の端で余白を追加しても、反対側の端へ周回したチャンクを生成しない。
+- チャンクストリーミングの可視・先読み・保持範囲は、64×64の全ローカルタイルを`int`絶対タイル座標へ復元できる論理チャンク範囲へクランプする。座標域の端で余白を追加しても、反対側の端へ周回したチャンクを生成しない。境界ハイライトや岩壁影がチャンク外を標本化する場合は64bitで絶対座標を検証し、`int`ワールド外のセルを存在しない非接続セルとして扱う。
 - Presentationはカメラ周辺の表示原点を絶対座標から差し引いた相対座標へ、Tilemap、Sprite、エフェクトを配置する。
 - カメラが表示原点から一定距離を超えた場合は、固定TickのSimulationを変更せず、Presentationの表示原点と表示物だけを移動する。
 - 画面入力は相対表示座標から整数の絶対タイル座標へ変換してCommandを作る。
@@ -202,7 +202,7 @@ Presentation
 
 絶対座標同士の差は`int`のまま減算せず、`long`へ広げてから計算する。逆変換では表示原点を加えた結果が`int`範囲内であることを先に検証し、NaN、無限大、範囲外を失敗として拒否する。このAPIはCamera、Transform、GridLayout、Tilemapへ依存しない純粋計算とし、表示原点の変更がSimulationの絶対座標、地形生成、初期スポーン、状態ハッシュを変更する経路を持たせない。
 
-`MAP-02B`では`CameraPanController`がPresentation寿命中の`DisplayOrigin`を所有する。World GridのTransformは原点へ固定し、Camera、9枚のTilemap、岩壁内部影Meshは表示原点からの相対座標だけを使用する。初期スポーンと明示的な絶対座標移動は所属チャンク境界を表示原点へ選び、Camera Transformへ0〜64付近の値を渡す。通常のWASD／矢印キー入力はCameraの相対座標だけを更新し、表示原点やWorld Gridを移動しない。Viewportを読む`CameraChunkStreamingBridge`は相対範囲へ現在の表示原点を加算し、ECSの`ChunkStreamingObserver`を絶対チャンク座標に保つ。明示的な絶対座標移動で表示原点が変わった場合、`ChunkTilemapPresenter`は旧相対セルを即時消去し、新しい表示原点で可視チャンクを再構築する。通常移動中の自動Floating Origin、継ぎ目を見せない再配置方式、再配置量の分割やカメラ速度抑制は`MAP-02D`で計測して決める。
+`MAP-02B`では`CameraPanController`がPresentation寿命中の`DisplayOrigin`を所有する。World GridのTransformは原点へ固定し、Camera、9枚のTilemap、岩壁内部影Meshは表示原点からの相対座標だけを使用する。初期スポーンと明示的な絶対座標移動は所属チャンク境界を表示原点へ選び、Camera Transformへ0〜64付近の値を渡す。通常のWASD／矢印キー入力はCameraの相対座標だけを更新し、表示原点やWorld Gridを移動しない。Viewportを読む`CameraChunkStreamingBridge`は相対範囲へ現在の表示原点を加算し、ECSの`ChunkStreamingObserver`を絶対チャンク座標に保つ。明示的な絶対座標移動で表示原点が変わった場合、`ChunkTilemapPresenter`は旧相対セルを即時消去し、新しい表示原点で可視チャンクを再構築する。F4のタイル・サブチャンク・チャンク境界は、`int`最大タイルの外周となる最大値+1を含めて64bitで列挙し、座標周回や終了しない描画ループを起こさない。通常移動中の自動Floating Origin、継ぎ目を見せない再配置方式、再配置量の分割やカメラ速度抑制は`MAP-02D`で計測して決める。
 
 ## 10. 実装前後の検証要件
 

@@ -1255,7 +1255,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="localTileY">読み取る垂直チャンク内座標です。境界外の値も許可します。</param>
         /// <param name="tiles">中心チャンクの4096件の生成済み地形Bufferです。</param>
         /// <param name="generationSettings">境界外セルを同じ結果へ再生成する設定です。</param>
-        /// <returns>指定ワールド座標の最終的なGeneratedTileです。</returns>
+        /// <returns>有効域内では指定座標の生成地形、ワールド外では土地・岩壁へ接続しない表示専用の水域値です。</returns>
         private static GeneratedTile GetGeneratedTile(
             ChunkCoordinate coordinate,
             int localTileX,
@@ -1272,8 +1272,19 @@ namespace Farmware.WorldGeneration.Presentation
                 return tiles[WorldGrid.ToTileIndex(localTileX, localTileY)];
             }
 
-            int worldTileX = WorldGrid.ToWorldTileX(coordinate.X, localTileX);
-            int worldTileY = WorldGrid.ToWorldTileY(coordinate.Y, localTileY);
+            if (!WorldGrid.TryToWorldTileCoordinate(
+                    coordinate.X,
+                    coordinate.Y,
+                    localTileX,
+                    localTileY,
+                    out int worldTileX,
+                    out int worldTileY))
+            {
+                // intワールドの外側には地形が存在しません。水域を表示専用の非接続値として使うことで、
+                // 土地と岩壁のどちらにも接続せず、資源を存在しない前面岩壁の背後へ隠しません。
+                return new GeneratedTile { Ground = GroundType.Water };
+            }
+
             return DeterministicChunkGenerator.GenerateTile(
                 generationSettings,
                 worldTileX,
@@ -1456,7 +1467,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="neighborLocalY">隣接セルの垂直チャンク内座標です。影マスク生成時は探索余白まで範囲外になります。</param>
         /// <param name="tiles">同じチャンクの生成済み地形Bufferです。</param>
         /// <param name="generationSettings">境界外セルの決定論的生成設定です。</param>
-        /// <returns>対象隣接セルが岩壁ならtrueです。</returns>
+        /// <returns>対象隣接セルが有効域内の岩壁ならtrue、ワールド外または岩壁以外ならfalseです。</returns>
         private static bool IsRockWallNeighbor(
             ChunkCoordinate coordinate,
             int neighborLocalX,
@@ -1474,8 +1485,18 @@ namespace Farmware.WorldGeneration.Presentation
                 return tiles[neighborIndex].Ground == GroundType.RockWall;
             }
 
-            int worldTileX = WorldGrid.ToWorldTileX(coordinate.X, neighborLocalX);
-            int worldTileY = WorldGrid.ToWorldTileY(coordinate.Y, neighborLocalY);
+            if (!WorldGrid.TryToWorldTileCoordinate(
+                    coordinate.X,
+                    coordinate.Y,
+                    neighborLocalX,
+                    neighborLocalY,
+                    out int worldTileX,
+                    out int worldTileY))
+            {
+                // ワールド外を岩壁として扱うと端の影が閉じて見えるため、存在しない隣接セルは空地側として扱います。
+                return false;
+            }
+
             return DeterministicChunkGenerator.IsRockWall(
                 generationSettings,
                 worldTileX,

@@ -212,7 +212,7 @@ namespace Farmware.WorldGeneration
         /// 論理チャンク座標とチャンク内座標から、ワールド水平タイル座標を復元します。
         /// </summary>
         /// <param name="chunkX">論理チャンクの水平座標です。</param>
-        /// <param name="localX">チャンク内の水平座標です。</param>
+        /// <param name="localX">チャンク内の水平座標です。0〜63以外を渡す場合は、先にTryToWorldTileCoordinateで範囲を検証してください。</param>
         /// <returns>符号付きのワールド水平タイル座標です。</returns>
         public static int ToWorldTileX(int chunkX, int localX)
         {
@@ -223,11 +223,47 @@ namespace Farmware.WorldGeneration
         /// 論理チャンク座標とチャンク内座標から、ワールド垂直タイル座標を復元します。
         /// </summary>
         /// <param name="chunkY">論理チャンクの垂直座標です。</param>
-        /// <param name="localY">チャンク内の垂直座標です。</param>
+        /// <param name="localY">チャンク内の垂直座標です。0〜63以外を渡す場合は、先にTryToWorldTileCoordinateで範囲を検証してください。</param>
         /// <returns>符号付きのワールド垂直タイル座標です。</returns>
         public static int ToWorldTileY(int chunkY, int localY)
         {
             return (chunkY * WorldGridConstants.LogicalChunkSize) + localY;
+        }
+
+        /// <summary>
+        /// 論理チャンク座標とローカル座標を64bitで合成し、intの絶対タイル座標へ安全に変換します。
+        /// 境界ハイライトや岩壁影がチャンク外の隣接セルを調べる場合に、ワールド反対端への整数周回を防ぎます。
+        /// </summary>
+        /// <param name="chunkX">基準となる水平論理チャンク座標です。</param>
+        /// <param name="chunkY">基準となる垂直論理チャンク座標です。</param>
+        /// <param name="localX">基準チャンク左端からの水平タイル差です。0〜63の外側も検証できます。</param>
+        /// <param name="localY">基準チャンク下端からの垂直タイル差です。0〜63の外側も検証できます。</param>
+        /// <param name="worldTileX">成功時に得られる水平絶対タイル座標です。</param>
+        /// <param name="worldTileY">成功時に得られる垂直絶対タイル座標です。</param>
+        /// <returns>両軸がint範囲内ならtrue、どちらかがワールド座標域の外ならfalseです。</returns>
+        public static bool TryToWorldTileCoordinate(
+            int chunkX,
+            int chunkY,
+            int localX,
+            int localY,
+            out int worldTileX,
+            out int worldTileY)
+        {
+            long candidateX = ((long)chunkX * WorldGridConstants.LogicalChunkSize) + localX;
+            long candidateY = ((long)chunkY * WorldGridConstants.LogicalChunkSize) + localY;
+            if (candidateX < int.MinValue
+                || candidateX > int.MaxValue
+                || candidateY < int.MinValue
+                || candidateY > int.MaxValue)
+            {
+                worldTileX = default;
+                worldTileY = default;
+                return false;
+            }
+
+            worldTileX = (int)candidateX;
+            worldTileY = (int)candidateY;
+            return true;
         }
 
         /// <summary>

@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using Farmware.Simulation;
+using Farmware.WorldGeneration.Presentation;
 using NUnit.Framework;
 using Unity.Entities;
 
@@ -58,6 +59,131 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(chunk.Y, Is.EqualTo(expectedChunk));
             Assert.That(local.X, Is.EqualTo(expectedLocal));
             Assert.That(local.Y, Is.EqualTo(expectedLocal));
+        }
+
+        /// <summary>
+        /// intタイル座標域の正負端チャンクを準備し、通常の0〜63ローカル座標を端の絶対座標へ安全に変換できることを保証します。
+        /// </summary>
+        /// <param name="chunkCoordinate">正または負の端にある論理チャンク座標です。</param>
+        /// <param name="localCoordinate">端の絶対タイルへ対応するチャンク内座標です。</param>
+        /// <param name="expectedWorldTileCoordinate">期待するint最小または最大の絶対タイル座標です。</param>
+        [TestCase(WorldGridConstants.MinimumLogicalChunkCoordinate, 0, int.MinValue)]
+        [TestCase(WorldGridConstants.MaximumLogicalChunkCoordinate, 63, int.MaxValue)]
+        public void TryToWorldTileCoordinate_WorldEdge_ConvertsValidLocalTile(
+            int chunkCoordinate,
+            int localCoordinate,
+            int expectedWorldTileCoordinate)
+        {
+            bool converted = WorldGrid.TryToWorldTileCoordinate(
+                chunkCoordinate,
+                chunkCoordinate,
+                localCoordinate,
+                localCoordinate,
+                out int worldTileX,
+                out int worldTileY);
+
+            Assert.That(converted, Is.True);
+            Assert.That(worldTileX, Is.EqualTo(expectedWorldTileCoordinate));
+            Assert.That(worldTileY, Is.EqualTo(expectedWorldTileCoordinate));
+        }
+
+        /// <summary>
+        /// ワールド端チャンクから外側の境界・岩壁影サンプルを準備し、反対側のint端へ周回せず変換を拒否することを保証します。
+        /// </summary>
+        /// <param name="chunkCoordinate">正または負の端にある論理チャンク座標です。</param>
+        /// <param name="localX">境界ハイライトまたは岩壁影が参照する水平ローカル座標です。</param>
+        /// <param name="localY">境界ハイライトまたは岩壁影が参照する垂直ローカル座標です。</param>
+        [TestCase(WorldGridConstants.MinimumLogicalChunkCoordinate, -8, 0)]
+        [TestCase(WorldGridConstants.MinimumLogicalChunkCoordinate, 0, -8)]
+        [TestCase(WorldGridConstants.MaximumLogicalChunkCoordinate, 71, 0)]
+        [TestCase(WorldGridConstants.MaximumLogicalChunkCoordinate, 0, 71)]
+        public void TryToWorldTileCoordinate_WorldEdge_RejectsOutsideNeighborSample(
+            int chunkCoordinate,
+            int localX,
+            int localY)
+        {
+            bool converted = WorldGrid.TryToWorldTileCoordinate(
+                chunkCoordinate,
+                chunkCoordinate,
+                localX,
+                localY,
+                out int worldTileX,
+                out int worldTileY);
+
+            Assert.That(converted, Is.False);
+            Assert.That(worldTileX, Is.Zero);
+            Assert.That(worldTileY, Is.Zero);
+        }
+
+        /// <summary>
+        /// ワールド外となる表示用隣接セルを準備し、境界ハイライトでは非接続値、岩壁影では空地として扱うことを保証します。
+        /// privateメソッドを直接呼ぶことで、範囲検査APIを追加してもPresenterが未検査変換へ戻る退行を検出します。
+        /// </summary>
+        /// <param name="chunkCoordinate">正または負の端にある論理チャンク座標です。</param>
+        /// <param name="outsideLocalCoordinate">表示処理が参照するワールド外ローカル座標です。</param>
+        [TestCase(WorldGridConstants.MinimumLogicalChunkCoordinate, -8)]
+        [TestCase(WorldGridConstants.MaximumLogicalChunkCoordinate, 71)]
+        public void ChunkTilemapPresenter_WorldEdge_TreatsOutsideNeighborAsDisconnected(
+            int chunkCoordinate,
+            int outsideLocalCoordinate)
+        {
+            using World world = new World("WorldEdgePresentationNeighborTests");
+            Entity entity = world.EntityManager.CreateEntity();
+            DynamicBuffer<GeneratedTile> tiles = world.EntityManager.AddBuffer<GeneratedTile>(entity);
+            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.FromString("world-edge-presentation-neighbor-test"),
+                1);
+            MethodInfo getGeneratedTile = typeof(ChunkTilemapPresenter).GetMethod(
+                "GetGeneratedTile",
+                BindingFlags.NonPublic | BindingFlags.Static);
+            MethodInfo isRockWallNeighbor = typeof(ChunkTilemapPresenter).GetMethod(
+                "IsRockWallNeighbor",
+                BindingFlags.NonPublic | BindingFlags.Static);
+
+            Assert.That(getGeneratedTile, Is.Not.Null);
+            Assert.That(isRockWallNeighbor, Is.Not.Null);
+            object[] arguments =
+            {
+                new ChunkCoordinate(chunkCoordinate, chunkCoordinate),
+                outsideLocalCoordinate,
+                0,
+                tiles,
+                settings
+            };
+
+            GeneratedTile presentationNeighbor = (GeneratedTile)getGeneratedTile.Invoke(null, arguments);
+            bool isRockWall = (bool)isRockWallNeighbor.Invoke(null, arguments);
+
+            Assert.That(
+                presentationNeighbor.Ground,
+                Is.EqualTo(GroundType.Water),
+                "存在しない隣接セルは、土地・岩壁のどちらにも接続しない表示専用値にする必要があります。");
+            Assert.That(isRockWall, Is.False);
+        }
+
+        /// <summary>
+        /// F4の可視境界をint座標域の正負端へ置き、最外周を含むグリッド線数を有限な64bit値で求めることを保証します。
+        /// </summary>
+        /// <param name="minimumTileBoundary">検証する最小タイル境界です。</param>
+        /// <param name="maximumTileBoundary">検証する最大タイル境界です。int最大タイルの外周も含みます。</param>
+        /// <param name="intervalInTiles">タイル、サブチャンク、チャンクの境界間隔です。</param>
+        /// <param name="expectedLineCount">期待する有限な境界線数です。</param>
+        [TestCase((long)int.MaxValue - 1L, (long)int.MaxValue + 1L, 1, 3L)]
+        [TestCase((long)int.MaxValue - 1L, (long)int.MaxValue + 1L, 16, 2L)]
+        [TestCase((long)int.MinValue, (long)int.MinValue + 1L, 1, 2L)]
+        [TestCase((long)int.MinValue + 1L, (long)int.MinValue + 65L, 64, 2L)]
+        public void CalculateGridBoundaryCount_IntEdges_ReturnsFiniteCount(
+            long minimumTileBoundary,
+            long maximumTileBoundary,
+            int intervalInTiles,
+            long expectedLineCount)
+        {
+            long actual = WorldGridDebugOverlay.CalculateGridBoundaryCount(
+                minimumTileBoundary,
+                maximumTileBoundary,
+                intervalInTiles);
+
+            Assert.That(actual, Is.EqualTo(expectedLineCount));
         }
 
         /// <summary>

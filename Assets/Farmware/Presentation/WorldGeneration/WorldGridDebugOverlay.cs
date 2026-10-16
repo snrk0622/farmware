@@ -775,9 +775,9 @@ namespace Farmware.WorldGeneration.Presentation
             ChunkCoordinate spawnChunk = hasSpawnLocation
                 ? WorldGrid.ToChunkCoordinate(spawnLocation.TileX, spawnLocation.TileY)
                 : default;
-            int chunkCountX = bounds.MaximumChunkX - bounds.MinimumChunkX + 1;
-            int chunkCountY = bounds.MaximumChunkY - bounds.MinimumChunkY + 1;
-            long visibleChunkCount = (long)chunkCountX * chunkCountY;
+            long chunkCountX = (long)bounds.MaximumChunkX - bounds.MinimumChunkX + 1L;
+            long chunkCountY = (long)bounds.MaximumChunkY - bounds.MinimumChunkY + 1L;
+            long visibleChunkCount = chunkCountX * chunkCountY;
 
             // 極端なズームアウト時に大量の線と文字を発行するとデバッグ表示自体が重くなるため、安全上限で打ち切ります。
             if (visibleChunkCount <= 0 || visibleChunkCount > MaximumDrawableChunkCount)
@@ -787,8 +787,10 @@ namespace Farmware.WorldGeneration.Presentation
                 return;
             }
 
-            int visibleTileLineCount = (bounds.MaximumTileX - bounds.MinimumTileX + 2)
-                + (bounds.MaximumTileY - bounds.MinimumTileY + 2);
+            long visibleTileLineCount = ((long)bounds.MaximumTileX - bounds.MinimumTileX + 2L)
+                + ((long)bounds.MaximumTileY - bounds.MinimumTileY + 2L);
+            long maximumBoundaryTileX = (long)bounds.MaximumTileX + 1L;
+            long maximumBoundaryTileY = (long)bounds.MaximumTileY + 1L;
 
             // 1タイル線は最も本数が増えるため、通常ズームでは描画し、極端なズームアウト時だけ省略します。
             // サブチャンク線とチャンク線は残すので、広域表示でも空間区分を見失いません。
@@ -796,9 +798,9 @@ namespace Farmware.WorldGeneration.Presentation
             {
                 DrawGridLines(
                     bounds.MinimumTileX,
-                    bounds.MaximumTileX + 1,
+                    maximumBoundaryTileX,
                     bounds.MinimumTileY,
-                    bounds.MaximumTileY + 1,
+                    maximumBoundaryTileY,
                     1,
                     tileBoundaryColor,
                     tileBoundaryThicknessInPixels);
@@ -813,18 +815,18 @@ namespace Farmware.WorldGeneration.Presentation
 
             DrawGridLines(
                 bounds.MinimumTileX,
-                bounds.MaximumTileX + 1,
+                maximumBoundaryTileX,
                 bounds.MinimumTileY,
-                bounds.MaximumTileY + 1,
+                maximumBoundaryTileY,
                 WorldGridConstants.SubChunkSize,
                 subChunkBoundaryColor,
                 subChunkBoundaryThicknessInPixels);
 
             DrawGridLines(
                 bounds.MinimumTileX,
-                bounds.MaximumTileX + 1,
+                maximumBoundaryTileX,
                 bounds.MinimumTileY,
-                bounds.MaximumTileY + 1,
+                maximumBoundaryTileY,
                 WorldGridConstants.LogicalChunkSize,
                 chunkBoundaryColor,
                 chunkBoundaryThicknessInPixels);
@@ -947,30 +949,37 @@ namespace Farmware.WorldGeneration.Presentation
         /// <summary>
         /// 指定タイル間隔で縦線と横線を各1回だけ描き、隣接領域の共有辺が重なって濃くなることを防ぎます。
         /// </summary>
-        /// <param name="minimumTileX">描画範囲左端の水平タイル境界座標です。</param>
-        /// <param name="maximumTileX">描画範囲右端の水平タイル境界座標です。</param>
-        /// <param name="minimumTileY">描画範囲下端の垂直タイル境界座標です。</param>
-        /// <param name="maximumTileY">描画範囲上端の垂直タイル境界座標です。</param>
+        /// <param name="minimumTileX">描画範囲左端の水平タイル境界座標です。int最小タイルの外周を含めるため64bitで受け取ります。</param>
+        /// <param name="maximumTileX">描画範囲右端の水平タイル境界座標です。int最大タイルの右辺はint最大値+1になります。</param>
+        /// <param name="minimumTileY">描画範囲下端の垂直タイル境界座標です。int最小タイルの外周を含めるため64bitで受け取ります。</param>
+        /// <param name="maximumTileY">描画範囲上端の垂直タイル境界座標です。int最大タイルの上辺はint最大値+1になります。</param>
         /// <param name="intervalInTiles">1、16、64のいずれかとなる境界間隔です。</param>
         /// <param name="lineColor">この階層の境界へ使用する色です。</param>
         /// <param name="lineThicknessInPixels">画面上での境界線の太さです。</param>
         private void DrawGridLines(
-            int minimumTileX,
-            int maximumTileX,
-            int minimumTileY,
-            int maximumTileY,
+            long minimumTileX,
+            long maximumTileX,
+            long minimumTileY,
+            long maximumTileY,
             int intervalInTiles,
             Color lineColor,
             float lineThicknessInPixels)
         {
-            // 負座標でも0方向へ丸めず、表示範囲以下で最も近い正規境界から開始します。
-            int firstBoundaryTileX = WorldGrid.FloorDivide(minimumTileX, intervalInTiles) * intervalInTiles;
-            int firstBoundaryTileY = WorldGrid.FloorDivide(minimumTileY, intervalInTiles) * intervalInTiles;
+            long firstBoundaryTileX = CalculateFirstGridBoundary(minimumTileX, intervalInTiles);
+            long firstBoundaryTileY = CalculateFirstGridBoundary(minimumTileY, intervalInTiles);
+            long verticalLineCount = CalculateGridBoundaryCount(
+                minimumTileX,
+                maximumTileX,
+                intervalInTiles);
+            long horizontalLineCount = CalculateGridBoundaryCount(
+                minimumTileY,
+                maximumTileY,
+                intervalInTiles);
 
-            for (int boundaryTileX = firstBoundaryTileX;
-                boundaryTileX <= maximumTileX;
-                boundaryTileX += intervalInTiles)
+            // 回数を先に64bitで確定し、最終境界を描いた後の加算がint反対端へ周回する無限ループを防ぎます。
+            for (long lineIndex = 0; lineIndex < verticalLineCount; lineIndex++)
             {
+                long boundaryTileX = firstBoundaryTileX + (lineIndex * intervalInTiles);
                 DrawWorldLine(
                     CellBoundaryToWorld(boundaryTileX, minimumTileY),
                     CellBoundaryToWorld(boundaryTileX, maximumTileY),
@@ -978,16 +987,59 @@ namespace Farmware.WorldGeneration.Presentation
                     lineThicknessInPixels);
             }
 
-            for (int boundaryTileY = firstBoundaryTileY;
-                boundaryTileY <= maximumTileY;
-                boundaryTileY += intervalInTiles)
+            for (long lineIndex = 0; lineIndex < horizontalLineCount; lineIndex++)
             {
+                long boundaryTileY = firstBoundaryTileY + (lineIndex * intervalInTiles);
                 DrawWorldLine(
                     CellBoundaryToWorld(minimumTileX, boundaryTileY),
                     CellBoundaryToWorld(maximumTileX, boundaryTileY),
                     lineColor,
                     lineThicknessInPixels);
             }
+        }
+
+        /// <summary>
+        /// 指定範囲へ一定間隔で描くグリッド境界線の本数を64bitで計算します。
+        /// F4の回帰テストからも使用し、int座標端でも有限回で終了することを保証します。
+        /// </summary>
+        /// <param name="minimumTileBoundary">描画範囲の最小タイル境界です。</param>
+        /// <param name="maximumTileBoundary">描画範囲の最大タイル境界です。包含境界として数えます。</param>
+        /// <param name="intervalInTiles">境界線同士の間隔です。1以上を指定します。</param>
+        /// <returns>最小値以下の直近境界から最大値までに含まれる線数です。無効範囲または間隔なら0です。</returns>
+        public static long CalculateGridBoundaryCount(
+            long minimumTileBoundary,
+            long maximumTileBoundary,
+            int intervalInTiles)
+        {
+            if (intervalInTiles <= 0 || minimumTileBoundary > maximumTileBoundary)
+            {
+                return 0L;
+            }
+
+            long firstBoundary = CalculateFirstGridBoundary(
+                minimumTileBoundary,
+                intervalInTiles);
+            return ((maximumTileBoundary - firstBoundary) / intervalInTiles) + 1L;
+        }
+
+        /// <summary>
+        /// 負座標でも0方向へ丸めず、指定位置以下で最も近い正規グリッド境界を求めます。
+        /// </summary>
+        /// <param name="tileBoundaryCoordinate">境界を探す基準となる64bitタイル境界座標です。</param>
+        /// <param name="intervalInTiles">1、16、64などの正の境界間隔です。</param>
+        /// <returns>指定位置以下にある、間隔の整数倍となる境界座標です。</returns>
+        private static long CalculateFirstGridBoundary(
+            long tileBoundaryCoordinate,
+            int intervalInTiles)
+        {
+            long quotient = tileBoundaryCoordinate / intervalInTiles;
+            long remainder = tileBoundaryCoordinate % intervalInTiles;
+            if (remainder < 0L)
+            {
+                quotient--;
+            }
+
+            return quotient * intervalInTiles;
         }
 
         /// <summary>
@@ -1086,15 +1138,15 @@ namespace Farmware.WorldGeneration.Presentation
         /// <summary>
         /// タイルセル境界の整数座標を、GridのTransformとセル寸法を考慮したワールド座標へ変換します。
         /// </summary>
-        /// <param name="tileX">水平タイル境界座標です。</param>
-        /// <param name="tileY">垂直タイル境界座標です。</param>
+        /// <param name="tileX">水平タイル境界座標です。int最大タイルの右辺となるint最大値+1も受け取れます。</param>
+        /// <param name="tileY">垂直タイル境界座標です。int最大タイルの上辺となるint最大値+1も受け取れます。</param>
         /// <returns>地形平面上のワールド座標です。</returns>
-        private Vector3 CellBoundaryToWorld(int tileX, int tileY)
+        private Vector3 CellBoundaryToWorld(long tileX, long tileY)
         {
-            RelativeCellCoordinate relativeCell =
-                WorldCoordinateConversion.ToRelativeCellCoordinate(
-                    new int2(tileX, tileY),
-                    GetCurrentDisplayOrigin());
+            DisplayOrigin displayOrigin = GetCurrentDisplayOrigin();
+            RelativeCellCoordinate relativeCell = new RelativeCellCoordinate(
+                tileX - displayOrigin.AbsoluteTileCoordinate.x,
+                tileY - displayOrigin.AbsoluteTileCoordinate.y);
             if (relativeCell.X < int.MinValue
                 || relativeCell.X > int.MaxValue
                 || relativeCell.Y < int.MinValue
