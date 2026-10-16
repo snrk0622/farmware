@@ -1012,6 +1012,38 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// 初期位置用の探索設定を準備し、3×3中央コアを収められない領域寸法を探索開始前に拒否することを保証します。
+        /// 汎用探索の1×1以上という契約と、初期位置だけに必要なコア寸法の契約を混同しないためのテストです。
+        /// </summary>
+        /// <param name="regionWidthInTiles">検証する探索領域の横幅です。単位はタイルです。</param>
+        /// <param name="regionHeightInTiles">検証する探索領域の縦幅です。単位はタイルです。</param>
+        [TestCase(2, 8)]
+        [TestCase(12, 2)]
+        public void EquipmentBuildableRegionLocator_InitialLocationRejectsRegionSmallerThanCore(
+            int regionWidthInTiles,
+            int regionHeightInTiles)
+        {
+            WorldGenerationSettings generationSettings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.FromString("initial-core-footprint-validation-test"),
+                2);
+            EquipmentBuildableRegionSearchSettings searchSettings =
+                EquipmentBuildableRegionSearchSettings.CreateInitialLocationDefault();
+            searchSettings.RegionWidthInTiles = regionWidthInTiles;
+            searchSettings.RegionHeightInTiles = regionHeightInTiles;
+
+            bool found = EquipmentBuildableRegionLocator.TryFindNearest(
+                generationSettings,
+                searchSettings,
+                out _);
+
+            Assert.That(searchSettings.RequireCenteredCoreFootprint, Is.True);
+            Assert.That(
+                found,
+                Is.False,
+                "初期位置探索は、中央コアの3×3占有を収められない設定を受け付けてはいけません。");
+        }
+
+        /// <summary>
         /// 同じ設定で探索を繰り返し、結果座標が一致し、探索前後で通常地形のチャンクハッシュが変わらないことを保証します。
         /// </summary>
         [Test]
@@ -1078,7 +1110,7 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 偶数寸法の建設可能矩形を準備し、初期スポーンが矩形内の中央寄りタイルへ決まり、元矩形も記録されることを保証します。
+        /// 偶数寸法の建設可能矩形を準備し、初期スポーンが3×3中央コアを収められる中央寄りタイルへ決まり、元矩形も記録されることを保証します。
         /// </summary>
         [Test]
         public void InitialSpawnLocation_FromRegionRecordsCenterTileAndSourceRegion()
@@ -1093,6 +1125,23 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(location.RegionMinimumTileY, Is.EqualTo(region.MinimumTileY));
             Assert.That(location.RegionWidthInTiles, Is.EqualTo(region.WidthInTiles));
             Assert.That(location.RegionHeightInTiles, Is.EqualTo(region.HeightInTiles));
+            int footprintRadius = InitialSpawnLocation.CentralCoreSizeInTiles / 2;
+            Assert.That(
+                location.TileX - footprintRadius,
+                Is.GreaterThanOrEqualTo(region.MinimumTileX),
+                "中央コア左端は選択元領域の内側に必要です。");
+            Assert.That(
+                location.TileX + footprintRadius,
+                Is.LessThan(region.MinimumTileX + region.WidthInTiles),
+                "中央コア右端は選択元領域の内側に必要です。");
+            Assert.That(
+                location.TileY - footprintRadius,
+                Is.GreaterThanOrEqualTo(region.MinimumTileY),
+                "中央コア下端は選択元領域の内側に必要です。");
+            Assert.That(
+                location.TileY + footprintRadius,
+                Is.LessThan(region.MinimumTileY + region.HeightInTiles),
+                "中央コア上端は選択元領域の内側に必要です。");
         }
 
         /// <summary>
@@ -1403,14 +1452,7 @@ namespace Farmware.WorldGeneration.Tests
                 Is.EqualTo(InitialSpawnSearchPhase.Succeeded),
                 "初期スポーンの記録後は、Presentationが待機を終えられる成功状態が必要です。");
             InitialSpawnLocation location = locationQuery.GetSingleton<InitialSpawnLocation>();
-            GeneratedTile spawnTile = DeterministicChunkGenerator.GenerateTile(
-                generationSettings,
-                location.TileX,
-                location.TileY);
-            Assert.That(
-                EquipmentBuildableRegionLocator.CanPlaceEquipment(spawnTile),
-                Is.True,
-                "記録された初期スポーンタイルは通常設備を建築できる必要があります。");
+            AssertCenteredCoreFootprintIsBuildable(generationSettings, location);
 
             // 完了後に再更新してもSingletonを増やさず、ワールド内の開始地点が一意であることを保証します。
             system.Update(world.Unmanaged);
@@ -1822,6 +1864,40 @@ namespace Farmware.WorldGeneration.Tests
                 foundTypes & requirements.RequiredTypes,
                 Is.EqualTo(requirements.RequiredTypes),
                 $"返された候補の周囲に必須資源が不足しています。seedIndex={seedIndex}");
+            AssertCenteredCoreFootprintIsBuildable(
+                generationSettings,
+                InitialSpawnLocation.FromRegion(region));
+        }
+
+        /// <summary>
+        /// 初期スポーンを中心とする3×3を通常生成器から読み直し、中央コアの全占有セルが設備建築可能であることを保証します。
+        /// 初期位置Systemテストと複数シードの資源付き探索テストで同じ9セル検証を共有します。
+        /// </summary>
+        /// <param name="generationSettings">検証対象ワールドと同じ地形生成設定です。</param>
+        /// <param name="location">中央コアの中心として記録された初期スポーン地点です。</param>
+        private static void AssertCenteredCoreFootprintIsBuildable(
+            in WorldGenerationSettings generationSettings,
+            in InitialSpawnLocation location)
+        {
+            int footprintRadius = InitialSpawnLocation.CentralCoreSizeInTiles / 2;
+
+            // 中心だけでなく周囲8セルも確認し、水・マグマ・岩壁へコアがはみ出す候補を見逃さないようにします。
+            for (int offsetY = -footprintRadius; offsetY <= footprintRadius; offsetY++)
+            {
+                for (int offsetX = -footprintRadius; offsetX <= footprintRadius; offsetX++)
+                {
+                    int worldTileX = location.TileX + offsetX;
+                    int worldTileY = location.TileY + offsetY;
+                    GeneratedTile tile = DeterministicChunkGenerator.GenerateTile(
+                        generationSettings,
+                        worldTileX,
+                        worldTileY);
+                    Assert.That(
+                        EquipmentBuildableRegionLocator.CanPlaceEquipment(tile),
+                        Is.True,
+                        $"中央コア占有セルは通常設備を建築可能である必要があります。tile=({worldTileX}, {worldTileY})");
+                }
+            }
         }
 
         /// <summary>

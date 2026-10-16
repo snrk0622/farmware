@@ -633,6 +633,12 @@ namespace Farmware.WorldGeneration
     /// </summary>
     public struct InitialSpawnLocation : IComponentData
     {
+        /// <summary>
+        /// 中央コアが縦横に占有するタイル数です。
+        /// 初期位置探索と後続の中央コア固定配置が同じ3×3寸法を参照するための共通値です。
+        /// </summary>
+        public const int CentralCoreSizeInTiles = 3;
+
         /// <summary>初期スポーンに選んだ水平ワールドタイル座標です。ワールド存続中は変更しません。</summary>
         public int TileX;
 
@@ -652,7 +658,7 @@ namespace Farmware.WorldGeneration
         public int RegionHeightInTiles;
 
         /// <summary>
-        /// 発見済みの建設可能矩形から、将来プレイヤーやドローンにも利用できる中央寄りの1タイルを選びます。
+        /// 発見済みの建設可能矩形から、3×3中央コアの中心として利用できる中央寄りの1タイルを選びます。
         /// 偶数幅では中央2タイルのうち右・上側を選び、常に整数タイル座標として記録します。
         /// </summary>
         /// <param name="region">全セルが建設可能と確認済みの矩形です。</param>

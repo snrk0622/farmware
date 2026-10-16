@@ -27,6 +27,12 @@ namespace Farmware.WorldGeneration
         public int MaximumSearchRadiusInChunks;
 
         /// <summary>
+        /// 発見領域の中央へ3×3中央コアを置ける寸法を必須にするかを示します。
+        /// 初期位置探索だけがtrueにし、汎用の建築可能領域探索ではfalseのまま使用します。
+        /// </summary>
+        public bool RequireCenteredCoreFootprint;
+
+        /// <summary>
         /// 初期検証用の検索設定を作ります。
         /// 12×8はコアと初期設備を複数箇所へ置ける暫定値で、半径2は最低5×5チャンクを検査します。
         /// </summary>
@@ -43,7 +49,8 @@ namespace Farmware.WorldGeneration
                 RegionHeightInTiles = 8,
                 OriginTileX = originTileX,
                 OriginTileY = originTileY,
-                MaximumSearchRadiusInChunks = 2
+                MaximumSearchRadiusInChunks = 2,
+                RequireCenteredCoreFootprint = false
             };
         }
 
@@ -60,6 +67,8 @@ namespace Farmware.WorldGeneration
         {
             EquipmentBuildableRegionSearchSettings settings = CreateDefault(originTileX, originTileY);
             settings.MaximumSearchRadiusInChunks = 8;
+            // 初期スポーンは将来3×3中央コアの中心になるため、探索時点から占有寸法を満たす領域だけを許可します。
+            settings.RequireCenteredCoreFootprint = true;
             return settings;
         }
     }
@@ -384,7 +393,13 @@ namespace Farmware.WorldGeneration
         /// <returns>領域寸法と探索半径が対応範囲内ならtrueです。</returns>
         private static bool IsValid(in EquipmentBuildableRegionSearchSettings settings)
         {
-            return settings.RegionWidthInTiles >= 1
+            bool hasCenteredCoreSpace = !settings.RequireCenteredCoreFootprint
+                || (settings.RegionWidthInTiles >= InitialSpawnLocation.CentralCoreSizeInTiles
+                    && settings.RegionHeightInTiles >= InitialSpawnLocation.CentralCoreSizeInTiles);
+
+            // 発見領域は全セルが建築可能なので、3×3以上の寸法があれば中央タイル周囲の9セルも同じ条件を満たします。
+            return hasCenteredCoreSpace
+                && settings.RegionWidthInTiles >= 1
                 && settings.RegionWidthInTiles <= WorldGridConstants.LogicalChunkSize
                 && settings.RegionHeightInTiles >= 1
                 && settings.RegionHeightInTiles <= WorldGridConstants.LogicalChunkSize
