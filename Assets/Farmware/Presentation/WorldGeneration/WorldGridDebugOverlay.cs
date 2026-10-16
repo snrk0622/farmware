@@ -3,6 +3,7 @@
 
 using Unity.Collections;
 using Unity.Entities;
+using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.Rendering.Universal;
@@ -33,6 +34,9 @@ namespace Farmware.WorldGeneration.Presentation
         // タイルセルとワールド位置の変換元です。地形表示用Tilemapを所有するGridを指定します。
         [Tooltip("地形Tilemapを所有するGridです。Gridの原点とセルサイズを座標表示へ反映します。未指定時は1 Unity unitを1タイルとして扱います。")]
         [SerializeField] private GridLayout targetGrid;
+
+        // 初期スポーン表示をTilemapと同じ相対座標へ投影するため、Main Cameraの表示原点を参照します。
+        private CameraPanController cameraPanController;
 
         // Scene開始直後からF3 HUDを表示するかを決めるAuthoring設定です。実行中の切替値とは分けて保持します。
         [Tooltip("Play開始直後から座標HUDを表示する場合に有効にします。実行中はF3キーで切り替えられます。")]
@@ -164,6 +168,9 @@ namespace Farmware.WorldGeneration.Presentation
             pixelPerfectCamera = targetCamera == null
                 ? null
                 : targetCamera.GetComponent<PixelPerfectCamera>();
+            cameraPanController = targetCamera == null
+                ? null
+                : targetCamera.GetComponent<CameraPanController>();
         }
 
         /// <summary>
@@ -180,6 +187,9 @@ namespace Farmware.WorldGeneration.Presentation
             pixelPerfectCamera = targetCamera == null
                 ? null
                 : targetCamera.GetComponent<PixelPerfectCamera>();
+            cameraPanController = targetCamera == null
+                ? null
+                : targetCamera.GetComponent<CameraPanController>();
         }
 
         /// <summary>
@@ -407,10 +417,25 @@ namespace Farmware.WorldGeneration.Presentation
         /// </summary>
         private void DrawCoordinateHud()
         {
-            Vector3 worldPosition = targetCamera.transform.position;
-            Vector3Int tile = targetGrid == null
-                ? new Vector3Int(Mathf.FloorToInt(worldPosition.x), Mathf.FloorToInt(worldPosition.y), 0)
-                : targetGrid.WorldToCell(worldPosition);
+            Vector3 relativeWorldPosition = targetCamera.transform.position;
+            Vector3Int relativeTile = targetGrid == null
+                ? new Vector3Int(
+                    Mathf.FloorToInt(relativeWorldPosition.x),
+                    Mathf.FloorToInt(relativeWorldPosition.y),
+                    0)
+                : targetGrid.WorldToCell(relativeWorldPosition);
+            DisplayOrigin displayOrigin = GetCurrentDisplayOrigin();
+            Vector3Int tile = new Vector3Int(
+                AddDisplayOriginSaturated(
+                    relativeTile.x,
+                    displayOrigin.AbsoluteTileCoordinate.x),
+                AddDisplayOriginSaturated(
+                    relativeTile.y,
+                    displayOrigin.AbsoluteTileCoordinate.y),
+                0);
+            double2 absoluteWorldPosition = cameraPanController == null
+                ? new double2(relativeWorldPosition.x, relativeWorldPosition.y)
+                : cameraPanController.GetAbsoluteWorldPosition();
             bool hasSpawnLocation = TryGetInitialSpawnLocation(out InitialSpawnLocation spawnLocation);
             bool hasSpawnSearchStatus = TryGetInitialSpawnSearchStatus(
                 out InitialSpawnSearchStatus spawnSearchStatus);
@@ -418,7 +443,7 @@ namespace Farmware.WorldGeneration.Presentation
                 out WorldGenerationSettings generationSettings);
             bool hasBiome = TryGetCurrentTileBiome(tile, out BiomeId biome);
             string text = BuildCoordinateHudText(
-                worldPosition,
+                absoluteWorldPosition,
                 tile,
                 hasSpawnLocation,
                 spawnLocation,
@@ -454,7 +479,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// <summary>
         /// 現在の座標、生成済みBiome、生成互換情報、記録済み初期スポーンをF3表示用文字列へまとめます。
         /// </summary>
-        /// <param name="worldPosition">現在のカメラ中心ワールド座標です。</param>
+        /// <param name="absoluteWorldPosition">現在のカメラ中心の絶対ワールドXY座標です。</param>
         /// <param name="tile">現在のカメラ中心タイル座標です。</param>
         /// <param name="hasSpawnLocation">初期スポーン探索が完了し、記録済み座標を渡せる場合はtrueです。</param>
         /// <param name="spawnLocation">記録済みの初期スポーン座標です。未完了時は表示に使用しません。</param>
@@ -466,7 +491,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="biome">現在タイルの論理Biomeです。未生成時は表示に使用しません。</param>
         /// <returns>見出しを含む10行のF3座標HUD文字列です。</returns>
         public static string BuildCoordinateHudText(
-            Vector3 worldPosition,
+            double2 absoluteWorldPosition,
             Vector3Int tile,
             bool hasSpawnLocation,
             InitialSpawnLocation spawnLocation,
@@ -504,7 +529,7 @@ namespace Farmware.WorldGeneration.Presentation
             }
 
             return $"F3  Coordinates\n"
-                + $"World : ({worldPosition.x:0.###}, {worldPosition.y:0.###})\n"
+                + $"World : ({absoluteWorldPosition.x:0.###}, {absoluteWorldPosition.y:0.###})\n"
                 + $"Tile  : ({tile.x}, {tile.y})\n"
                 + $"Chunk : ({chunk.X}, {chunk.Y})\n"
                 + $"Local : ({local.X}, {local.Y})\n"
@@ -750,9 +775,9 @@ namespace Farmware.WorldGeneration.Presentation
             ChunkCoordinate spawnChunk = hasSpawnLocation
                 ? WorldGrid.ToChunkCoordinate(spawnLocation.TileX, spawnLocation.TileY)
                 : default;
-            int chunkCountX = bounds.MaximumChunkX - bounds.MinimumChunkX + 1;
-            int chunkCountY = bounds.MaximumChunkY - bounds.MinimumChunkY + 1;
-            long visibleChunkCount = (long)chunkCountX * chunkCountY;
+            long chunkCountX = (long)bounds.MaximumChunkX - bounds.MinimumChunkX + 1L;
+            long chunkCountY = (long)bounds.MaximumChunkY - bounds.MinimumChunkY + 1L;
+            long visibleChunkCount = chunkCountX * chunkCountY;
 
             // 極端なズームアウト時に大量の線と文字を発行するとデバッグ表示自体が重くなるため、安全上限で打ち切ります。
             if (visibleChunkCount <= 0 || visibleChunkCount > MaximumDrawableChunkCount)
@@ -762,8 +787,10 @@ namespace Farmware.WorldGeneration.Presentation
                 return;
             }
 
-            int visibleTileLineCount = (bounds.MaximumTileX - bounds.MinimumTileX + 2)
-                + (bounds.MaximumTileY - bounds.MinimumTileY + 2);
+            long visibleTileLineCount = ((long)bounds.MaximumTileX - bounds.MinimumTileX + 2L)
+                + ((long)bounds.MaximumTileY - bounds.MinimumTileY + 2L);
+            long maximumBoundaryTileX = (long)bounds.MaximumTileX + 1L;
+            long maximumBoundaryTileY = (long)bounds.MaximumTileY + 1L;
 
             // 1タイル線は最も本数が増えるため、通常ズームでは描画し、極端なズームアウト時だけ省略します。
             // サブチャンク線とチャンク線は残すので、広域表示でも空間区分を見失いません。
@@ -771,9 +798,9 @@ namespace Farmware.WorldGeneration.Presentation
             {
                 DrawGridLines(
                     bounds.MinimumTileX,
-                    bounds.MaximumTileX + 1,
+                    maximumBoundaryTileX,
                     bounds.MinimumTileY,
-                    bounds.MaximumTileY + 1,
+                    maximumBoundaryTileY,
                     1,
                     tileBoundaryColor,
                     tileBoundaryThicknessInPixels);
@@ -788,18 +815,18 @@ namespace Farmware.WorldGeneration.Presentation
 
             DrawGridLines(
                 bounds.MinimumTileX,
-                bounds.MaximumTileX + 1,
+                maximumBoundaryTileX,
                 bounds.MinimumTileY,
-                bounds.MaximumTileY + 1,
+                maximumBoundaryTileY,
                 WorldGridConstants.SubChunkSize,
                 subChunkBoundaryColor,
                 subChunkBoundaryThicknessInPixels);
 
             DrawGridLines(
                 bounds.MinimumTileX,
-                bounds.MaximumTileX + 1,
+                maximumBoundaryTileX,
                 bounds.MinimumTileY,
-                bounds.MaximumTileY + 1,
+                maximumBoundaryTileY,
                 WorldGridConstants.LogicalChunkSize,
                 chunkBoundaryColor,
                 chunkBoundaryThicknessInPixels);
@@ -922,30 +949,37 @@ namespace Farmware.WorldGeneration.Presentation
         /// <summary>
         /// 指定タイル間隔で縦線と横線を各1回だけ描き、隣接領域の共有辺が重なって濃くなることを防ぎます。
         /// </summary>
-        /// <param name="minimumTileX">描画範囲左端の水平タイル境界座標です。</param>
-        /// <param name="maximumTileX">描画範囲右端の水平タイル境界座標です。</param>
-        /// <param name="minimumTileY">描画範囲下端の垂直タイル境界座標です。</param>
-        /// <param name="maximumTileY">描画範囲上端の垂直タイル境界座標です。</param>
+        /// <param name="minimumTileX">描画範囲左端の水平タイル境界座標です。int最小タイルの外周を含めるため64bitで受け取ります。</param>
+        /// <param name="maximumTileX">描画範囲右端の水平タイル境界座標です。int最大タイルの右辺はint最大値+1になります。</param>
+        /// <param name="minimumTileY">描画範囲下端の垂直タイル境界座標です。int最小タイルの外周を含めるため64bitで受け取ります。</param>
+        /// <param name="maximumTileY">描画範囲上端の垂直タイル境界座標です。int最大タイルの上辺はint最大値+1になります。</param>
         /// <param name="intervalInTiles">1、16、64のいずれかとなる境界間隔です。</param>
         /// <param name="lineColor">この階層の境界へ使用する色です。</param>
         /// <param name="lineThicknessInPixels">画面上での境界線の太さです。</param>
         private void DrawGridLines(
-            int minimumTileX,
-            int maximumTileX,
-            int minimumTileY,
-            int maximumTileY,
+            long minimumTileX,
+            long maximumTileX,
+            long minimumTileY,
+            long maximumTileY,
             int intervalInTiles,
             Color lineColor,
             float lineThicknessInPixels)
         {
-            // 負座標でも0方向へ丸めず、表示範囲以下で最も近い正規境界から開始します。
-            int firstBoundaryTileX = WorldGrid.FloorDivide(minimumTileX, intervalInTiles) * intervalInTiles;
-            int firstBoundaryTileY = WorldGrid.FloorDivide(minimumTileY, intervalInTiles) * intervalInTiles;
+            long firstBoundaryTileX = CalculateFirstGridBoundary(minimumTileX, intervalInTiles);
+            long firstBoundaryTileY = CalculateFirstGridBoundary(minimumTileY, intervalInTiles);
+            long verticalLineCount = CalculateGridBoundaryCount(
+                minimumTileX,
+                maximumTileX,
+                intervalInTiles);
+            long horizontalLineCount = CalculateGridBoundaryCount(
+                minimumTileY,
+                maximumTileY,
+                intervalInTiles);
 
-            for (int boundaryTileX = firstBoundaryTileX;
-                boundaryTileX <= maximumTileX;
-                boundaryTileX += intervalInTiles)
+            // 回数を先に64bitで確定し、最終境界を描いた後の加算がint反対端へ周回する無限ループを防ぎます。
+            for (long lineIndex = 0; lineIndex < verticalLineCount; lineIndex++)
             {
+                long boundaryTileX = firstBoundaryTileX + (lineIndex * intervalInTiles);
                 DrawWorldLine(
                     CellBoundaryToWorld(boundaryTileX, minimumTileY),
                     CellBoundaryToWorld(boundaryTileX, maximumTileY),
@@ -953,16 +987,59 @@ namespace Farmware.WorldGeneration.Presentation
                     lineThicknessInPixels);
             }
 
-            for (int boundaryTileY = firstBoundaryTileY;
-                boundaryTileY <= maximumTileY;
-                boundaryTileY += intervalInTiles)
+            for (long lineIndex = 0; lineIndex < horizontalLineCount; lineIndex++)
             {
+                long boundaryTileY = firstBoundaryTileY + (lineIndex * intervalInTiles);
                 DrawWorldLine(
                     CellBoundaryToWorld(minimumTileX, boundaryTileY),
                     CellBoundaryToWorld(maximumTileX, boundaryTileY),
                     lineColor,
                     lineThicknessInPixels);
             }
+        }
+
+        /// <summary>
+        /// 指定範囲へ一定間隔で描くグリッド境界線の本数を64bitで計算します。
+        /// F4の回帰テストからも使用し、int座標端でも有限回で終了することを保証します。
+        /// </summary>
+        /// <param name="minimumTileBoundary">描画範囲の最小タイル境界です。</param>
+        /// <param name="maximumTileBoundary">描画範囲の最大タイル境界です。包含境界として数えます。</param>
+        /// <param name="intervalInTiles">境界線同士の間隔です。1以上を指定します。</param>
+        /// <returns>最小値以下の直近境界から最大値までに含まれる線数です。無効範囲または間隔なら0です。</returns>
+        public static long CalculateGridBoundaryCount(
+            long minimumTileBoundary,
+            long maximumTileBoundary,
+            int intervalInTiles)
+        {
+            if (intervalInTiles <= 0 || minimumTileBoundary > maximumTileBoundary)
+            {
+                return 0L;
+            }
+
+            long firstBoundary = CalculateFirstGridBoundary(
+                minimumTileBoundary,
+                intervalInTiles);
+            return ((maximumTileBoundary - firstBoundary) / intervalInTiles) + 1L;
+        }
+
+        /// <summary>
+        /// 負座標でも0方向へ丸めず、指定位置以下で最も近い正規グリッド境界を求めます。
+        /// </summary>
+        /// <param name="tileBoundaryCoordinate">境界を探す基準となる64bitタイル境界座標です。</param>
+        /// <param name="intervalInTiles">1、16、64などの正の境界間隔です。</param>
+        /// <returns>指定位置以下にある、間隔の整数倍となる境界座標です。</returns>
+        private static long CalculateFirstGridBoundary(
+            long tileBoundaryCoordinate,
+            int intervalInTiles)
+        {
+            long quotient = tileBoundaryCoordinate / intervalInTiles;
+            long remainder = tileBoundaryCoordinate % intervalInTiles;
+            if (remainder < 0L)
+            {
+                quotient--;
+            }
+
+            return quotient * intervalInTiles;
         }
 
         /// <summary>
@@ -1061,14 +1138,27 @@ namespace Farmware.WorldGeneration.Presentation
         /// <summary>
         /// タイルセル境界の整数座標を、GridのTransformとセル寸法を考慮したワールド座標へ変換します。
         /// </summary>
-        /// <param name="tileX">水平タイル境界座標です。</param>
-        /// <param name="tileY">垂直タイル境界座標です。</param>
+        /// <param name="tileX">水平タイル境界座標です。int最大タイルの右辺となるint最大値+1も受け取れます。</param>
+        /// <param name="tileY">垂直タイル境界座標です。int最大タイルの上辺となるint最大値+1も受け取れます。</param>
         /// <returns>地形平面上のワールド座標です。</returns>
-        private Vector3 CellBoundaryToWorld(int tileX, int tileY)
+        private Vector3 CellBoundaryToWorld(long tileX, long tileY)
         {
+            DisplayOrigin displayOrigin = GetCurrentDisplayOrigin();
+            RelativeCellCoordinate relativeCell = new RelativeCellCoordinate(
+                tileX - displayOrigin.AbsoluteTileCoordinate.x,
+                tileY - displayOrigin.AbsoluteTileCoordinate.y);
+            if (relativeCell.X < int.MinValue
+                || relativeCell.X > int.MaxValue
+                || relativeCell.Y < int.MinValue
+                || relativeCell.Y > int.MaxValue)
+            {
+                return new Vector3(float.PositiveInfinity, float.PositiveInfinity, 0f);
+            }
+
             return targetGrid == null
-                ? new Vector3(tileX, tileY, 0f)
-                : targetGrid.CellToWorld(new Vector3Int(tileX, tileY, 0));
+                ? new Vector3((int)relativeCell.X, (int)relativeCell.Y, 0f)
+                : targetGrid.CellToWorld(
+                    new Vector3Int((int)relativeCell.X, (int)relativeCell.Y, 0));
         }
 
         /// <summary>
@@ -1079,8 +1169,20 @@ namespace Farmware.WorldGeneration.Presentation
         /// <returns>カメラ前方へ投影できた場合はtrueです。</returns>
         private bool TryWorldToGuiPoint(Vector3 worldPoint, out Vector2 guiPoint)
         {
+            // 表示原点からint範囲を超えて離れた診断マーカーは画面外なので、InfinityをCamera APIへ渡さず省略します。
+            if (!float.IsFinite(worldPoint.x)
+                || !float.IsFinite(worldPoint.y)
+                || !float.IsFinite(worldPoint.z))
+            {
+                guiPoint = default;
+                return false;
+            }
+
             Vector3 viewportPoint = targetCamera.WorldToViewportPoint(worldPoint);
-            if (viewportPoint.z <= 0f)
+            if (!float.IsFinite(viewportPoint.x)
+                || !float.IsFinite(viewportPoint.y)
+                || !float.IsFinite(viewportPoint.z)
+                || viewportPoint.z <= 0f)
             {
                 guiPoint = default;
                 return false;
@@ -1129,6 +1231,20 @@ namespace Farmware.WorldGeneration.Presentation
                 maximumTileY = Mathf.CeilToInt(Mathf.Max(bottomLeftWorld.y, topRightWorld.y)) - 1;
             }
 
+            DisplayOrigin displayOrigin = GetCurrentDisplayOrigin();
+            minimumTileX = AddDisplayOriginSaturated(
+                minimumTileX,
+                displayOrigin.AbsoluteTileCoordinate.x);
+            maximumTileX = AddDisplayOriginSaturated(
+                maximumTileX,
+                displayOrigin.AbsoluteTileCoordinate.x);
+            minimumTileY = AddDisplayOriginSaturated(
+                minimumTileY,
+                displayOrigin.AbsoluteTileCoordinate.y);
+            maximumTileY = AddDisplayOriginSaturated(
+                maximumTileY,
+                displayOrigin.AbsoluteTileCoordinate.y);
+
             ChunkCoordinate minimumChunk = WorldGrid.ToChunkCoordinate(minimumTileX, minimumTileY);
             ChunkCoordinate maximumChunk = WorldGrid.ToChunkCoordinate(maximumTileX, maximumTileY);
             return new VisibleGridBounds(
@@ -1140,6 +1256,41 @@ namespace Farmware.WorldGeneration.Presentation
                 maximumChunk.X,
                 minimumChunk.Y,
                 maximumChunk.Y);
+        }
+
+        /// <summary>
+        /// 現在のCameraが共有する表示原点を返します。旧SceneでControllerがない場合だけ絶対原点へフォールバックします。
+        /// </summary>
+        /// <returns>ローカルセル(0, 0)へ対応する絶対タイル座標です。</returns>
+        private DisplayOrigin GetCurrentDisplayOrigin()
+        {
+            return cameraPanController == null
+                ? new DisplayOrigin(int2.zero)
+                : cameraPanController.CurrentDisplayOrigin;
+        }
+
+        /// <summary>
+        /// 表示用の相対タイルへ1軸分の表示原点を加え、int世界端では飽和した絶対座標を返します。
+        /// </summary>
+        /// <param name="relativeTileCoordinate">表示原点から数えた相対タイル座標です。</param>
+        /// <param name="displayOriginCoordinate">同じ軸の絶対表示原点です。</param>
+        /// <returns>F3・F4が参照する絶対タイル座標です。</returns>
+        private static int AddDisplayOriginSaturated(
+            int relativeTileCoordinate,
+            int displayOriginCoordinate)
+        {
+            long absoluteCoordinate = (long)relativeTileCoordinate + displayOriginCoordinate;
+            if (absoluteCoordinate < int.MinValue)
+            {
+                return int.MinValue;
+            }
+
+            if (absoluteCoordinate > int.MaxValue)
+            {
+                return int.MaxValue;
+            }
+
+            return (int)absoluteCoordinate;
         }
 
         /// <summary>

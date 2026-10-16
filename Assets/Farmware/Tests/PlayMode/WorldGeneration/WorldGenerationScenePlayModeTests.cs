@@ -8,6 +8,7 @@ using Farmware.WorldGeneration.Presentation;
 using NUnit.Framework;
 using Unity.Collections;
 using Unity.Entities;
+using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.Rendering.Universal;
@@ -158,6 +159,89 @@ namespace Farmware.WorldGeneration.PlayModeTests
         }
 
         /// <summary>
+        /// 通常移動相当の大きな相対座標を準備し、MAP-02Bでは表示原点を自動変更せずObserverがその絶対範囲を要求することを保証します。
+        /// </summary>
+        [Test]
+        public void NormalCameraMovement_DoesNotChangeDisplayOriginOrAbsoluteChunkBounds()
+        {
+            GameObject gridObject = null;
+            GameObject cameraObject = null;
+
+            try
+            {
+                gridObject = new GameObject("Display Origin Test Grid");
+                Grid grid = gridObject.AddComponent<Grid>();
+
+                cameraObject = new GameObject("Display Origin Test Camera");
+                cameraObject.SetActive(false);
+                cameraObject.transform.position = new Vector3(0f, 0f, -10f);
+                Camera camera = cameraObject.AddComponent<Camera>();
+                camera.orthographic = true;
+                camera.orthographicSize = 16f;
+                camera.aspect = 1f;
+                CameraPanController panController =
+                    cameraObject.AddComponent<CameraPanController>();
+                CameraChunkStreamingBridge bridge =
+                    cameraObject.AddComponent<CameraChunkStreamingBridge>();
+                cameraObject.SetActive(true);
+
+                FieldInfo targetGridField = typeof(CameraChunkStreamingBridge).GetField(
+                    "targetGrid",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                MethodInfo calculateVisibleChunkBounds =
+                    typeof(CameraChunkStreamingBridge).GetMethod(
+                        "CalculateVisibleChunkBounds",
+                        BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.That(targetGridField, Is.Not.Null);
+                Assert.That(calculateVisibleChunkBounds, Is.Not.Null);
+                targetGridField.SetValue(bridge, grid);
+
+                // 4チャンクを越える相対位置へ通常移動しても、MAP-02Dまで表示原点とGridは固定します。
+                panController.SetWorldPosition(new Vector2(544.5f, 32.5f));
+                ChunkStreamingObserver bounds = (ChunkStreamingObserver)
+                    calculateVisibleChunkBounds.Invoke(bridge, null);
+
+                Assert.That(
+                    panController.CurrentDisplayOrigin.AbsoluteTileCoordinate,
+                    Is.EqualTo(int2.zero),
+                    "通常移動だけで表示原点を変更してはいけません。");
+                Assert.That(
+                    grid.transform.localPosition,
+                    Is.EqualTo(Vector3.zero),
+                    "通常移動でWorld Gridへ一時オフセットを設定してはいけません。");
+                Assert.That(cameraObject.transform.position.x, Is.EqualTo(544.5f));
+                Assert.That(cameraObject.transform.position.y, Is.EqualTo(32.5f));
+                Assert.That(
+                    bounds.MinimumVisibleChunkX,
+                    Is.EqualTo(8));
+                Assert.That(
+                    bounds.MaximumVisibleChunkX,
+                    Is.EqualTo(8));
+                Assert.That(
+                    bounds.MinimumVisibleChunkY,
+                    Is.EqualTo(0));
+                Assert.That(
+                    bounds.MaximumVisibleChunkY,
+                    Is.EqualTo(0));
+                Assert.That(
+                    panController.GetAbsoluteWorldPosition(),
+                    Is.EqualTo(new double2(544.5d, 32.5d)));
+            }
+            finally
+            {
+                if (cameraObject != null)
+                {
+                    Object.DestroyImmediate(cameraObject);
+                }
+
+                if (gridObject != null)
+                {
+                    Object.DestroyImmediate(gridObject);
+                }
+            }
+        }
+
+        /// <summary>
         /// 現在の負座標と記録済み初期スポーンを準備し、F3文字列が両者を混同せずタイル・チャンク座標として表示することを保証します。
         /// </summary>
         [Test]
@@ -170,7 +254,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
             };
 
             string text = WorldGridDebugOverlay.BuildCoordinateHudText(
-                new Vector3(5.5f, -2.5f, -10f),
+                new double2(5.5d, -2.5d),
                 new Vector3Int(5, -3, 0),
                 true,
                 spawnLocation,
@@ -203,7 +287,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
         public void BuildCoordinateHudText_SearchFailedShowsSceneCameraFallback()
         {
             string text = WorldGridDebugOverlay.BuildCoordinateHudText(
-                new Vector3(123.5f, -45.25f, -10f),
+                new double2(123.5d, -45.25d),
                 new Vector3Int(123, -46, 0),
                 false,
                 default,
@@ -541,7 +625,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 cameraObject = new GameObject("World Recreation Initial Camera");
                 cameraObject.SetActive(false);
                 cameraObject.AddComponent<Camera>();
-                cameraObject.AddComponent<CameraPanController>();
+                CameraPanController panController =
+                    cameraObject.AddComponent<CameraPanController>();
                 InitialCameraPositionController positionController =
                     cameraObject.AddComponent<InitialCameraPositionController>();
                 cameraObject.SetActive(true);
@@ -552,8 +637,9 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Assert.That(positionUpdate, Is.Not.Null);
 
                 positionUpdate.Invoke(positionController, null);
-                Assert.That(cameraObject.transform.position.x, Is.EqualTo(2.5f));
-                Assert.That(cameraObject.transform.position.y, Is.EqualTo(3.5f));
+                Assert.That(
+                    panController.GetAbsoluteWorldPosition(),
+                    Is.EqualTo(new double2(2.5d, 3.5d)));
 
                 // Componentを無効化せずWorldだけを切り替え、以前の完了フラグが新Worldの適用を妨げないことを確認します。
                 World.DefaultGameObjectInjectionWorld = secondWorld;
@@ -561,8 +647,13 @@ namespace Farmware.WorldGeneration.PlayModeTests
 
                 Assert.That(positionController.HasCompletedInitialPositioning, Is.True);
                 Assert.That(positionController.HasAppliedInitialPosition, Is.True);
-                Assert.That(cameraObject.transform.position.x, Is.EqualTo(-4.5f));
-                Assert.That(cameraObject.transform.position.y, Is.EqualTo(7.5f));
+                Assert.That(
+                    panController.GetAbsoluteWorldPosition(),
+                    Is.EqualTo(new double2(-4.5d, 7.5d)));
+                Assert.That(
+                    panController.CurrentDisplayOrigin.AbsoluteTileCoordinate,
+                    Is.EqualTo(new int2(-64, 0)),
+                    "負座標の初期スポーンでも0方向ではなく床方向のチャンク境界を表示原点にしてください。");
             }
             finally
             {
@@ -1606,10 +1697,10 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     initialCameraWorldPosition = new Vector2(
                         initialSpawnLocation.TileX + 0.5f,
                         initialSpawnLocation.TileY + 0.5f);
-                    Vector3Int spawnCell = new Vector3Int(
+                    Vector3Int spawnCell = ToDisplayCell(
                         initialSpawnLocation.TileX,
                         initialSpawnLocation.TileY,
-                        0);
+                        cameraPanController.CurrentDisplayOrigin);
 
                     if (initialPositionController.HasAppliedInitialPosition
                         && TryGetActiveCompleteChunk(
@@ -1623,6 +1714,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                             world.EntityManager,
                             originalChunkEntity,
                             initialSpawnChunk,
+                            cameraPanController.CurrentDisplayOrigin,
                             resourceTilemap,
                             resourceBehindRockWallTilemap,
                             out originalResourceCell))
@@ -1639,6 +1731,10 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 initialLoadCompleted,
                 Is.True,
                 $"{MaximumWaitFrames}フレーム以内に初回生成と表示が完了しませんでした。");
+            int2 initialDisplayOrigin =
+                cameraPanController.CurrentDisplayOrigin.AbsoluteTileCoordinate;
+            int originalResourceAbsoluteTileX = initialDisplayOrigin.x + originalResourceCell.x;
+            int originalResourceAbsoluteTileY = initialDisplayOrigin.y + originalResourceCell.y;
 
             // 一体型岩壁が存在するセルを実際の表示結果から探し、同じ論理セルに土地ブロックも残る二段構成を保証します。
             // TransformとPivotだけを検査すると、Presenterが岩壁を書き忘れてもテストが通るため、Tilemapの内容まで確認します。
@@ -1665,25 +1761,32 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 foundDisplayedRockWall,
                 Is.True,
                 "初回表示範囲に一体型岩壁が1枚もなく、二段構成を実表示で検証できませんでした。");
+            double2 initialAbsoluteCameraPosition =
+                cameraPanController.GetAbsoluteWorldPosition();
             Assert.That(
-                cameraPanController.transform.position.x,
-                Is.EqualTo(initialCameraWorldPosition.x).Within(0.00001f),
-                "カメラX座標が記録済み初期スポーンタイル中央と一致しません。");
+                initialAbsoluteCameraPosition.x,
+                Is.EqualTo(initialCameraWorldPosition.x).Within(0.00001d),
+                "表示原点を加えた絶対Camera X座標が記録済み初期スポーン中央と一致しません。");
             Assert.That(
-                cameraPanController.transform.position.y,
-                Is.EqualTo(initialCameraWorldPosition.y).Within(0.00001f),
-                "カメラY座標が記録済み初期スポーンタイル中央と一致しません。");
+                initialAbsoluteCameraPosition.y,
+                Is.EqualTo(initialCameraWorldPosition.y).Within(0.00001d),
+                "表示原点を加えた絶対Camera Y座標が記録済み初期スポーン中央と一致しません。");
 
             // 初期移動後も通常カメラ操作は16 PPUへ丸まり、テスト後は記録済みスポーンへ正確に戻せることを確認します。
-            cameraPanController.SetWorldPosition(
-                initialCameraWorldPosition + new Vector2(0.1f, -0.1f));
+            cameraPanController.SetAbsoluteWorldPosition(
+                initialCameraWorldPosition.x + 0.1d,
+                initialCameraWorldPosition.y - 0.1d);
+            double2 movedAbsoluteCameraPosition =
+                cameraPanController.GetAbsoluteWorldPosition();
             Assert.That(
-                cameraPanController.transform.position.x,
-                Is.EqualTo(initialCameraWorldPosition.x + 0.125f).Within(0.00001f));
+                movedAbsoluteCameraPosition.x,
+                Is.EqualTo(initialCameraWorldPosition.x + 0.125d).Within(0.00001d));
             Assert.That(
-                cameraPanController.transform.position.y,
-                Is.EqualTo(initialCameraWorldPosition.y - 0.125f).Within(0.00001f));
-            cameraPanController.SetWorldPosition(initialCameraWorldPosition);
+                movedAbsoluteCameraPosition.y,
+                Is.EqualTo(initialCameraWorldPosition.y - 0.125d).Within(0.00001d));
+            cameraPanController.SetAbsoluteWorldPosition(
+                initialCameraWorldPosition.x,
+                initialCameraWorldPosition.y);
 
             // 正式なセーブ互換運用前は生成調整のたびに番号を増やさず、Sceneの初期バージョンを1へ固定します。
             WorldGenerationSettings runtimeGenerationSettings =
@@ -1729,7 +1832,9 @@ namespace Farmware.WorldGeneration.PlayModeTests
             ChunkCoordinate farCameraChunk = WorldGrid.ToChunkCoordinate(
                 Mathf.FloorToInt(farCameraWorldPosition.x),
                 Mathf.FloorToInt(farCameraWorldPosition.y));
-            cameraPanController.SetWorldPosition(farCameraWorldPosition);
+            cameraPanController.SetAbsoluteWorldPosition(
+                farCameraWorldPosition.x,
+                farCameraWorldPosition.y);
             bool farLoadCompleted = false;
             for (int frame = 0; frame < MaximumWaitFrames; frame++)
             {
@@ -1737,25 +1842,33 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     chunkQuery,
                     initialSpawnChunk.X,
                     initialSpawnChunk.Y);
-                bool originalTileWasCleared = tilemap.GetTile(
-                    new Vector3Int(
-                        initialSpawnLocation.TileX,
-                        initialSpawnLocation.TileY,
-                        0)) == null;
-                bool originalResourceWasCleared =
-                    resourceTilemap.GetTile(originalResourceCell) == null
-                    && resourceBehindRockWallTilemap.GetTile(originalResourceCell) == null;
                 bool farChunkIsActive = TryGetActiveCompleteChunk(
                     world.EntityManager,
                     chunkQuery,
                     farCameraChunk.X,
                     farCameraChunk.Y,
                     out _);
+                Vector3Int farCameraDisplayCell = ToDisplayCell(
+                    Mathf.FloorToInt(farCameraWorldPosition.x),
+                    Mathf.FloorToInt(farCameraWorldPosition.y),
+                    cameraPanController.CurrentDisplayOrigin);
+                bool farCameraCellIsDisplayed = tilemap.HasTile(farCameraDisplayCell)
+                    || liquidBaseTilemap.HasTile(farCameraDisplayCell);
+                Vector3Int originalResourceDisplayCell = ToDisplayCell(
+                    originalResourceAbsoluteTileX,
+                    originalResourceAbsoluteTileY,
+                    cameraPanController.CurrentDisplayOrigin);
+                bool originalResourceWasCleared =
+                    resourceTilemap.GetTile(originalResourceDisplayCell) == null
+                    && resourceBehindRockWallTilemap.GetTile(originalResourceDisplayCell) == null;
+                bool displayOriginMoved = !cameraPanController.CurrentDisplayOrigin
+                    .AbsoluteTileCoordinate.Equals(initialDisplayOrigin);
 
                 if (originalChunkWasUnloaded
-                    && originalTileWasCleared
-                    && originalResourceWasCleared
-                    && farChunkIsActive)
+                    && displayOriginMoved
+                    && farChunkIsActive
+                    && farCameraCellIsDisplayed
+                    && originalResourceWasCleared)
                 {
                     farLoadCompleted = true;
                     break;
@@ -1770,7 +1883,9 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 $"{MaximumWaitFrames}フレーム以内に遠方チャンクへの切替と原点のアンロードが完了しませんでした。");
 
             // 記録済みスポーンへ戻り、破棄済みEntityに依存せず同じシードから同一タイルデータを再生成できることを確認します。
-            cameraPanController.SetWorldPosition(initialCameraWorldPosition);
+            cameraPanController.SetAbsoluteWorldPosition(
+                initialCameraWorldPosition.x,
+                initialCameraWorldPosition.y);
             bool returnLoadCompleted = false;
             Entity regeneratedChunkEntity = Entity.Null;
             for (int frame = 0; frame < MaximumWaitFrames; frame++)
@@ -1782,10 +1897,10 @@ namespace Farmware.WorldGeneration.PlayModeTests
                         initialSpawnChunk.Y,
                         out regeneratedChunkEntity)
                     && tilemap.GetTile(
-                        new Vector3Int(
+                        ToDisplayCell(
                             initialSpawnLocation.TileX,
                             initialSpawnLocation.TileY,
-                            0)) != null)
+                            cameraPanController.CurrentDisplayOrigin)) != null)
                 {
                     returnLoadCompleted = true;
                     break;
@@ -1842,14 +1957,20 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Is.True,
                 "初期スポーンから2048タイル以内に、液面レイヤーを実表示検証できる水・マグマが見つかりませんでした。");
 
-            cameraPanController.SetWorldPosition(
-                new Vector2(liquidCell.x + 0.5f, liquidCell.y + 0.5f));
+            cameraPanController.SetAbsoluteWorldPosition(
+                liquidCell.x + 0.5d,
+                liquidCell.y + 0.5d);
             bool liquidDisplayCompleted = false;
+            Vector3Int liquidDisplayCell = default;
             for (int frame = 0; frame < MaximumWaitFrames; frame++)
             {
+                liquidDisplayCell = ToDisplayCell(
+                    liquidCell.x,
+                    liquidCell.y,
+                    cameraPanController.CurrentDisplayOrigin);
                 // 静止面とアニメーションが同じ論理セルへそろって初めて、実際の液面表示が完成したと判断します。
-                if (liquidBaseTilemap.HasTile(liquidCell)
-                    && liquidAnimationTilemap.HasTile(liquidCell))
+                if (liquidBaseTilemap.HasTile(liquidDisplayCell)
+                    && liquidAnimationTilemap.HasTile(liquidDisplayCell))
                 {
                     liquidDisplayCompleted = true;
                     break;
@@ -1863,7 +1984,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Is.True,
                 $"液体セル {liquidCell} の静止面とアニメーションが{MaximumWaitFrames}フレーム以内に表示されませんでした。");
             Assert.That(
-                tilemap.HasTile(liquidCell),
+                tilemap.HasTile(liquidDisplayCell),
                 Is.False,
                 $"液体セル {liquidCell} がGround Tilemapにも重複し、元の高さの液面が残っています。");
 
@@ -1994,14 +2115,16 @@ namespace Farmware.WorldGeneration.PlayModeTests
         /// <param name="entityManager">Default WorldのEntityManagerです。</param>
         /// <param name="chunkEntity">検査対象チャンクを表す完全生成済みEntityです。</param>
         /// <param name="chunkCoordinate">ローカルBuffer Indexをワールドセルへ戻す論理チャンク座標です。</param>
+        /// <param name="displayOrigin">絶対ワールドセルをTilemapの相対セルへ変換する現在の表示原点です。</param>
         /// <param name="resourceTilemap">岩壁に隠れない資源を重ね描画するTilemapです。</param>
         /// <param name="resourceBehindRockWallTilemap">直前方の岩壁に隠す資源を描画するTilemapです。</param>
-        /// <param name="resourceCell">成功時に、表示済み資源のワールドセル座標を返します。</param>
+        /// <param name="resourceCell">成功時に、表示済み資源の表示原点基準セル座標を返します。</param>
         /// <returns>配置済み資源が1件以上あり、そのTileが表示済みならtrueです。</returns>
         private static bool TryGetDisplayedResourceCell(
             EntityManager entityManager,
             Entity chunkEntity,
             ChunkCoordinate chunkCoordinate,
+            DisplayOrigin displayOrigin,
             Tilemap resourceTilemap,
             Tilemap resourceBehindRockWallTilemap,
             out Vector3Int resourceCell)
@@ -2019,16 +2142,37 @@ namespace Farmware.WorldGeneration.PlayModeTests
 
                 int localX = tileIndex % WorldGridConstants.LogicalChunkSize;
                 int localY = tileIndex / WorldGridConstants.LogicalChunkSize;
-                resourceCell = new Vector3Int(
+                resourceCell = ToDisplayCell(
                     WorldGrid.ToWorldTileX(chunkCoordinate.X, localX),
                     WorldGrid.ToWorldTileY(chunkCoordinate.Y, localY),
-                    0);
+                    displayOrigin);
                 return resourceTilemap.GetTile(resourceCell) != null
                     || resourceBehindRockWallTilemap.GetTile(resourceCell) != null;
             }
 
             resourceCell = default;
             return false;
+        }
+
+        /// <summary>
+        /// Simulationの絶対タイル座標を、現在の表示原点を差し引いたTilemapセルへ変換します。
+        /// </summary>
+        /// <param name="absoluteTileX">Simulationが保持する絶対水平タイル座標です。</param>
+        /// <param name="absoluteTileY">Simulationが保持する絶対垂直タイル座標です。</param>
+        /// <param name="displayOrigin">Tilemapローカルセル(0, 0)へ対応する絶対タイル座標です。</param>
+        /// <returns>GameビューのTilemapへ実際に書き込まれる相対セル座標です。</returns>
+        private static Vector3Int ToDisplayCell(
+            int absoluteTileX,
+            int absoluteTileY,
+            DisplayOrigin displayOrigin)
+        {
+            RelativeCellCoordinate relativeCell =
+                WorldCoordinateConversion.ToRelativeCellCoordinate(
+                    new int2(absoluteTileX, absoluteTileY),
+                    displayOrigin);
+            Assert.That(relativeCell.X, Is.InRange((long)int.MinValue, int.MaxValue));
+            Assert.That(relativeCell.Y, Is.InRange((long)int.MinValue, int.MaxValue));
+            return new Vector3Int((int)relativeCell.X, (int)relativeCell.Y, 0);
         }
 
         /// <summary>

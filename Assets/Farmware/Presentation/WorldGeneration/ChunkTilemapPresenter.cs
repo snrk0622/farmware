@@ -4,6 +4,7 @@
 using System.Collections.Generic;
 using Unity.Collections;
 using Unity.Entities;
+using Unity.Mathematics;
 using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -66,6 +67,10 @@ namespace Farmware.WorldGeneration.Presentation
         // 岩壁上面の外周と内角へ境界線を重ね、側面や通常土地の表示から分離する専用Tilemapです。
         [Tooltip("岩壁上面の境界ハイライト専用Tilemapです。Transform Yを12/16セル上げ、岩壁より前へ描画してください。")]
         [SerializeField] private Tilemap rockWallBoundaryHighlightTilemap;
+
+        // Cameraと全Tilemapで共有する表示原点を提供します。Tilemapセルへ絶対座標を直接書かないために使用します。
+        [Tooltip("CameraとTilemapで共有する表示原点の所有者です。未指定時は絶対原点(0, 0)を使用します。")]
+        [SerializeField] private CameraPanController cameraPanController;
 
         // 草原Biomeの土地へ使用するTileです。プレイヤー表示にはSoilTypeを反映せず、バイオームの識別だけに使います。
         [Tooltip("草原バイオームの土地に表示するTileです。SoilTypeによる見た目の差は付けません。")]
@@ -246,6 +251,12 @@ namespace Farmware.WorldGeneration.Presentation
         // 正式なTileアセットが設定されている場合は作成せず、このComponentが作成した場合だけOnDestroyで破棄します。
         private Tile generatedFreshWaterFallbackTile;
 
+        // 現在Tilemapセルと岩壁影Meshの配置に使用している表示原点です。Camera側の変更検出と旧セル消去に使います。
+        private DisplayOrigin presentedDisplayOrigin;
+
+        // presentedDisplayOriginを初期化済みか示し、絶対原点(0, 0)自体も有効値として区別します。
+        private bool hasPresentedDisplayOrigin;
+
         /// <summary>
         /// Editor構築ツールまたはテストから、地形・資源TilemapとBiomeごとの基準Tileをまとめて設定します。
         /// ゲームルールは変更せず、ECSのBiomeをどのTileで見せるかだけを更新します。
@@ -366,6 +377,15 @@ namespace Farmware.WorldGeneration.Presentation
             {
                 RebuildBoundaryHighlightTiles();
             }
+        }
+
+        /// <summary>
+        /// Editor構築ツールまたはテストから、Cameraと全Tilemapが共有する表示原点の所有者を設定します。
+        /// </summary>
+        /// <param name="panController">絶対座標から分離した表示原点を保持するCamera Controllerです。</param>
+        public void ConfigureDisplayOrigin(CameraPanController panController)
+        {
+            cameraPanController = panController;
         }
 
         /// <summary>
@@ -548,8 +568,12 @@ namespace Farmware.WorldGeneration.Presentation
                     || resourceTilemap == null
                     || resourceBehindRockWallTilemap == null
                     || landBoundaryHighlightTilemap == null
-                    || rockWallBoundaryHighlightTilemap == null
-                    || !TryEnsureQueries())
+                    || rockWallBoundaryHighlightTilemap == null)
+                {
+                    return;
+                }
+
+                if (!TryEnsureQueries())
                 {
                     return;
                 }
@@ -559,13 +583,65 @@ namespace Farmware.WorldGeneration.Presentation
                     return;
                 }
 
+                bool displayOriginChanged = SynchronizeDisplayOrigin();
                 ChunkStreamingObserver observer = observerQuery.GetSingleton<ChunkStreamingObserver>();
                 CollectPresentationWork(observer);
 
-                int remainingBudget = GetSubChunkBudget();
+                // 初期スポーンや明示的な絶対移動で原点が変わった場合は、旧相対セルを残さないよう全反映します。
+                // 通常移動はMAP-02Bで原点を変更しないため、この無制限予算は明示的な位置変更時だけ使用します。
+                int remainingBudget = displayOriginChanged
+                    ? int.MaxValue
+                    : GetSubChunkBudget();
                 remainingBudget = ProcessClearQueue(remainingBudget);
                 ProcessApplyQueue(remainingBudget);
             }
+        }
+
+        /// <summary>
+        /// Camera側の表示原点変更を検出し、旧相対セルを消去して新しい原点で再収集できる状態へ戻します。
+        /// </summary>
+        /// <returns>表示済み内容を伴う原点変更があり、即時消去を行った場合はtrueです。</returns>
+        private bool SynchronizeDisplayOrigin()
+        {
+            DisplayOrigin currentOrigin = cameraPanController == null
+                ? new DisplayOrigin(int2.zero)
+                : cameraPanController.CurrentDisplayOrigin;
+            if (!hasPresentedDisplayOrigin)
+            {
+                presentedDisplayOrigin = currentOrigin;
+                hasPresentedDisplayOrigin = true;
+                return false;
+            }
+
+            if (DisplayOriginsAreEqual(presentedDisplayOrigin, currentOrigin))
+            {
+                return false;
+            }
+
+            bool hadPresentedContent = displayedCoordinates.Count > 0
+                || applyProgressByCoordinate.Count > 0
+                || pendingClearCoordinates.Count > 0
+                || rockWallShadowByCoordinate.Count > 0;
+            if (hadPresentedContent)
+            {
+                // 明示的なテレポートでは旧原点のセルを残さず、同じUpdate内で新原点側を再構築します。
+                ClearAllPresentedChunksImmediately();
+            }
+
+            presentedDisplayOrigin = currentOrigin;
+            return hadPresentedContent;
+        }
+
+        /// <summary>
+        /// 2つの表示原点が同じ絶対タイルをローカルセル(0, 0)へ対応させるか比較します。
+        /// </summary>
+        /// <param name="left">現在Tilemapへ使用中の表示原点です。</param>
+        /// <param name="right">Cameraが現在提供している表示原点です。</param>
+        /// <returns>水平・垂直の両座標が一致する場合はtrueです。</returns>
+        private static bool DisplayOriginsAreEqual(DisplayOrigin left, DisplayOrigin right)
+        {
+            return left.AbsoluteTileCoordinate.x == right.AbsoluteTileCoordinate.x
+                && left.AbsoluteTileCoordinate.y == right.AbsoluteTileCoordinate.y;
         }
 
         /// <summary>
@@ -1111,7 +1187,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="coordinate">親となる論理チャンク座標です。</param>
         /// <param name="subChunkIndex">行優先の0〜15サブチャンク番号です。</param>
         /// <returns>Z=0平面にある16×16×1セルの範囲です。</returns>
-        private static BoundsInt CreateSubChunkBounds(ChunkCoordinate coordinate, int subChunkIndex)
+        private BoundsInt CreateSubChunkBounds(ChunkCoordinate coordinate, int subChunkIndex)
         {
             int subChunkX = subChunkIndex % WorldGridConstants.SubChunksPerAxis;
             int subChunkY = subChunkIndex / WorldGridConstants.SubChunksPerAxis;
@@ -1122,9 +1198,22 @@ namespace Farmware.WorldGeneration.Presentation
                 coordinate.Y,
                 subChunkY * WorldGridConstants.SubChunkSize);
 
+            RelativeCellCoordinate relativeCell =
+                WorldCoordinateConversion.ToRelativeCellCoordinate(
+                    new int2(worldTileX, worldTileY),
+                    presentedDisplayOrigin);
+            if (relativeCell.X < int.MinValue
+                || relativeCell.X > int.MaxValue
+                || relativeCell.Y < int.MinValue
+                || relativeCell.Y > int.MaxValue)
+            {
+                throw new System.InvalidOperationException(
+                    $"表示原点から離れ過ぎたチャンクをTilemapへ配置できません: Chunk=({coordinate.X}, {coordinate.Y}), Relative=({relativeCell.X}, {relativeCell.Y})");
+            }
+
             return new BoundsInt(
-                worldTileX,
-                worldTileY,
+                (int)relativeCell.X,
+                (int)relativeCell.Y,
                 0,
                 WorldGridConstants.SubChunkSize,
                 WorldGridConstants.SubChunkSize,
@@ -1166,7 +1255,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="localTileY">読み取る垂直チャンク内座標です。境界外の値も許可します。</param>
         /// <param name="tiles">中心チャンクの4096件の生成済み地形Bufferです。</param>
         /// <param name="generationSettings">境界外セルを同じ結果へ再生成する設定です。</param>
-        /// <returns>指定ワールド座標の最終的なGeneratedTileです。</returns>
+        /// <returns>有効域内では指定座標の生成地形、ワールド外では土地・岩壁へ接続しない表示専用の水域値です。</returns>
         private static GeneratedTile GetGeneratedTile(
             ChunkCoordinate coordinate,
             int localTileX,
@@ -1183,8 +1272,19 @@ namespace Farmware.WorldGeneration.Presentation
                 return tiles[WorldGrid.ToTileIndex(localTileX, localTileY)];
             }
 
-            int worldTileX = WorldGrid.ToWorldTileX(coordinate.X, localTileX);
-            int worldTileY = WorldGrid.ToWorldTileY(coordinate.Y, localTileY);
+            if (!WorldGrid.TryToWorldTileCoordinate(
+                    coordinate.X,
+                    coordinate.Y,
+                    localTileX,
+                    localTileY,
+                    out int worldTileX,
+                    out int worldTileY))
+            {
+                // intワールドの外側には地形が存在しません。水域を表示専用の非接続値として使うことで、
+                // 土地と岩壁のどちらにも接続せず、資源を存在しない前面岩壁の背後へ隠しません。
+                return new GeneratedTile { Ground = GroundType.Water };
+            }
+
             return DeterministicChunkGenerator.GenerateTile(
                 generationSettings,
                 worldTileX,
@@ -1367,7 +1467,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="neighborLocalY">隣接セルの垂直チャンク内座標です。影マスク生成時は探索余白まで範囲外になります。</param>
         /// <param name="tiles">同じチャンクの生成済み地形Bufferです。</param>
         /// <param name="generationSettings">境界外セルの決定論的生成設定です。</param>
-        /// <returns>対象隣接セルが岩壁ならtrueです。</returns>
+        /// <returns>対象隣接セルが有効域内の岩壁ならtrue、ワールド外または岩壁以外ならfalseです。</returns>
         private static bool IsRockWallNeighbor(
             ChunkCoordinate coordinate,
             int neighborLocalX,
@@ -1385,8 +1485,18 @@ namespace Farmware.WorldGeneration.Presentation
                 return tiles[neighborIndex].Ground == GroundType.RockWall;
             }
 
-            int worldTileX = WorldGrid.ToWorldTileX(coordinate.X, neighborLocalX);
-            int worldTileY = WorldGrid.ToWorldTileY(coordinate.Y, neighborLocalY);
+            if (!WorldGrid.TryToWorldTileCoordinate(
+                    coordinate.X,
+                    coordinate.Y,
+                    neighborLocalX,
+                    neighborLocalY,
+                    out int worldTileX,
+                    out int worldTileY))
+            {
+                // ワールド外を岩壁として扱うと端の影が閉じて見えるため、存在しない隣接セルは空地側として扱います。
+                return false;
+            }
+
             return DeterministicChunkGenerator.IsRockWall(
                 generationSettings,
                 worldTileX,
@@ -1411,8 +1521,27 @@ namespace Farmware.WorldGeneration.Presentation
             int opacitySize = WorldGridConstants.LogicalChunkSize + 2;
             int worldMinimumX = WorldGrid.ToWorldTileX(coordinate.X, 0);
             int worldMinimumY = WorldGrid.ToWorldTileY(coordinate.Y, 0);
-            Vector3 meshOrigin = targetTilemap.CellToLocal(
-                new Vector3Int(worldMinimumX, worldMinimumY, 0));
+
+            // Simulationの絶対チャンク座標を現在の表示原点からの相対セルへ戻し、Tilemapと同じ位置へ影を重ねます。
+            // 変換結果は64bitになり得るため、UnityのVector3Intへ狭める前に範囲を検証します。
+            RelativeCellCoordinate relativeMinimumCoordinate =
+                WorldCoordinateConversion.ToRelativeCellCoordinate(
+                    new int2(worldMinimumX, worldMinimumY),
+                    presentedDisplayOrigin);
+            if (relativeMinimumCoordinate.X < int.MinValue
+                || relativeMinimumCoordinate.X > int.MaxValue
+                || relativeMinimumCoordinate.Y < int.MinValue
+                || relativeMinimumCoordinate.Y > int.MaxValue)
+            {
+                throw new System.InvalidOperationException(
+                    $"表示原点から離れ過ぎた岩壁影を配置できません: Chunk=({coordinate.X}, {coordinate.Y}), Relative=({relativeMinimumCoordinate.X}, {relativeMinimumCoordinate.Y})");
+            }
+
+            Vector3Int relativeMinimum = new Vector3Int(
+                (int)relativeMinimumCoordinate.X,
+                (int)relativeMinimumCoordinate.Y,
+                0);
+            Vector3 meshOrigin = targetTilemap.CellToLocal(relativeMinimum);
             byte maximumAlpha = 0;
 
             // 4つのタイル中心を共有頂点へ平均し、MeshRendererの三角形補間でタイル内部の段差を消します。
@@ -1438,8 +1567,8 @@ namespace Farmware.WorldGeneration.Presentation
 
                     Vector3 cellCorner = targetTilemap.CellToLocal(
                         new Vector3Int(
-                            worldMinimumX + vertexX,
-                            worldMinimumY + vertexY,
+                            relativeMinimum.x + vertexX,
+                            relativeMinimum.y + vertexY,
                             0));
                     rockWallShadowVertexBuffer[vertexIndex] = cellCorner - meshOrigin;
                     rockWallShadowColorBuffer[vertexIndex] = new Color32(0, 0, 0, alpha);

@@ -54,9 +54,17 @@ namespace Farmware.WorldGeneration
                 int retentionMargin = math.max(0, settings.RetentionMarginInChunks);
                 int maximumConcurrentGenerations = math.max(1, settings.MaximumConcurrentGenerations);
 
-                ChunkBounds visibleBounds = ChunkBounds.FromObserver(observer);
-                ChunkBounds preloadBounds = visibleBounds.Expanded(preloadMargin);
-                ChunkBounds retentionBounds = preloadBounds.Expanded(retentionMargin);
+                // Observerを直接書き込む別Presentationが将来増えても、生成Systemへ不正なチャンク座標を渡さないよう、
+                // Camera側ではなくストリーミング境界で可視・先読み・保持の全範囲を有効なタイル座標域へ収めます。
+                ChunkBounds visibleBounds = ChunkBounds
+                    .FromObserver(observer)
+                    .ClampedToWorldTileDomain();
+                ChunkBounds preloadBounds = visibleBounds
+                    .Expanded(preloadMargin)
+                    .ClampedToWorldTileDomain();
+                ChunkBounds retentionBounds = preloadBounds
+                    .Expanded(retentionMargin)
+                    .ClampedToWorldTileDomain();
 
                 // 前フレームの生成Jobが状態を書き終えるまで待ちます。ここはチャンク寿命を変更する境界であり、
                 // 書き込み中のEntityを破棄しないために必要な明示的同期点です。
@@ -391,6 +399,32 @@ namespace Farmware.WorldGeneration
                     SaturatingAdd(MaximumX, margin),
                     SaturatingSubtract(MinimumY, margin),
                     SaturatingAdd(MaximumY, margin));
+            }
+
+            /// <summary>
+            /// 各辺を、64×64の全タイルをint絶対座標へ安全に変換できる論理チャンク範囲へ収めます。
+            /// 可視範囲の外へ先読み・保持余白を加えたときも、反対側のint端へ周回した地形を要求させないために使います。
+            /// </summary>
+            /// <returns>ワールドタイル座標へ安全に変換できる4辺を持つ包含矩形です。</returns>
+            public ChunkBounds ClampedToWorldTileDomain()
+            {
+                return new ChunkBounds(
+                    math.clamp(
+                        MinimumX,
+                        WorldGridConstants.MinimumLogicalChunkCoordinate,
+                        WorldGridConstants.MaximumLogicalChunkCoordinate),
+                    math.clamp(
+                        MaximumX,
+                        WorldGridConstants.MinimumLogicalChunkCoordinate,
+                        WorldGridConstants.MaximumLogicalChunkCoordinate),
+                    math.clamp(
+                        MinimumY,
+                        WorldGridConstants.MinimumLogicalChunkCoordinate,
+                        WorldGridConstants.MaximumLogicalChunkCoordinate),
+                    math.clamp(
+                        MaximumY,
+                        WorldGridConstants.MinimumLogicalChunkCoordinate,
+                        WorldGridConstants.MaximumLogicalChunkCoordinate));
             }
 
             /// <summary>
