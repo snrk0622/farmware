@@ -1,0 +1,19 @@
+{
+  "name": "Farmware.Tests.EditMode",
+  "rootNamespace": "Farmware.Tests.EditMode",
+  "references": [
+    "Farmware.Simulation",
+    "Farmware.Input",
+    "Farmware.Presentation",
+    "Farmware.Authoring",
+    "Unity.Collections",
+    "Unity.Entities"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ],
+  "autoReferenced": false
+}

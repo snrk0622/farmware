@@ -3,15 +3,17 @@
 
 using Unity.Burst;
 using Unity.Entities;
+using Farmware.Simulation;
 
 namespace Farmware.WorldGeneration
 {
     /// <summary>
     /// 有効なChunkGenerationRequestを持つチャンクだけを生成し、同じ座標の地形と資源を対応付けるECS Systemです。
     /// 完了後は要求を無効化し、生成済みの大量チャンクを毎フレーム再走査しないようにします。
+    /// FarmwareSimulationSystemGroupでストリーミング要求の後に動き、固定Tickのゲームルールからは独立します。
     /// </summary>
     [BurstCompile]
-    [UpdateInGroup(typeof(SimulationSystemGroup))]
+    [UpdateInGroup(typeof(FarmwareSimulationSystemGroup))]
     [UpdateAfter(typeof(ChunkStreamingSystem))]
     public partial struct ChunkGenerationSystem : ISystem
     {

@@ -2,6 +2,7 @@
   "name": "Farmware.WorldGeneration.Runtime",
   "rootNamespace": "Farmware.WorldGeneration",
   "references": [
+    "Farmware.Simulation",
     "Unity.Burst",
     "Unity.Collections",
     "Unity.Entities",

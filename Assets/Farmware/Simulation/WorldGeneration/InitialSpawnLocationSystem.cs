@@ -6,6 +6,7 @@ using Unity.Collections;
 using Unity.Entities;
 using Unity.Jobs;
 using UnityEngine;
+using Farmware.Simulation;
 
 namespace Farmware.WorldGeneration
 {
@@ -25,8 +26,9 @@ namespace Farmware.WorldGeneration
     /// <summary>
     /// ワールド設定の準備後に、木・石・水が近い12×8建設可能領域を非同期で探します。
     /// 探索結果をInitialSpawnSearchStatusへ記録し、成功時はInitialSpawnLocation Singletonも1つだけ作成します。
+    /// FarmwareInitializationSystemGroupへ所属し、通常のSimulation更新が始まる前に初期状態を確定します。
     /// </summary>
-    [UpdateInGroup(typeof(InitializationSystemGroup))]
+    [UpdateInGroup(typeof(FarmwareInitializationSystemGroup))]
     public partial struct InitialSpawnLocationSystem : ISystem
     {
         // 0は未開始、1はJob実行中、2は完了です。毎フレーム同じ広域探索を再実行しないために保持します。
