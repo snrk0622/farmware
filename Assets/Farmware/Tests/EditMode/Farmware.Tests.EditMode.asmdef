@@ -6,8 +6,10 @@
     "Farmware.Input",
     "Farmware.Presentation",
     "Farmware.Authoring",
+    "Unity.Burst",
     "Unity.Collections",
-    "Unity.Entities"
+    "Unity.Entities",
+    "Unity.Mathematics"
   ],
   "includePlatforms": [
     "Editor"
