@@ -5,7 +5,7 @@
 
 ## 1. 用途
 
-自動テストは、ワールド生成の決定性、チャンク境界、地形分類、ECS System、Sceneと表示の接続が、修正によって壊れていないことを短時間で検出するために使用する。
+自動テストは、共通Assemblyの依存方向、ECS Systemの更新境界、ワールド生成の決定性、チャンク境界、地形分類、Sceneと表示の接続が、修正によって壊れていないことを短時間で検出するために使用する。
 地形バランスや見た目の良さを自動テストだけで決定せず、[Unity Editorツール](./EditorTools.md)とGameビューの確認を組み合わせる。
 
 ## 2. 実行方法
@@ -20,7 +20,13 @@ Unity Editorを開いたまま外部プロセスから同じプロジェクト�
 
 ## 3. 現在のテスト構成
 
-### 3.1 EditMode: `Farmware.WorldGeneration.Tests`
+### 3.1 EditMode: `Farmware.Tests.EditMode`
+
+#### `SystemGroupBoundaryTests`
+
+`Farmware.Simulation`、`Farmware.Input`、`Farmware.Presentation`、`Farmware.Authoring`の直接参照をUnityのコンパイル情報から検査し、Simulationへの一方向依存を保証する。各境界型が意図したAssemblyへコンパイルされること、共通Initialization／Simulation／Presentation Groupが対応するUnity標準Groupへ1回だけ所属すること、`Farmware.Tests.EditMode`がPlayer向けコンパイルから除外されることも検証する。
+
+### 3.2 EditMode: `Farmware.WorldGeneration.Tests`
 
 #### `WorldGenerationTests`
 
@@ -37,7 +43,7 @@ Unity Editorを開いたまま外部プロセスから同じプロジェクト�
 | 地形配置属性 | 陸地は通常設備＋通常ベルト、水は橋、マグマは橋＋耐熱必須、岩壁と未知IDは配置不可になることを純粋計算で保証する。 |
 | 資源 | 地形適性、最低間隔、群生半径、競合解決、決定性を保証する。 |
 | 建築可能領域・初期スポーン | 地形を上書きせず、必要面積と資源条件を満たす地点を決定論的に記録する。初期位置用設定が3×3未満の領域を拒否し、記録された中心周囲9セルがすべて通常設備建築可能であることも検証する。探索Job実行中に既存地点が現れた場合も、Job完了後に一時結果を解放してSingletonを二重作成しないことを保証する。 |
-| ECS生成・ストリーミング | 生成要求、同時生成上限、範囲外キャンセル、保持、非表示化、再有効化を保証する。 |
+| ECS生成・ストリーミング | 生成要求、同時生成上限、範囲外キャンセル、保持、非表示化、再有効化を保証する。初期スポーン、チャンク要求、チャンク生成がUnity標準Groupへ直接所属せず、用途に対応するFarmware共通Groupを使うことも確認する。 |
 
 `EquipmentBuildableRegionLocator_OneThousandSeedsFindDefaultRegion`は、狭い既定探索を1,000シードで調べる通常回帰テストである。
 `EquipmentBuildableRegionLocator_OneHundredSeedSoakTest`は、最大17×17チャンクの資源探索を100シードで行うため`Explicit`指定された負荷テストであり、通常の修正確認では自動実行しない。
@@ -76,7 +82,7 @@ Sprite Packer ModeがV2であること、土地Atlasが7バイオームの本番
 
 `Build Fallback Map Prototype`の対話メニューについて、保存確認をキャンセルした場合は構築を開始しないこと、構築成功後は退避したScene構成を復元すること、構築中に例外が発生しても復元後に例外を呼び出し元へ返すことを保証する。実際のSceneやアセットは変更せず、保存確認、構築、復元をDelegateで差し替えて制御フローだけをEditModeで検証する。
 
-### 3.2 PlayMode: `Farmware.WorldGeneration.PlayModeTests`
+### 3.3 PlayMode: `Farmware.WorldGeneration.PlayModeTests`
 
 #### `WorldGenerationScenePlayModeTests`
 
@@ -104,7 +110,7 @@ Sprite Packer ModeがV2であること、土地Atlasが7バイオームの本番
 | Base地形の固定Biome割り当て | 本番用横一列シートのSprite名・並び順・16×24 Slice・Pivotと、各Tileが同名Spriteを参照することを検証するEditModeテスト。正負座標、原点、16×16サブチャンク境界、64×64チャンク境界、Seed変更、チャンクの生成・ロード順変更でも論理Biomeに対応する同じTileを選ぶことを確認する | 各Biomeが1種類のBase Tileで安定して表示され、カメラ往復後も別BiomeのTileへ入れ替わらないことをGameビューで確認 |
 | 本番用岩壁の固定割り当て | 本番PNGが16×28 px、PPU 16、Point、Mip Maps Off、Compression None、Full Rect、Pivot Y `8/28`であること、専用Tile、`RockWallAtlas`、SampleSceneが同じ本番Spriteを参照すること、Editor構築ツールの再実行後もFallback参照へ戻らないことをEditMode／PlayModeテストで保証する | 連続岩壁の側面遮蔽、12 px持ち上げた上面・内部影・資源・境界ハイライトの整列、水・マグマに面した下層土地断面、にじみ、チャンク境界の透明な隙間と位置ずれをGameビューで確認する。上面の大きな菱形模様がセル単位で反復することと、側面12 pxが境界線や層理のない一色面であることは意図したデザインとして合格扱いにする |
 | Scene、SubScene、Authoring、Baker、参照 | SampleScene縦切りPlayModeテストとMap Viewerテスト | Scene内のMissing参照確認 |
-| asmdef、パッケージ、プラットフォーム条件 | 影響するEditModeとPlayMode Assembly | Playerビルドへの混入確認 |
+| asmdef、Assembly依存方向、System Group、パッケージ、プラットフォーム条件 | `SystemGroupBoundaryTests`と、影響するEditMode／PlayMode Assembly | PlayerビルドへのEditor専用Assembly混入確認 |
 | 地形配置共通API | 通常設備・通常ベルト・非耐熱橋・耐熱橋と、陸地・水域・マグマ・岩壁の全16組、耐熱不足理由、未指定・未定義の配置対象、不整合な属性、入力値の不変性を扱う`TerrainPlacementRulesTests` | `Terrain Placement`の4色、凡例、中央HUDの`Allowed`・`Blocked`・`Heat Required`をGameビューで確認 |
 | 複数タイル設備、ベルト、橋 | 占有、回転、接続方向、分岐・合流、詰まり、地形配置可否、単体・範囲配置と撤去の即時反映、同種既設物の無償再利用、資材不足または配置不可セルがある場合に一部だけ建築されないことを扱うEditModeテスト。橋の種類名や素材名に依存せず、耐熱性を持つ代表定義と持たない代表定義を使い、水域では両方、マグマでは耐熱性を持つ定義だけ、岩壁と通常地面では両方を拒否するマトリクスを保証する | 再利用セル、問題セル、耐熱性不足の理由、総必要数・在庫数・不足数のプレビュー、範囲保持と再確定、ドローン演出を待たず操作できること、操作プロトタイプ、Gameビュー、Profiler |
 | 搬送アイテムと遠隔工場 | ベルト上の1枠1個制約、FIFO、混載、在庫内の品目別数量集約、液体アイテムの通常搬送、固定Tick境界での個別・集計状態変換、同一入力に対する生産量・消費量・在庫・詰まり・進捗・コア到着Tickの等価性、等価性を保証できない物流網の個別処理継続を扱うECSテスト | カメラ距離を往復した際の搬送順序と表示復元、長時間の遠隔稼働、セーブ・ロード、1,000／10,000／100,000件でのProfiler比較 |

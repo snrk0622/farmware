@@ -1,0 +1,11 @@
+{
+  "name": "Farmware.Authoring",
+  "rootNamespace": "Farmware.Authoring",
+  "references": [
+    "Farmware.Simulation",
+    "Unity.Collections",
+    "Unity.Entities",
+    "Unity.Entities.Hybrid"
+  ],
+  "autoReferenced": false
+}

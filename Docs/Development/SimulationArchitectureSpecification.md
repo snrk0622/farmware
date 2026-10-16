@@ -1,7 +1,7 @@
 # Farmware シミュレーション技術仕様 v0.1
 
 - 作成日: 2026-10-14
-- 最終更新日: 2026-10-15
+- 最終更新日: 2026-10-16
 - 状態: 設備・物流・施設実装前の基盤仕様
 - 対象環境: Unity 6000.3.8f1、Entities 1.5.0
 - 関連仕様: [ゲームコンセプト](../GameSpecification/2026-10-11_casual_factory_concept_v0.1.md)
@@ -13,6 +13,30 @@
 本書は、設備、ベルト、搬送アイテム、施設、遠隔工場、建築編集、セーブを後から別方式へ全面移行しないために、実装前に固定する技術上の境界を定める。ゲームルールとプレイヤー体験はゲーム仕様を正とし、具体的なTickレート、速度、容量、Job分割数、読み込み距離などの調整値はプロトタイプと計測後に決定する。
 
 SimulationのECS状態をゲーム状態の正とする。InputとUIはCommandを渡し、PresentationはSimulationの結果だけを読み取る。GameObject、Transform、Tilemap、表示用Spriteを生産、物流、施設、保存状態の正にしない。
+
+### 1.1 Assembly境界と依存方向
+
+共通コードは次のAssemblyへ分離し、機能別Assemblyから用途に対応する共通Assemblyを明示参照する。共通Assemblyは`autoReferenced: false`とし、参照を必要とするAssemblyだけが依存を宣言する。
+
+| Assembly | 責務 | 参照できるFarmware共通Assembly |
+| --- | --- | --- |
+| `Farmware.Simulation` | ECS Component、System、更新順、ゲーム状態の正 | なし |
+| `Farmware.Input` | 入力をSimulation Commandへ変換する境界 | `Farmware.Simulation` |
+| `Farmware.Presentation` | Simulation結果の描画、補間、音声 | `Farmware.Simulation` |
+| `Farmware.Authoring` | MonoBehaviour、Baker、設定アセット | `Farmware.Simulation` |
+| `Farmware.Tests.EditMode` | 共通境界とSystem順序のEditorテスト | 検証対象となる上記4 Assembly |
+
+`Input`、`Presentation`、`Authoring`は互いを直接参照せず、`Simulation`からこれらへ逆参照しない。機能別Assemblyでは、例えば`Farmware.WorldGeneration.Runtime`から`Farmware.Simulation`、`Farmware.WorldGeneration.Presentation`から`Farmware.Presentation`を参照する。既存のカメラ移動入力はゲーム状態を変更しない表示操作なのでWorldGeneration Presentationに残し、建築や設定変更などのゲームルール入力は今後`Farmware.Input`からCommandとして渡す。
+
+ECSの共通ルートGroupは次のとおりとする。
+
+| 共通Group | Unity標準の親Group | 用途 |
+| --- | --- | --- |
+| `FarmwareInitializationSystemGroup` | `InitializationSystemGroup` | Singleton準備、初期探索などSimulation更新前の初期化 |
+| `FarmwareSimulationSystemGroup` | `SimulationSystemGroup` | フレーム単位のSimulation側準備、ストリーミング、結果確定 |
+| `FarmwarePresentationSystemGroup` | `PresentationSystemGroup` | Simulation結果の描画・音声への反映 |
+
+`FarmwareSimulationSystemGroup`の更新回数はゲーム内時間の正ではない。固定Tickで進める生産、物流、動物などは`SIM-01B`で追加する子Groupへ所属させる。カメラ可視範囲に応じたチャンク要求と地形生成は表示ストリーミング用のフレーム駆動処理であり、固定Tickのゲームルールへ含めない。
 
 ## 2. 固定Tickと決定論
 

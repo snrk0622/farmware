@@ -2,6 +2,7 @@
   "name": "Farmware.WorldGeneration.Presentation",
   "rootNamespace": "Farmware.WorldGeneration.Presentation",
   "references": [
+    "Farmware.Presentation",
     "Farmware.WorldGeneration.Runtime",
     "Unity.Collections",
     "Unity.Entities",

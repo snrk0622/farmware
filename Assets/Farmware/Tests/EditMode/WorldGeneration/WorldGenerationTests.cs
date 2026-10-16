@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using Farmware.Simulation;
 using NUnit.Framework;
 using Unity.Entities;
 
@@ -15,6 +16,24 @@ namespace Farmware.WorldGeneration.Tests
     /// </summary>
     public sealed class WorldGenerationTests
     {
+        /// <summary>
+        /// ワールド生成SystemのUpdateInGroup属性を読み、Unity標準Groupへ直接ぶら下がらずFarmware共通Groupを使うことを保証します。
+        /// 初期探索とフレーム駆動のチャンク処理を、後続の固定Tickゲームルールと混同しないための境界テストです。
+        /// </summary>
+        [Test]
+        public void WorldGenerationSystems_UseFarmwareCommonGroups()
+        {
+            AssertSystemUpdatesInGroup(
+                typeof(InitialSpawnLocationSystem),
+                typeof(FarmwareInitializationSystemGroup));
+            AssertSystemUpdatesInGroup(
+                typeof(ChunkStreamingSystem),
+                typeof(FarmwareSimulationSystemGroup));
+            AssertSystemUpdatesInGroup(
+                typeof(ChunkGenerationSystem),
+                typeof(FarmwareSimulationSystemGroup));
+        }
+
         /// <summary>
         /// 正負の境界タイルを準備し、床方向除算で期待するチャンク座標とローカル座標になることを検証します。
         /// </summary>
@@ -39,6 +58,25 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(chunk.Y, Is.EqualTo(expectedChunk));
             Assert.That(local.X, Is.EqualTo(expectedLocal));
             Assert.That(local.Y, Is.EqualTo(expectedLocal));
+        }
+
+        /// <summary>
+        /// 指定SystemのUpdateInGroup属性を取得し、期待するFarmware共通Groupへ1回だけ所属していることを確認します。
+        /// </summary>
+        /// <param name="systemType">所属先を確認するワールド生成System型です。</param>
+        /// <param name="expectedGroupType">期待するFarmware共通System Group型です。</param>
+        private static void AssertSystemUpdatesInGroup(Type systemType, Type expectedGroupType)
+        {
+            object[] attributes = systemType.GetCustomAttributes(
+                typeof(UpdateInGroupAttribute),
+                false);
+
+            Assert.That(
+                attributes,
+                Has.Length.EqualTo(1),
+                $"{systemType.Name}には共通親Groupを1件だけ指定してください。");
+            UpdateInGroupAttribute updateInGroup = (UpdateInGroupAttribute)attributes[0];
+            Assert.That(updateInGroup.GroupType, Is.EqualTo(expectedGroupType));
         }
 
         /// <summary>

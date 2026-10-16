@@ -1,0 +1,11 @@
+{
+  "name": "Farmware.Input",
+  "rootNamespace": "Farmware.Input",
+  "references": [
+    "Farmware.Simulation",
+    "Unity.Collections",
+    "Unity.Entities",
+    "Unity.InputSystem"
+  ],
+  "autoReferenced": false
+}

@@ -1,0 +1,10 @@
+{
+  "name": "Farmware.Presentation",
+  "rootNamespace": "Farmware.Presentation",
+  "references": [
+    "Farmware.Simulation",
+    "Unity.Collections",
+    "Unity.Entities"
+  ],
+  "autoReferenced": false
+}

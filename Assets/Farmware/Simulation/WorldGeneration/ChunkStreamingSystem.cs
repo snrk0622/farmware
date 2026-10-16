@@ -5,14 +5,16 @@ using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
 using Unity.Profiling;
+using Farmware.Simulation;
 
 namespace Farmware.WorldGeneration
 {
     /// <summary>
     /// 可視矩形の近くに必要なチャンクEntityを作り、遠ざかった再生成可能データを破棄するECS Systemです。
     /// カメラ中心に近い座標から要求することで、生成予算が小さい場合も画面中央を優先します。
+    /// FarmwareSimulationSystemGroupで描画フレームごとに動き、固定Tickのゲーム内時間は進めません。
     /// </summary>
-    [UpdateInGroup(typeof(SimulationSystemGroup))]
+    [UpdateInGroup(typeof(FarmwareSimulationSystemGroup))]
     [UpdateBefore(typeof(ChunkGenerationSystem))]
     public partial struct ChunkStreamingSystem : ISystem
     {
@@ -39,7 +41,7 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>
-        /// 毎Simulation更新で可視・先読み・保持の各矩形を評価し、必要最小限の構造変更をまとめて適用します。
+        /// 毎Farmware Simulation更新で可視・先読み・保持の各矩形を評価し、必要最小限の構造変更をまとめて適用します。
         /// </summary>
         /// <param name="state">SystemのQuery、依存関係、Worldへアクセスする状態です。</param>
         public void OnUpdate(ref SystemState state)

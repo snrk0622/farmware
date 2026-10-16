@@ -49,7 +49,7 @@ PR系列の実行順は「2. 全体状況」の番号を正とし、同じ系列
 | 0 | MAP-00 決定論的ワールド生成基盤 | ✅ 実装済み | 7バイオーム、基礎地形、土壌、木・石・砂、ストリーミング、可視化 |
 | 1 | ART-00 バイオーム地形の本番表示 | ✅ 実装済み | 本番用土地・岩壁と土地・岩壁境界ハイライトを適用 |
 | 2 | MAP-01 地形契約と開始領域 | ✅ 実装済み | 地形配置属性、設備建築可能領域、3×3コア開始範囲、共通配置APIを実装済み |
-| 3 | SIM-01 固定Tick・ID・定義・Command | ⬜ 未実装 | 全ゲームシステムの共通Simulation境界 |
+| 3 | SIM-01 固定Tick・ID・定義・Command | 🟨 一部実装 | Assembly境界と共通System Groupを実装済み。固定Tick、ID、定義、Commandは未実装 |
 | 4 | MAP-02 Floating Originとストリーミング | ⬜ 未実装 | 遠方座標でも表示・入力・生成が安定 |
 | 5 | ANIMAL-01 ワールド動物基盤 | ⬜ 未実装 | 動物が決定論的に生成され、移動・表示される |
 | 6 | MAP-03 ワールド保存 | ⬜ 未実装 | Seed、初期地点、動物、変更チャンクを永続化 |
@@ -197,14 +197,16 @@ PR系列の実行順は「2. 全体状況」の番号を正とし、同じ系列
 
 ## 4. 共通シミュレーション基盤
 
-### 大項目 SIM-01: 固定Tick・ID・定義・Command基盤 — ⬜ 未実装
+### 大項目 SIM-01: 固定Tick・ID・定義・Command基盤 — 🟨 一部実装
 
-- [ ] **PR SIM-01A Assembly境界**: Simulation、Input、Presentation、Authoring、TestsのAssembly境界と共通System Groupを追加する。
+- [x] **PR SIM-01A Assembly境界**: Simulation、Input、Presentation、Authoring、TestsのAssembly境界と共通System Groupを追加する。
 - [ ] **PR SIM-01B 固定Tick**: `ulong` Simulation Tick、一時停止、最大追いつき回数を持つ固定Tick基盤と決定論テストを追加する。
 - [ ] **PR SIM-01C 永続ID**: ワールド内`ulong`永続IDの発行、非再利用、保存・復元境界とテストを追加する。
 - [ ] **PR SIM-01D 定義GUID**: アイテム、設備、施設、レシピ、動物種用の128bit定義GUID、Baker、Blob Asset、重複・参照切れ検証を追加する。
 - [ ] **PR SIM-01E Command Queue**: Command受付番号、検証、Commit、失敗時無変更を扱う共通Command QueueとSystem順序テストを追加する。
 - [ ] **PR SIM-01F 状態ハッシュ**: 状態ハッシュ検証器と、同一Command列を異なるJob条件で実行する決定論テスト基盤を追加する。
+
+`SIM-01A`では、`Farmware.Simulation`、`Farmware.Input`、`Farmware.Presentation`、`Farmware.Authoring`、`Farmware.Tests.EditMode`の明示的なAssembly境界と、Initialization／Simulation／Presentationの共通ルートSystem Groupを追加した。既存ワールド生成の初期探索とチャンクストリーミングは用途に対応する共通Groupへ移し、将来の固定Tickゲームルールとは分離した。2026-10-16に、UnityコンパイルとConsoleのエラー・警告が0件、EditMode 134件とPlayMode 25件が成功し、既存の明示実行用負荷テスト1件だけを通常実行から除外した。Assemblyと更新順だけの変更で画面表示やゲーム挙動を変更しないため、追加のGameビュー目視項目はない。
 
 大項目完了条件:
 

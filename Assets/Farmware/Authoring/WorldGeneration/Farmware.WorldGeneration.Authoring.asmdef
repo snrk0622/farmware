@@ -2,6 +2,7 @@
   "name": "Farmware.WorldGeneration.Authoring",
   "rootNamespace": "Farmware.WorldGeneration.Authoring",
   "references": [
+    "Farmware.Authoring",
     "Farmware.WorldGeneration.Runtime",
     "Unity.Collections",
     "Unity.Entities",
