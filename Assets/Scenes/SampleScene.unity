@@ -624,7 +624,6 @@ MonoBehaviour:
   m_Name:
   m_EditorClassIdentifier: Farmware.WorldGeneration.Presentation::Farmware.WorldGeneration.Presentation.InitialCameraPositionController
   cameraPanController: {fileID: 519420035}
-  targetGrid: {fileID: 1659629450}
 --- !u!1 &619394800
 GameObject:
   m_ObjectHideFlags: 0
@@ -1505,6 +1504,7 @@ MonoBehaviour:
   rockWallResourceTilemap: {fileID: 1923410986}
   landBoundaryHighlightTilemap: {fileID: 743018148}
   rockWallBoundaryHighlightTilemap: {fileID: 1800664789}
+  cameraPanController: {fileID: 519420035}
   grasslandTile: {fileID: 11400000, guid: 8742ae7a60f7f434f894678fe1add07b, type: 2}
   forestTile: {fileID: 11400000, guid: 7ee287944b9ff4c5087fa64923bb4251, type: 2}
   desertTile: {fileID: 11400000, guid: b642a3ae94175467a93817fae33bf345, type: 2}

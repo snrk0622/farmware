@@ -19,10 +19,6 @@ namespace Farmware.WorldGeneration.Presentation
         [Tooltip("初期スポーン地点へ移動させるCameraPanControllerです。未指定なら同じGameObjectから取得します。")]
         [SerializeField] private CameraPanController cameraPanController;
 
-        // タイル中央をワールド座標へ変換するGridです。地形Tilemapと同じGridを指定します。
-        [Tooltip("初期スポーンの整数タイル座標をワールド中央座標へ変換するGridです。未指定時は1タイルを1 Unity unitとして扱います。")]
-        [SerializeField] private GridLayout targetGrid;
-
         // InitialSpawnLocationを読むQueryが属するWorldです。PlayMode中のWorld再作成を検知するため保持します。
         private World spawnLocationWorld;
 
@@ -57,14 +53,12 @@ namespace Farmware.WorldGeneration.Presentation
         public bool HasCompletedInitialPositioning => hasCompletedInitialPositioning;
 
         /// <summary>
-        /// Editor構築ツールまたはテストから、移動Controllerと地形Gridをまとめて設定します。
+        /// Editor構築ツールまたはテストから、絶対初期位置を相対Camera座標へ変換するControllerを設定します。
         /// </summary>
         /// <param name="panController">初期XY座標とピクセル整列を反映するカメラ移動Controllerです。</param>
-        /// <param name="grid">スポーンタイル中央をワールド座標へ変換するGridです。</param>
-        public void Configure(CameraPanController panController, GridLayout grid)
+        public void Configure(CameraPanController panController)
         {
             cameraPanController = panController;
-            targetGrid = grid;
         }
 
         /// <summary>
@@ -136,31 +130,12 @@ namespace Farmware.WorldGeneration.Presentation
 
             InitialSpawnLocation spawnLocation =
                 spawnLocationQuery.GetSingleton<InitialSpawnLocation>();
-            Vector3 spawnWorldPosition;
-            if (targetGrid == null)
-            {
-                spawnWorldPosition = new Vector3(
-                    spawnLocation.TileX + 0.5f,
-                    spawnLocation.TileY + 0.5f,
-                    0f);
-            }
-            else
-            {
-                Vector3Int spawnCell = new Vector3Int(
-                    spawnLocation.TileX,
-                    spawnLocation.TileY,
-                    0);
-                Vector3 cellMinimum = targetGrid.CellToWorld(spawnCell);
-                Vector3 cellMaximum = targetGrid.CellToWorld(
-                    new Vector3Int(spawnCell.x + 1, spawnCell.y + 1, spawnCell.z));
 
-                // GridLayoutにはGrid.GetCellCenterWorldがないため、対角2点の中点から同じセル中央を求めます。
-                spawnWorldPosition = (cellMinimum + cellMaximum) * 0.5f;
-            }
-
-            // ZはCameraPanControllerが現在値を維持するため、ここではタイル中央のXYだけを渡します。
-            cameraPanController.SetWorldPosition(
-                new Vector2(spawnWorldPosition.x, spawnWorldPosition.y));
+            // 絶対タイルをTransformへ直接書くと遠方でfloat精度を失うため、Controllerへ整数座標のまま渡します。
+            // Controllerは所属チャンク境界を表示原点に選び、Cameraへ小さな相対座標だけを反映します。
+            cameraPanController.SetAbsoluteTileCenter(
+                spawnLocation.TileX,
+                spawnLocation.TileY);
             hasAppliedInitialPosition = true;
             hasCompletedInitialPositioning = true;
         }

@@ -26,7 +26,7 @@
 - 本番用`terrain_rock_wall_01.png`へPoint、PPU 16、Mip Maps Off、Compression None、Full Rect、Pivot Y `8/28`を設定し、専用Tileを作成または更新する。Sprite PivotはSprite Editor Data Provider経由で設定する。
 - 本番用シートからSliceした7枚のBiome土地を同じTextureページへ収める`GroundTerrainAtlas.spriteatlasv2`、本番用岩壁を収める`RockWallAtlas.spriteatlasv2`、14枚の境界ハイライト用`BoundaryHighlightAtlas.spriteatlasv2`を生成または更新し、現在のBuild Target向けにパックする。境界元画像は224×16 pxを左から16×16 pxずつ、Sprite Editor Data Providerで安定名へ分割する。
 - `WorldGenerationSettingsSubScene`へ生成設定のAuthoringを配置する。
-- `SampleScene`へCamera、Grid、Ground・静止液面・液面アニメーション・土地境界・岩壁・岩壁境界・岩壁背面資源・通常前面資源・岩壁上資源の9枚のTilemap、表示用Component、SubScene参照を接続する。静止液面と液面アニメーションは土地より8px下、岩壁境界と岩壁上資源は土地基準面より12px上へ設定する。境界は不透明白PNGへ実行時Tileカラーの不透明度20%を一様に掛ける。GroundとRock WallはIndividual ModeかつTop Left順で描画する。土地境界はOrder 1、岩壁境界はOrder 4とし、通常資源は直前方の岩壁有無からOrder 2の背面用TilemapとOrder 10の前面用Tilemapへ振り分ける。
+- `SampleScene`へCamera、原点固定のGrid、Ground・静止液面・液面アニメーション・土地境界・岩壁・岩壁境界・岩壁背面資源・通常前面資源・岩壁上資源の9枚のTilemap、表示用Component、SubScene参照を接続する。Cameraの`CameraPanController`を全Tilemap Presenterの共通表示原点として接続し、絶対初期位置をTransformへ直接保存しない。通常移動ではCameraの相対座標だけを更新し、Gridと表示原点は変更しない。静止液面と液面アニメーションは土地より8px下、岩壁境界と岩壁上資源は土地基準面より12px上へ設定する。境界は不透明白PNGへ実行時Tileカラーの不透明度20%を一様に掛ける。GroundとRock WallはIndividual ModeかつTop Left順で描画する。土地境界はOrder 1、岩壁境界はOrder 4とし、通常資源は直前方の岩壁有無からOrder 2の背面用TilemapとOrder 10の前面用Tilemapへ振り分ける。
 - Pixel Perfect Cameraの基準解像度480×270を含む、再現可能な確認環境を構築する。
 
 #### 実行後の注意
@@ -42,7 +42,7 @@
 - `WorldGenerationAuthoring`の設定項目、既定値、Baker変換を変更した。
 - バイオーム、地面、水域、マグマ、岩壁、資源の種類またはフォールバック色を変更した。
 - Ground、Liquid Base、Liquid Surface Animation、Land Boundary Highlight、Rock Wall、Rock Wall Boundary Highlight、Resource、Rock Wall ResourceのTilemapレイヤー構成、Transform、描画Mode、Sorting Order、参照関係を変更した。
-- Camera、Pixel Perfect Camera、480×270の基準解像度、黒帯処理を変更した。
+- Camera、Pixel Perfect Camera、共通表示原点、480×270の基準解像度、黒帯処理を変更した。
 - `SampleScene`または`WorldGenerationSettingsSubScene`の生成構成を変更した。
 - 土地・岩壁・境界ハイライトの元Texture、Sprite Slice、Atlas容量、Pixel Art向けAtlas設定を変更した。
 
@@ -51,7 +51,7 @@
 1. Consoleに例外または新規警告が出ていない。
 2. メニュー実行をキャンセルした場合はアセットやSceneが変更されず、実行した場合は成功・失敗のどちらでも元の複数Scene構成、読込状態、Active Sceneへ戻る。
 3. 必要なPNG、Tile、AnimatedTile、Sprite Atlas、`.meta`が揃っている。フォールバック7枚の基準土地上面はBiome基準色一色で、草・葉・砂紋やSoil模様を含まない。本番用`terrain_biomes_base.png`はBiome ID順の7枚へ16×24でSliceされ、旧肥沃・砂質派生14枚は存在せず、7枚の本番土地Spriteが`GroundTerrainAtlas`の同じパック後Textureを参照する。本番用`terrain_rock_wall_01.png`と専用Tileが16×28、Pivot Y `8/28`で同じSpriteを参照し、`RockWallAtlas`へ収録される。境界画像は224×16 pxから安定名の14枚へ分割され、`BoundaryHighlightAtlas`の1ページへ収録される。
-4. SampleSceneとSubSceneの参照がMissingになっていない。
+4. SampleSceneとSubSceneの参照がMissingになっていない。World GridのTransformが原点・無回転・等倍で、Cameraの`CameraPanController`が`ChunkTilemapPresenter`と`InitialCameraPositionController`へ接続されている。
 5. PlayModeで土地が16×24、岩壁が16×28の一体型ブロックとして表示される。土地は論理Biomeだけを反映し、同じBiome内では標準・肥沃・砂質のいずれも同じTileに見える。静止液面と透明アニメーションは同じ8px下、岩壁内部影・露出資源・岩壁境界は12px上へ表示される。土地境界は水・マグマ側だけ、岩壁境界は岩壁領域の外周・内角だけに表示され、Biome間には出ない。境界の不透明度20%がBase Tileへ自然に馴染み、1px輪郭がぼけていない。液体はGround Tilemapへ重複せず、液面下辺と奥側ブロックの断面・側面は手前ブロックに隠れる。直前方が岩壁の通常資源は背面用Tilemapへ入り、それ以外は前面用へ入る。カメラをサブチャンク・チャンク境界へ寄せても境界線や立体Spriteが途中で消えない。
 6. Gameビューの地形描画領域が480×270基準の黒帯内へ収まり、HUDとF4表示も同じ領域を使用する。F3には現在タイルのサブチャンク座標、Biome、GeneratorVersion、16桁16進数のワールドシードが表示される。
 

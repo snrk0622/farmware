@@ -1,4 +1,4 @@
-// このファイルは、2Dカメラの表示範囲を整数の論理チャンク矩形へ変換し、ECSへ入力Commandとして渡します。
+// このファイルは、表示原点基準の2Dカメラ範囲を絶対論理チャンク矩形へ戻し、ECSへ入力Commandとして渡します。
 // カメラやTransformをゲーム状態の正にはせず、ChunkStreamingSystemが参照するObserver Entityだけを更新します。
 
 using Unity.Entities;
@@ -10,6 +10,7 @@ namespace Farmware.WorldGeneration.Presentation
     /// 画面に見えるタイル範囲を毎フレーム確認し、変化したときだけChunkStreamingObserverを更新します。
     /// 2Dカメラへ1つ配置し、任意のGridLayoutを指定するとセルサイズや原点を含めて座標変換できます。
     /// </summary>
+    [DefaultExecutionOrder(-100)]
     [DisallowMultipleComponent]
     public sealed class CameraChunkStreamingBridge : MonoBehaviour
     {
@@ -48,6 +49,9 @@ namespace Farmware.WorldGeneration.Presentation
         // 初期スポーン探索が成功または失敗する前に不要なチャンクを要求しないよう、同じCamera上の初期化状態を参照します。
         private InitialCameraPositionController initialPositionController;
 
+        // CameraとTilemapが共有する表示原点です。同じGameObjectのCameraPanControllerがPresentation寿命中だけ保持します。
+        private CameraPanController cameraPanController;
+
         // このComponentが作成し、OnDisableで破棄するObserver Entityです。セーブ対象にはしません。
         private Entity observerEntity;
 
@@ -74,6 +78,7 @@ namespace Farmware.WorldGeneration.Presentation
             }
 
             initialPositionController = GetComponent<InitialCameraPositionController>();
+            cameraPanController = GetComponent<CameraPanController>();
         }
 
         /// <summary>
@@ -263,11 +268,47 @@ namespace Farmware.WorldGeneration.Presentation
                 maximumTileY = Mathf.CeilToInt(maximumWorldY) - 1;
             }
 
+            DisplayOrigin displayOrigin = cameraPanController == null
+                ? new DisplayOrigin(Unity.Mathematics.int2.zero)
+                : cameraPanController.CurrentDisplayOrigin;
             return CalculateChunkBoundsFromVisibleTileBounds(
-                minimumTileX,
-                maximumTileX,
-                minimumTileY,
-                maximumTileY);
+                AddDisplayOriginSaturated(
+                    minimumTileX,
+                    displayOrigin.AbsoluteTileCoordinate.x),
+                AddDisplayOriginSaturated(
+                    maximumTileX,
+                    displayOrigin.AbsoluteTileCoordinate.x),
+                AddDisplayOriginSaturated(
+                    minimumTileY,
+                    displayOrigin.AbsoluteTileCoordinate.y),
+                AddDisplayOriginSaturated(
+                    maximumTileY,
+                    displayOrigin.AbsoluteTileCoordinate.y));
+        }
+
+        /// <summary>
+        /// 表示用の相対タイル座標へ1軸分の表示原点を加え、絶対タイル座標へ戻します。
+        /// int世界の端を越えるViewport端は端のセルへ飽和させ、符号反転による誤ったチャンク要求を防ぎます。
+        /// </summary>
+        /// <param name="relativeTileCoordinate">表示原点から数えた相対タイル座標です。</param>
+        /// <param name="displayOriginCoordinate">同じ軸の絶対表示原点です。</param>
+        /// <returns>int範囲へ収めた絶対タイル座標です。</returns>
+        private static int AddDisplayOriginSaturated(
+            int relativeTileCoordinate,
+            int displayOriginCoordinate)
+        {
+            long absoluteCoordinate = (long)relativeTileCoordinate + displayOriginCoordinate;
+            if (absoluteCoordinate < int.MinValue)
+            {
+                return int.MinValue;
+            }
+
+            if (absoluteCoordinate > int.MaxValue)
+            {
+                return int.MaxValue;
+            }
+
+            return (int)absoluteCoordinate;
         }
 
         /// <summary>

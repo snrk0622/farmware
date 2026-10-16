@@ -1659,6 +1659,10 @@ namespace Farmware.WorldGeneration.Editor
             subScene.AutoLoadScene = true;
 
             GameObject gridObject = FindOrCreateRoot(mainScene, "World Grid");
+            // Floating OriginではGridのローカルセル(0, 0)を表示原点として扱うため、Transform自体は固定の基準位置へ戻します。
+            gridObject.transform.position = Vector3.zero;
+            gridObject.transform.rotation = Quaternion.identity;
+            gridObject.transform.localScale = Vector3.one;
             Grid grid = GetOrAddComponent<Grid>(gridObject);
             grid.cellSize = Vector3.one;
             grid.cellGap = Vector3.zero;
@@ -1784,7 +1788,9 @@ namespace Farmware.WorldGeneration.Editor
                 boundaryHighlightSprites);
 
             Camera camera = FindMainCamera(mainScene);
-            ConfigureCamera(camera, grid);
+            CameraPanController panController = ConfigureCamera(camera, grid);
+            presenter.ConfigureDisplayOrigin(panController);
+            EditorUtility.SetDirty(presenter);
 
             EditorSceneManager.MarkSceneDirty(mainScene);
             if (!EditorSceneManager.SaveScene(mainScene, MainScenePath))
@@ -1908,11 +1914,12 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>
-        /// Main Cameraへ初期位置、移動、Observer Bridge、Debug Overlay、URP Pixel Perfect Cameraを追加し、16 PPU・480×270の基準へ設定します。
+        /// Main Cameraへ初期位置、表示原点、Observer Bridge、Debug Overlay、URP Pixel Perfect Cameraを追加し、16 PPU・480×270の基準へ設定します。
         /// </summary>
         /// <param name="camera">SampleSceneでMainCameraタグを持つOrthographic Cameraです。</param>
         /// <param name="grid">カメラ範囲を整数セルへ変換するWorld Gridです。</param>
-        private static void ConfigureCamera(Camera camera, Grid grid)
+        /// <returns>Cameraと全Tilemapが共有する表示原点を所有する移動Controllerです。</returns>
+        private static CameraPanController ConfigureCamera(Camera camera, Grid grid)
         {
             camera.orthographic = true;
             camera.orthographicSize = (ReferenceResolutionY / 2f) / AssetsPixelsPerUnit;
@@ -1935,7 +1942,7 @@ namespace Farmware.WorldGeneration.Editor
             // Simulationが記録した初期スポーンタイルを一度だけ読み、通常の移動Controller経由でカメラへ反映します。
             InitialCameraPositionController initialPositionController =
                 GetOrAddComponent<InitialCameraPositionController>(camera.gameObject);
-            initialPositionController.Configure(panController, grid);
+            initialPositionController.Configure(panController);
             EditorUtility.SetDirty(initialPositionController);
 
             CameraChunkStreamingBridge bridge = GetOrAddComponent<CameraChunkStreamingBridge>(camera.gameObject);
@@ -1953,6 +1960,7 @@ namespace Farmware.WorldGeneration.Editor
                 GetOrAddComponent<WorldGenerationDebugVisualizationOverlay>(camera.gameObject);
             developerVisualization.Configure(camera, grid);
             EditorUtility.SetDirty(developerVisualization);
+            return panController;
         }
 
         /// <summary>
@@ -2357,16 +2365,18 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>
-        /// 初期カメラ位置Controllerが、通常移動Controllerと地形Gridの両方を参照しているか確認します。
+        /// 初期カメラ位置Controllerが、絶対初期位置を相対表示へ変換する通常移動Controllerを参照しているか確認します。
         /// </summary>
         /// <param name="controller">保存済みSampleSceneから読み込んだ初期位置Controllerです。</param>
-        /// <returns>必要な2参照がどちらも非nullならtrueです。</returns>
+        /// <returns>CameraPanController参照が非nullならtrueです。</returns>
         private static bool InitialPositionControllerHasAllReferences(
             InitialCameraPositionController controller)
         {
             SerializedObject serializedController = new SerializedObject(controller);
-            return serializedController.FindProperty("cameraPanController").objectReferenceValue != null
-                && serializedController.FindProperty("targetGrid").objectReferenceValue != null;
+            SerializedProperty panControllerProperty =
+                serializedController.FindProperty("cameraPanController");
+            return panControllerProperty != null
+                && panControllerProperty.objectReferenceValue != null;
         }
 
         /// <summary>
@@ -2388,6 +2398,7 @@ namespace Farmware.WorldGeneration.Editor
                 "rockWallResourceTilemap",
                 "landBoundaryHighlightTilemap",
                 "rockWallBoundaryHighlightTilemap",
+                "cameraPanController",
                 "grasslandTile",
                 "forestTile",
                 "desertTile",

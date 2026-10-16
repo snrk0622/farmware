@@ -7,6 +7,7 @@
     "Unity.Collections",
     "Unity.Entities",
     "Unity.InputSystem",
+    "Unity.Mathematics",
     "Unity.RenderPipelines.Universal.2D.Runtime"
   ],
   "autoReferenced": true

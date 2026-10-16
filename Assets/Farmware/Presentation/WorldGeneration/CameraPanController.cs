@@ -1,6 +1,7 @@
-// このファイルは、キーボード入力を見下ろし2Dカメラの移動へ変換し、最終座標をピクセルグリッドへ揃えます。
-// CameraChunkStreamingBridgeは移動後の表示範囲だけをECSへ渡すため、入力やTransformをゲーム状態の正にはしません。
+// このファイルは、キーボード入力を見下ろし2Dカメラの移動へ変換し、表示原点を管理して最終座標をピクセルグリッドへ揃えます。
+// CameraとTilemapは表示原点からの相対座標だけを扱い、CameraChunkStreamingBridgeが絶対タイル座標へ戻してECSへ渡します。
 
+using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -8,8 +9,9 @@ namespace Farmware.WorldGeneration.Presentation
 {
     /// <summary>
     /// WASDまたは矢印キーでカメラを移動し、ドット絵が移動中に揺れないよう1ピクセル単位へ丸めます。
-    /// Main Cameraへ1つ配置し、通常の入力読取はUpdate、最終的なTransform反映はLateUpdateで行います。
+    /// Main Cameraへ1つ配置し、絶対座標から分離した表示原点をCamera、Grid、Tilemapへ共通提供します。
     /// </summary>
+    [DefaultExecutionOrder(-150)]
     [DisallowMultipleComponent]
     [RequireComponent(typeof(Camera))]
     public sealed class CameraPanController : MonoBehaviour
@@ -29,15 +31,32 @@ namespace Farmware.WorldGeneration.Presentation
         [Min(1)]
         [SerializeField] private int pixelsPerUnit = 16;
 
-        // 小さなフレーム移動量を丸めで失わないよう、未丸めの論理カメラ座標をフレーム間で保持します。
-        private Vector3 desiredWorldPosition;
+        // 小さなフレーム移動量を丸めで失わないよう、表示原点からの未丸め相対カメラ座標をフレーム間で保持します。
+        private Vector3 desiredRelativeWorldPosition;
+
+        // 表示空間のローカルセル(0, 0)に対応する絶対タイル座標です。Presentationだけが変更します。
+        private DisplayOrigin currentDisplayOrigin;
+
+        /// <summary>
+        /// 現在の表示空間セル(0, 0)へ対応する絶対タイル座標です。
+        /// CameraChunkStreamingBridgeと全Tilemap Presenterが同じ値を読み、相対表示と絶対Simulation座標を一致させます。
+        /// </summary>
+        public DisplayOrigin CurrentDisplayOrigin => currentDisplayOrigin;
+
+        /// <summary>
+        /// 表示原点から見た、ピクセル整列前のCamera中心XY座標です。単位はタイルです。
+        /// </summary>
+        public Vector2 DesiredRelativeWorldPosition => new Vector2(
+            desiredRelativeWorldPosition.x,
+            desiredRelativeWorldPosition.y);
 
         /// <summary>
         /// Component読み込み直後にUnityから呼ばれ、Sceneへ保存された初期座標を未丸めの移動開始位置にします。
         /// </summary>
         private void Awake()
         {
-            desiredWorldPosition = transform.position;
+            desiredRelativeWorldPosition = transform.position;
+            currentDisplayOrigin = new DisplayOrigin(int2.zero);
         }
 
         /// <summary>
@@ -45,7 +64,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// </summary>
         private void OnEnable()
         {
-            desiredWorldPosition = transform.position;
+            desiredRelativeWorldPosition = transform.position;
         }
 
         /// <summary>
@@ -75,8 +94,10 @@ namespace Farmware.WorldGeneration.Presentation
             bool isFastMovement = keyboard.leftShiftKey.isPressed || keyboard.rightShiftKey.isPressed;
             float speedMultiplier = isFastMovement ? fastMovementMultiplier : 1f;
             float travelDistance = movementSpeedInTilesPerSecond * speedMultiplier * Time.unscaledDeltaTime;
-            desiredWorldPosition.x += movementDirection.x * travelDistance;
-            desiredWorldPosition.y += movementDirection.y * travelDistance;
+            desiredRelativeWorldPosition.x += movementDirection.x * travelDistance;
+            desiredRelativeWorldPosition.y += movementDirection.y * travelDistance;
+
+            ApplyPixelSnappedPosition();
         }
 
         /// <summary>
@@ -89,14 +110,83 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// テレポートやテストから、カメラの論理XY座標を指定して同じフレームにピクセル整列済み位置へ反映します。
+        /// テレポートやテストから、表示原点基準の相対XY座標を指定して同じフレームにピクセル整列済み位置へ反映します。
         /// </summary>
-        /// <param name="worldPosition">移動先のワールドXY座標です。カメラのZ座標は変更しません。</param>
+        /// <param name="worldPosition">移動先の表示用相対ワールドXY座標です。カメラのZ座標は変更しません。</param>
         public void SetWorldPosition(Vector2 worldPosition)
         {
-            desiredWorldPosition.x = worldPosition.x;
-            desiredWorldPosition.y = worldPosition.y;
+            desiredRelativeWorldPosition.x = worldPosition.x;
+            desiredRelativeWorldPosition.y = worldPosition.y;
             ApplyPixelSnappedPosition();
+        }
+
+        /// <summary>
+        /// Simulation上の絶対タイル中央へCameraを移し、同じチャンク境界を新しい表示原点にします。
+        /// 初期スポーンやロード後の復帰で大きな絶対座標をTransformへ直接書かないために使用します。
+        /// </summary>
+        /// <param name="absoluteTileX">移動先セルの絶対水平タイル座標です。</param>
+        /// <param name="absoluteTileY">移動先セルの絶対垂直タイル座標です。</param>
+        public void SetAbsoluteTileCenter(int absoluteTileX, int absoluteTileY)
+        {
+            SetAbsoluteWorldPosition(
+                absoluteTileX + 0.5d,
+                absoluteTileY + 0.5d);
+        }
+
+        /// <summary>
+        /// Simulation上の連続した絶対座標へCameraを移し、Transformへはチャンク境界からの小さな相対値だけを書き込みます。
+        /// </summary>
+        /// <param name="absoluteWorldX">移動先の絶対水平座標です。1タイルを1ワールド単位とします。</param>
+        /// <param name="absoluteWorldY">移動先の絶対垂直座標です。1タイルを1ワールド単位とします。</param>
+        /// <returns>所属タイルがint範囲内で有限値ならtrue、無効な座標なら何も変更せずfalseです。</returns>
+        public bool SetAbsoluteWorldPosition(double absoluteWorldX, double absoluteWorldY)
+        {
+            if (double.IsNaN(absoluteWorldX)
+                || double.IsInfinity(absoluteWorldX)
+                || double.IsNaN(absoluteWorldY)
+                || double.IsInfinity(absoluteWorldY))
+            {
+                return false;
+            }
+
+            double flooredAbsoluteX = System.Math.Floor(absoluteWorldX);
+            double flooredAbsoluteY = System.Math.Floor(absoluteWorldY);
+            if (flooredAbsoluteX < int.MinValue
+                || flooredAbsoluteX > int.MaxValue
+                || flooredAbsoluteY < int.MinValue
+                || flooredAbsoluteY > int.MaxValue)
+            {
+                return false;
+            }
+
+            int absoluteTileX = (int)flooredAbsoluteX;
+            int absoluteTileY = (int)flooredAbsoluteY;
+            int alignedOriginX = WorldGrid.FloorDivide(
+                absoluteTileX,
+                WorldGridConstants.LogicalChunkSize) * WorldGridConstants.LogicalChunkSize;
+            int alignedOriginY = WorldGrid.FloorDivide(
+                absoluteTileY,
+                WorldGridConstants.LogicalChunkSize) * WorldGridConstants.LogicalChunkSize;
+
+            // 原点を先にチャンク境界へそろえ、CameraのTransformへは0〜64付近の相対値だけを渡します。
+            currentDisplayOrigin = new DisplayOrigin(new int2(alignedOriginX, alignedOriginY));
+            desiredRelativeWorldPosition.x = (float)(absoluteWorldX - alignedOriginX);
+            desiredRelativeWorldPosition.y = (float)(absoluteWorldY - alignedOriginY);
+            ApplyPixelSnappedPosition();
+            return true;
+        }
+
+        /// <summary>
+        /// 現在の表示原点と相対Camera位置から、Simulation上の連続した絶対Camera位置を取得します。
+        /// </summary>
+        /// <returns>1タイルを1ワールド単位とする絶対XY座標です。</returns>
+        public double2 GetAbsoluteWorldPosition()
+        {
+            return new double2(
+                currentDisplayOrigin.AbsoluteTileCoordinate.x
+                    + (double)transform.position.x,
+                currentDisplayOrigin.AbsoluteTileCoordinate.y
+                    + (double)transform.position.y);
         }
 
         /// <summary>
@@ -138,9 +228,14 @@ namespace Farmware.WorldGeneration.Presentation
         private void ApplyPixelSnappedPosition()
         {
             int safePixelsPerUnit = Mathf.Max(1, pixelsPerUnit);
-            float snappedX = Mathf.Round(desiredWorldPosition.x * safePixelsPerUnit) / safePixelsPerUnit;
-            float snappedY = Mathf.Round(desiredWorldPosition.y * safePixelsPerUnit) / safePixelsPerUnit;
-            transform.position = new Vector3(snappedX, snappedY, desiredWorldPosition.z);
+            float snappedX = Mathf.Round(desiredRelativeWorldPosition.x * safePixelsPerUnit)
+                / safePixelsPerUnit;
+            float snappedY = Mathf.Round(desiredRelativeWorldPosition.y * safePixelsPerUnit)
+                / safePixelsPerUnit;
+            transform.position = new Vector3(
+                snappedX,
+                snappedY,
+                desiredRelativeWorldPosition.z);
         }
     }
 }

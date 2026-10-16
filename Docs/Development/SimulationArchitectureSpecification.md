@@ -195,11 +195,13 @@ Presentation
 - 画面入力は相対表示座標から整数の絶対タイル座標へ変換してCommandを作る。
 - Floating Originの変更によってワールド生成、施設領域、物流、生産、セーブ結果を変化させない。
 
-表示原点を移動する具体的な距離とTilemap再配置予算は、最大ズームアウトと高速パンの計測後に決定する。
+`MAP-02B`では通常移動中の表示原点変更を行わない。自動Floating Originを開始する距離、TilemapRendererの描画を途切れさせない再配置方式、原点変更フレームの反映予算は、最大ズームアウト、高速パン、遠距離座標のfloat精度を扱う`MAP-02D`で計測して決定する。
 
 `MAP-02A`では、表示空間のローカルセル`(0, 0)`に対応する絶対タイル座標を`DisplayOrigin`として表す。`WorldCoordinateConversion`は、Simulationが保持する`int2`の絶対タイル座標と、表示原点からの2軸64bit`RelativeCellCoordinate`、1タイルを1ワールド単位とする`double2`相対ワールド座標を相互変換する。セル左下は整数座標、セル中心は各軸へ0.5を加えた位置とし、相対ワールド座標から所属セルへ戻す場合は正負とも床方向へ丸める。
 
-絶対座標同士の差は`int`のまま減算せず、`long`へ広げてから計算する。逆変換では表示原点を加えた結果が`int`範囲内であることを先に検証し、NaN、無限大、範囲外を失敗として拒否する。このAPIはCamera、Transform、GridLayout、Tilemapへ依存しない純粋計算とし、表示原点の変更がSimulationの絶対座標、地形生成、初期スポーン、状態ハッシュを変更する経路を持たせない。Cameraと全表示物への適用、原点移動の実行条件、再配置予算は後続PRで接続・計測する。
+絶対座標同士の差は`int`のまま減算せず、`long`へ広げてから計算する。逆変換では表示原点を加えた結果が`int`範囲内であることを先に検証し、NaN、無限大、範囲外を失敗として拒否する。このAPIはCamera、Transform、GridLayout、Tilemapへ依存しない純粋計算とし、表示原点の変更がSimulationの絶対座標、地形生成、初期スポーン、状態ハッシュを変更する経路を持たせない。
+
+`MAP-02B`では`CameraPanController`がPresentation寿命中の`DisplayOrigin`を所有する。World GridのTransformは原点へ固定し、Camera、9枚のTilemap、岩壁内部影Meshは表示原点からの相対座標だけを使用する。初期スポーンと明示的な絶対座標移動は所属チャンク境界を表示原点へ選び、Camera Transformへ0〜64付近の値を渡す。通常のWASD／矢印キー入力はCameraの相対座標だけを更新し、表示原点やWorld Gridを移動しない。Viewportを読む`CameraChunkStreamingBridge`は相対範囲へ現在の表示原点を加算し、ECSの`ChunkStreamingObserver`を絶対チャンク座標に保つ。明示的な絶対座標移動で表示原点が変わった場合、`ChunkTilemapPresenter`は旧相対セルを即時消去し、新しい表示原点で可視チャンクを再構築する。通常移動中の自動Floating Origin、継ぎ目を見せない再配置方式、再配置量の分割やカメラ速度抑制は`MAP-02D`で計測して決める。
 
 ## 10. 実装前後の検証要件
 

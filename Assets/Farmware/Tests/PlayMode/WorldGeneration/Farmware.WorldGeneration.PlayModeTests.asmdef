@@ -6,6 +6,7 @@
     "Farmware.WorldGeneration.Presentation",
     "Unity.Collections",
     "Unity.Entities",
+    "Unity.Mathematics",
     "Unity.RenderPipelines.Universal.2D.Runtime"
   ],
   "optionalUnityReferences": [
