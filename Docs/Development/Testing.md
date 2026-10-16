@@ -36,7 +36,7 @@ Sceneを使わない最小ECS Worldへ描画フレーム相当のDeltaTimeを直
 
 #### `DefinitionCatalogTests`
 
-32桁とハイフン付きのGUID文字列が同じ128bit値へ正規化され、全0と不正文字列を拒否することを検証する。定義入力順に依存せずGUID昇順で1始まりの実行時IDを割り当て、定義間のGUID参照を整数IDへ解決すること、重複GUID、参照切れ、参照先分類不一致、連結されていない参照範囲ではBlob Assetを作成しないことも保証する。テスト内で作成したPersistent Blob Assetは各テストが所有し、終了時にDisposeする。
+32桁とハイフン付きのGUID文字列が同じ128bit値へ正規化され、全0と不正文字列を拒否することを検証する。定義入力順に依存せずGUID昇順で1始まりの実行時IDを割り当て、定義間のGUID参照を整数IDへ解決すること、重複GUID、参照切れ、参照先分類不一致、連結されていない参照範囲ではBlob Assetを作成しないことも保証する。複数定義の参照を平坦化した後も、検証エラーの参照番号はInspector上の定義内添字へ戻す。テスト内で作成したPersistent Blob Assetは各テストが所有し、終了時にDisposeする。
 
 ### 3.2 EditMode: `Farmware.WorldGeneration.Tests`
 

@@ -244,15 +244,26 @@ namespace Farmware.Tests.EditMode
         [Test]
         public void TryBuild_RejectsUnsetReferenceGuidWithoutCreatingCatalog()
         {
+            DefinitionGuid itemGuid = CreateGuid(0x52);
             DefinitionBuildEntry[] definitions =
             {
                 CreateDefinition(
-                    CreateGuid(0x52),
+                    itemGuid,
+                    DefinitionKind.Item,
+                    referenceCount: 1),
+                CreateDefinition(
+                    CreateGuid(0x53),
                     DefinitionKind.Recipe,
-                    referenceCount: 1)
+                    referenceCount: 1,
+                    referenceStartIndex: 1)
             };
             DefinitionBuildReference[] references =
             {
+                new DefinitionBuildReference
+                {
+                    TargetGuid = itemGuid,
+                    ExpectedKind = DefinitionKind.Item
+                },
                 new DefinitionBuildReference
                 {
                     TargetGuid = DefinitionGuid.Invalid,
@@ -272,7 +283,9 @@ namespace Farmware.Tests.EditMode
                 error.Code,
                 Is.EqualTo(
                     DefinitionCatalogValidationErrorCode.ReferenceGuidIsInvalid));
-            Assert.That(error.DefinitionIndex, Is.EqualTo(0));
+            Assert.That(error.DefinitionIndex, Is.EqualTo(1));
+
+            // 平坦配列では添字1ですが、Inspector上の2件目の定義では最初の参照なので0を返す必要があります。
             Assert.That(error.ReferenceIndex, Is.EqualTo(0));
         }
 

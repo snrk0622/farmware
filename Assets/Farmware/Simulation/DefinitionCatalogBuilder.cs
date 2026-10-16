@@ -88,7 +88,7 @@ namespace Farmware.Simulation
         /// <summary>問題があるDefinitionBuildEntryの元入力添字です。対象がなければ-1です。</summary>
         public int DefinitionIndex;
 
-        /// <summary>問題があるDefinitionBuildReferenceの元入力添字です。対象がなければ-1です。</summary>
+        /// <summary>問題がある定義のReferences内での0始まりの添字です。対象がなければ-1です。</summary>
         public int ReferenceIndex;
 
         /// <summary>重複相手や参照先など、関連する定義の元入力添字です。対象がなければ-1です。</summary>
@@ -214,12 +214,15 @@ namespace Farmware.Simulation
                      referenceIndex++)
                 {
                     DefinitionBuildReference reference = references[referenceIndex];
+                    // Inspectorでは各定義の参照配列が0から始まるため、平坦配列の添字を定義内の番号へ戻します。
+                    int localReferenceIndex =
+                        referenceIndex - source.Definition.ReferenceStartIndex;
                     if (!reference.TargetGuid.IsValid)
                     {
                         error = CreateError(
                             DefinitionCatalogValidationErrorCode.ReferenceGuidIsInvalid,
                             source.OriginalIndex,
-                            referenceIndex);
+                            localReferenceIndex);
                         return false;
                     }
 
@@ -231,7 +234,7 @@ namespace Farmware.Simulation
                         error = CreateError(
                             DefinitionCatalogValidationErrorCode.ReferencedDefinitionWasNotFound,
                             source.OriginalIndex,
-                            referenceIndex);
+                            localReferenceIndex);
                         return false;
                     }
 
@@ -241,7 +244,7 @@ namespace Farmware.Simulation
                         error = CreateError(
                             DefinitionCatalogValidationErrorCode.ReferencedDefinitionKindMismatch,
                             source.OriginalIndex,
-                            referenceIndex,
+                            localReferenceIndex,
                             target.OriginalIndex);
                         return false;
                     }
@@ -386,7 +389,7 @@ namespace Farmware.Simulation
         /// </summary>
         /// <param name="code">検証結果または失敗理由です。</param>
         /// <param name="definitionIndex">問題がある定義の元入力添字です。</param>
-        /// <param name="referenceIndex">問題がある参照の元入力添字です。</param>
+        /// <param name="referenceIndex">問題がある定義内での0始まりの参照添字です。</param>
         /// <param name="relatedDefinitionIndex">重複相手または参照先の元入力添字です。</param>
         /// <returns>指定した位置を保持する検証結果です。</returns>
         private static DefinitionCatalogValidationError CreateError(
