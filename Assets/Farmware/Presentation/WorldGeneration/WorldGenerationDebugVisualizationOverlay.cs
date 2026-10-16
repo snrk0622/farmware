@@ -279,20 +279,35 @@ namespace Farmware.WorldGeneration.Presentation
                         : new Color32(35, 35, 42, 210);
 
                 case WorldGenerationDebugVisualizationMode.TerrainPlacement:
-                    TileGameplayFlags normalGroundFlags =
-                        TileGameplayFlags.AllowsNormalEquipment
-                        | TileGameplayFlags.AllowsNormalBelt;
-                    if ((tile.GameplayFlags & normalGroundFlags) == normalGroundFlags)
+                    TerrainPlacementResult equipmentResult = TerrainPlacementRules.Evaluate(
+                        tile,
+                        TerrainPlacementKind.NormalEquipment);
+                    TerrainPlacementResult beltResult = TerrainPlacementRules.Evaluate(
+                        tile,
+                        TerrainPlacementKind.NormalBelt);
+                    if (equipmentResult == TerrainPlacementResult.Allowed
+                        && beltResult == TerrainPlacementResult.Allowed)
                     {
                         return new Color32(72, 194, 92, 242);
                     }
 
-                    if ((tile.GameplayFlags & TileGameplayFlags.AllowsBridge) != 0)
+                    TerrainPlacementResult bridgeResult = TerrainPlacementRules.Evaluate(
+                        tile,
+                        TerrainPlacementKind.Bridge,
+                        hasHeatResistance: false);
+                    if (bridgeResult == TerrainPlacementResult.Allowed)
                     {
-                        // 水上橋とマグマ上の耐熱橋を別色にし、要件bitの付け忘れをGameビューで発見できるようにします。
-                        return (tile.GameplayFlags & TileGameplayFlags.RequiresHeatResistance) != 0
-                            ? new Color32(238, 82, 38, 245)
-                            : new Color32(48, 146, 226, 242);
+                        return new Color32(48, 146, 226, 242);
+                    }
+
+                    TerrainPlacementResult heatResistantBridgeResult = TerrainPlacementRules.Evaluate(
+                        tile,
+                        TerrainPlacementKind.Bridge,
+                        hasHeatResistance: true);
+                    if (heatResistantBridgeResult == TerrainPlacementResult.Allowed)
+                    {
+                        // 非耐熱橋が不足理由付きで拒否され、耐熱橋だけを許可する地形はマグマ用の別色で表示します。
+                        return new Color32(238, 82, 38, 245);
                     }
 
                     return new Color32(42, 42, 50, 220);
@@ -795,7 +810,7 @@ namespace Farmware.WorldGeneration.Presentation
             WorldGenerationSettings settings,
             ResourceGenerationSettings resourceSettings)
         {
-            const int generatedTileInformationLineCount = 20;
+            const int generatedTileInformationLineCount = 21;
             const int waitingInformationLineCount = 1;
             const float bottomPadding = 6f;
             float informationStartY = currentMode == WorldGenerationDebugVisualizationMode.Biome
@@ -885,14 +900,30 @@ namespace Farmware.WorldGeneration.Presentation
                     magmaProfile = "Volcanic";
                 }
 
+                // 中央HUDも地図の色分けと同じ共通APIを使い、地形属性bitの直接表示と最終判定が食い違わないようにします。
+                TerrainPlacementResult equipmentPlacementResult = TerrainPlacementRules.Evaluate(
+                    centerTile,
+                    TerrainPlacementKind.NormalEquipment);
+                TerrainPlacementResult beltPlacementResult = TerrainPlacementRules.Evaluate(
+                    centerTile,
+                    TerrainPlacementKind.NormalBelt);
+                TerrainPlacementResult bridgePlacementResult = TerrainPlacementRules.Evaluate(
+                    centerTile,
+                    TerrainPlacementKind.Bridge,
+                    hasHeatResistance: false);
+                TerrainPlacementResult heatBridgePlacementResult = TerrainPlacementRules.Evaluate(
+                    centerTile,
+                    TerrainPlacementKind.Bridge,
+                    hasHeatResistance: true);
+
                 // 生密度・平滑化後・通路削り・連続影値を同時に表示し、生成規則変更時の食い違いをGameビューだけで診断できます。
                 centerInformation = $"Tile ({centerCoordinate.x}, {centerCoordinate.y})  "
                     + $"Biome={centerTile.Biome}  Ground={centerTile.Ground}  Soil={centerTile.Soil}\n"
                     + $"Water={centerTile.WaterSalinity} / {centerTile.WaterBodyType}\n"
-                    + $"Placement: Equipment={GetFlagState(centerTile.GameplayFlags, TileGameplayFlags.AllowsNormalEquipment)}  "
-                    + $"Belt={GetFlagState(centerTile.GameplayFlags, TileGameplayFlags.AllowsNormalBelt)}  "
-                    + $"Bridge={GetFlagState(centerTile.GameplayFlags, TileGameplayFlags.AllowsBridge)}  "
-                    + $"Heat={GetFlagState(centerTile.GameplayFlags, TileGameplayFlags.RequiresHeatResistance)}\n"
+                    + $"Placement: Equipment={GetPlacementResultState(equipmentPlacementResult)}  "
+                    + $"Belt={GetPlacementResultState(beltPlacementResult)}\n"
+                    + $"Bridge={GetPlacementResultState(bridgePlacementResult)}  "
+                    + $"HeatBridge={GetPlacementResultState(heatBridgePlacementResult)}\n"
                     + $"Elevation={centerTile.Elevation}  Temperature={centerTile.Temperature}\n"
                     + $"Moisture={centerTile.Moisture}  Weirdness={centerTile.Weirdness}\n"
                     + $"Transition={(IsBiomeTransitionTile(centerTile) ? "Yes" : "No")}\n"
@@ -964,17 +995,24 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// GameplayFlagsの指定bitを、中央タイルHUDで読みやすいYesまたはNoへ変換します。
-        /// 表示専用の変換であり、元のGeneratedTileやECS Bufferは変更しません。
+        /// 共通地形判定の結果を、中央タイルHUDで読みやすい短い文言へ変換します。
+        /// 耐熱性不足を通常の地形不可と区別し、橋定義側で不足している能力をGameビューから確認できるようにします。
         /// </summary>
-        /// <param name="flags">中央タイルから読み取った配置属性の組み合わせです。</param>
-        /// <param name="targetFlag">表示したい1つの配置属性です。</param>
-        /// <returns>属性を持つ場合はYes、持たない場合はNoです。</returns>
-        private static string GetFlagState(
-            TileGameplayFlags flags,
-            TileGameplayFlags targetFlag)
+        /// <param name="result">TerrainPlacementRulesが返した地形配置判定結果です。</param>
+        /// <returns>許可、地形不可、耐熱不足、未対応を表す英語の短い表示文言です。</returns>
+        private static string GetPlacementResultState(TerrainPlacementResult result)
         {
-            return (flags & targetFlag) != 0 ? "Yes" : "No";
+            switch (result)
+            {
+                case TerrainPlacementResult.Allowed:
+                    return "Allowed";
+                case TerrainPlacementResult.HeatResistanceRequired:
+                    return "Heat Required";
+                case TerrainPlacementResult.TerrainDoesNotAllowPlacement:
+                    return "Blocked";
+                default:
+                    return "Unsupported";
+            }
         }
 
         /// <summary>
@@ -1132,8 +1170,8 @@ namespace Farmware.WorldGeneration.Presentation
                                 GameplayFlags = TileGameplayFlags.AllowsNormalEquipment
                                     | TileGameplayFlags.AllowsNormalBelt
                             }),
-                        "Equipment + Belt",
-                        126f);
+                        "Equipment+Belt",
+                        110f);
                     DrawLegendEntry(
                         ref nextX,
                         y,
@@ -1143,8 +1181,8 @@ namespace Farmware.WorldGeneration.Presentation
                             {
                                 GameplayFlags = TileGameplayFlags.AllowsBridge
                             }),
-                        "Bridge",
-                        72f);
+                        "Any Bridge",
+                        84f);
                     DrawLegendEntry(
                         ref nextX,
                         y,
@@ -1155,8 +1193,8 @@ namespace Farmware.WorldGeneration.Presentation
                                 GameplayFlags = TileGameplayFlags.AllowsBridge
                                     | TileGameplayFlags.RequiresHeatResistance
                             }),
-                        "Heat Bridge",
-                        96f);
+                        "Heat Only",
+                        78f);
                     DrawLegendEntry(
                         ref nextX,
                         y,

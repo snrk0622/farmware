@@ -1070,7 +1070,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                         GameplayFlags = TileGameplayFlags.None
                     });
 
-            // 4つの契約を別色にし、水とマグマで橋の耐熱要件が異なることを目視でも判別できるようにします。
+            // 共通配置APIが返す4つの結果パターンを別色にし、水とマグマで橋の耐熱要件が異なることを目視でも判別できるようにします。
             Assert.That(normalGroundPlacementColor, Is.Not.EqualTo(waterBridgePlacementColor));
             Assert.That(waterBridgePlacementColor, Is.Not.EqualTo(magmaBridgePlacementColor));
             Assert.That(magmaBridgePlacementColor, Is.Not.EqualTo(blockedPlacementColor));
