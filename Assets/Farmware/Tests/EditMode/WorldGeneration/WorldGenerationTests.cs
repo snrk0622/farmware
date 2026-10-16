@@ -1641,6 +1641,64 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// intタイル座標域の正負端にObserverを置き、先読み余白が有効域の外へチャンクを要求しないことを保証します。
+        /// 範囲外チャンクを64倍した結果が反対側のint端へ周回し、無関係な地形を生成する退行を防ぐテストです。
+        /// </summary>
+        /// <param name="edgeChunkCoordinate">検証する正または負の論理チャンク境界です。</param>
+        [TestCase(WorldGridConstants.MinimumLogicalChunkCoordinate)]
+        [TestCase(WorldGridConstants.MaximumLogicalChunkCoordinate)]
+        public void ChunkStreamingSystem_WorldEdge_ClampsPreloadToConvertibleChunkDomain(
+            int edgeChunkCoordinate)
+        {
+            using World world = new World("ChunkStreamingWorldEdgeTests");
+            EntityManager entityManager = world.EntityManager;
+            CreateStreamingSingletons(
+                entityManager,
+                new ChunkStreamingObserver
+                {
+                    MinimumVisibleChunkX = edgeChunkCoordinate,
+                    MaximumVisibleChunkX = edgeChunkCoordinate,
+                    MinimumVisibleChunkY = edgeChunkCoordinate,
+                    MaximumVisibleChunkY = edgeChunkCoordinate
+                },
+                new ChunkStreamingSettings
+                {
+                    PreloadMarginInChunks = 1,
+                    RetentionMarginInChunks = 1,
+                    MaximumConcurrentGenerations = 4,
+                    MaximumSubChunkApplicationsPerFrame = 1
+                });
+
+            SystemHandle streamingSystem = world.GetOrCreateSystem<ChunkStreamingSystem>();
+            streamingSystem.Update(world.Unmanaged);
+
+            EntityQuery chunkQuery = entityManager.CreateEntityQuery(
+                ComponentType.ReadOnly<ChunkCoordinateComponent>());
+            int inwardChunkCoordinate = edgeChunkCoordinate
+                == WorldGridConstants.MinimumLogicalChunkCoordinate
+                    ? edgeChunkCoordinate + 1
+                    : edgeChunkCoordinate - 1;
+
+            // 端の外側は切り落とされるため、境界セルと内側隣接セルを組み合わせた2×2だけが要求されます。
+            Assert.That(chunkQuery.CalculateEntityCount(), Is.EqualTo(4));
+            Assert.That(ContainsChunkCoordinate(chunkQuery, edgeChunkCoordinate, edgeChunkCoordinate), Is.True);
+            Assert.That(ContainsChunkCoordinate(chunkQuery, inwardChunkCoordinate, edgeChunkCoordinate), Is.True);
+            Assert.That(ContainsChunkCoordinate(chunkQuery, edgeChunkCoordinate, inwardChunkCoordinate), Is.True);
+            Assert.That(ContainsChunkCoordinate(chunkQuery, inwardChunkCoordinate, inwardChunkCoordinate), Is.True);
+
+            using Unity.Collections.NativeArray<ChunkCoordinateComponent> coordinates =
+                chunkQuery.ToComponentDataArray<ChunkCoordinateComponent>(Unity.Collections.Allocator.Temp);
+            for (int index = 0; index < coordinates.Length; index++)
+            {
+                ChunkCoordinateComponent coordinate = coordinates[index];
+                AssertChunkFitsInWorldTileDomain(coordinate.X);
+                AssertChunkFitsInWorldTileDomain(coordinate.Y);
+            }
+
+            chunkQuery.Dispose();
+        }
+
+        /// <summary>
         /// プリロード外かつ保持範囲内の未開始要求を準備し、要求だけが取り消されEntityは再利用可能に残ることを保証します。
         /// </summary>
         [Test]
@@ -2090,6 +2148,20 @@ namespace Farmware.WorldGeneration.Tests
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// 論理チャンクの先頭と末尾を64bitで計算し、intの絶対タイル座標域へ収まることを保証します。
+        /// テスト自体の計算をintで周回させず、ストリーミングが生成器へ渡してよい座標かを確認します。
+        /// </summary>
+        /// <param name="chunkCoordinate">検証する1軸分の論理チャンク座標です。</param>
+        private static void AssertChunkFitsInWorldTileDomain(int chunkCoordinate)
+        {
+            long firstTile = (long)chunkCoordinate * WorldGridConstants.LogicalChunkSize;
+            long lastTile = firstTile + WorldGridConstants.LogicalChunkSize - 1L;
+
+            Assert.That(firstTile, Is.InRange((long)int.MinValue, (long)int.MaxValue));
+            Assert.That(lastTile, Is.InRange((long)int.MinValue, (long)int.MaxValue));
         }
 
         /// <summary>

@@ -25,6 +25,18 @@ namespace Farmware.WorldGeneration
 
         /// <summary>1論理チャンクに含まれるサブチャンク総数です。4×4で16個です。</summary>
         public const int SubChunksPerChunk = SubChunksPerAxis * SubChunksPerAxis;
+
+        /// <summary>
+        /// 64×64の全ローカルタイルをintの絶対タイル座標へ安全に戻せる、最小の論理チャンク座標です。
+        /// ストリーミング範囲の下限として使用し、int最小値より反対側へ周回することを防ぎます。
+        /// </summary>
+        public const int MinimumLogicalChunkCoordinate = int.MinValue / LogicalChunkSize;
+
+        /// <summary>
+        /// 64×64の全ローカルタイルをintの絶対タイル座標へ安全に戻せる、最大の論理チャンク座標です。
+        /// ストリーミング範囲の上限として使用し、int最大値より反対側へ周回することを防ぎます。
+        /// </summary>
+        public const int MaximumLogicalChunkCoordinate = int.MaxValue / LogicalChunkSize;
     }
 
     /// <summary>
