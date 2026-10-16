@@ -521,6 +521,57 @@ namespace Farmware.Tests.EditMode
         }
 
         /// <summary>
+        /// 未完了Commitが連続しても各ECBを再生せず、その後の成功Commandだけを正常に反映できることを保証します。
+        /// 失敗経路もUnity標準ECB処理へ渡し、次のCommandへ未再生BufferやAllocator状態を持ち越さない契約を確認します。
+        /// </summary>
+        [Test]
+        public void ProcessingGroup_DiscardsRepeatedIncompleteCommitsBeforeFollowingSuccess()
+        {
+            using World world = CreateProcessingWorld(
+                out FarmwareFixedTickSimulationSystemGroup fixedTickGroup);
+            const int incompleteCommandCount = 32;
+            Entity[] incompleteCommands = new Entity[incompleteCommandCount];
+            ulong[] incompleteReceipts = new ulong[incompleteCommandCount];
+
+            // Queueの内部容量を超える件数を同Tickへ投入し、失敗が連続する現実的な経路を再現します。
+            for (int index = 0; index < incompleteCommandCount; index++)
+            {
+                SimulationCommandQueue.TryEnqueue(
+                    world.EntityManager,
+                    CreatePayload(expectedMarkerCount: 0, leaveCommitIncomplete: true),
+                    out incompleteCommands[index],
+                    out incompleteReceipts[index]);
+            }
+
+            SimulationCommandQueue.TryEnqueue(
+                world.EntityManager,
+                CreatePayload(expectedMarkerCount: 0),
+                out Entity successfulCommand,
+                out ulong successfulReceipt);
+
+            UpdateFixedTickGroup(world, fixedTickGroup, 0.1f);
+
+            // 32件分の記録はすべて破棄され、最後に成功した1件だけがMarkerを作成します。
+            Assert.That(CountComponents<CommandQueueTestMarker>(world), Is.EqualTo(1));
+            for (int index = 0; index < incompleteCommandCount; index++)
+            {
+                AssertCommandResult(
+                    world,
+                    incompleteCommands[index],
+                    incompleteReceipts[index],
+                    SimulationCommandStatus.Rejected,
+                    (int)SimulationCommandFailureCode.CommitDidNotComplete);
+            }
+
+            AssertCommandResult(
+                world,
+                successfulCommand,
+                successfulReceipt,
+                SimulationCommandStatus.Succeeded,
+                (int)SimulationCommandFailureCode.None);
+        }
+
+        /// <summary>
         /// 完了結果が処理フレーム中は存在し、次の描画フレーム先頭のCleanupで破棄されることを保証します。
         /// </summary>
         [Test]

@@ -299,31 +299,31 @@ namespace Farmware.Simulation
 
         /// <summary>
         /// Commitが成功状態まで到達した場合だけ記録済みECBを再生します。
-        /// Commit途中や拒否状態ではBufferを再生せず破棄し、次のCommandへ部分変更を公開しません。
+        /// Commit途中や拒否状態ではShouldPlaybackを無効にし、次のCommandへ部分変更を公開しません。
+        /// 成否にかかわらず基底処理へ渡し、Job依存の完了、Buffer破棄、専用Allocatorの巻き戻しをUnity標準経路で行います。
         /// </summary>
         protected override void OnUpdate()
         {
             bool shouldPlayback = activeCommandQuery.CalculateEntityCount() == 1
                 && activeCommandQuery.GetSingleton<SimulationCommand>().Status
                     == SimulationCommandStatus.Succeeded;
-            if (shouldPlayback)
+            if (!shouldPlayback)
             {
-                base.OnUpdate();
-                return;
-            }
-
-            // Commit SystemはJobをスケジュールしない契約なので、未完了Bufferをここで安全に破棄できます。
-            // 中身を実行せずDisposeし、ECB用一時メモリを確実に返します。
-            for (int index = 0; index < PendingBuffers.Length; index++)
-            {
-                EntityCommandBuffer commandBuffer = PendingBuffers[index];
-                if (commandBuffer.IsCreated)
+                // ShouldPlaybackは、ECB取得後に処理中断が決まった場合のためにUnityが公開している機能です。
+                // Buffer自体は基底処理へ残し、再生だけを抑止することでAllocatorの巻き戻しを省略しません。
+                for (int index = 0; index < PendingBuffers.Length; index++)
                 {
-                    commandBuffer.Dispose();
+                    EntityCommandBuffer commandBuffer = PendingBuffers[index];
+                    if (commandBuffer.IsCreated)
+                    {
+                        commandBuffer.ShouldPlayback = false;
+                        PendingBuffers[index] = commandBuffer;
+                    }
                 }
             }
 
-            PendingBuffers.Clear();
+            // EntityCommandBufferSystemの標準処理が、再生可否に関係なく依存完了、Dispose、Allocator.Rewindを行います。
+            base.OnUpdate();
         }
     }
 
