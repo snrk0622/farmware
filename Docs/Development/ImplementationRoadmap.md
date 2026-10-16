@@ -2,7 +2,7 @@
 
 - 作成日: 2026-10-14
 - 最終更新日: 2026-10-16
-- 実装状況の確認基準: merge commit `40640e4e`（2026-10-16、PR #9まで）と本書に記載したSIM-01B
+- 実装状況の確認基準: merge commit `e7a7f571`（2026-10-16、PR #11まで）と本書に記載したSIM-01D
 - 対象: ランダムマップ生成の続きから、工場自動化ゲームの縦切りと主要機能を実装する順序
 - ゲーム仕様: [ゲームコンセプト](../GameSpecification/2026-10-11_casual_factory_concept_v0.1.md)
 - マップ仕様: [ランダムマップ生成仕様](../GameSpecification/RandomMapGenerationSpecification.md)
@@ -49,7 +49,7 @@ PR系列の実行順は「2. 全体状況」の番号を正とし、同じ系列
 | 0 | MAP-00 決定論的ワールド生成基盤 | ✅ 実装済み | 7バイオーム、基礎地形、土壌、木・石・砂、ストリーミング、可視化 |
 | 1 | ART-00 バイオーム地形の本番表示 | ✅ 実装済み | 本番用土地・岩壁と土地・岩壁境界ハイライトを適用 |
 | 2 | MAP-01 地形契約と開始領域 | ✅ 実装済み | 地形配置属性、設備建築可能領域、3×3コア開始範囲、共通配置APIを実装済み |
-| 3 | SIM-01 固定Tick・ID・定義・Command | 🟨 一部実装 | Assembly境界、共通System Group、固定Tick、一時停止、追いつき上限、永続IDを実装済み。定義、Command、状態ハッシュは未実装 |
+| 3 | SIM-01 固定Tick・ID・定義・Command | 🟨 一部実装 | Assembly境界、共通System Group、固定Tick、一時停止、追いつき上限、永続ID、定義GUIDを実装済み。Command、状態ハッシュは未実装 |
 | 4 | MAP-02 Floating Originとストリーミング | ⬜ 未実装 | 遠方座標でも表示・入力・生成が安定 |
 | 5 | ANIMAL-01 ワールド動物基盤 | ⬜ 未実装 | ワールド固有の個体群状態から動物が生成され、移動・表示される |
 | 6 | MAP-03 ワールド保存 | ⬜ 未実装 | Seed、初期地点、動物、変更チャンクを永続化 |
@@ -203,7 +203,7 @@ PR系列の実行順は「2. 全体状況」の番号を正とし、同じ系列
 - [x] **PR SIM-01A Assembly境界**: Simulation、Input、Presentation、Authoring、TestsのAssembly境界と共通System Groupを追加する。
 - [x] **PR SIM-01B 固定Tick**: `ulong` Simulation Tick、一時停止、最大追いつき回数を持つ固定Tick基盤と決定論テストを追加する。
 - [x] **PR SIM-01C 永続ID**: `0`を無効値、`1`以降を発行範囲とするワールド内`ulong`永続IDの共通アロケーターを追加する。プレイヤー配置物だけでなく初期配置・リスポーンされた動物や、将来個体として扱う再生資源にも利用できるようにし、非再利用、上限時の失敗、安定順での一括発行、次回発行IDの保存・復元境界をテストする。
-- [ ] **PR SIM-01D 定義GUID**: アイテム、設備、施設、レシピ、動物種用の128bit定義GUID、Baker、Blob Asset、重複・参照切れ検証を追加する。
+- [x] **PR SIM-01D 定義GUID**: アイテム、設備、施設、レシピ、動物種用の128bit定義GUID、Baker、Blob Asset、重複・参照切れ検証を追加する。
 - [ ] **PR SIM-01E Command Queue**: Command受付番号、検証、Commit、失敗時無変更を扱う共通Command QueueとSystem順序テストを追加する。
 - [ ] **PR SIM-01F 状態ハッシュ**: 状態ハッシュ検証器と、同一Command列を異なるJob条件で実行する決定論テスト基盤を追加する。
 
@@ -212,6 +212,8 @@ PR系列の実行順は「2. 全体状況」の番号を正とし、同じ系列
 `SIM-01B`では、`FixedTickConfiguration`、`SimulationTickState`、`SimulationPauseState`のSingletonと、`FarmwareFixedTickSimulationSystemGroup`を追加した。開発用の暫定値は10 Tick/秒、最大4 Tick/描画フレームとし、上限を超えた整数Tick分の遅延は破棄して処理落ちの連鎖を防ぐ。Tick未満の端数は次フレームへ保持し、許容誤差でTickを先行した場合の不足時間も負の端数として次フレームへ残す。一時停止中の経過時間は蓄積せず、再開時に停止時間分を追いつかない。設定はWorldの初回更新時に固定し、同じWorldの途中では変更しない。`FixedTickSimulationTests`では初期化、端数蓄積、追いつき上限、停止と再開、異なる描画フレーム分割でのTick一致、許容誤差による時間負債、0設定の正規化を検証する。2026-10-16にUnityコンパイルのエラー・警告が0件、EditMode 141件とPlayMode 25件が成功し、既存の明示実行用負荷テスト1件だけを通常実行から除外した。
 
 `SIM-01C`では、実行時オブジェクトへ付与する`PersistentObjectId`、ワールドごとの`PersistentIdAllocatorState` Singleton、保存境界となる`PersistentIdAllocatorSnapshot`、共通の`PersistentIdAllocator`を追加した。単体発行は1から単調増加し、削除済みIDを再利用しない。複数要求は呼び出し側が設定する`MajorOrder`、`MinorOrder`、`Sequence`の安定キーで整列してから一括発行し、重複キー、配列長不一致、残りID不足では一部だけIDを消費しない。`ulong.MaxValue`自体は最後の有効IDとして1回発行し、以降は0へ周回せず上限到達状態を保存・復元する。新規Worldでは`PersistentIdInitializationSystem`がID 1から始まるSingletonを作成し、セーブロード側が先に復元した状態は上書きしない。2026-10-16にUnity Consoleのエラー・警告が0件、`Farmware.Simulation`のビルドが警告0・エラー0、`PersistentIdTests` 6件と共通EditModeテストAssembly 17件が成功した。Scene、Prefab、表示処理を変更していないため、PlayModeとGameビューの追加確認項目はない。
+
+`SIM-01D`では、全0を無効値とする`DefinitionGuid`、1始まりの`DefinitionRuntimeId`、アイテム・設備・施設・レシピ・動物種の`DefinitionKind`、定義と解決済み参照を保持する`DefinitionCatalogBlob`を追加した。`DefinitionCatalogAuthoring`のBakerはInspectorのGUID文字列を共通Builderへ渡し、GUID昇順で入力順に依存しない連続IDを割り当てる。GUID未設定、未対応分類、重複GUID、参照範囲不整合、参照先未設定、参照切れ、参照先分類不一致ではBlob Assetを作成せずBakeを失敗させる。実行時は初期化・ロード境界でGUIDを二分探索し、通常Tickでは解決済み整数IDを使用する。2026-10-16にUnity再コンパイルが最新状態、Consoleのエラー・警告が0件、`DefinitionCatalogTests` 9件、共通EditModeテストAssembly 26件、明示実行用負荷テストを除くEditMode全156件が成功した。Scene、Prefab、表示処理を変更していないため、PlayModeとGameビューの追加確認項目はない。
 
 大項目完了条件:
 

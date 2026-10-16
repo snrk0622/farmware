@@ -115,6 +115,8 @@ ECSの共通ルートGroupは次のとおりとする。
 - GUIDの重複、未設定、参照切れはEditor検証またはビルド前検証でエラーにする。
 - バイオームや地形のようにコードで閉じた安定分類は、既存値を変更・再利用しないappend-onlyな数値IDを使用できる。
 
+`SIM-01D`では、全0を無効値とする上位・下位各64bitの`DefinitionGuid`と、1始まりの`DefinitionRuntimeId`を共通Simulation型として実装した。Authoringの定義配列はBakerでGUID昇順へ正規化し、入力順に依存しない連続ID、定義分類、解決済み参照を`DefinitionCatalogBlob`へ格納する。GUID文字列はInspectorとセーブ境界だけで扱い、実行時の定義参照は整数IDを使用する。BakerとEditModeテストは同じ`DefinitionCatalogBuilder`を使い、GUID未設定、重複、参照切れ、参照先分類不一致を破損したBlob Assetの生成前に拒否する。実際のアイテム、設備、施設、レシピ、動物種データとSceneへのカタログ配置は各機能PRで追加する。
+
 ## 6. チャンク境界と保存所有権
 
 - 複数タイル設備はアンカーセルを含む論理チャンクを保存上の所有チャンクとし、設備全体を1回だけ保存する。
