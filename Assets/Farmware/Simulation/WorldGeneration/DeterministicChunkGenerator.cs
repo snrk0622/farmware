@@ -1151,24 +1151,29 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>
-        /// 地面種別から建築可否と通常リンク遮断を決めます。
-        /// 水は建築不可でもリンクを通し、岩壁とマグマがリンクを遮る仕様をここで明示します。
+        /// 地面種別から通常設備、通常ベルト、橋の配置可否と、橋の耐熱要件を決めます。
+        /// 後続の建築処理がGroundTypeを独自解釈せず、生成済み属性だけを参照できるようにします。
         /// </summary>
         /// <param name="ground">分類済みの地面種別です。</param>
-        /// <returns>建築・リンク判定のビットフラグです。</returns>
-        private static TileGameplayFlags ClassifyGameplayFlags(GroundType ground)
+        /// <returns>各配置可否と橋の耐熱要件を表すビットフラグです。</returns>
+        public static TileGameplayFlags ClassifyGameplayFlags(GroundType ground)
         {
             switch (ground)
             {
                 case GroundType.Land:
-                    return TileGameplayFlags.IsBuildable;
+                    return TileGameplayFlags.AllowsNormalEquipment
+                        | TileGameplayFlags.AllowsNormalBelt;
                 case GroundType.Water:
-                    return TileGameplayFlags.None;
-                case GroundType.RockWall:
+                    // 水上では橋の素材を耐熱性で制限しないため、橋可だけを設定します。
+                    return TileGameplayFlags.AllowsBridge;
                 case GroundType.Magma:
-                    return TileGameplayFlags.BlocksNormalLink;
+                    // マグマ上の橋は耐熱性を持つ定義だけに限定できるよう、要件を独立したbitで記録します。
+                    return TileGameplayFlags.AllowsBridge
+                        | TileGameplayFlags.RequiresHeatResistance;
+                case GroundType.RockWall:
+                    return TileGameplayFlags.None;
                 default:
-                    // 予約済みIDや破損データを建築可能地として扱わず、安全側で通常設備を置けない状態にします。
+                    // 予約済みIDや破損データを配置可能地として扱わず、すべて不許可の安全側へ倒します。
                     return TileGameplayFlags.None;
             }
         }

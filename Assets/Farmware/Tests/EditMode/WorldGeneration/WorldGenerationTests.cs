@@ -611,8 +611,58 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// 4種類の基礎地形を直接分類し、通常設備・通常ベルト・橋・耐熱要件が仕様の組み合わせになることを保証します。
+        /// 生成ノイズを介さず地形契約そのものを検証するため、後続の建築処理が地形種別を再解釈する必要はありません。
+        /// </summary>
+        [Test]
+        public void GameplayFlags_ExposeExplicitPlacementAttributesForEveryGroundType()
+        {
+            TileGameplayFlags normalGround =
+                TileGameplayFlags.AllowsNormalEquipment
+                | TileGameplayFlags.AllowsNormalBelt;
+            TileGameplayFlags normalBridge = TileGameplayFlags.AllowsBridge;
+            TileGameplayFlags heatResistantBridge =
+                TileGameplayFlags.AllowsBridge
+                | TileGameplayFlags.RequiresHeatResistance;
+
+            Assert.That(
+                DeterministicChunkGenerator.ClassifyGameplayFlags(GroundType.Land),
+                Is.EqualTo(normalGround),
+                "通常地面では通常設備と通常ベルトだけを許可する必要があります。");
+            Assert.That(
+                DeterministicChunkGenerator.ClassifyGameplayFlags(GroundType.Water),
+                Is.EqualTo(normalBridge),
+                "水域では耐熱性の有無にかかわらず橋を許可する必要があります。");
+            Assert.That(
+                DeterministicChunkGenerator.ClassifyGameplayFlags(GroundType.Magma),
+                Is.EqualTo(heatResistantBridge),
+                "マグマでは耐熱性を持つ橋だけを許可できる属性が必要です。");
+            Assert.That(
+                DeterministicChunkGenerator.ClassifyGameplayFlags(GroundType.RockWall),
+                Is.EqualTo(TileGameplayFlags.None),
+                "岩壁では通常設備、通常ベルト、橋のすべてを拒否する必要があります。");
+            Assert.That(
+                DeterministicChunkGenerator.ClassifyGameplayFlags((GroundType)byte.MaxValue),
+                Is.EqualTo(TileGameplayFlags.None),
+                "未知の地形IDは配置可能として扱わず、安全側へ倒す必要があります。");
+
+            GeneratedTile equipmentTile = new GeneratedTile
+            {
+                GameplayFlags = TileGameplayFlags.AllowsNormalEquipment
+            };
+            GeneratedTile bridgeOnlyTile = new GeneratedTile
+            {
+                GameplayFlags = TileGameplayFlags.AllowsBridge
+            };
+
+            // MAP-01Bまでは旧Node名称の探索APIを使うため、内部だけが新しい設備属性へ確実に移行したことも固定します。
+            Assert.That(NodeBuildableRegionLocator.CanPlaceNode(equipmentTile), Is.True);
+            Assert.That(NodeBuildableRegionLocator.CanPlaceNode(bridgeOnlyTile), Is.False);
+        }
+
+        /// <summary>
         /// 固定シードの広域を粗く走査し、火山のおよそ半分がマグマになり、岩地では稀にだけ生成されることを確認します。
-        /// 各候補では水属性・建築・リンク・資源適性も調べ、海以外の水域、岩壁、通常資源と同じセルを共有しないことを保証します。
+        /// 各候補では水属性・配置属性・資源適性も調べ、海以外の水域、岩壁、通常資源と同じセルを共有しないことを保証します。
         /// </summary>
         [Test]
         public void MagmaGeneration_CreatesVolcanicBasinsAndSuppressesFreshWater()
@@ -674,7 +724,9 @@ namespace Farmware.WorldGeneration.Tests
                     Assert.That(tile.MovementCost, Is.EqualTo(0));
                     Assert.That(
                         tile.GameplayFlags,
-                        Is.EqualTo(TileGameplayFlags.BlocksNormalLink));
+                        Is.EqualTo(
+                            TileGameplayFlags.AllowsBridge
+                            | TileGameplayFlags.RequiresHeatResistance));
                     if (overlappingRockWallCandidateCount == 0
                         && DeterministicRockWallGenerator.IsRockWallCandidate(
                             settings,
@@ -889,8 +941,8 @@ namespace Farmware.WorldGeneration.Tests
                         // 陸地には必ず資源候補と表示差分に使える土壌があり、物理地形とは独立して保持される必要があります。
                         Assert.That(transitioned.Soil, Is.Not.EqualTo(SoilType.None));
                         Assert.That(
-                            transitioned.GameplayFlags & TileGameplayFlags.IsBuildable,
-                            Is.EqualTo(TileGameplayFlags.IsBuildable),
+                            transitioned.GameplayFlags & TileGameplayFlags.AllowsNormalEquipment,
+                            Is.EqualTo(TileGameplayFlags.AllowsNormalEquipment),
                             "土壌の種類だけで通常設備の建築可否を変えてはいけません。");
                         Assert.That(transitioned.MovementCost, Is.EqualTo(1));
                         discoveredLandSoils.Add(transitioned.Soil);

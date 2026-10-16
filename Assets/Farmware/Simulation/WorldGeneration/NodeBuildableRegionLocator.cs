@@ -207,7 +207,8 @@ namespace Farmware.WorldGeneration
         /// <returns>通常ノードを配置できる場合はtrueです。</returns>
         public static bool CanPlaceNode(in GeneratedTile tile)
         {
-            return (tile.GameplayFlags & TileGameplayFlags.IsBuildable) != 0;
+            // MAP-01Bで型名を設備用語へ移行するまでは既存API名を維持し、判定だけを新しい正方向属性へ切り替えます。
+            return (tile.GameplayFlags & TileGameplayFlags.AllowsNormalEquipment) != 0;
         }
 
         /// <summary>

@@ -1,4 +1,4 @@
-// このファイルは、ECSで生成済みの可視タイルをPlayMode中だけ色分けして、ノイズ・バイオーム・土壌・水域・岩壁・資源判定を確認できるようにします。
+// このファイルは、ECSで生成済みの可視タイルをPlayMode中だけ色分けして、ノイズ・バイオーム・土壌・水域・岩壁・資源・地形配置属性を確認できるようにします。
 // 操作入口はEditor AssemblyのWorldGenerationDebugVisualizationMenuに置き、Simulationとプレイヤー用F3/F4入力から分離します。
 
 using System.Collections.Generic;
@@ -52,7 +52,10 @@ namespace Farmware.WorldGeneration.Presentation
         Magma = 11,
 
         /// <summary>プレイヤー表示へ出さない標準・肥沃・砂質のSoilTypeを固定色で表示します。</summary>
-        Soil = 12
+        Soil = 12,
+
+        /// <summary>通常設備・通常ベルト・橋の配置可否と、橋の耐熱要件を地形契約ごとの固定色で表示します。</summary>
+        TerrainPlacement = 13
     }
 
     /// <summary>
@@ -274,6 +277,25 @@ namespace Farmware.WorldGeneration.Presentation
                     return tile.Soil == SoilType.Normal
                         ? new Color32(150, 130, 105, 238)
                         : new Color32(35, 35, 42, 210);
+
+                case WorldGenerationDebugVisualizationMode.TerrainPlacement:
+                    TileGameplayFlags normalGroundFlags =
+                        TileGameplayFlags.AllowsNormalEquipment
+                        | TileGameplayFlags.AllowsNormalBelt;
+                    if ((tile.GameplayFlags & normalGroundFlags) == normalGroundFlags)
+                    {
+                        return new Color32(72, 194, 92, 242);
+                    }
+
+                    if ((tile.GameplayFlags & TileGameplayFlags.AllowsBridge) != 0)
+                    {
+                        // 水上橋とマグマ上の耐熱橋を別色にし、要件bitの付け忘れをGameビューで発見できるようにします。
+                        return (tile.GameplayFlags & TileGameplayFlags.RequiresHeatResistance) != 0
+                            ? new Color32(238, 82, 38, 245)
+                            : new Color32(48, 146, 226, 242);
+                    }
+
+                    return new Color32(42, 42, 50, 220);
 
                 case WorldGenerationDebugVisualizationMode.Elevation:
                     float elevation = tile.Elevation / (float)ushort.MaxValue;
@@ -773,7 +795,7 @@ namespace Farmware.WorldGeneration.Presentation
             WorldGenerationSettings settings,
             ResourceGenerationSettings resourceSettings)
         {
-            const int generatedTileInformationLineCount = 19;
+            const int generatedTileInformationLineCount = 20;
             const int waitingInformationLineCount = 1;
             const float bottomPadding = 6f;
             float informationStartY = currentMode == WorldGenerationDebugVisualizationMode.Biome
@@ -867,6 +889,10 @@ namespace Farmware.WorldGeneration.Presentation
                 centerInformation = $"Tile ({centerCoordinate.x}, {centerCoordinate.y})  "
                     + $"Biome={centerTile.Biome}  Ground={centerTile.Ground}  Soil={centerTile.Soil}\n"
                     + $"Water={centerTile.WaterSalinity} / {centerTile.WaterBodyType}\n"
+                    + $"Placement: Equipment={GetFlagState(centerTile.GameplayFlags, TileGameplayFlags.AllowsNormalEquipment)}  "
+                    + $"Belt={GetFlagState(centerTile.GameplayFlags, TileGameplayFlags.AllowsNormalBelt)}  "
+                    + $"Bridge={GetFlagState(centerTile.GameplayFlags, TileGameplayFlags.AllowsBridge)}  "
+                    + $"Heat={GetFlagState(centerTile.GameplayFlags, TileGameplayFlags.RequiresHeatResistance)}\n"
                     + $"Elevation={centerTile.Elevation}  Temperature={centerTile.Temperature}\n"
                     + $"Moisture={centerTile.Moisture}  Weirdness={centerTile.Weirdness}\n"
                     + $"Transition={(IsBiomeTransitionTile(centerTile) ? "Yes" : "No")}\n"
@@ -938,6 +964,20 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
+        /// GameplayFlagsの指定bitを、中央タイルHUDで読みやすいYesまたはNoへ変換します。
+        /// 表示専用の変換であり、元のGeneratedTileやECS Bufferは変更しません。
+        /// </summary>
+        /// <param name="flags">中央タイルから読み取った配置属性の組み合わせです。</param>
+        /// <param name="targetFlag">表示したい1つの配置属性です。</param>
+        /// <returns>属性を持つ場合はYes、持たない場合はNoです。</returns>
+        private static string GetFlagState(
+            TileGameplayFlags flags,
+            TileGameplayFlags targetFlag)
+        {
+            return (flags & targetFlag) != 0 ? "Yes" : "No";
+        }
+
+        /// <summary>
         /// 描画上限を超えた場合に、色面を省略した理由と現在の可視タイル数を右上へ表示します。
         /// </summary>
         /// <param name="tileCount">Camera矩形から計算した可視タイル数です。</param>
@@ -983,6 +1023,11 @@ namespace Farmware.WorldGeneration.Presentation
             if (mode == WorldGenerationDebugVisualizationMode.Resources)
             {
                 return "Resources";
+            }
+
+            if (mode == WorldGenerationDebugVisualizationMode.TerrainPlacement)
+            {
+                return "Terrain Placement";
             }
 
             return mode == WorldGenerationDebugVisualizationMode.BiomeTransition
@@ -1075,6 +1120,49 @@ namespace Farmware.WorldGeneration.Presentation
                         GetVisualizationColor(mode, new GeneratedTile { Soil = SoilType.Sandy }),
                         "Sandy",
                         72f);
+                    break;
+                case WorldGenerationDebugVisualizationMode.TerrainPlacement:
+                    DrawLegendEntry(
+                        ref nextX,
+                        y,
+                        GetVisualizationColor(
+                            mode,
+                            new GeneratedTile
+                            {
+                                GameplayFlags = TileGameplayFlags.AllowsNormalEquipment
+                                    | TileGameplayFlags.AllowsNormalBelt
+                            }),
+                        "Equipment + Belt",
+                        126f);
+                    DrawLegendEntry(
+                        ref nextX,
+                        y,
+                        GetVisualizationColor(
+                            mode,
+                            new GeneratedTile
+                            {
+                                GameplayFlags = TileGameplayFlags.AllowsBridge
+                            }),
+                        "Bridge",
+                        72f);
+                    DrawLegendEntry(
+                        ref nextX,
+                        y,
+                        GetVisualizationColor(
+                            mode,
+                            new GeneratedTile
+                            {
+                                GameplayFlags = TileGameplayFlags.AllowsBridge
+                                    | TileGameplayFlags.RequiresHeatResistance
+                            }),
+                        "Heat Bridge",
+                        96f);
+                    DrawLegendEntry(
+                        ref nextX,
+                        y,
+                        GetVisualizationColor(mode, new GeneratedTile()),
+                        "Blocked",
+                        76f);
                     break;
                 case WorldGenerationDebugVisualizationMode.Elevation:
                     DrawContinuousValueLegend(mode, ref nextX, y, "0 (Low)", "65535 (High)");
