@@ -24,7 +24,11 @@ Unity Editorを開いたまま外部プロセスから同じプロジェクト�
 
 #### `SystemGroupBoundaryTests`
 
-`Farmware.Simulation`、`Farmware.Input`、`Farmware.Presentation`、`Farmware.Authoring`の直接参照をUnityのコンパイル情報から検査し、Simulationへの一方向依存を保証する。各境界型が意図したAssemblyへコンパイルされること、共通Initialization／Simulation／Presentation Groupが対応するUnity標準Groupへ1回だけ所属すること、`Farmware.Tests.EditMode`がPlayer向けコンパイルから除外されることも検証する。
+`Farmware.Simulation`、`Farmware.Input`、`Farmware.Presentation`、`Farmware.Authoring`の直接参照をUnityのコンパイル情報から検査し、Simulationへの一方向依存を保証する。各境界型が意図したAssemblyへコンパイルされること、共通Initialization／Simulation／固定Tick／Presentation Groupと固定Tick初期化・Tick加算Systemが対応する親Groupへ1回だけ所属し、必要な先頭・末尾順序を宣言すること、`Farmware.Tests.EditMode`がPlayer向けコンパイルから除外されることも検証する。
+
+#### `FixedTickSimulationTests`
+
+Sceneを使わない最小ECS Worldへ描画フレーム相当のDeltaTimeを直接与え、固定Tick用Singletonが各1件作られること、10 Tick/秒でTick未満の端数を保持すること、1フレーム最大4 Tickを超えた整数Tick分の遅延を破棄すること、一時停止中の時間を再開後へ持ち越さないことを検証する。合計時間が同じで追いつき上限内なら、細かい描画フレームと粗い描画フレームで`SimulationTickState.CurrentTick`が一致すること、0の設定値が安全な既定値へ正規化されることも保証する。
 
 ### 3.2 EditMode: `Farmware.WorldGeneration.Tests`
 
@@ -114,7 +118,8 @@ Sprite Packer ModeがV2であること、土地Atlasが7バイオームの本番
 | 地形配置共通API | 通常設備・通常ベルト・非耐熱橋・耐熱橋と、陸地・水域・マグマ・岩壁の全16組、耐熱不足理由、未指定・未定義の配置対象、不整合な属性、入力値の不変性を扱う`TerrainPlacementRulesTests` | `Terrain Placement`の4色、凡例、中央HUDの`Allowed`・`Blocked`・`Heat Required`をGameビューで確認 |
 | 複数タイル設備、ベルト、橋 | 占有、回転、接続方向、分岐・合流、詰まり、地形配置可否、単体・範囲配置と撤去の即時反映、同種既設物の無償再利用、資材不足または配置不可セルがある場合に一部だけ建築されないことを扱うEditModeテスト。橋の種類名や素材名に依存せず、耐熱性を持つ代表定義と持たない代表定義を使い、水域では両方、マグマでは耐熱性を持つ定義だけ、岩壁と通常地面では両方を拒否するマトリクスを保証する | 再利用セル、問題セル、耐熱性不足の理由、総必要数・在庫数・不足数のプレビュー、範囲保持と再確定、ドローン演出を待たず操作できること、操作プロトタイプ、Gameビュー、Profiler |
 | 搬送アイテムと遠隔工場 | ベルト上の1枠1個制約、FIFO、混載、在庫内の品目別数量集約、液体アイテムの通常搬送、固定Tick境界での個別・集計状態変換、同一入力に対する生産量・消費量・在庫・詰まり・進捗・コア到着Tickの等価性、等価性を保証できない物流網の個別処理継続を扱うECSテスト | カメラ距離を往復した際の搬送順序と表示復元、長時間の遠隔稼働、セーブ・ロード、1,000／10,000／100,000件でのProfiler比較 |
-| 固定Tick、永続ID、保存所有権 | 同一Command列の状態ハッシュ、整数進捗、ID非再利用、定義GUID解決、チャンク境界をまたぐ設備・施設の単一保存と異なるロード順からの復元を扱うEditMode／ECSテスト | Job並列数を変えた決定性、範囲移動による所有チャンク変更、定義参照切れのEditor検証 |
+| 固定Tick | 固定Tick Singletonの一意な初期化、Tick未満の端数蓄積、1フレーム最大4 Tick、上限超過分の破棄、一時停止中の非蓄積、再開後に停止時間を追いつかないこと、異なる描画フレーム分割でのTick一致を扱う`FixedTickSimulationTests` | 将来の生産・物流Systemを接続した後、同じTick数で状態が一致することと、Profiler上で追いつきが4回以内であることを確認 |
+| 永続ID、定義、保存所有権 | 同一Command列の状態ハッシュ、整数進捗、ID非再利用、定義GUID解決、チャンク境界をまたぐ設備・施設の単一保存と異なるロード順からの復元を扱うEditMode／ECSテスト | Job並列数を変えた決定性、範囲移動による所有チャンク変更、定義参照切れのEditor検証 |
 | セーブ形式 | 固定Tick境界のSnapshot、設備・在庫・搬送順序・進捗・ID・地形差分の復元、一時ファイルから本ファイルへの置換、初期開発中は固定した`SaveFormatVersion`を扱うEditModeテスト | 書き込み中断後に直前の正常セーブを読めること、形式変更後の非対応な開発用セーブを安全に拒否することをPlayMode確認 |
 | 建築Commandトランザクション | Command受付順、全体事前検証、資材・配置・履歴の全成功または全失敗、Commit後のDirty再構築、同Tickの生産前に確定するSystem順序を扱うECSテスト | 複数範囲編集の競合、失敗・キャンセル時に中間状態が表示されないことをPlayMode確認 |
 | Floating Origin | 絶対整数座標と相対表示座標の相互変換、負座標、原点移動前後の選択セル・生成結果・接続・状態ハッシュ一致を扱うEditModeテスト | 最大ズームアウト、高速パン、複数回の原点移動でTilemap、Sprite、入力、エフェクトにずれや揺れがないことをPlayMode確認 |

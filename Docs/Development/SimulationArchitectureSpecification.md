@@ -34,9 +34,10 @@ ECSの共通ルートGroupは次のとおりとする。
 | --- | --- | --- |
 | `FarmwareInitializationSystemGroup` | `InitializationSystemGroup` | Singleton準備、初期探索などSimulation更新前の初期化 |
 | `FarmwareSimulationSystemGroup` | `SimulationSystemGroup` | フレーム単位のSimulation側準備、ストリーミング、結果確定 |
+| `FarmwareFixedTickSimulationSystemGroup` | `FarmwareSimulationSystemGroup` | 生産、物流、動物などゲーム内時間で進む規則の固定Tick更新 |
 | `FarmwarePresentationSystemGroup` | `PresentationSystemGroup` | Simulation結果の描画・音声への反映 |
 
-`FarmwareSimulationSystemGroup`の更新回数はゲーム内時間の正ではない。固定Tickで進める生産、物流、動物などは`SIM-01B`で追加する子Groupへ所属させる。カメラ可視範囲に応じたチャンク要求と地形生成は表示ストリーミング用のフレーム駆動処理であり、固定Tickのゲームルールへ含めない。
+`FarmwareSimulationSystemGroup`の更新回数はゲーム内時間の正ではない。固定Tickで進める生産、物流、動物などは子の`FarmwareFixedTickSimulationSystemGroup`へ所属させる。カメラ可視範囲に応じたチャンク要求と地形生成は表示ストリーミング用のフレーム駆動処理であり、固定Tickのゲームルールへ含めない。
 
 ## 2. 固定Tickと決定論
 
@@ -46,7 +47,11 @@ ECSの共通ルートGroupは次のとおりとする。
 - Tickレートは共通設定から供給する。同一セーブの実行途中では変更せず、将来の変更が既存セーブへ影響する段階では保存形式またはゲームルールの移行として扱う。
 - 同一の初期状態、Command列、Tick数から、Job実行順、Entity生成順、チャンクの表示状態にかかわらず同じ結果を得る。
 
-具体的なTickレートと1フレーム当たりの最大追いつきTick数は、設備・物流の性能試作後に決定する。
+`SIM-01B`時点では、`FixedTickConfiguration`の開発用既定値を10 Tick/秒、1描画フレーム当たり最大4 Tickとする。描画遅延によって実行可能なTickが上限を超えた場合は、上限を超えた整数Tick分の経過時間を破棄し、Tick未満の端数だけを次フレームへ保持する。これにより、遅れを取り戻す処理自体が次の遅れを生む連鎖を防ぎ、負荷が高い場合はゲーム内時間が実時間より遅く進む。一時停止中の描画フレーム時間は最初から蓄積しない。
+
+`SimulationTickState.CurrentTick`を固定Tick Groupが開始したTick数と現在実行中のTick番号の正とし、`SimulationTickAdvanceSystem`がGroupの先頭で1だけ加算する。同じTickの後続Systemは加算後の番号を共通して使用する。`SimulationPauseState`は現在Tickと分離し、将来のInputまたは全画面メニューが停止状態だけを変更できるようにする。`FixedTickConfiguration`、`SimulationTickState`、`SimulationPauseState`は`SimulationTimeInitializationSystem`がWorld開始時に1件ずつ作成する。固定Tick Groupは設定を初回更新時に読み取ってWorld寿命中固定し、毎描画フレーム変化し得る一時停止状態だけを読み直す。
+
+10 Tick/秒と最大4 Tickは製品用の最終調整値ではない。設備・物流の性能試作では、同じ固定Tick境界と超過時の破棄方針を維持したまま、操作応答、CPU時間、GC Alloc、遠距離集計との等価性を計測して最終値を決定する。
 
 ## 3. 配置物と搬送アイテムのECS表現
 
@@ -177,7 +182,7 @@ Presentation
 
 次の項目は本仕様の境界を変えずに調整できるため、現在は確定しない。
 
-- 固定Tickの具体的な周波数と1フレームの最大追いつき回数。
+- 固定Tickの製品用周波数と1フレームの最大追いつき回数。SIM-01Bの開発用暫定値は10 Tick/秒、最大4 Tickとする。
 - ベルト速度、セル容量、設備バッファ容量、生産時間。
 - 個別処理と集計処理の切替距離、集計可能判定の最適化範囲。
 - Jobの分割数、バッチサイズ、Native Collectionの初期容量。
