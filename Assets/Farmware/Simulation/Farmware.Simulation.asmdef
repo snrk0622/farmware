@@ -5,5 +5,6 @@
     "Unity.Collections",
     "Unity.Entities"
   ],
+  "allowUnsafeCode": true,
   "autoReferenced": false
 }

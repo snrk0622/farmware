@@ -24,7 +24,7 @@ Unity Editorを開いたまま外部プロセスから同じプロジェクト�
 
 #### `SystemGroupBoundaryTests`
 
-`Farmware.Simulation`、`Farmware.Input`、`Farmware.Presentation`、`Farmware.Authoring`の直接参照をUnityのコンパイル情報から検査し、Simulationへの一方向依存を保証する。各境界型が意図したAssemblyへコンパイルされること、共通Initialization／Simulation／固定Tick／Presentation Groupと固定Tick初期化・Tick加算Systemが対応する親Groupへ1回だけ所属し、必要な先頭・末尾順序を宣言すること、`Farmware.Tests.EditMode`がPlayer向けコンパイルから除外されることも検証する。
+`Farmware.Simulation`、`Farmware.Input`、`Farmware.Presentation`、`Farmware.Authoring`の直接参照をUnityのコンパイル情報から検査し、Simulationへの一方向依存を保証する。各境界型が意図したAssemblyへコンパイルされること、共通Initialization／Simulation／固定Tick／Command Validation／Command Commit／Gameplay／Presentation Groupと関連Systemが対応する親Groupへ1回だけ所属し、CommandからGameplayまでの先頭・末尾・前後順序を宣言すること、`Farmware.Tests.EditMode`がPlayer向けコンパイルから除外されることも検証する。
 
 #### `FixedTickSimulationTests`
 
@@ -37,6 +37,10 @@ Sceneを使わない最小ECS Worldへ描画フレーム相当のDeltaTimeを直
 #### `DefinitionCatalogTests`
 
 32桁とハイフン付きのGUID文字列が同じ128bit値へ正規化され、全0と不正文字列を拒否することを検証する。定義入力順に依存せずGUID昇順で1始まりの実行時IDを割り当て、定義間のGUID参照を整数IDへ解決すること、重複GUID、参照切れ、参照先分類不一致、連結されていない参照範囲ではBlob Assetを作成しないことも保証する。複数定義の参照を平坦化した後も、検証エラーの参照番号はInspector上の定義内添字へ戻す。テスト内で作成したPersistent Blob Assetは各テストが所有し、終了時にDisposeする。
+
+#### `SimulationCommandQueueTests`
+
+Sceneを使わない最小ECS Worldで、受付番号が1から単調増加し、`ulong.MaxValue`を1回使用した後は0へ周回しないことを検証する。一時停止中はCommand Entityも受付番号も消費しない。同一固定Tickへ成功、競合失敗、成功の3件を順に投入し、各CommandがValidation、Commit、ECB再生、結果確定まで完了してから次へ進むこと、失敗Commandが状態を部分変更しないこと、Gameplay Groupが同Tick内の最終確定状態だけを読むことを保証する。Validation／Commit担当不在と複数Validation担当の拒否、未完了Commitが記録したECBの非再生、完了結果を現在の描画フレーム中保持して次フレーム先頭で破棄する寿命も確認する。
 
 ### 3.2 EditMode: `Farmware.WorldGeneration.Tests`
 
@@ -129,6 +133,7 @@ Sprite Packer ModeがV2であること、土地Atlasが7バイオームの本番
 | 固定Tick | 固定Tick Singletonの一意な初期化、Tick未満の端数蓄積、1フレーム最大4 Tick、上限超過分の破棄、一時停止中の非蓄積、再開後に停止時間を追いつかないこと、許容誤差で先行した時間負債の保持、異なる描画フレーム分割でのTick一致を扱う`FixedTickSimulationTests` | 将来の生産・物流Systemを接続した後、同じTick数で状態が一致することと、Profiler上で追いつきが4回以内であることを確認 |
 | 永続ID、定義、保存所有権 | `PersistentIdTests`で`0`の無効扱い、`1`からの単調増加、削除後のID非再利用、上限値を1回発行した後の停止、安定キー順の一括発行、重複キー・ID不足時の非消費、次回発行IDと上限到達状態の保存・復元を扱う。`DefinitionCatalogTests`で128bit GUIDの解析、入力順に依存しない連続ID、GUIDから実行時IDへの解決、解決済み参照、重複・未設定・参照切れ・分類不一致の拒否を扱う。後続では初期配置・リスポーン動物を含む実行時オブジェクト間の重複不在と、チャンク境界をまたぐ設備・施設の単一保存を追加する | Job並列数を変えても生成要求の安定順が変わらないこと、範囲移動による所有チャンク変更、定義参照切れのBaker検証 |
 | セーブ形式 | 固定Tick境界のSnapshot、設備・在庫・搬送順序・進捗・ID・地形差分の復元、一時ファイルから本ファイルへの置換、初期開発中は固定した`SaveFormatVersion`を扱うEditModeテスト | 書き込み中断後に直前の正常セーブを読めること、形式変更後の非対応な開発用セーブを安全に拒否することをPlayMode確認 |
+| 共通Command Queue | `SimulationCommandQueueTests`で受付番号、一時停止中の非受理、番号上限、受付順のValidation／Commit、失敗時無変更、成功CommandごとのECB再生、未完了CommitのECB破棄、同TickのGameplay前確定、担当System不在時の拒否、結果寿命を扱うECS EditModeテスト。`SystemGroupBoundaryTests`で宣言上のGroup順序も確認する | 機能固有Commandを接続した時点で、入力から結果表示までと、一時停止中に予約されないことをPlayMode確認 |
 | 建築Commandトランザクション | Command受付順、全体事前検証、資材・配置・履歴の全成功または全失敗、Commit後のDirty再構築、同Tickの生産前に確定するSystem順序を扱うECSテスト | 複数範囲編集の競合、失敗・キャンセル時に中間状態が表示されないことをPlayMode確認 |
 | Floating Origin | 絶対整数座標と相対表示座標の相互変換、負座標、原点移動前後の選択セル・生成結果・接続・状態ハッシュ一致を扱うEditModeテスト | 最大ズームアウト、高速パン、複数回の原点移動でTilemap、Sprite、入力、エフェクトにずれや揺れがないことをPlayMode確認 |
 | 動物の初期生成・移動 | 地形とは独立して保存した`AnimalPopulationSeed`、地域別抽選状態、初期化状態が同じなら初期補充結果、群れ、初期位置が一致すること、同じ地形シードだけでは配置を固定しないこと、初期補充でも共通アロケーターの永続IDを使うこと、固定Tickの移動・待機が決定論的であること、表示チャンクのアンロードでSimulation状態を失わないことを扱うEditMode／ECSテスト | 施設が存在しない新規ワールドでの動物表示、表示補間、接地点Y順、カメラ往復後の同一個体復元、可視範囲外のPresentation解放をPlayMode確認 |
