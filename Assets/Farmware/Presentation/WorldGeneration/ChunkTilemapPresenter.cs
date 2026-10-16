@@ -96,7 +96,7 @@ namespace Farmware.WorldGeneration.Presentation
         [SerializeField] private TileBase volcanicTile;
 
         // GroundType.Magmaへ使用する表示専用Tileで、水域や火山地面とは別のゲームルールを視覚化します。
-        [Tooltip("マグマ地形に表示するTileです。建築・通常移動・通常リンクを遮断する判定はECSデータで行います。")]
+        [Tooltip("マグマ地形に表示するTileです。通常設備・通常ベルト・通常移動の禁止と、橋の耐熱要件はECSデータで判定します。")]
         [SerializeField] private TileBase magmaTile;
 
         // WaterSalinity.FreshWaterへ使用する表示専用Tileです。

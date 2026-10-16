@@ -38,7 +38,7 @@ namespace Farmware.WorldGeneration
     }
 
     /// <summary>
-    /// 建築、通行、リンク可否へ直接影響する基礎地形種別です。
+    /// 設備・ベルト・橋の配置可否と通行可否へ直接影響する基礎地形種別です。
     /// 資源候補や地表の見た目を表すSoilTypeとは分離し、物理的な地形ルールだけに使用します。
     /// </summary>
     public enum GroundType : byte
@@ -46,14 +46,14 @@ namespace Farmware.WorldGeneration
         /// <summary>通常の建築可能な陸地です。</summary>
         Land = 0,
 
-        /// <summary>通常ノードは建築不可ですが、通常リンクは通過できる水域です。</summary>
+        /// <summary>通常設備と通常ベルトは配置不可ですが、橋を配置できる水域です。</summary>
         Water = 1,
 
-        /// <summary>建築と通常リンクの両方を遮断する岩壁です。</summary>
+        /// <summary>通常設備、通常ベルト、橋を配置できない岩壁です。</summary>
         RockWall = 2,
 
         // ID 3と4は旧Vegetation、旧Sandが使用していたため、既存データの誤読を防ぐ目的で再利用しません。
-        /// <summary>建築・通常移動・通常リンクを遮断する高温のマグマ地形です。</summary>
+        /// <summary>通常設備・通常ベルト・通常移動を拒否し、耐熱橋だけを許可する高温のマグマ地形です。</summary>
         Magma = 5
     }
 
@@ -143,11 +143,17 @@ namespace Farmware.WorldGeneration
         /// <summary>特別なフラグを持ちません。</summary>
         None = 0,
 
-        /// <summary>通常ノードを建築できる地面です。</summary>
-        IsBuildable = 1 << 0,
+        /// <summary>中央コアを含む通常設備を配置できる地形です。</summary>
+        AllowsNormalEquipment = 1 << 0,
 
-        /// <summary>通常物流リンクの直線経路を遮断します。</summary>
-        BlocksNormalLink = 1 << 1
+        /// <summary>橋を介さない通常ベルトを配置できる地形です。</summary>
+        AllowsNormalBelt = 1 << 1,
+
+        /// <summary>ベルトなどの上部構造を支える橋を配置できる地形です。</summary>
+        AllowsBridge = 1 << 2,
+
+        /// <summary>橋を配置するとき、橋定義に耐熱性が必要な地形です。AllowsBridgeを持つ場合だけ参照します。</summary>
+        RequiresHeatResistance = 1 << 3
     }
 
     /// <summary>
@@ -807,7 +813,7 @@ namespace Farmware.WorldGeneration
         /// <summary>連続標高をゲームルール向けに分類した値です。</summary>
         public ElevationClass ElevationClass;
 
-        /// <summary>建築可能・リンク遮断などをまとめたビットフラグです。</summary>
+        /// <summary>通常設備、通常ベルト、橋の配置可否と、橋の耐熱要件をまとめたビットフラグです。</summary>
         public TileGameplayFlags GameplayFlags;
 
         /// <summary>Phase 3の資源配置が参照する候補種別のビットフラグです。</summary>

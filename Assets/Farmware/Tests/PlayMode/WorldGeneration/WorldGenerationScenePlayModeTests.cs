@@ -881,8 +881,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
         }
 
         /// <summary>
-        /// 開発者用可視化がBiome、Soil、連続ノイズ、水域、移行帯、資源を異なる色へ写像し、論理BiomeとSoilの差を正しく判定することを検証します。
-        /// SceneやECS Worldを作らない純粋計算として、表示色の両端、水域分類、水域除外、最終資源分類をまとめて保証します。
+        /// 開発者用可視化がBiome、Soil、連続ノイズ、水域、移行帯、資源、地形配置属性を異なる色へ写像することを検証します。
+        /// SceneやECS Worldを作らない純粋計算として、表示色の両端、水域分類、配置契約、最終資源分類と入力値の不変性をまとめて保証します。
         /// </summary>
         [Test]
         public void DebugVisualization_MapsGeneratedTileValuesWithoutChangingSimulationData()
@@ -892,11 +892,14 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Biome = BiomeId.Forest,
                 Ground = GroundType.Land,
                 Soil = SoilType.Normal,
+                GameplayFlags = TileGameplayFlags.AllowsNormalEquipment
+                    | TileGameplayFlags.AllowsNormalBelt,
                 Elevation = ushort.MaxValue,
                 Temperature = 0,
                 Moisture = ushort.MaxValue,
                 Weirdness = ushort.MaxValue
             };
+            GeneratedTile originalForestTransitionTile = forestTransitionTile;
 
             Assert.That(
                 WorldGenerationDebugVisualizationOverlay.IsBiomeTransitionTile(forestTransitionTile),
@@ -1043,10 +1046,43 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Is.Not.EqualTo(treeResourceColor),
                 "Resources表示では配置なしと樹木を別色で判別できる必要があります。");
 
+            Color normalGroundPlacementColor =
+                WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                    WorldGenerationDebugVisualizationMode.TerrainPlacement,
+                    forestTransitionTile);
+            waterTile.GameplayFlags = TileGameplayFlags.AllowsBridge;
+            Color waterBridgePlacementColor =
+                WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                    WorldGenerationDebugVisualizationMode.TerrainPlacement,
+                    waterTile);
+            magmaTile.GameplayFlags = TileGameplayFlags.AllowsBridge
+                | TileGameplayFlags.RequiresHeatResistance;
+            Color magmaBridgePlacementColor =
+                WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                    WorldGenerationDebugVisualizationMode.TerrainPlacement,
+                    magmaTile);
+            Color blockedPlacementColor =
+                WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                    WorldGenerationDebugVisualizationMode.TerrainPlacement,
+                    new GeneratedTile
+                    {
+                        Ground = GroundType.RockWall,
+                        GameplayFlags = TileGameplayFlags.None
+                    });
+
+            // 4つの契約を別色にし、水とマグマで橋の耐熱要件が異なることを目視でも判別できるようにします。
+            Assert.That(normalGroundPlacementColor, Is.Not.EqualTo(waterBridgePlacementColor));
+            Assert.That(waterBridgePlacementColor, Is.Not.EqualTo(magmaBridgePlacementColor));
+            Assert.That(magmaBridgePlacementColor, Is.Not.EqualTo(blockedPlacementColor));
+            Assert.That(blockedPlacementColor, Is.Not.EqualTo(normalGroundPlacementColor));
+
             Color hiddenColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
                 WorldGenerationDebugVisualizationMode.None,
                 forestTransitionTile);
             Assert.That(hiddenColor.a, Is.EqualTo(0f), "Offモードは地形を一切着色してはいけません。");
+
+            // 可視化関数へ値型を渡しただけで、Simulationから読み取った元タイルの属性を変更してはいけません。
+            AssertTileEquals(originalForestTransitionTile, forestTransitionTile, 0);
         }
 
         /// <summary>
@@ -1516,7 +1552,12 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(debugOverlay.IsCoordinateHudVisible, Is.True);
             Assert.That(debugOverlay.IsChunkGridVisible, Is.True);
 
-            // 1描画フレームだけ両方を有効にし、GUI Style作成、座標変換、タイル・サブチャンク・チャンク線とラベル描画まで例外なく通します。
+            developerVisualization.SetMode(WorldGenerationDebugVisualizationMode.TerrainPlacement);
+            Assert.That(
+                developerVisualization.CurrentMode,
+                Is.EqualTo(WorldGenerationDebugVisualizationMode.TerrainPlacement));
+
+            // 1描画フレームだけ配置属性とF3/F4を有効にし、GUI Style作成、座標変換、凡例、タイル・グリッド描画まで例外なく通します。
             yield return null;
             developerVisualization.SetMode(WorldGenerationDebugVisualizationMode.None);
             debugOverlay.SetCoordinateHudVisible(false);

@@ -1,4 +1,4 @@
-// このファイルは、PlayMode中のノイズ・バイオーム・土壌・水域・マグマ・岩壁・資源可視化をUnity Editorメニューから切り替えます。
+// このファイルは、PlayMode中のノイズ・バイオーム・土壌・水域・マグマ・岩壁・資源・地形配置属性の可視化をUnity Editorメニューから切り替えます。
 // Editor Assemblyだけに属し、プレイヤー用入力や製品版ビルドへ開発者専用の操作UIを追加しません。
 
 using Farmware.WorldGeneration.Presentation;
@@ -57,6 +57,10 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>最低間隔と競合解決後の基礎資源表示へ切り替えるメニューパスです。</summary>
         private const string ResourcesMenuPath =
             "Farmware/World Generation/Debug Visualization/Resources";
+
+        /// <summary>通常設備・通常ベルト・橋と耐熱要件の地形属性表示へ切り替えるメニューパスです。</summary>
+        private const string TerrainPlacementMenuPath =
+            "Farmware/World Generation/Debug Visualization/Terrain Placement";
 
         /// <summary>PlayMode中の開発者用可視化を通常表示へ戻します。</summary>
         [MenuItem(OffMenuPath, false, 200)]
@@ -147,6 +151,13 @@ namespace Farmware.WorldGeneration.Editor
         private static void SelectResources()
         {
             SelectMode(WorldGenerationDebugVisualizationMode.Resources);
+        }
+
+        /// <summary>PlayMode中の地形配置属性を、通常地面・水上橋・耐熱橋・配置不可の固定色で表示します。</summary>
+        [MenuItem(TerrainPlacementMenuPath, false, 213)]
+        private static void SelectTerrainPlacement()
+        {
+            SelectMode(WorldGenerationDebugVisualizationMode.TerrainPlacement);
         }
 
         /// <summary>Off項目の有効状態とチェック表示を更新します。</summary>
@@ -255,6 +266,16 @@ namespace Farmware.WorldGeneration.Editor
         private static bool ValidateResources()
         {
             return ValidateMode(ResourcesMenuPath, WorldGenerationDebugVisualizationMode.Resources);
+        }
+
+        /// <summary>Terrain Placement項目の有効状態とチェック表示を更新します。</summary>
+        /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
+        [MenuItem(TerrainPlacementMenuPath, true)]
+        private static bool ValidateTerrainPlacement()
+        {
+            return ValidateMode(
+                TerrainPlacementMenuPath,
+                WorldGenerationDebugVisualizationMode.TerrainPlacement);
         }
 
         /// <summary>
