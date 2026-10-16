@@ -3,7 +3,8 @@
   "rootNamespace": "Farmware.Simulation",
   "references": [
     "Unity.Collections",
-    "Unity.Entities"
+    "Unity.Entities",
+    "Unity.Mathematics"
   ],
   "allowUnsafeCode": true,
   "autoReferenced": false
