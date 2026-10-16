@@ -566,8 +566,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 2aa1b1ef38564b2aad725d152d1f9aba, type: 3}
   m_Name:
   m_EditorClassIdentifier: Farmware.WorldGeneration.Presentation::Farmware.WorldGeneration.Presentation.CameraPanController
-  movementSpeedInTilesPerSecond: 24
-  fastMovementMultiplier: 4
+  movementSpeedInTilesPerSecond: 12
+  fastMovementMultiplier: 3
   pixelsPerUnit: 16
 --- !u!114 &519420036
 MonoBehaviour:

@@ -16,15 +16,27 @@ namespace Farmware.WorldGeneration.Presentation
     [RequireComponent(typeof(Camera))]
     public sealed class CameraPanController : MonoBehaviour
     {
+        /// <summary>
+        /// 新しくCameraPanControllerを追加したときに使用する通常移動速度です。
+        /// 480×270の基準画面を落ち着いて見渡せるよう、1秒間に12タイル進む値を使用します。
+        /// </summary>
+        public const float DefaultMovementSpeedInTilesPerSecond = 12f;
+
+        /// <summary>
+        /// 新しくCameraPanControllerを追加したときに使用する高速移動倍率です。
+        /// Shift操作でも地形生成を極端に追い越さないよう、通常速度の3倍に制限します。
+        /// </summary>
+        public const float DefaultFastMovementMultiplier = 3f;
+
         // 通常移動時の速度です。1タイルを1 Unity unitとして、Inspectorから体感を調整します。
         [Tooltip("WASDまたは矢印キーで移動する速さです。単位はタイル/秒で、1タイルを1 Unity unitとして扱います。")]
         [Min(0f)]
-        [SerializeField] private float movementSpeedInTilesPerSecond = 24f;
+        [SerializeField] private float movementSpeedInTilesPerSecond = DefaultMovementSpeedInTilesPerSecond;
 
         // Shiftキー中に通常速度へ掛ける倍率です。遠方チャンクの読み込み確認にも使用します。
         [Tooltip("左右どちらかのShiftキーを押している間の速度倍率です。大きくすると地形生成が追いつかない場合があります。")]
         [Min(1f)]
-        [SerializeField] private float fastMovementMultiplier = 4f;
+        [SerializeField] private float fastMovementMultiplier = DefaultFastMovementMultiplier;
 
         // 1 Unity unitに含めるピクセル数です。フォールバックTileとPixel Perfect CameraのPPUへ合わせます。
         [Tooltip("1 Unity unitあたりのピクセル数です。SpriteとPixel Perfect CameraのAssets PPUと同じ値にしてください。")]

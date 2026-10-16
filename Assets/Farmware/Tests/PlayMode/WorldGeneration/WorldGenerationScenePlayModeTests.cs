@@ -1597,6 +1597,39 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 "8px下げた液面の下辺は、手前にある土地上面より奥へ描画する必要があります。");
             CameraPanController cameraPanController = Object.FindFirstObjectByType<CameraPanController>();
             Assert.That(cameraPanController, Is.Not.Null, "Main CameraにCameraPanControllerがありません。");
+
+            // SampleSceneへ保存した操作速度がコードの既定値とずれると、構築メニューを再実行した後だけ体感が変わります。
+            // privateなInspector値を読み取り、現在のSceneと新規構築時の両方が通常12タイル/秒・高速36タイル/秒になることを保証します。
+            FieldInfo movementSpeedField = typeof(CameraPanController).GetField(
+                "movementSpeedInTilesPerSecond",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            FieldInfo fastMovementMultiplierField = typeof(CameraPanController).GetField(
+                "fastMovementMultiplier",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.That(
+                movementSpeedField,
+                Is.Not.Null,
+                "CameraPanControllerの通常移動速度フィールドが見つかりません。");
+            Assert.That(
+                fastMovementMultiplierField,
+                Is.Not.Null,
+                "CameraPanControllerの高速移動倍率フィールドが見つかりません。");
+            float movementSpeedInTilesPerSecond =
+                (float)movementSpeedField.GetValue(cameraPanController);
+            float fastMovementMultiplier =
+                (float)fastMovementMultiplierField.GetValue(cameraPanController);
+            Assert.That(
+                movementSpeedInTilesPerSecond,
+                Is.EqualTo(CameraPanController.DefaultMovementSpeedInTilesPerSecond),
+                "SampleSceneの通常移動速度はコード既定値の12タイル/秒と一致する必要があります。");
+            Assert.That(
+                fastMovementMultiplier,
+                Is.EqualTo(CameraPanController.DefaultFastMovementMultiplier),
+                "SampleSceneの高速移動倍率はコード既定値の3倍と一致する必要があります。");
+            Assert.That(
+                movementSpeedInTilesPerSecond * fastMovementMultiplier,
+                Is.EqualTo(36f),
+                "Shift併用時の移動速度は36タイル/秒になる必要があります。");
             InitialCameraPositionController initialPositionController =
                 Object.FindFirstObjectByType<InitialCameraPositionController>();
             Assert.That(

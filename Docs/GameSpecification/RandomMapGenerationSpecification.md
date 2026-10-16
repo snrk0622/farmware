@@ -903,7 +903,7 @@ Unrequested
 - 7バイオームを基準色だけで区別し、SoilTypeや固有模様を含めない土地PNGと、淡水、海水、岩壁を区別する仮色PNG・Tileアセット。岩壁内部は別Tileやセル色を使わず、同じ岩壁Tileの手前へ連続アルファの黒い影Meshを後付けする。すべてPoint、MipMapなし、無圧縮、PPU 16の交換可能なフォールバック素材とする。
 - SampleSceneへ、設定用SubScene、World Grid、専用Ground Tilemap、Camera Bridge、ChunkTilemapPresenterを接続。
 - URP用Pixel Perfect CameraをPPU 16、基準解像度480×270、Pixel Snapping、Windowboxへ設定し、CameraのHDR・MSAA・動的解像度を無効化。
-- WASDまたは矢印キーで通常24タイル/秒、Shift併用時96タイル/秒で移動し、LateUpdateで1/16ワールド単位へ整列するカメラ操作。
+- WASDまたは矢印キーで通常12タイル/秒、Shift併用時36タイル/秒で移動し、LateUpdateで1/16ワールド単位へ整列するカメラ操作。MAP-02Dのストリーミング負荷試験は、このプレイヤー向け速度とは分離したテスト用の高速移動と座標ジャンプでも実施する。
 - プレイヤー向け診断表示としてF3を押すとカメラ中心と初期スポーンのワールド・タイル・チャンク・チャンク内座標に加え、サブチャンク座標、生成済みBiome、GeneratorVersion、ワールドシードを表示する。F4を押すと各グリッド境界、論理チャンク座標、初期スポーンタイルと所属チャンクの赤系マーカーを表示するオーバーレイ。
 - Profilerでストリーミング寿命管理とTilemap反映を個別確認できる `Farmware.WorldGeneration.ChunkStreaming`、`Farmware.WorldGeneration.TilemapPresentation` の計測区間。
 - SampleSceneを実際に起動し、設定Singleton、4096タイルのActiveチャンク、Tilemap表示、遠方移動時のアンロード、原点帰還時の決定論的再生成まで確認するPlayModeテスト。
