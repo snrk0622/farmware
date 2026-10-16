@@ -1958,7 +1958,7 @@ namespace Farmware.WorldGeneration.Editor
             // ノイズ可視化はプレイヤー用F3/F4と分離し、Editorメニューだけが実行時モードを変更します。
             WorldGenerationDebugVisualizationOverlay developerVisualization =
                 GetOrAddComponent<WorldGenerationDebugVisualizationOverlay>(camera.gameObject);
-            developerVisualization.Configure(camera, grid);
+            developerVisualization.Configure(camera, grid, panController);
             EditorUtility.SetDirty(developerVisualization);
             return panController;
         }
@@ -2477,20 +2477,24 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>
-        /// 開発者用ノイズ可視化のCameraとGrid参照が、保存後も両方設定されているか検証します。
+        /// 開発者用ノイズ可視化のCamera、Grid、表示原点参照が、保存後もすべて設定されているか検証します。
         /// </summary>
         /// <param name="developerVisualization">保存済みSampleSceneから読み込んだ開発者用可視化Componentです。</param>
-        /// <returns>投影用Cameraと座標変換用Gridが両方とも非nullならtrueです。</returns>
+        /// <returns>投影用Camera、座標変換用Grid、CameraPanControllerがすべて非nullならtrueです。</returns>
         private static bool DeveloperVisualizationHasAllReferences(
             WorldGenerationDebugVisualizationOverlay developerVisualization)
         {
             SerializedObject serializedVisualization = new SerializedObject(developerVisualization);
             SerializedProperty cameraProperty = serializedVisualization.FindProperty("targetCamera");
             SerializedProperty gridProperty = serializedVisualization.FindProperty("targetGrid");
+            SerializedProperty panControllerProperty =
+                serializedVisualization.FindProperty("cameraPanController");
             return cameraProperty != null
                 && cameraProperty.objectReferenceValue != null
                 && gridProperty != null
-                && gridProperty.objectReferenceValue != null;
+                && gridProperty.objectReferenceValue != null
+                && panControllerProperty != null
+                && panControllerProperty.objectReferenceValue != null;
         }
     }
 }

@@ -204,6 +204,8 @@ Presentation
 
 `MAP-02B`では`CameraPanController`がPresentation寿命中の`DisplayOrigin`を所有する。World GridのTransformは原点へ固定し、Camera、9枚のTilemap、岩壁内部影Meshは表示原点からの相対座標だけを使用する。初期スポーンと明示的な絶対座標移動は所属チャンク境界を表示原点へ選び、Camera Transformへ0〜64付近の値を渡す。通常のWASD／矢印キー入力はCameraの相対座標だけを更新し、表示原点やWorld Gridを移動しない。Viewportを読む`CameraChunkStreamingBridge`は相対範囲へ現在の表示原点を加算し、ECSの`ChunkStreamingObserver`を絶対チャンク座標に保つ。明示的な絶対座標移動で表示原点が変わった場合、`ChunkTilemapPresenter`は旧相対セルを即時消去し、新しい表示原点で可視チャンクを再構築する。F4のタイル・サブチャンク・チャンク境界は、`int`最大タイルの外周となる最大値+1を含めて64bitで列挙し、座標周回や終了しない描画ループを起こさない。通常移動中の自動Floating Origin、継ぎ目を見せない再配置方式、再配置量の分割やカメラ速度抑制は`MAP-02D`で計測して決める。
 
+`MAP-02C`では、F3／F4に加えて開発者用Gameビュー可視化も`CameraPanController`の`DisplayOrigin`へ接続する。CameraとGridから得た相対セルへ表示原点を加えた絶対タイル座標でECSを検索し、検索結果の絶対タイルから表示原点を引いた相対セルへ色面を投影する。正負の遠方表示原点でもViewport範囲、中央タイル、Tilemap、色面が同じ絶対セルを参照する。Map Viewerは独立したEditorWindowで絶対座標を直接扱い、変換対象に含めない。現時点のGameビューには選択・建築ポインター入力が存在しないため、将来の入力はTransformやGridの相対値をSimulationへ直接渡さず、同じ表示原点境界で絶対タイル座標へ戻してからCommandを作る。
+
 ## 10. 実装前後の検証要件
 
 - 同一の初期状態、Command列、Tick数から同じ状態ハッシュを得る決定性テストを用意する。

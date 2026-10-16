@@ -1611,6 +1611,18 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 developerVisualization,
                 Is.Not.Null,
                 "Main CameraにWorldGenerationDebugVisualizationOverlayがありません。");
+            FieldInfo developerVisualizationPanControllerField =
+                typeof(WorldGenerationDebugVisualizationOverlay).GetField(
+                    "cameraPanController",
+                    BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.That(
+                developerVisualizationPanControllerField,
+                Is.Not.Null,
+                "開発者可視化の表示原点参照フィールドが見つかりません。");
+            Assert.That(
+                developerVisualizationPanControllerField.GetValue(developerVisualization),
+                Is.SameAs(cameraPanController),
+                "開発者可視化はMain Cameraと同じCameraPanControllerの表示原点を参照する必要があります。");
             PixelPerfectCamera pixelPerfectCamera = Object.FindFirstObjectByType<PixelPerfectCamera>();
             Assert.That(pixelPerfectCamera, Is.Not.Null, "Main CameraにURP PixelPerfectCameraがありません。");
 
@@ -1881,6 +1893,67 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 farLoadCompleted,
                 Is.True,
                 $"{MaximumWaitFrames}フレーム以内に遠方チャンクへの切替と原点のアンロードが完了しませんでした。");
+
+            // 申し送り事項の正座標側を確認し、可視範囲、中央情報、色面投影が同じ絶対セルを参照することを保証します。
+            AssertDeveloperVisualizationUsesAbsoluteCoordinates(
+                developerVisualization,
+                cameraPanController,
+                tilemap,
+                farCameraChunk,
+                farCameraWorldPosition,
+                "正座標の遠方");
+            developerVisualization.SetMode(WorldGenerationDebugVisualizationMode.Biome);
+            yield return null;
+            developerVisualization.SetMode(WorldGenerationDebugVisualizationMode.None);
+
+            // 負座標ではC#の0方向丸めを使うと別チャンクへずれるため、初期位置から十分離れた負の絶対座標でも同じ境界を確認します。
+            Vector2 negativeFarCameraWorldPosition = new Vector2(
+                -Mathf.Abs(initialCameraWorldPosition.x) - FarCameraOffsetInTiles,
+                -Mathf.Abs(initialCameraWorldPosition.y) - FarCameraOffsetInTiles);
+            ChunkCoordinate negativeFarCameraChunk = WorldGrid.ToChunkCoordinate(
+                Mathf.FloorToInt(negativeFarCameraWorldPosition.x),
+                Mathf.FloorToInt(negativeFarCameraWorldPosition.y));
+            cameraPanController.SetAbsoluteWorldPosition(
+                negativeFarCameraWorldPosition.x,
+                negativeFarCameraWorldPosition.y);
+            bool negativeFarLoadCompleted = false;
+            for (int frame = 0; frame < MaximumWaitFrames; frame++)
+            {
+                bool negativeFarChunkIsActive = TryGetActiveCompleteChunk(
+                    world.EntityManager,
+                    chunkQuery,
+                    negativeFarCameraChunk.X,
+                    negativeFarCameraChunk.Y,
+                    out _);
+                Vector3Int negativeFarDisplayCell = ToDisplayCell(
+                    Mathf.FloorToInt(negativeFarCameraWorldPosition.x),
+                    Mathf.FloorToInt(negativeFarCameraWorldPosition.y),
+                    cameraPanController.CurrentDisplayOrigin);
+                bool negativeFarCellIsDisplayed = tilemap.HasTile(negativeFarDisplayCell)
+                    || liquidBaseTilemap.HasTile(negativeFarDisplayCell);
+                if (negativeFarChunkIsActive && negativeFarCellIsDisplayed)
+                {
+                    negativeFarLoadCompleted = true;
+                    break;
+                }
+
+                yield return null;
+            }
+
+            Assert.That(
+                negativeFarLoadCompleted,
+                Is.True,
+                $"{MaximumWaitFrames}フレーム以内に負座標の遠方チャンクが生成・表示されませんでした。");
+            AssertDeveloperVisualizationUsesAbsoluteCoordinates(
+                developerVisualization,
+                cameraPanController,
+                tilemap,
+                negativeFarCameraChunk,
+                negativeFarCameraWorldPosition,
+                "負座標の遠方");
+            developerVisualization.SetMode(WorldGenerationDebugVisualizationMode.Moisture);
+            yield return null;
+            developerVisualization.SetMode(WorldGenerationDebugVisualizationMode.None);
 
             // 記録済みスポーンへ戻り、破棄済みEntityに依存せず同じシードから同一タイルデータを再生成できることを確認します。
             cameraPanController.SetAbsoluteWorldPosition(
@@ -2173,6 +2246,77 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(relativeCell.X, Is.InRange((long)int.MinValue, int.MaxValue));
             Assert.That(relativeCell.Y, Is.InRange((long)int.MinValue, int.MaxValue));
             return new Vector3Int((int)relativeCell.X, (int)relativeCell.Y, 0);
+        }
+
+        /// <summary>
+        /// 遠方の表示原点で、開発者可視化の可視範囲、中央情報、色面投影が同じ絶対タイルを参照することを保証します。
+        /// 正負の各移動先がActiveになった後に呼び、ECSチャンクとGameビューセルの両方へ接続されていることを確認します。
+        /// </summary>
+        /// <param name="developerVisualization">絶対・相対座標の境界を検査する開発者用可視化です。</param>
+        /// <param name="cameraPanController">現在の表示原点とCamera Transformを所有するControllerです。</param>
+        /// <param name="terrainTilemap">通常地形と同じGridセルへの投影結果を比較するTilemapです。</param>
+        /// <param name="activeChunk">Camera中央を含み、生成完了を確認済みの絶対論理チャンクです。</param>
+        /// <param name="absoluteCameraPosition">移動時に指定したSimulation上の絶対Camera座標です。</param>
+        /// <param name="caseName">失敗メッセージで正座標・負座標を区別する表示名です。</param>
+        private static void AssertDeveloperVisualizationUsesAbsoluteCoordinates(
+            WorldGenerationDebugVisualizationOverlay developerVisualization,
+            CameraPanController cameraPanController,
+            Tilemap terrainTilemap,
+            ChunkCoordinate activeChunk,
+            Vector2 absoluteCameraPosition,
+            string caseName)
+        {
+            bool hasVisibleBounds = developerVisualization.TryGetVisibleAbsoluteTileBounds(
+                out int minimumTileX,
+                out int maximumTileX,
+                out int minimumTileY,
+                out int maximumTileY);
+            Assert.That(hasVisibleBounds, Is.True, $"{caseName}: 絶対可視範囲を取得できません。");
+
+            int chunkMinimumX = activeChunk.X * WorldGridConstants.LogicalChunkSize;
+            int chunkMaximumX = chunkMinimumX + WorldGridConstants.LogicalChunkSize - 1;
+            int chunkMinimumY = activeChunk.Y * WorldGridConstants.LogicalChunkSize;
+            int chunkMaximumY = chunkMinimumY + WorldGridConstants.LogicalChunkSize - 1;
+            bool intersectsActiveChunk = minimumTileX <= chunkMaximumX
+                && maximumTileX >= chunkMinimumX
+                && minimumTileY <= chunkMaximumY
+                && maximumTileY >= chunkMinimumY;
+            Assert.That(
+                intersectsActiveChunk,
+                Is.True,
+                $"{caseName}: 開発者可視化の絶対可視範囲がActiveチャンクと交差していません。");
+
+            bool hasCenterTile = developerVisualization.TryGetAbsoluteCameraCenterTile(
+                out int2 centerAbsoluteTile);
+            Assert.That(hasCenterTile, Is.True, $"{caseName}: Camera中央の絶対タイルを取得できません。");
+            Assert.That(
+                centerAbsoluteTile,
+                Is.EqualTo(
+                    new int2(
+                        Mathf.FloorToInt(absoluteCameraPosition.x),
+                        Mathf.FloorToInt(absoluteCameraPosition.y))),
+                $"{caseName}: 中央タイル情報がCameraの絶対セルと一致していません。");
+            Assert.That(centerAbsoluteTile.x, Is.InRange(minimumTileX, maximumTileX));
+            Assert.That(centerAbsoluteTile.y, Is.InRange(minimumTileY, maximumTileY));
+
+            bool hasDisplayCell = developerVisualization.TryGetDisplayCellForAbsoluteTile(
+                centerAbsoluteTile,
+                out Vector3Int developerDisplayCell);
+            Assert.That(hasDisplayCell, Is.True, $"{caseName}: 中央の絶対セルを表示セルへ戻せません。");
+            Vector3Int expectedDisplayCell = ToDisplayCell(
+                centerAbsoluteTile.x,
+                centerAbsoluteTile.y,
+                cameraPanController.CurrentDisplayOrigin);
+            Assert.That(
+                developerDisplayCell,
+                Is.EqualTo(expectedDisplayCell),
+                $"{caseName}: 色面の投影セルがTilemapの表示セルと一致していません。");
+            Vector3Int cameraGridCell = terrainTilemap.layoutGrid.WorldToCell(
+                cameraPanController.transform.position);
+            Assert.That(
+                new Vector3Int(cameraGridCell.x, cameraGridCell.y, 0),
+                Is.EqualTo(developerDisplayCell),
+                $"{caseName}: 中央情報と色面がGameビュー上の別セルを参照しています。");
         }
 
         /// <summary>

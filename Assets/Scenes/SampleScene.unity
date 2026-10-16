@@ -611,6 +611,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Farmware.WorldGeneration.Presentation::Farmware.WorldGeneration.Presentation.WorldGenerationDebugVisualizationOverlay
   targetCamera: {fileID: 519420031}
   targetGrid: {fileID: 1659629450}
+  cameraPanController: {fileID: 519420035}
 --- !u!114 &519420038
 MonoBehaviour:
   m_ObjectHideFlags: 0

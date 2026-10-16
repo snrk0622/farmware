@@ -4,6 +4,7 @@
 using System.Collections.Generic;
 using Unity.Collections;
 using Unity.Entities;
+using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Rendering.Universal;
 
@@ -77,6 +78,10 @@ namespace Farmware.WorldGeneration.Presentation
         [Tooltip("地形Tilemapを所有するGridです。セル原点とサイズをデバッグ色面へ反映します。未指定時は1 Unity unitを1タイルとして扱います。")]
         [SerializeField] private GridLayout targetGrid;
 
+        // CameraやTilemapが使用する現在の表示原点です。開発者表示も同じ原点を使い、遠方で相対セルを絶対座標と誤認しないようにします。
+        [Tooltip("Main Cameraの表示原点を管理するComponentです。遠方の相対セルをSimulationの絶対タイル座標へ戻すために使用します。")]
+        [SerializeField] private CameraPanController cameraPanController;
+
         // Windowboxの黒帯を除いた描画領域を求めるため、Cameraと同じGameObjectから取得して保持します。
         private PixelPerfectCamera pixelPerfectCamera;
 
@@ -112,21 +117,26 @@ namespace Farmware.WorldGeneration.Presentation
         public WorldGenerationDebugVisualizationMode CurrentMode => currentMode;
 
         /// <summary>
-        /// Editor構築ツールまたはテストから、投影Cameraとタイル座標用Gridをまとめて設定します。
+        /// Editor構築ツールまたはテストから、投影Camera、タイル座標用Grid、表示原点の所有者をまとめて設定します。
         /// </summary>
         /// <param name="camera">可視化を重ねる2Dカメラです。</param>
         /// <param name="grid">通常地形と同じセル変換を提供するGridです。</param>
-        public void Configure(Camera camera, GridLayout grid)
+        /// <param name="panController">CameraとTilemapが共有する表示原点の所有者です。</param>
+        public void Configure(
+            Camera camera,
+            GridLayout grid,
+            CameraPanController panController)
         {
             targetCamera = camera;
             targetGrid = grid;
+            cameraPanController = panController;
             pixelPerfectCamera = targetCamera == null
                 ? null
                 : targetCamera.GetComponent<PixelPerfectCamera>();
         }
 
         /// <summary>
-        /// Component読み込み直後にUnityから呼ばれ、未設定のCamera参照とPixel Perfect Camera参照を補います。
+        /// Component読み込み直後にUnityから呼ばれ、未設定のCamera、表示原点、Pixel Perfect Camera参照を補います。
         /// </summary>
         private void Awake()
         {
@@ -135,9 +145,100 @@ namespace Farmware.WorldGeneration.Presentation
                 targetCamera = GetComponent<Camera>();
             }
 
+            if (cameraPanController == null)
+            {
+                cameraPanController = GetComponent<CameraPanController>();
+            }
+
             pixelPerfectCamera = targetCamera == null
                 ? null
                 : targetCamera.GetComponent<PixelPerfectCamera>();
+        }
+
+        /// <summary>
+        /// 現在のCamera Viewportへ少しでも含まれる範囲を、Simulationと同じ絶対タイル座標で返します。
+        /// 開発者表示、PlayModeテスト、将来のGameビュー診断入力が同じ変換境界を確認するために使用します。
+        /// </summary>
+        /// <param name="minimumTileX">成功時に、画面へ含まれる最小の絶対水平タイル座標を返します。</param>
+        /// <param name="maximumTileX">成功時に、画面へ含まれる最大の絶対水平タイル座標を返します。</param>
+        /// <param name="minimumTileY">成功時に、画面へ含まれる最小の絶対垂直タイル座標を返します。</param>
+        /// <param name="maximumTileY">成功時に、画面へ含まれる最大の絶対垂直タイル座標を返します。</param>
+        /// <returns>投影Cameraが設定され、可視範囲を計算できる場合はtrueです。</returns>
+        public bool TryGetVisibleAbsoluteTileBounds(
+            out int minimumTileX,
+            out int maximumTileX,
+            out int minimumTileY,
+            out int maximumTileY)
+        {
+            if (targetCamera == null)
+            {
+                minimumTileX = default;
+                maximumTileX = default;
+                minimumTileY = default;
+                maximumTileY = default;
+                return false;
+            }
+
+            VisibleTileBounds bounds = CalculateVisibleTileBounds();
+            minimumTileX = bounds.MinimumTileX;
+            maximumTileX = bounds.MaximumTileX;
+            minimumTileY = bounds.MinimumTileY;
+            maximumTileY = bounds.MaximumTileY;
+            return true;
+        }
+
+        /// <summary>
+        /// Camera中央を含む相対セルへ現在の表示原点を加え、Simulation上の絶対タイル座標へ戻します。
+        /// 中央タイル情報が色面と同じ絶対セルを参照しているか確認する入口としても使用します。
+        /// </summary>
+        /// <param name="absoluteTileCoordinate">成功時に、Camera中央を含む絶対タイル座標を返します。</param>
+        /// <returns>Camera中央が有限なint座標へ変換できる場合はtrueです。</returns>
+        public bool TryGetAbsoluteCameraCenterTile(out int2 absoluteTileCoordinate)
+        {
+            if (targetCamera == null)
+            {
+                absoluteTileCoordinate = default;
+                return false;
+            }
+
+            Vector3 centerWorld = targetCamera.transform.position;
+            Vector3Int relativeCenterCell = targetGrid == null
+                ? new Vector3Int(
+                    Mathf.FloorToInt(centerWorld.x),
+                    Mathf.FloorToInt(centerWorld.y),
+                    0)
+                : targetGrid.WorldToCell(centerWorld);
+            return WorldCoordinateConversion.TryToAbsoluteTileCoordinate(
+                new RelativeCellCoordinate(relativeCenterCell.x, relativeCenterCell.y),
+                GetCurrentDisplayOrigin(),
+                out absoluteTileCoordinate);
+        }
+
+        /// <summary>
+        /// Simulation上の絶対タイル座標を、現在の表示原点から見たGridセルへ変換します。
+        /// 開発者用色面をTilemapと同じセルへ投影し、遠方でも1セルのずれを作らないために使用します。
+        /// </summary>
+        /// <param name="absoluteTileCoordinate">投影対象となるSimulation上の絶対タイル座標です。</param>
+        /// <param name="displayCell">成功時に、現在のGridへ投影する相対セル座標を返します。</param>
+        /// <returns>表示原点との差がUnityのGridセルで扱えるint範囲内ならtrueです。</returns>
+        public bool TryGetDisplayCellForAbsoluteTile(
+            int2 absoluteTileCoordinate,
+            out Vector3Int displayCell)
+        {
+            RelativeCellCoordinate relativeCell = WorldCoordinateConversion.ToRelativeCellCoordinate(
+                absoluteTileCoordinate,
+                GetCurrentDisplayOrigin());
+            if (relativeCell.X < int.MinValue
+                || relativeCell.X > int.MaxValue
+                || relativeCell.Y < int.MinValue
+                || relativeCell.Y > int.MaxValue)
+            {
+                displayCell = default;
+                return false;
+            }
+
+            displayCell = new Vector3Int((int)relativeCell.X, (int)relativeCell.Y, 0);
+            return true;
         }
 
         /// <summary>
@@ -503,10 +604,14 @@ namespace Farmware.WorldGeneration.Presentation
                 return;
             }
 
-            Vector3 centerWorld = targetCamera.transform.position;
-            Vector3Int centerTileCoordinate = targetGrid == null
-                ? new Vector3Int(Mathf.FloorToInt(centerWorld.x), Mathf.FloorToInt(centerWorld.y), 0)
-                : targetGrid.WorldToCell(centerWorld);
+            bool hasCenterCoordinate = TryGetAbsoluteCameraCenterTile(
+                out int2 centerAbsoluteTileCoordinate);
+            Vector3Int centerTileCoordinate = hasCenterCoordinate
+                ? new Vector3Int(
+                    centerAbsoluteTileCoordinate.x,
+                    centerAbsoluteTileCoordinate.y,
+                    0)
+                : default;
             bool hasCenterTile = false;
             GeneratedTile centerTile = default;
             GeneratedResourceTile centerResource = default;
@@ -565,13 +670,18 @@ namespace Farmware.WorldGeneration.Presentation
                     continue;
                 }
 
-                // チャンク全体ではなく、カメラ矩形と交差する行・列だけを描き、画面外タイルのIMGUI発行を避けます。
-                for (int tileY = minimumTileY; tileY <= maximumTileY; tileY++)
+                int minimumLocalX = minimumTileX - chunkMinimumX;
+                int maximumLocalX = maximumTileX - chunkMinimumX;
+                int minimumLocalY = minimumTileY - chunkMinimumY;
+                int maximumLocalY = maximumTileY - chunkMinimumY;
+
+                // 0〜63のチャンク内座標をループし、画面外タイルのIMGUI発行とint最大タイルでの加算周回を同時に避けます。
+                for (int localY = minimumLocalY; localY <= maximumLocalY; localY++)
                 {
-                    int localY = tileY - chunkMinimumY;
-                    for (int tileX = minimumTileX; tileX <= maximumTileX; tileX++)
+                    int tileY = chunkMinimumY + localY;
+                    for (int localX = minimumLocalX; localX <= maximumLocalX; localX++)
                     {
-                        int localX = tileX - chunkMinimumX;
+                        int tileX = chunkMinimumX + localX;
                         int tileIndex = (localY * WorldGridConstants.LogicalChunkSize) + localX;
                         GeneratedTile tile = tiles[tileIndex];
                         GeneratedResourceTile resource = resources[tileIndex];
@@ -607,7 +717,9 @@ namespace Farmware.WorldGeneration.Presentation
                             isMagmaInfluenceArea);
                         GUI.DrawTexture(CalculateTileGuiRect(tileX, tileY), Texture2D.whiteTexture);
 
-                        if (tileX == centerTileCoordinate.x && tileY == centerTileCoordinate.y)
+                        if (hasCenterCoordinate
+                            && tileX == centerTileCoordinate.x
+                            && tileY == centerTileCoordinate.y)
                         {
                             hasCenterTile = true;
                             centerTile = tile;
@@ -661,10 +773,19 @@ namespace Farmware.WorldGeneration.Presentation
                         continue;
                     }
 
-                    if (!GetCachedRockWall(
+                    long sampleTileX = (long)worldTileX + offsetX;
+                    long sampleTileY = (long)worldTileY + offsetY;
+                    bool sampleIsOutsideWorld = sampleTileX < int.MinValue
+                        || sampleTileX > int.MaxValue
+                        || sampleTileY < int.MinValue
+                        || sampleTileY > int.MaxValue;
+
+                    // int座標域の外側は地形が存在しない空地として扱い、反対側の端へ符号周回した岩壁を参照しません。
+                    if (sampleIsOutsideWorld
+                        || !GetCachedRockWall(
                             settings,
-                            worldTileX + offsetX,
-                            worldTileY + offsetY))
+                            (int)sampleTileX,
+                            (int)sampleTileY))
                     {
                         nearestOpenDistanceSquared = distanceSquared;
                     }
@@ -710,8 +831,17 @@ namespace Farmware.WorldGeneration.Presentation
         /// <returns>1タイルを覆う正の幅と高さを持つIMGUI矩形です。</returns>
         private Rect CalculateTileGuiRect(int tileX, int tileY)
         {
-            Vector3 bottomLeftWorld = CellBoundaryToWorld(tileX, tileY);
-            Vector3 topRightWorld = CellBoundaryToWorld(tileX + 1, tileY + 1);
+            if (!TryGetDisplayCellForAbsoluteTile(
+                    new int2(tileX, tileY),
+                    out Vector3Int displayCell))
+            {
+                return Rect.zero;
+            }
+
+            Vector3 bottomLeftWorld = DisplayCellBoundaryToWorld(displayCell.x, displayCell.y);
+            Vector3 topRightWorld = DisplayCellBoundaryToWorld(
+                (long)displayCell.x + 1L,
+                (long)displayCell.y + 1L);
             Vector3 bottomLeftViewport = targetCamera.WorldToViewportPoint(bottomLeftWorld);
             Vector3 topRightViewport = targetCamera.WorldToViewportPoint(topRightWorld);
             float left = Mathf.Min(bottomLeftViewport.x, topRightViewport.x) * activeGuiViewportRect.width;
@@ -736,36 +866,105 @@ namespace Farmware.WorldGeneration.Presentation
                 new Vector3(0f, 0f, distanceToGridPlane));
             Vector3 topRightWorld = targetCamera.ViewportToWorldPoint(
                 new Vector3(1f, 1f, distanceToGridPlane));
+            DisplayOrigin displayOrigin = GetCurrentDisplayOrigin();
 
             if (targetGrid != null)
             {
                 Vector3Int bottomLeftCell = targetGrid.WorldToCell(bottomLeftWorld);
                 Vector3Int topRightCell = targetGrid.WorldToCell(topRightWorld);
                 return new VisibleTileBounds(
-                    Mathf.Min(bottomLeftCell.x, topRightCell.x),
-                    Mathf.Max(bottomLeftCell.x, topRightCell.x),
-                    Mathf.Min(bottomLeftCell.y, topRightCell.y),
-                    Mathf.Max(bottomLeftCell.y, topRightCell.y));
+                    AddDisplayOriginSaturated(
+                        Mathf.Min(bottomLeftCell.x, topRightCell.x),
+                        displayOrigin.AbsoluteTileCoordinate.x),
+                    AddDisplayOriginSaturated(
+                        Mathf.Max(bottomLeftCell.x, topRightCell.x),
+                        displayOrigin.AbsoluteTileCoordinate.x),
+                    AddDisplayOriginSaturated(
+                        Mathf.Min(bottomLeftCell.y, topRightCell.y),
+                        displayOrigin.AbsoluteTileCoordinate.y),
+                    AddDisplayOriginSaturated(
+                        Mathf.Max(bottomLeftCell.y, topRightCell.y),
+                        displayOrigin.AbsoluteTileCoordinate.y));
             }
 
             return new VisibleTileBounds(
-                Mathf.FloorToInt(Mathf.Min(bottomLeftWorld.x, topRightWorld.x)),
-                Mathf.CeilToInt(Mathf.Max(bottomLeftWorld.x, topRightWorld.x)) - 1,
-                Mathf.FloorToInt(Mathf.Min(bottomLeftWorld.y, topRightWorld.y)),
-                Mathf.CeilToInt(Mathf.Max(bottomLeftWorld.y, topRightWorld.y)) - 1);
+                AddDisplayOriginSaturated(
+                    Mathf.FloorToInt(Mathf.Min(bottomLeftWorld.x, topRightWorld.x)),
+                    displayOrigin.AbsoluteTileCoordinate.x),
+                AddDisplayOriginSaturated(
+                    Mathf.CeilToInt(Mathf.Max(bottomLeftWorld.x, topRightWorld.x)) - 1,
+                    displayOrigin.AbsoluteTileCoordinate.x),
+                AddDisplayOriginSaturated(
+                    Mathf.FloorToInt(Mathf.Min(bottomLeftWorld.y, topRightWorld.y)),
+                    displayOrigin.AbsoluteTileCoordinate.y),
+                AddDisplayOriginSaturated(
+                    Mathf.CeilToInt(Mathf.Max(bottomLeftWorld.y, topRightWorld.y)) - 1,
+                    displayOrigin.AbsoluteTileCoordinate.y));
         }
 
         /// <summary>
-        /// タイル境界座標を、Gridの原点・Transform・セル寸法を反映したワールド座標へ変換します。
+        /// 表示原点基準の相対セル境界を、Gridの原点・Transform・セル寸法を反映したワールド座標へ変換します。
         /// </summary>
-        /// <param name="tileX">水平タイル境界座標です。</param>
-        /// <param name="tileY">垂直タイル境界座標です。</param>
+        /// <param name="displayCellX">現在の表示原点から数えた水平セル境界座標です。</param>
+        /// <param name="displayCellY">現在の表示原点から数えた垂直セル境界座標です。</param>
         /// <returns>通常地形と同じ平面上のワールド座標です。</returns>
-        private Vector3 CellBoundaryToWorld(int tileX, int tileY)
+        private Vector3 DisplayCellBoundaryToWorld(long displayCellX, long displayCellY)
         {
             return targetGrid == null
-                ? new Vector3(tileX, tileY, 0f)
-                : targetGrid.CellToWorld(new Vector3Int(tileX, tileY, 0));
+                ? new Vector3(displayCellX, displayCellY, 0f)
+                : targetGrid.CellToWorld(
+                    new Vector3Int(
+                        SaturateToInt(displayCellX),
+                        SaturateToInt(displayCellY),
+                        0));
+        }
+
+        /// <summary>
+        /// CameraやTilemapと共有する現在の表示原点を返します。
+        /// 古いSceneを一時的に開いた場合だけ絶対原点へフォールバックし、構築ツールの検証では未接続を検出します。
+        /// </summary>
+        /// <returns>CameraPanControllerが所有する表示原点、未接続時は絶対座標(0, 0)です。</returns>
+        private DisplayOrigin GetCurrentDisplayOrigin()
+        {
+            return cameraPanController == null
+                ? new DisplayOrigin(int2.zero)
+                : cameraPanController.CurrentDisplayOrigin;
+        }
+
+        /// <summary>
+        /// 相対セルへ表示原点を64bitで加算し、ワールド端を越える場合はint端へ収めます。
+        /// Camera Viewportがint座標域の外へ少しはみ出しても符号反転させず、存在する側の端だけを描くために使用します。
+        /// </summary>
+        /// <param name="relativeCoordinate">表示原点から数えた1軸分の相対セル座標です。</param>
+        /// <param name="displayOriginCoordinate">同じ軸の絶対表示原点です。</param>
+        /// <returns>Simulationのint座標域へ収めた絶対タイル座標です。</returns>
+        private static int AddDisplayOriginSaturated(
+            int relativeCoordinate,
+            int displayOriginCoordinate)
+        {
+            long absoluteCoordinate = (long)relativeCoordinate + displayOriginCoordinate;
+            return SaturateToInt(absoluteCoordinate);
+        }
+
+        /// <summary>
+        /// 64bit座標をUnityのGridセルで扱えるint範囲へ収めます。
+        /// 直接castすると遠方で符号が反転するため、比較してから変換します。
+        /// </summary>
+        /// <param name="coordinate">int範囲を越える可能性がある1軸分の座標です。</param>
+        /// <returns>int最小値から最大値の範囲へ収めた座標です。</returns>
+        private static int SaturateToInt(long coordinate)
+        {
+            if (coordinate < int.MinValue)
+            {
+                return int.MinValue;
+            }
+
+            if (coordinate > int.MaxValue)
+            {
+                return int.MaxValue;
+            }
+
+            return (int)coordinate;
         }
 
         /// <summary>
