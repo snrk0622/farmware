@@ -47,7 +47,7 @@ namespace Farmware.Simulation
     {
         // 浮動小数点の0.1秒などを加算した際、Tick境界のごく小さな誤差で1回不足しないようにする比較余白です。
         // Unityの描画DeltaTimeはfloatなので、doubleへ変換しても元の丸め誤差が残ります。
-        // 0.1秒に対して100万分の1という十分小さい余白だけを認め、0.04f + 0.06fのような境界を取りこぼさないようにします。
+        // 0.1秒に対して100万分の1という十分小さい余白だけを認め、先行した不足分は負の時間として次フレームへ残します。
         private const double TickBoundaryTolerance = 0.0000001d;
 
         // 固定Tick設定を1件だけ取得するQueryです。初回更新時に作成し、Group破棄時にDisposeします。
@@ -73,7 +73,8 @@ namespace Farmware.Simulation
         private uint maximumTicksPerFrame =
             FixedTickConfiguration.DefaultMaximumTicksPerFrame;
 
-        // まだ固定Tickへ変換されていない通常進行中の秒数です。Tick未満の端数だけは次フレームへ保持します。
+        // まだ固定Tickへ変換されていない通常進行中の秒数です。
+        // 許容誤差でTickを少し先行した場合だけ負になり、その不足時間を次フレームで返すための負債として保持します。
         private double accumulatedSeconds;
 
         // 現在の描画フレームで、この後に実行する予定の固定Tick数です。
@@ -226,7 +227,7 @@ namespace Farmware.Simulation
 
         /// <summary>
         /// 蓄積秒数から今回実行するTick数を求め、最大追いつき回数を超えた整数Tick分だけを破棄します。
-        /// Tick未満の端数は次フレームへ残し、通常フレームの小さなDeltaTimeを失わないようにします。
+        /// Tick未満の端数は次フレームへ残し、許容誤差で先行した不足時間も負の端数として失わないようにします。
         /// </summary>
         private void PlanTicksForCurrentFrame()
         {
@@ -246,12 +247,13 @@ namespace Farmware.Simulation
                 return;
             }
 
-            // 上限超過分はゲーム内時間を遅らせる方針で破棄します。余りだけは通常の次Tickへ引き継ぎます。
+            // 上限超過分はゲーム内時間を遅らせる方針で破棄します。
+            // 余りがわずかに負なら、許容誤差で先行した時間の負債なので、0へ丸めず次フレームへ引き継ぎます。
             double fractionalRemainder =
                 accumulatedSeconds - (availableTickCount * fixedDeltaTimeSeconds);
             accumulatedSeconds =
                 (remainingTicksThisFrame * fixedDeltaTimeSeconds)
-                + Math.Max(0d, fractionalRemainder);
+                + fractionalRemainder;
         }
 
         /// <summary>
@@ -261,9 +263,9 @@ namespace Farmware.Simulation
         /// <returns>常にtrueを返し、ComponentSystemGroupへ1回の更新を指示します。</returns>
         private bool PushNextTickTime(ComponentSystemGroup group)
         {
-            accumulatedSeconds = Math.Max(
-                0d,
-                accumulatedSeconds - fixedDeltaTimeSeconds);
+            // 許容誤差で境界直前のTickを実行した場合は負数になります。
+            // この不足分を消すとフレーム分割によってTick数が変わるため、次フレームへ負債として残します。
+            accumulatedSeconds -= fixedDeltaTimeSeconds;
             remainingTicksThisFrame--;
             simulationElapsedSeconds += fixedDeltaTimeSeconds;
 

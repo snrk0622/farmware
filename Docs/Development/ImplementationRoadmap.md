@@ -208,7 +208,7 @@ PR系列の実行順は「2. 全体状況」の番号を正とし、同じ系列
 
 `SIM-01A`では、`Farmware.Simulation`、`Farmware.Input`、`Farmware.Presentation`、`Farmware.Authoring`、`Farmware.Tests.EditMode`の明示的なAssembly境界と、Initialization／Simulation／Presentationの共通ルートSystem Groupを追加した。既存ワールド生成の初期探索とチャンクストリーミングは用途に対応する共通Groupへ移し、将来の固定Tickゲームルールとは分離した。2026-10-16に、UnityコンパイルとConsoleのエラー・警告が0件、EditMode 134件とPlayMode 25件が成功し、既存の明示実行用負荷テスト1件だけを通常実行から除外した。Assemblyと更新順だけの変更で画面表示やゲーム挙動を変更しないため、追加のGameビュー目視項目はない。
 
-`SIM-01B`では、`FixedTickConfiguration`、`SimulationTickState`、`SimulationPauseState`のSingletonと、`FarmwareFixedTickSimulationSystemGroup`を追加した。開発用の暫定値は10 Tick/秒、最大4 Tick/描画フレームとし、上限を超えた整数Tick分の遅延は破棄して処理落ちの連鎖を防ぐ。Tick未満の端数は次フレームへ保持するが、一時停止中の経過時間は蓄積せず、再開時に停止時間分を追いつかない。設定はWorldの初回更新時に固定し、同じWorldの途中では変更しない。`FixedTickSimulationTests`では初期化、端数蓄積、追いつき上限、停止と再開、異なる描画フレーム分割でのTick一致、0設定の正規化を検証する。2026-10-16にUnityコンパイルのエラー・警告が0件、EditMode 140件とPlayMode 25件が成功し、既存の明示実行用負荷テスト1件だけを通常実行から除外した。
+`SIM-01B`では、`FixedTickConfiguration`、`SimulationTickState`、`SimulationPauseState`のSingletonと、`FarmwareFixedTickSimulationSystemGroup`を追加した。開発用の暫定値は10 Tick/秒、最大4 Tick/描画フレームとし、上限を超えた整数Tick分の遅延は破棄して処理落ちの連鎖を防ぐ。Tick未満の端数は次フレームへ保持し、許容誤差でTickを先行した場合の不足時間も負の端数として次フレームへ残す。一時停止中の経過時間は蓄積せず、再開時に停止時間分を追いつかない。設定はWorldの初回更新時に固定し、同じWorldの途中では変更しない。`FixedTickSimulationTests`では初期化、端数蓄積、追いつき上限、停止と再開、異なる描画フレーム分割でのTick一致、許容誤差による時間負債、0設定の正規化を検証する。2026-10-16にUnityコンパイルのエラー・警告が0件、EditMode 141件とPlayMode 25件が成功し、既存の明示実行用負荷テスト1件だけを通常実行から除外した。
 
 大項目完了条件:
 

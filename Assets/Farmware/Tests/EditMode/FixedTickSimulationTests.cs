@@ -153,6 +153,48 @@ namespace Farmware.Tests.EditMode
         }
 
         /// <summary>
+        /// Tick境界の許容誤差で少し先行した不足時間を負債として保持し、同じfloat合計を異なるフレーム幅で渡してもTick数が一致することを保証します。
+        /// </summary>
+        [Test]
+        public void FixedTickGroup_PreservesToleranceDebtAcrossFramePartitions()
+        {
+            const float FineFrameDeltaTime = 0.09999995f;
+            const int FineFrameCount = 1000;
+            const float CoarseFrameDeltaTime = 0.1999999f;
+            const int CoarseFrameCount = 500;
+
+            using World fineFrameWorld = CreateFixedTickTestWorld(
+                FixedTickConfiguration.CreateDefault(),
+                out FarmwareFixedTickSimulationSystemGroup fineFrameGroup);
+            using World coarseFrameWorld = CreateFixedTickTestWorld(
+                FixedTickConfiguration.CreateDefault(),
+                out FarmwareFixedTickSimulationSystemGroup coarseFrameGroup);
+
+            // 2種類のDeltaTimeはfloatへ丸めた後も合計が同一です。分割方法以外の条件をそろえて比較します。
+            Assert.That(
+                (double)FineFrameDeltaTime * FineFrameCount,
+                Is.EqualTo((double)CoarseFrameDeltaTime * CoarseFrameCount));
+
+            // 0.1秒の直前にある細かいフレームを繰り返し、許容誤差による先行Tickと時間負債を発生させます。
+            for (int frameIndex = 0; frameIndex < FineFrameCount; frameIndex++)
+            {
+                UpdateFixedTickGroup(fineFrameWorld, fineFrameGroup, FineFrameDeltaTime);
+            }
+
+            // 同じ合計時間を2倍幅のフレームで渡し、時間の分割だけを変更します。
+            for (int frameIndex = 0; frameIndex < CoarseFrameCount; frameIndex++)
+            {
+                UpdateFixedTickGroup(coarseFrameWorld, coarseFrameGroup, CoarseFrameDeltaTime);
+            }
+
+            // 合計は100秒よりわずかに短いため、完了できる0.1秒Tickは両方999回です。
+            Assert.That(GetCurrentTick(fineFrameWorld), Is.EqualTo(999ul));
+            Assert.That(
+                GetCurrentTick(coarseFrameWorld),
+                Is.EqualTo(GetCurrentTick(fineFrameWorld)));
+        }
+
+        /// <summary>
         /// 0の設定値を正規化し、除算不能なTickレートや更新不能な追いつき上限を既定値へ戻すことを保証します。
         /// </summary>
         [Test]
