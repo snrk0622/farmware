@@ -39,8 +39,8 @@ Unity Editorを開いたまま外部プロセスから同じプロジェクト�
 | 建築可能領域・初期スポーン | 地形を上書きせず、必要面積と資源条件を満たす地点を決定論的に記録する。探索Job実行中に既存地点が現れた場合も、Job完了後に一時結果を解放してSingletonを二重作成しないことを保証する。 |
 | ECS生成・ストリーミング | 生成要求、同時生成上限、範囲外キャンセル、保持、非表示化、再有効化を保証する。 |
 
-`NodeBuildableRegionLocator_OneThousandSeedsFindDefaultRegion`は、狭い既定探索を1,000シードで調べる通常回帰テストである。
-`NodeBuildableRegionLocator_OneHundredSeedSoakTest`は、最大17×17チャンクの資源探索を100シードで行うため`Explicit`指定された負荷テストであり、通常の修正確認では自動実行しない。
+`EquipmentBuildableRegionLocator_OneThousandSeedsFindDefaultRegion`は、狭い既定探索を1,000シードで調べる通常回帰テストである。
+`EquipmentBuildableRegionLocator_OneHundredSeedSoakTest`は、最大17×17チャンクの資源探索を100シードで行うため`Explicit`指定された負荷テストであり、通常の修正確認では自動実行しない。
 
 #### `WorldGenerationDistributionAuditTests`
 

@@ -657,7 +657,7 @@ namespace Farmware.WorldGeneration
         /// </summary>
         /// <param name="region">全セルが建設可能と確認済みの矩形です。</param>
         /// <returns>矩形情報と、その内部にある初期スポーンタイルです。</returns>
-        public static InitialSpawnLocation FromRegion(in NodeBuildableRegion region)
+        public static InitialSpawnLocation FromRegion(in EquipmentBuildableRegion region)
         {
             return new InitialSpawnLocation
             {

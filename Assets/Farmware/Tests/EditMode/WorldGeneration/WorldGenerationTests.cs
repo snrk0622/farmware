@@ -655,9 +655,9 @@ namespace Farmware.WorldGeneration.Tests
                 GameplayFlags = TileGameplayFlags.AllowsBridge
             };
 
-            // MAP-01Bまでは旧Node名称の探索APIを使うため、内部だけが新しい設備属性へ確実に移行したことも固定します。
-            Assert.That(NodeBuildableRegionLocator.CanPlaceNode(equipmentTile), Is.True);
-            Assert.That(NodeBuildableRegionLocator.CanPlaceNode(bridgeOnlyTile), Is.False);
+            // 設備探索APIが橋用属性を誤って許可しないよう、通常設備専用の正方向属性だけを参照することを固定します。
+            Assert.That(EquipmentBuildableRegionLocator.CanPlaceEquipment(equipmentTile), Is.True);
+            Assert.That(EquipmentBuildableRegionLocator.CanPlaceEquipment(bridgeOnlyTile), Is.False);
         }
 
         /// <summary>
@@ -974,21 +974,21 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 通常生成された地形だけを探索し、発見領域の全タイルがコアを含む共通ノード建築条件を満たすことを保証します。
+        /// 通常生成された地形だけを探索し、発見領域の全タイルが中央コアを含む共通設備建築条件を満たすことを保証します。
         /// </summary>
         [Test]
-        public void NodeBuildableRegionLocator_FindsOnlyNormallyBuildableTiles()
+        public void EquipmentBuildableRegionLocator_FindsOnlyNormallyBuildableTiles()
         {
             WorldGenerationSettings generationSettings = WorldGenerationSettings.CreateDefault(
-                WorldSeedUtility.FromString("node-buildable-region-test"),
+                WorldSeedUtility.FromString("equipment-buildable-region-test"),
                 2);
-            NodeBuildableRegionSearchSettings searchSettings =
-                NodeBuildableRegionSearchSettings.CreateDefault();
+            EquipmentBuildableRegionSearchSettings searchSettings =
+                EquipmentBuildableRegionSearchSettings.CreateDefault();
 
-            bool found = NodeBuildableRegionLocator.TryFindNearest(
+            bool found = EquipmentBuildableRegionLocator.TryFindNearest(
                 generationSettings,
                 searchSettings,
-                out NodeBuildableRegion region);
+                out EquipmentBuildableRegion region);
 
             Assert.That(found, Is.True);
             Assert.That(region.WidthInTiles, Is.EqualTo(searchSettings.RegionWidthInTiles));
@@ -1004,7 +1004,7 @@ namespace Farmware.WorldGeneration.Tests
                         region.MinimumTileX + localX,
                         region.MinimumTileY + localY);
                     Assert.That(
-                        NodeBuildableRegionLocator.CanPlaceNode(tile),
+                        EquipmentBuildableRegionLocator.CanPlaceEquipment(tile),
                         Is.True,
                         $"建築不可タイル: ({region.MinimumTileX + localX}, {region.MinimumTileY + localY})");
                 }
@@ -1015,26 +1015,26 @@ namespace Farmware.WorldGeneration.Tests
         /// 同じ設定で探索を繰り返し、結果座標が一致し、探索前後で通常地形のチャンクハッシュが変わらないことを保証します。
         /// </summary>
         [Test]
-        public void NodeBuildableRegionLocator_IsDeterministicAndDoesNotMutateTerrain()
+        public void EquipmentBuildableRegionLocator_IsDeterministicAndDoesNotMutateTerrain()
         {
             WorldGenerationSettings generationSettings = WorldGenerationSettings.CreateDefault(
-                WorldSeedUtility.FromString("node-region-determinism-test"),
+                WorldSeedUtility.FromString("equipment-region-determinism-test"),
                 2);
-            NodeBuildableRegionSearchSettings searchSettings =
-                NodeBuildableRegionSearchSettings.CreateDefault(-17, 93);
+            EquipmentBuildableRegionSearchSettings searchSettings =
+                EquipmentBuildableRegionSearchSettings.CreateDefault(-17, 93);
             ChunkCoordinate observedChunk = new ChunkCoordinate(-1, 1);
             ulong beforeSearch = DeterministicChunkGenerator.ComputeChunkHash(
                 generationSettings,
                 observedChunk);
 
-            bool foundFirst = NodeBuildableRegionLocator.TryFindNearest(
+            bool foundFirst = EquipmentBuildableRegionLocator.TryFindNearest(
                 generationSettings,
                 searchSettings,
-                out NodeBuildableRegion first);
-            bool foundSecond = NodeBuildableRegionLocator.TryFindNearest(
+                out EquipmentBuildableRegion first);
+            bool foundSecond = EquipmentBuildableRegionLocator.TryFindNearest(
                 generationSettings,
                 searchSettings,
-                out NodeBuildableRegion second);
+                out EquipmentBuildableRegion second);
             ulong afterSearch = DeterministicChunkGenerator.ComputeChunkHash(
                 generationSettings,
                 observedChunk);
@@ -1052,10 +1052,10 @@ namespace Farmware.WorldGeneration.Tests
         /// 1,000個の異なるワールドシードを準備し、地形の上書きなしで5×5チャンク以内に既定領域が見つかることを検証します。
         /// </summary>
         [Test]
-        public void NodeBuildableRegionLocator_OneThousandSeedsFindDefaultRegion()
+        public void EquipmentBuildableRegionLocator_OneThousandSeedsFindDefaultRegion()
         {
-            NodeBuildableRegionSearchSettings searchSettings =
-                NodeBuildableRegionSearchSettings.CreateDefault();
+            EquipmentBuildableRegionSearchSettings searchSettings =
+                EquipmentBuildableRegionSearchSettings.CreateDefault();
 
             // 文字列生成を乱数代わりにせず、連番を安定64bit混合して広いシード分布を再現可能に調べます。
             for (int seedIndex = 0; seedIndex < 1000; seedIndex++)
@@ -1063,10 +1063,10 @@ namespace Farmware.WorldGeneration.Tests
                 ulong worldSeed = WorldSeedUtility.Mix64((ulong)seedIndex);
                 WorldGenerationSettings generationSettings =
                     WorldGenerationSettings.CreateDefault(worldSeed, 2);
-                bool found = NodeBuildableRegionLocator.TryFindNearest(
+                bool found = EquipmentBuildableRegionLocator.TryFindNearest(
                     generationSettings,
                     searchSettings,
-                    out NodeBuildableRegion region);
+                    out EquipmentBuildableRegion region);
 
                 Assert.That(
                     found,
@@ -1083,7 +1083,7 @@ namespace Farmware.WorldGeneration.Tests
         [Test]
         public void InitialSpawnLocation_FromRegionRecordsCenterTileAndSourceRegion()
         {
-            NodeBuildableRegion region = new NodeBuildableRegion(-12, 7, 12, 8);
+            EquipmentBuildableRegion region = new EquipmentBuildableRegion(-12, 7, 12, 8);
 
             InitialSpawnLocation location = InitialSpawnLocation.FromRegion(region);
 
@@ -1348,7 +1348,7 @@ namespace Farmware.WorldGeneration.Tests
         [TestCase(1)]
         [TestCase(37)]
         [TestCase(99)]
-        public void NodeBuildableRegionLocator_RepresentativeSeedFindsNaturalRequiredResources(
+        public void EquipmentBuildableRegionLocator_RepresentativeSeedFindsNaturalRequiredResources(
             int seedIndex)
         {
             AssertNaturalRequiredResourcesForSeed(seedIndex);
@@ -1360,7 +1360,7 @@ namespace Farmware.WorldGeneration.Tests
         /// </summary>
         [Test]
         [Explicit("最大17×17チャンクの資源探索を100シード行うため、通常の変更確認から分離した負荷テストです。")]
-        public void NodeBuildableRegionLocator_OneHundredSeedSoakTest()
+        public void EquipmentBuildableRegionLocator_OneHundredSeedSoakTest()
         {
             // 失敗時に再現用seedIndexがAssertionへ残るよう、同じ1シード検証を順番に呼び出します。
             for (int seedIndex = 0; seedIndex < 100; seedIndex++)
@@ -1408,9 +1408,9 @@ namespace Farmware.WorldGeneration.Tests
                 location.TileX,
                 location.TileY);
             Assert.That(
-                NodeBuildableRegionLocator.CanPlaceNode(spawnTile),
+                EquipmentBuildableRegionLocator.CanPlaceEquipment(spawnTile),
                 Is.True,
-                "記録された初期スポーンタイルは通常ノードを建設できる必要があります。");
+                "記録された初期スポーンタイルは通常設備を建築できる必要があります。");
 
             // 完了後に再更新してもSingletonを増やさず、ワールド内の開始地点が一意であることを保証します。
             system.Update(world.Unmanaged);
@@ -1793,21 +1793,21 @@ namespace Farmware.WorldGeneration.Tests
         private static void AssertNaturalRequiredResourcesForSeed(int seedIndex)
         {
             ResourceGenerationSettings resourceSettings = ResourceGenerationSettings.CreateDefault();
-            NodeBuildableRegionSearchSettings searchSettings =
-                NodeBuildableRegionSearchSettings.CreateInitialLocationDefault();
-            NodeBuildableRegionResourceRequirements requirements =
-                NodeBuildableRegionResourceRequirements.CreateDefault();
+            EquipmentBuildableRegionSearchSettings searchSettings =
+                EquipmentBuildableRegionSearchSettings.CreateInitialLocationDefault();
+            EquipmentBuildableRegionResourceRequirements requirements =
+                EquipmentBuildableRegionResourceRequirements.CreateDefault();
             ulong worldSeed = WorldSeedUtility.Mix64((ulong)seedIndex);
             WorldGenerationSettings generationSettings =
                 WorldGenerationSettings.CreateDefault(worldSeed, 2);
 
             // 地形・資源の追加生成や上書きを行わず、同じ通常生成関数だけで初期候補を選別します。
-            bool found = NodeBuildableRegionLocator.TryFindNearestWithResources(
+            bool found = EquipmentBuildableRegionLocator.TryFindNearestWithResources(
                 generationSettings,
                 resourceSettings,
                 searchSettings,
                 requirements,
-                out NodeBuildableRegion region);
+                out EquipmentBuildableRegion region);
 
             Assert.That(
                 found,
@@ -1835,7 +1835,7 @@ namespace Farmware.WorldGeneration.Tests
         private static NaturalResourceTypeMask CollectResourceTypesAroundRegion(
             in WorldGenerationSettings generationSettings,
             in ResourceGenerationSettings resourceSettings,
-            in NodeBuildableRegion region,
+            in EquipmentBuildableRegion region,
             int marginInTiles)
         {
             NaturalResourceTypeMask foundTypes = NaturalResourceTypeMask.None;
