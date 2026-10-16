@@ -21,7 +21,7 @@ namespace Farmware.Tests.EditMode
     public sealed class SystemGroupBoundaryTests
     {
         /// <summary>
-        /// 共通Group型のUpdateInGroup属性を読み、Initialization、Simulation、Presentationの各標準Groupへ接続されていることを保証します。
+        /// 共通Groupと固定Tick関連SystemのUpdateInGroup属性を読み、設計どおりの親Groupへ接続されていることを保証します。
         /// </summary>
         [Test]
         public void CommonSystemGroups_AreConnectedToExpectedUnityGroups()
@@ -35,6 +35,18 @@ namespace Farmware.Tests.EditMode
             AssertUpdatesInGroup(
                 typeof(FarmwarePresentationSystemGroup),
                 typeof(PresentationSystemGroup));
+            AssertUpdatesInGroup(
+                typeof(FarmwareFixedTickSimulationSystemGroup),
+                typeof(FarmwareSimulationSystemGroup),
+                expectedOrderLast: true);
+            AssertUpdatesInGroup(
+                typeof(SimulationTimeInitializationSystem),
+                typeof(FarmwareInitializationSystemGroup),
+                expectedOrderFirst: true);
+            AssertUpdatesInGroup(
+                typeof(SimulationTickAdvanceSystem),
+                typeof(FarmwareFixedTickSimulationSystemGroup),
+                expectedOrderFirst: true);
         }
 
         /// <summary>
@@ -95,22 +107,30 @@ namespace Farmware.Tests.EditMode
         }
 
         /// <summary>
-        /// 指定System GroupのUpdateInGroup属性を取得し、親Groupが1件だけ明示されていることを確認します。
+        /// 指定SystemのUpdateInGroup属性を取得し、親Groupと先頭・末尾指定が設計どおり明示されていることを確認します。
         /// </summary>
-        /// <param name="systemGroupType">所属先を確認するFarmwareのSystem Group型です。</param>
-        /// <param name="expectedParentGroupType">期待するUnity標準の親System Group型です。</param>
-        private static void AssertUpdatesInGroup(Type systemGroupType, Type expectedParentGroupType)
+        /// <param name="systemType">所属先を確認するFarmwareのSystemまたはSystem Group型です。</param>
+        /// <param name="expectedParentGroupType">期待する親System Group型です。</param>
+        /// <param name="expectedOrderFirst">親Group内の先頭で実行する設計ならtrueです。</param>
+        /// <param name="expectedOrderLast">親Group内の末尾で実行する設計ならtrueです。</param>
+        private static void AssertUpdatesInGroup(
+            Type systemType,
+            Type expectedParentGroupType,
+            bool expectedOrderFirst = false,
+            bool expectedOrderLast = false)
         {
-            object[] attributes = systemGroupType.GetCustomAttributes(
+            object[] attributes = systemType.GetCustomAttributes(
                 typeof(UpdateInGroupAttribute),
                 false);
 
             Assert.That(
                 attributes,
                 Has.Length.EqualTo(1),
-                $"{systemGroupType.Name}には親Groupを1件だけ指定してください。");
+                $"{systemType.Name}には親Groupを1件だけ指定してください。");
             UpdateInGroupAttribute updateInGroup = (UpdateInGroupAttribute)attributes[0];
             Assert.That(updateInGroup.GroupType, Is.EqualTo(expectedParentGroupType));
+            Assert.That(updateInGroup.OrderFirst, Is.EqualTo(expectedOrderFirst));
+            Assert.That(updateInGroup.OrderLast, Is.EqualTo(expectedOrderLast));
         }
 
         /// <summary>
