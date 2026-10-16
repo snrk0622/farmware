@@ -780,7 +780,7 @@ Create a seamless four-frame movement loop in the current direction. Show a rest
 - [ ] 連続操作時は最新の対象への追従を優先し、ドローン演出が終わるまで次の操作を待たせない
 - [ ] 全地形とズーム段階で確認
 
-### 7.6 開始コア `node_starting_core`
+### 7.6 開始コア `equipment_starting_core`
 
 - 必要数: 待機4フレーム、稼働4フレーム。論理占有は3×3タイル、描画枠は48×56または64×64 px
 - PixelLabツール: 基準絵は`Create object` → `1 direction`、動きは`Animate with text`
@@ -857,7 +857,7 @@ Assets/Farmware/Art/WorldGeneration/
 │   └── Decorations/
 ├── Resources/
 ├── Player/
-└── Nodes/
+└── Equipment/
 ```
 
 単体画像のファイル名は`種別_用途_番号.png`を基本とし、複数Biomeをまとめる本番用土地シートは`terrain_biomes_base.png`とする。
@@ -872,7 +872,7 @@ overlay_magma_flow_01.png
 decor_forest_fern_01.png
 resource_tree_basic_01.png
 player_drone_idle_south.png
-node_starting_core_active.png
+equipment_starting_core_active.png
 ```
 
 現在の`ChunkTilemapPresenter`は、7バイオームの16×24土地を`Ground Tilemap`、淡水・海水・マグマを`Liquid Base Tilemap`へ排他的に表示する。静止液面と透明アニメーションは論理セルを変えず画面下へ8 px移動する。岩壁セルにもBiome由来の土地ブロックを残し、16×28岩壁を`Rock Wall Tilemap`へ同じ論理座標で重ねる。GroundとRock WallはIndividual ModeかつTop Left順でセルごとにYソートし、画面奥を先、手前を後に描いて奥側の断面・側面を手前ブロックで隠す。通常Resourceは直前方の岩壁有無から背面用と前面用の固定Tilemapへ振り分け、遠方座標でも手前岩壁との前後関係を維持する。岩壁の内部影と露出資源は岩壁上面に合わせて12 px上へ表示する。境界ハイライトは`Land Boundary Highlight Tilemap`を地表と同じ高さ、`Rock Wall Boundary Highlight Tilemap`を12 px上へ配置し、14基本Spriteから作る回転済みTileを共有して不透明度20%で描画する。

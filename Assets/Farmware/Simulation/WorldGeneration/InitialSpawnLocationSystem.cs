@@ -19,7 +19,7 @@ namespace Farmware.WorldGeneration
         public byte Found;
 
         /// <summary>Foundが1の場合に、通常地形と必須資源の条件を満たした建設可能矩形です。</summary>
-        public NodeBuildableRegion Region;
+        public EquipmentBuildableRegion Region;
     }
 
     /// <summary>
@@ -194,16 +194,16 @@ namespace Farmware.WorldGeneration
             /// </summary>
             public void Execute()
             {
-                NodeBuildableRegionSearchSettings searchSettings =
-                    NodeBuildableRegionSearchSettings.CreateInitialLocationDefault();
-                NodeBuildableRegionResourceRequirements resourceRequirements =
-                    NodeBuildableRegionResourceRequirements.CreateDefault();
-                bool found = NodeBuildableRegionLocator.TryFindNearestWithResources(
+                EquipmentBuildableRegionSearchSettings searchSettings =
+                    EquipmentBuildableRegionSearchSettings.CreateInitialLocationDefault();
+                EquipmentBuildableRegionResourceRequirements resourceRequirements =
+                    EquipmentBuildableRegionResourceRequirements.CreateDefault();
+                bool found = EquipmentBuildableRegionLocator.TryFindNearestWithResources(
                     GenerationSettings,
                     ResourceSettings,
                     searchSettings,
                     resourceRequirements,
-                    out NodeBuildableRegion region);
+                    out EquipmentBuildableRegion region);
 
                 Result.Value = new InitialSpawnSearchResult
                 {

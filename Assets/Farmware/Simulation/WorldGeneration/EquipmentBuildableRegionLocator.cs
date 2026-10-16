@@ -1,15 +1,15 @@
-// このファイルは、通常のワールド生成結果からノードを連続配置できる矩形領域を決定論的に探します。
-// 開始地点専用の地形上書きは行わず、コアを含む全ノードが同じ建築可否ルールを共有するための検索境界です。
+// このファイルは、通常のワールド生成結果から設備を連続配置できる矩形領域を決定論的に探します。
+// 開始地点専用の地形上書きは行わず、中央コアを含む設備が同じ建築可否ルールを共有するための検索境界です。
 
 using Unity.Collections;
 
 namespace Farmware.WorldGeneration
 {
     /// <summary>
-    /// ノード建設可能領域を探す大きさ、基準座標、探索上限をまとめた設定です。
+    /// 設備建築可能領域を探す大きさ、基準座標、探索上限をまとめた設定です。
     /// 新規ワールドの初期位置選択だけでなく、将来の自動配置や移転候補検索からも同じ規則を利用できます。
     /// </summary>
-    public struct NodeBuildableRegionSearchSettings
+    public struct EquipmentBuildableRegionSearchSettings
     {
         /// <summary>必要な連続領域の横幅です。単位はタイルで、1〜64を指定します。</summary>
         public int RegionWidthInTiles;
@@ -33,11 +33,11 @@ namespace Farmware.WorldGeneration
         /// <param name="originTileX">探索基準となる水平ワールドタイル座標です。</param>
         /// <param name="originTileY">探索基準となる垂直ワールドタイル座標です。</param>
         /// <returns>原点付近から12×8の連続領域を5×5チャンク内で探す設定です。</returns>
-        public static NodeBuildableRegionSearchSettings CreateDefault(
+        public static EquipmentBuildableRegionSearchSettings CreateDefault(
             int originTileX = 0,
             int originTileY = 0)
         {
-            return new NodeBuildableRegionSearchSettings
+            return new EquipmentBuildableRegionSearchSettings
             {
                 RegionWidthInTiles = 12,
                 RegionHeightInTiles = 8,
@@ -54,11 +54,11 @@ namespace Farmware.WorldGeneration
         /// <param name="originTileX">探索基準となる水平ワールドタイル座標です。</param>
         /// <param name="originTileY">探索基準となる垂直ワールドタイル座標です。</param>
         /// <returns>原点付近から12×8の連続領域を最大17×17チャンク内で探す設定です。</returns>
-        public static NodeBuildableRegionSearchSettings CreateInitialLocationDefault(
+        public static EquipmentBuildableRegionSearchSettings CreateInitialLocationDefault(
             int originTileX = 0,
             int originTileY = 0)
         {
-            NodeBuildableRegionSearchSettings settings = CreateDefault(originTileX, originTileY);
+            EquipmentBuildableRegionSearchSettings settings = CreateDefault(originTileX, originTileY);
             settings.MaximumSearchRadiusInChunks = 8;
             return settings;
         }
@@ -68,7 +68,7 @@ namespace Farmware.WorldGeneration
     /// 建設可能領域の周囲に自然配置されている必要がある基礎資源を定義します。
     /// 開始地点専用に資源を追加せず、通常の資源生成結果を候補選択条件として読むために使用します。
     /// </summary>
-    public struct NodeBuildableRegionResourceRequirements
+    public struct EquipmentBuildableRegionResourceRequirements
     {
         /// <summary>候補周辺で少なくとも1タイルずつ必要な生成資源または水域地形です。</summary>
         public NaturalResourceTypeMask RequiredTypes;
@@ -81,9 +81,9 @@ namespace Farmware.WorldGeneration
         /// 木、石、水は初期自動化の基礎として求め、砂は砂漠探索の価値を残すため必須にしません。
         /// </summary>
         /// <returns>候補から48タイル以内に木、石、水を必要とする設定です。</returns>
-        public static NodeBuildableRegionResourceRequirements CreateDefault()
+        public static EquipmentBuildableRegionResourceRequirements CreateDefault()
         {
-            return new NodeBuildableRegionResourceRequirements
+            return new EquipmentBuildableRegionResourceRequirements
             {
                 RequiredTypes = NaturalResourceTypeMask.Tree
                     | NaturalResourceTypeMask.Stone
@@ -94,10 +94,10 @@ namespace Farmware.WorldGeneration
     }
 
     /// <summary>
-    /// 通常生成された地形内で、全タイルへノードを建設できる矩形領域を表します。
+    /// 通常生成された地形内で、全タイルへ通常設備を建築できる矩形領域を表します。
     /// 地形そのものは保持せず、ワールドタイル座標と寸法だけを後続の配置UIやセーブ処理へ渡します。
     /// </summary>
-    public readonly struct NodeBuildableRegion
+    public readonly struct EquipmentBuildableRegion
     {
         /// <summary>矩形左下の水平ワールドタイル座標です。</summary>
         public readonly int MinimumTileX;
@@ -118,7 +118,7 @@ namespace Farmware.WorldGeneration
         /// <param name="minimumTileY">矩形左下の垂直ワールドタイル座標です。</param>
         /// <param name="widthInTiles">矩形の横幅です。単位はタイルです。</param>
         /// <param name="heightInTiles">矩形の縦幅です。単位はタイルです。</param>
-        public NodeBuildableRegion(
+        public EquipmentBuildableRegion(
             int minimumTileX,
             int minimumTileY,
             int widthInTiles,
@@ -132,10 +132,10 @@ namespace Farmware.WorldGeneration
     }
 
     /// <summary>
-    /// 座標から直接生成した通常タイルだけを読み、連続したノード建設可能領域を探します。
+    /// 座標から直接生成した通常タイルだけを読み、連続した設備建築可能領域を探します。
     /// 検索中にEntity、Tilemap、生成設定を変更しないため、検索順によってマップ内容が変わりません。
     /// </summary>
-    public static class NodeBuildableRegionLocator
+    public static class EquipmentBuildableRegionLocator
     {
         // 誤設定で無制限にチャンクを走査しないための安全上限です。通常の初期値は半径2です。
         private const int MaximumSupportedSearchRadiusInChunks = 64;
@@ -200,14 +200,14 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>
-        /// 指定タイルへ通常ノードを配置できるか判定します。
+        /// 指定タイルへ通常設備を配置できるか判定します。
         /// コアも特別扱いせず、この共通判定を利用します。
         /// </summary>
         /// <param name="tile">決定論的生成器または生成済みチャンクから得た基礎タイルです。</param>
-        /// <returns>通常ノードを配置できる場合はtrueです。</returns>
-        public static bool CanPlaceNode(in GeneratedTile tile)
+        /// <returns>通常設備を配置できる場合はtrueです。</returns>
+        public static bool CanPlaceEquipment(in GeneratedTile tile)
         {
-            // MAP-01Bで型名を設備用語へ移行するまでは既存API名を維持し、判定だけを新しい正方向属性へ切り替えます。
+            // 地形種別を呼び出し側ごとに再解釈しないよう、設備配置はMAP-01Aで導入した共通属性だけを参照します。
             return (tile.GameplayFlags & TileGameplayFlags.AllowsNormalEquipment) != 0;
         }
 
@@ -221,11 +221,11 @@ namespace Farmware.WorldGeneration
         /// <returns>探索上限内に条件を満たす領域が見つかった場合はtrueです。</returns>
         public static bool TryFindNearest(
             in WorldGenerationSettings generationSettings,
-            in NodeBuildableRegionSearchSettings searchSettings,
-            out NodeBuildableRegion region)
+            in EquipmentBuildableRegionSearchSettings searchSettings,
+            out EquipmentBuildableRegion region)
         {
             ResourceGenerationSettings unusedResourceSettings = default;
-            NodeBuildableRegionResourceRequirements unusedRequirements = default;
+            EquipmentBuildableRegionResourceRequirements unusedRequirements = default;
             return TryFindNearestInternal(
                 generationSettings,
                 unusedResourceSettings,
@@ -248,9 +248,9 @@ namespace Farmware.WorldGeneration
         public static bool TryFindNearestWithResources(
             in WorldGenerationSettings generationSettings,
             in ResourceGenerationSettings resourceSettings,
-            in NodeBuildableRegionSearchSettings searchSettings,
-            in NodeBuildableRegionResourceRequirements resourceRequirements,
-            out NodeBuildableRegion region)
+            in EquipmentBuildableRegionSearchSettings searchSettings,
+            in EquipmentBuildableRegionResourceRequirements resourceRequirements,
+            out EquipmentBuildableRegion region)
         {
             return TryFindNearestInternal(
                 generationSettings,
@@ -274,10 +274,10 @@ namespace Farmware.WorldGeneration
         private static bool TryFindNearestInternal(
             in WorldGenerationSettings generationSettings,
             in ResourceGenerationSettings resourceSettings,
-            in NodeBuildableRegionSearchSettings searchSettings,
-            in NodeBuildableRegionResourceRequirements resourceRequirements,
+            in EquipmentBuildableRegionSearchSettings searchSettings,
+            in EquipmentBuildableRegionResourceRequirements resourceRequirements,
             bool requireResources,
-            out NodeBuildableRegion region)
+            out EquipmentBuildableRegion region)
         {
             region = default;
             if (!IsValid(searchSettings)
@@ -295,7 +295,7 @@ namespace Farmware.WorldGeneration
             {
                 bool foundInRing = false;
                 long bestSquaredDistance = long.MaxValue;
-                NodeBuildableRegion bestRegion = default;
+                EquipmentBuildableRegion bestRegion = default;
 
                 // 同じリング内は実距離に近い中心距離で比較するため、周上の全チャンクを確認します。
                 for (int offsetY = -radius; offsetY <= radius; offsetY++)
@@ -324,7 +324,7 @@ namespace Farmware.WorldGeneration
                                 NaturalResourceTypeMask.None,
                                 resourceSearchMarginInTiles: 0,
                                 filterByResourcePresence: false,
-                                out NodeBuildableRegion candidate,
+                                out EquipmentBuildableRegion candidate,
                                 out long squaredDistance))
                         {
                             continue;
@@ -382,7 +382,7 @@ namespace Farmware.WorldGeneration
         /// </summary>
         /// <param name="settings">利用前に検証する検索設定です。</param>
         /// <returns>領域寸法と探索半径が対応範囲内ならtrueです。</returns>
-        private static bool IsValid(in NodeBuildableRegionSearchSettings settings)
+        private static bool IsValid(in EquipmentBuildableRegionSearchSettings settings)
         {
             return settings.RegionWidthInTiles >= 1
                 && settings.RegionWidthInTiles <= WorldGridConstants.LogicalChunkSize
@@ -397,7 +397,7 @@ namespace Farmware.WorldGeneration
         /// </summary>
         /// <param name="requirements">検証する必須資源と探索距離です。</param>
         /// <returns>探索距離が対応範囲内ならtrueです。</returns>
-        private static bool IsValid(in NodeBuildableRegionResourceRequirements requirements)
+        private static bool IsValid(in EquipmentBuildableRegionResourceRequirements requirements)
         {
             return requirements.SearchMarginInTiles >= 0
                 && requirements.SearchMarginInTiles <= MaximumSupportedResourceSearchMarginInTiles;
@@ -414,8 +414,8 @@ namespace Farmware.WorldGeneration
         private static bool HasRequiredResources(
             in WorldGenerationSettings generationSettings,
             in ResourceGenerationSettings resourceSettings,
-            in NodeBuildableRegion region,
-            in NodeBuildableRegionResourceRequirements requirements)
+            in EquipmentBuildableRegion region,
+            in EquipmentBuildableRegionResourceRequirements requirements)
         {
             if (requirements.RequiredTypes == NaturalResourceTypeMask.None)
             {
@@ -488,11 +488,11 @@ namespace Farmware.WorldGeneration
         private static bool TryFindBestInChunkWithResources(
             in WorldGenerationSettings generationSettings,
             in ResourceGenerationSettings resourceSettings,
-            in NodeBuildableRegionSearchSettings searchSettings,
-            in NodeBuildableRegionResourceRequirements resourceRequirements,
+            in EquipmentBuildableRegionSearchSettings searchSettings,
+            in EquipmentBuildableRegionResourceRequirements resourceRequirements,
             int chunkX,
             int chunkY,
-            out NodeBuildableRegion region,
+            out EquipmentBuildableRegion region,
             out long squaredDistance)
         {
             region = default;
@@ -638,14 +638,14 @@ namespace Farmware.WorldGeneration
         /// <returns>このチャンクに左下を持つ有効な候補が存在する場合はtrueです。</returns>
         private static bool TryFindBestInChunk(
             in WorldGenerationSettings generationSettings,
-            in NodeBuildableRegionSearchSettings searchSettings,
+            in EquipmentBuildableRegionSearchSettings searchSettings,
             int chunkX,
             int chunkY,
             ResourcePresencePrefixMap resourcePresence,
             NaturalResourceTypeMask requiredTypes,
             int resourceSearchMarginInTiles,
             bool filterByResourcePresence,
-            out NodeBuildableRegion region,
+            out EquipmentBuildableRegion region,
             out long squaredDistance)
         {
             region = default;
@@ -690,7 +690,7 @@ namespace Farmware.WorldGeneration
                         generationSettings,
                         worldX,
                         worldY);
-                    horizontalBuildableCount = CanPlaceNode(tile)
+                    horizontalBuildableCount = CanPlaceEquipment(tile)
                         ? horizontalBuildableCount + 1
                         : 0;
 
@@ -712,7 +712,7 @@ namespace Farmware.WorldGeneration
                     }
 
                     int candidateMinimumY = worldY - searchSettings.RegionHeightInTiles + 1;
-                    NodeBuildableRegion candidate = new NodeBuildableRegion(
+                    EquipmentBuildableRegion candidate = new EquipmentBuildableRegion(
                         candidateMinimumX,
                         candidateMinimumY,
                         searchSettings.RegionWidthInTiles,
@@ -759,7 +759,7 @@ namespace Farmware.WorldGeneration
         /// <returns>必要な全種類が候補周辺に少なくとも1件ずつ存在する場合はtrueです。</returns>
         private static bool HasRequiredResources(
             in ResourcePresencePrefixMap resourcePresence,
-            in NodeBuildableRegion region,
+            in EquipmentBuildableRegion region,
             NaturalResourceTypeMask requiredTypes,
             int searchMarginInTiles)
         {
@@ -900,7 +900,7 @@ namespace Farmware.WorldGeneration
         /// <param name="originTileY">基準となる垂直タイル座標です。</param>
         /// <returns>2倍座標系での中心距離の二乗です。</returns>
         private static long CalculateSquaredCenterDistance(
-            in NodeBuildableRegion region,
+            in EquipmentBuildableRegion region,
             int originTileX,
             int originTileY)
         {
@@ -920,9 +920,9 @@ namespace Farmware.WorldGeneration
         /// <param name="currentSquaredDistance">現在候補の中心距離の二乗です。</param>
         /// <returns>新候補へ置き換えるべき場合はtrueです。</returns>
         private static bool IsPreferredCandidate(
-            in NodeBuildableRegion candidate,
+            in EquipmentBuildableRegion candidate,
             long candidateSquaredDistance,
-            in NodeBuildableRegion current,
+            in EquipmentBuildableRegion current,
             long currentSquaredDistance)
         {
             if (candidateSquaredDistance != currentSquaredDistance)

@@ -902,7 +902,7 @@ Unrequested
 
 現在の初期値は、プリロード1チャンク、保持余白1チャンク、最大同時生成2チャンク、1フレーム最大4サブチャンク反映である。これは最終性能値ではなく、接続済みのSampleSceneをUnity Profilerで計測し、「1フレーム2ms以下」を目安に調整する。
 
-### 2026-10-11: マップ共通のノード建設可能領域探索
+### 2026-10-11: マップ共通の設備建築可能領域探索
 
 以下を実装済み。
 
@@ -1077,7 +1077,7 @@ Unrequested
 
 - `TileGameplayFlags`を、`AllowsNormalEquipment`、`AllowsNormalBelt`、`AllowsBridge`、`RequiresHeatResistance`の正方向属性へ更新し、旧`BlocksNormalLink`をRuntimeとテストから除去。
 - 陸地は通常設備と通常ベルト、水域は耐熱性を問わない橋、マグマは耐熱橋、岩壁は配置不可となる地形分類。未知の`GroundType`も配置不可として扱う。
-- 初期スポーン用の既存領域探索は、`MAP-01B`まで旧Node名称を維持しつつ、判定を`AllowsNormalEquipment`へ移行。
+- 初期スポーン用の既存領域探索は、判定を`AllowsNormalEquipment`へ移行。型とAPIも`MAP-01B`で`EquipmentBuildableRegion`、`EquipmentBuildableRegionLocator`、`CanPlaceEquipment`へ統一した。
 - Unity Editorの開発者用`Terrain Placement`表示へ、通常設備＋通常ベルト、水上橋、耐熱橋、配置不可の4色と、中央タイルの各属性を追加。
 - 4地形と未知IDの属性組み合わせを保証するEditModeテスト、および配置属性の色写像とSimulation入力不変性を保証するPlayModeテスト。
 
