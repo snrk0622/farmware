@@ -34,10 +34,14 @@ ECSの共通ルートGroupは次のとおりとする。
 | --- | --- | --- |
 | `FarmwareInitializationSystemGroup` | `InitializationSystemGroup` | Singleton準備、初期探索などSimulation更新前の初期化 |
 | `FarmwareSimulationSystemGroup` | `SimulationSystemGroup` | フレーム単位のSimulation側準備、ストリーミング、結果確定 |
-| `FarmwareFixedTickSimulationSystemGroup` | `FarmwareSimulationSystemGroup` | 生産、物流、動物などゲーム内時間で進む規則の固定Tick更新 |
+| `FarmwareFixedTickSimulationSystemGroup` | `FarmwareSimulationSystemGroup` | 固定Tickの時間境界と、Command・ゲームルール用子Groupの更新 |
+| `FarmwareCommandProcessingSystemGroup` | `FarmwareFixedTickSimulationSystemGroup` | 固定Tick開始時に受付済みCommandを1件ずつ受付順で処理 |
+| `FarmwareCommandValidationSystemGroup` | `FarmwareCommandProcessingSystemGroup` | 機能固有Commandの副作用を持たない事前検証 |
+| `FarmwareCommandCommitSystemGroup` | `FarmwareCommandProcessingSystemGroup` | 検証成功Commandの状態変更とECB記録 |
+| `FarmwareFixedTickGameplaySystemGroup` | `FarmwareFixedTickSimulationSystemGroup` | Command確定後の生産、物流、敵、動物などのゲームルール更新 |
 | `FarmwarePresentationSystemGroup` | `PresentationSystemGroup` | Simulation結果の描画・音声への反映 |
 
-`FarmwareSimulationSystemGroup`の更新回数はゲーム内時間の正ではない。固定Tickで進める生産、物流、動物などは子の`FarmwareFixedTickSimulationSystemGroup`へ所属させる。カメラ可視範囲に応じたチャンク要求と地形生成は表示ストリーミング用のフレーム駆動処理であり、固定Tickのゲームルールへ含めない。
+`FarmwareSimulationSystemGroup`の更新回数はゲーム内時間の正ではない。固定Tickで進める機能は`FarmwareFixedTickSimulationSystemGroup`の子へ置き、機能固有CommandはValidation／Commit Group、生産・物流・動物などの通常ゲームルールは`FarmwareFixedTickGameplaySystemGroup`へ所属させる。カメラ可視範囲に応じたチャンク要求と地形生成は表示ストリーミング用のフレーム駆動処理であり、固定Tickのゲームルールへ含めない。
 
 ## 2. 固定Tickと決定論
 
@@ -138,15 +142,21 @@ ECSの共通ルートGroupは次のとおりとする。
 - 製品版またはセーブ互換性を保証する開発段階へ移行するときに、`SaveFormatVersion`の更新条件、移行経路、サポート範囲をあらためて決定する。
 - 作成ゲームバージョンと最終プレイゲームバージョンは`SaveFormatVersion`と別に記録する。
 
-## 8. 建築Commandのトランザクション
+## 8. 共通Command Queueと建築トランザクション
 
 - InputとUIはワールドを直接変更せず、建築、撤去、移動、回転、置換、設定変更をCommandとしてSimulationへ渡す。
 - Commandは単調増加する受付順番号を持ち、同一Tickではその順番に決定的に処理する。
 - 各Commandは、対象セル、占有、地形、必要資材、失われる内容物、施設と物流への影響を変更前に検証する。
 - 検証失敗時は、配置、資材、施設、物流、Undo履歴のいずれも変更しない。
 - 成功時は、資材精算と配置変更を固定Tick開始時に一括適用する。その後、Dirty範囲の空間索引、物流接続、施設認識を再構築してから同Tickの生産・物流を実行する。
-- 構造変更はEntityCommandBufferへまとめ、途中状態を他Systemへ公開しない。
+- CommitのComponent値更新と構造変更はCommand専用EntityCommandBufferへまとめ、途中状態を他Systemへ公開しない。
 - Undo／RedoはWorld全体のSnapshotではなく、確定済みの建築差分と資材差分に対するCommandとして実行する。
+
+`SIM-01E`では、機能固有のunmanaged Componentを一時Command Entityへ付け、共通の`SimulationCommand`、`SimulationCommandActive`、`SimulationCommandCompleted`と組み合わせる。受付済みEntityは`SimulationCommandQueueElement`のSingleton Dynamic Bufferへ追加し、受付番号はWorld実行中だけ1から単調増加する。0は無効値とし、`ulong.MaxValue`を最後に1回発行した後は周回せず受付を停止する。Commandと受付番号状態は未確定の操作要求なのでセーブせず、ロード後の新しいWorldでは1から開始する。失敗したCommandも番号を再利用しないが、一時停止中、Singleton不整合、番号上限による受付失敗ではEntityも番号も消費しない。
+
+`FarmwareCommandProcessingSystemGroup`は、同じ固定Tickに受付済みのCommandを1件ずつ選び、Validation、検証終端、Commit、ECB再生、結果確定までを完了してから次の受付番号へ進む。機能固有Validation Systemは対象Commandに対して1件だけ存在し、ゲーム状態を変更せず全条件を確認する。成功した場合だけ機能固有Commit SystemがComponent値更新を含む全変更を`SimulationCommandEntityCommandBufferSystem`へ記録し、成功状態まで完了したCommandのECBだけを再生する。Commandごとに直後の再生または破棄を確定するため、Validation／Commit Systemはメインスレッドで完結させ、Command専用ECBへ書くJobをスケジュールしない。担当Validation／Commit Systemの不足、複数Validation担当、不正状態、未完了Commitは共通失敗として拒否する。未完了CommitのECBは`ShouldPlayback`を無効にして再生だけを抑止し、成功時と同じ`EntityCommandBufferSystem`標準処理へ渡してBufferの破棄と専用Allocatorの巻き戻しを必ず行う。前の成功CommandのECBを次のValidation前に再生するため、同一Tick内の競合Commandも直前の確定結果を参照できる。
+
+完了したCommand Entityは成功または失敗結果と処理Tickを現在の描画フレーム中だけ保持し、次の`FarmwareSimulationSystemGroup`先頭で破棄する。同じ描画フレームに複数固定Tickが進んでもPresentationが結果を読み取る機会を失わない。`Farmware.Simulation`のunsafe許可は、Entities公式の`IECBSingleton`パターンでECB System所有の未再生Buffer一覧を登録する箇所だけに限定し、ゲーム側でポインターの寿命や解放を管理しない。
 
 基本順序は次のとおりとする。
 

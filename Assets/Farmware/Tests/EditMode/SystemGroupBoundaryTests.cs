@@ -15,13 +15,13 @@ using CompilationAssembly = UnityEditor.Compilation.Assembly;
 namespace Farmware.Tests.EditMode
 {
     /// <summary>
-    /// SIM-01Aで確定したAssembly依存方向と共通System Group、および後続の共通初期化Systemの親Groupを保証するテスト群です。
+    /// SIM-01Aで確定したAssembly依存方向と、固定Tick、Command処理を含む共通System Groupの親子関係を保証するテスト群です。
     /// Unity Test RunnerのEditModeから実行し、SceneやDefault Worldは作成しません。
     /// </summary>
     public sealed class SystemGroupBoundaryTests
     {
         /// <summary>
-        /// 共通Group、初期化System、固定Tick関連SystemのUpdateInGroup属性を読み、設計どおりの親Groupへ接続されていることを保証します。
+        /// 共通Group、初期化System、固定Tick、Command関連SystemのUpdateInGroup属性を読み、設計どおりの親Groupへ接続されていることを保証します。
         /// </summary>
         [Test]
         public void CommonSystemGroups_AreConnectedToExpectedUnityGroups()
@@ -50,6 +50,54 @@ namespace Farmware.Tests.EditMode
                 typeof(SimulationTickAdvanceSystem),
                 typeof(FarmwareFixedTickSimulationSystemGroup),
                 expectedOrderFirst: true);
+            AssertUpdatesInGroup(
+                typeof(FarmwareCommandProcessingSystemGroup),
+                typeof(FarmwareFixedTickSimulationSystemGroup),
+                expectedOrderFirst: true);
+            AssertUpdatesInGroup(
+                typeof(FarmwareCommandValidationSystemGroup),
+                typeof(FarmwareCommandProcessingSystemGroup),
+                expectedOrderFirst: true);
+            AssertUpdatesInGroup(
+                typeof(SimulationCommandValidationEndSystem),
+                typeof(FarmwareCommandProcessingSystemGroup));
+            AssertUpdatesInGroup(
+                typeof(FarmwareCommandCommitSystemGroup),
+                typeof(FarmwareCommandProcessingSystemGroup));
+            AssertUpdatesInGroup(
+                typeof(SimulationCommandEntityCommandBufferSystem),
+                typeof(FarmwareCommandProcessingSystemGroup));
+            AssertUpdatesInGroup(
+                typeof(SimulationCommandCompletionSystem),
+                typeof(FarmwareCommandProcessingSystemGroup),
+                expectedOrderLast: true);
+            AssertUpdatesInGroup(
+                typeof(FarmwareFixedTickGameplaySystemGroup),
+                typeof(FarmwareFixedTickSimulationSystemGroup),
+                expectedOrderLast: true);
+            AssertUpdatesInGroup(
+                typeof(SimulationCommandQueueInitializationSystem),
+                typeof(FarmwareInitializationSystemGroup));
+            AssertUpdatesInGroup(
+                typeof(SimulationCommandResultCleanupSystem),
+                typeof(FarmwareSimulationSystemGroup),
+                expectedOrderFirst: true);
+
+            AssertUpdatesAfter(
+                typeof(FarmwareCommandProcessingSystemGroup),
+                typeof(SimulationTickAdvanceSystem));
+            AssertUpdatesAfter(
+                typeof(FarmwareCommandCommitSystemGroup),
+                typeof(SimulationCommandValidationEndSystem));
+            AssertUpdatesAfter(
+                typeof(SimulationCommandEntityCommandBufferSystem),
+                typeof(FarmwareCommandCommitSystemGroup));
+            AssertUpdatesAfter(
+                typeof(SimulationCommandCompletionSystem),
+                typeof(SimulationCommandEntityCommandBufferSystem));
+            AssertUpdatesAfter(
+                typeof(FarmwareFixedTickGameplaySystemGroup),
+                typeof(FarmwareCommandProcessingSystemGroup));
         }
 
         /// <summary>
@@ -134,6 +182,27 @@ namespace Farmware.Tests.EditMode
             Assert.That(updateInGroup.GroupType, Is.EqualTo(expectedParentGroupType));
             Assert.That(updateInGroup.OrderFirst, Is.EqualTo(expectedOrderFirst));
             Assert.That(updateInGroup.OrderLast, Is.EqualTo(expectedOrderLast));
+        }
+
+        /// <summary>
+        /// 指定SystemのUpdateAfter属性を取得し、依存先が明示した直前SystemまたはGroupと一致することを確認します。
+        /// </summary>
+        /// <param name="systemType">実行順属性を確認するSystemまたはSystem Group型です。</param>
+        /// <param name="expectedEarlierType">対象より前に実行されるべきSystemまたはSystem Group型です。</param>
+        private static void AssertUpdatesAfter(
+            Type systemType,
+            Type expectedEarlierType)
+        {
+            object[] attributes = systemType.GetCustomAttributes(
+                typeof(UpdateAfterAttribute),
+                false);
+
+            Assert.That(
+                attributes,
+                Has.Length.EqualTo(1),
+                $"{systemType.Name}にはUpdateAfterを1件だけ指定してください。");
+            UpdateAfterAttribute updateAfter = (UpdateAfterAttribute)attributes[0];
+            Assert.That(updateAfter.SystemType, Is.EqualTo(expectedEarlierType));
         }
 
         /// <summary>
