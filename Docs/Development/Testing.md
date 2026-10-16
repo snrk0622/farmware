@@ -68,6 +68,10 @@ Sceneを使わない最小ECS Worldで、受付番号が1から単調増加し�
 `EquipmentBuildableRegionLocator_OneThousandSeedsFindDefaultRegion`は、狭い既定探索を1,000シードで調べる通常回帰テストである。
 `EquipmentBuildableRegionLocator_OneHundredSeedSoakTest`は、最大17×17チャンクの資源探索を100シードで行うため`Explicit`指定された負荷テストであり、通常の修正確認では自動実行しない。
 
+#### `WorldCoordinateConversionTests`
+
+MAP-02Aの純粋な座標変換について、表示原点が相対セル`(0, 0)`へ対応すること、正負座標とint最小・最大の差を失わないこと、絶対タイルから相対セルを経由した往復で元の値を復元することを保証する。連続した相対ワールド座標はセル境界の正負両側で床方向へ丸め、表示原点を変更しても逆変換後の絶対タイルが変わらないことを確認する。NaN、無限大、表示原点加算後にint範囲外となる入力は誤った座標へ周回させず拒否する。
+
 #### `TerrainPlacementRulesTests`
 
 通常設備、通常ベルト、非耐熱橋、耐熱橋を陸地、水域、マグマ、岩壁へ配置する全16組を、生成済み`TileGameplayFlags`と共通`TerrainPlacementRules`だけから判定する。水域では両方の橋、マグマでは耐熱橋だけを許可し、非耐熱橋は通常の地形不可と区別できる`HeatResistanceRequired`を返すことを保証する。未指定・未定義の配置対象と、`AllowsBridge`を持たず耐熱要件だけを持つ不整合な入力も許可せず、入力した`GeneratedTile`を変更しないことを確認する。
@@ -140,7 +144,7 @@ Sprite Packer ModeがV2であること、土地Atlasが7バイオームの本番
 | 共通Command Queue | `SimulationCommandQueueTests`で受付番号、一時停止中の非受理、番号上限、受付順のValidation／Commit、失敗時無変更、成功CommandごとのECB再生、未完了CommitのECB破棄、連続失敗後の成功、同TickのGameplay前確定、担当System不在時の拒否、結果寿命を扱うECS EditModeテスト。`SystemGroupBoundaryTests`で宣言上のGroup順序も確認する | 機能固有Commandを接続した時点で、入力から結果表示までと、一時停止中に予約されないことをPlayMode確認 |
 | 状態ハッシュと決定論 | `SimulationStateHashTests`で固定バイト表現、スキーマ、セクション順、Singletonと固定Tick境界の検証、定義入力順の正規化、永続ID順、重複ID拒否、論理値の変更検出を扱う。同じCommand列とTick数をEntity配置およびJob実行方法の異なるWorldで実行し、状態ハッシュ一致を確認する | 各機能追加時に保存対象となる論理状態のセクションを追加し、Presentation・キャッシュ・チャンク表示状態を変えても一致することを確認 |
 | 建築Commandトランザクション | Command受付順、全体事前検証、資材・配置・履歴の全成功または全失敗、Commit後のDirty再構築、同Tickの生産前に確定するSystem順序を扱うECSテスト | 複数範囲編集の競合、失敗・キャンセル時に中間状態が表示されないことをPlayMode確認 |
-| Floating Origin | 絶対整数座標と相対表示座標の相互変換、負座標、原点移動前後の選択セル・生成結果・接続・状態ハッシュ一致を扱うEditModeテスト | 最大ズームアウト、高速パン、複数回の原点移動でTilemap、Sprite、入力、エフェクトにずれや揺れがないことをPlayMode確認 |
+| Floating Origin | `WorldCoordinateConversionTests`で絶対整数座標、表示原点、相対セル・相対ワールド座標の相互変換、負座標の床丸め、int両端、無効入力、原点変更前後の絶対タイル一致を扱う。後続PRでは選択セル・生成結果・接続・状態ハッシュ一致を追加する | 最大ズームアウト、高速パン、複数回の原点移動でTilemap、Sprite、入力、エフェクトにずれや揺れがないことをPlayMode確認 |
 | 動物の初期生成・移動 | 地形とは独立して保存した`AnimalPopulationSeed`、地域別抽選状態、初期化状態が同じなら初期補充結果、群れ、初期位置が一致すること、同じ地形シードだけでは配置を固定しないこと、初期補充でも共通アロケーターの永続IDを使うこと、固定Tickの移動・待機が決定論的であること、表示チャンクのアンロードでSimulation状態を失わないことを扱うEditMode／ECSテスト | 施設が存在しない新規ワールドでの動物表示、表示補間、接地点Y順、カメラ往復後の同一個体復元、可視範囲外のPresentation解放をPlayMode確認 |
 | 動物の保存 | `AnimalPopulationSeed`、地域の初期化済み状態、地域別抽選状態、次回リスポーンTick、次回発行ID、個体ID、種類、位置、移動状態、所属群れを保存し、異なるチャンクロード順でも個体が重複・消失せず、初期化済み地域を再補充しないことを扱うEditMode／ECSテスト | セーブ・ロード前後の個体、群れ、位置、移動表示の一致をPlayMode確認 |
 | 動物の捕獲・再出現 | 捕獲・解放Command、地域上限、クールダウン、保存済み抽選状態によるリスポーン、初期補充とリスポーンの共通生成パイプライン、新規永続IDの発行、ロード反復で抽選結果が変わらないことを扱うEditMode／ECSテスト | 捕獲対象の選択、ドローン表示を待たないCommand受理、解放位置、牧場がなくても操作できることをPlayMode確認 |
