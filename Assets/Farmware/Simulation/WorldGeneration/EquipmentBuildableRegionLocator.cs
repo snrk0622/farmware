@@ -216,8 +216,10 @@ namespace Farmware.WorldGeneration
         /// <returns>通常設備を配置できる場合はtrueです。</returns>
         public static bool CanPlaceEquipment(in GeneratedTile tile)
         {
-            // 地形種別を呼び出し側ごとに再解釈しないよう、設備配置はMAP-01Aで導入した共通属性だけを参照します。
-            return (tile.GameplayFlags & TileGameplayFlags.AllowsNormalEquipment) != 0;
+            // 初期領域探索も後続の建築Commandと同じ共通APIを通し、設備専用の判定が別実装へ分岐しないようにします。
+            return TerrainPlacementRules.Evaluate(
+                tile,
+                TerrainPlacementKind.NormalEquipment) == TerrainPlacementResult.Allowed;
         }
 
         /// <summary>

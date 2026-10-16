@@ -42,6 +42,10 @@ Unity Editorを開いたまま外部プロセスから同じプロジェクト�
 `EquipmentBuildableRegionLocator_OneThousandSeedsFindDefaultRegion`は、狭い既定探索を1,000シードで調べる通常回帰テストである。
 `EquipmentBuildableRegionLocator_OneHundredSeedSoakTest`は、最大17×17チャンクの資源探索を100シードで行うため`Explicit`指定された負荷テストであり、通常の修正確認では自動実行しない。
 
+#### `TerrainPlacementRulesTests`
+
+通常設備、通常ベルト、非耐熱橋、耐熱橋を陸地、水域、マグマ、岩壁へ配置する全16組を、生成済み`TileGameplayFlags`と共通`TerrainPlacementRules`だけから判定する。水域では両方の橋、マグマでは耐熱橋だけを許可し、非耐熱橋は通常の地形不可と区別できる`HeatResistanceRequired`を返すことを保証する。未指定・未定義の配置対象と、`AllowsBridge`を持たず耐熱要件だけを持つ不整合な入力も許可せず、入力した`GeneratedTile`を変更しないことを確認する。
+
 #### `WorldGenerationDistributionAuditTests`
 
 Editorの分布監査と同じAnalyzerを小さな固定サンプルで2回実行し、バイオーム・基礎地形・土壌・水域の集計漏れがないことと、署名・レポートが決定論的に一致することを保証する。
@@ -83,7 +87,7 @@ Sprite Packer ModeがV2であること、土地Atlasが7バイオームの本番
 | F4 | 初期スポーンの赤いTile・Chunk表示と、縦横グリッド線の矩形計算を保証する。 |
 | 初期スポーン失敗 | Scene保存位置を維持し、失敗状態の確定後にチャンクストリーミングを開始できることを保証する。 |
 | Presentation寿命 | Camera GameObjectを維持したDefault World再作成時に新しい初期スポーンを再適用する。Camera Bridgeは新Worldの初期スポーン探索中でも旧WorldのObserverを直ちに破棄し、初期位置の確定前は新Observerを作らず、確定後に1件だけ作り直す。同一Worldでカメラ制御を再有効化した場合はプレイヤーの移動後位置を保つ。正負座標のGrid 64タイル境界へViewport右上端が一致しても、上限側の面積を持たない隣接チャンクを要求しない。Tilemap PresenterがWorld切替または無効化時に表示済み・反映途中・消去途中の旧表示を残さないことも保証する。 |
-| 開発者用可視化 | バイオーム、ノイズ、水域、移行帯、岩壁、マグマ、資源、地形配置属性の色写像がSimulationを変更しないことを保証する。 |
+| 開発者用可視化 | バイオーム、ノイズ、水域、移行帯、岩壁、マグマ、資源、共通配置APIの判定結果を使う地形配置マトリクスの色写像がSimulationを変更しないことを保証する。 |
 | 岩壁表示 | チャンク境界をまたぐ内部影が連続したグラデーションになり、一体型岩壁の上面・内部影・露出資源が同じ12px高へ揃うことを保証する。 |
 | SampleScene縦切り | SubSceneロード、Authoringと共通既定閾値、初期カメラ、チャンク生成、境界2層を含む9枚のTilemap、Ground・Rock WallのIndividual ModeおよびTop Left順、土地境界Order 1・岩壁境界Order 4と表示高、14 Sprite参照、境界の既定不透明度20%と実行時Tileへの反映、同じBiomeなら標準・肥沃・砂質のいずれも同じプレイヤー向けTileを選ぶこと、SampleSceneの7バイオーム参照が本番用`terrain_biomes_base.png`の同名Spriteへ対応すること、岩壁参照と全表示セルが本番用`terrain_rock_wall_01.png`の専用Tileへ対応すること、Editor専用Soil可視化が3種類を別色にすること、通常資源の岩壁背面用Order 2・前面用Order 10への振り分け、静止液面・アニメーションの-8pxオフセット、液体セルのGround Tilemapとの排他表示、岩壁セルの下層土地、岩壁上資源の12pxオフセット、土地・岩壁Spriteの上下はみ出しを含む可視チャンク範囲、液面4fps設定、アンロード、同一地形の再生成を保証する。EditModeでは、境界選択と資源背面分類の純粋計算を保証する。 |
 
@@ -101,6 +105,7 @@ Sprite Packer ModeがV2であること、土地Atlasが7バイオームの本番
 | 本番用岩壁の固定割り当て | 本番PNGが16×28 px、PPU 16、Point、Mip Maps Off、Compression None、Full Rect、Pivot Y `8/28`であること、専用Tile、`RockWallAtlas`、SampleSceneが同じ本番Spriteを参照すること、Editor構築ツールの再実行後もFallback参照へ戻らないことをEditMode／PlayModeテストで保証する | 連続岩壁の側面遮蔽、12 px持ち上げた上面・内部影・資源・境界ハイライトの整列、水・マグマに面した下層土地断面、にじみ、チャンク境界の透明な隙間と位置ずれをGameビューで確認する。上面の大きな菱形模様がセル単位で反復することと、側面12 pxが境界線や層理のない一色面であることは意図したデザインとして合格扱いにする |
 | Scene、SubScene、Authoring、Baker、参照 | SampleScene縦切りPlayModeテストとMap Viewerテスト | Scene内のMissing参照確認 |
 | asmdef、パッケージ、プラットフォーム条件 | 影響するEditModeとPlayMode Assembly | Playerビルドへの混入確認 |
+| 地形配置共通API | 通常設備・通常ベルト・非耐熱橋・耐熱橋と、陸地・水域・マグマ・岩壁の全16組、耐熱不足理由、未指定・未定義の配置対象、不整合な属性、入力値の不変性を扱う`TerrainPlacementRulesTests` | `Terrain Placement`の4色、凡例、中央HUDの`Allowed`・`Blocked`・`Heat Required`をGameビューで確認 |
 | 複数タイル設備、ベルト、橋 | 占有、回転、接続方向、分岐・合流、詰まり、地形配置可否、単体・範囲配置と撤去の即時反映、同種既設物の無償再利用、資材不足または配置不可セルがある場合に一部だけ建築されないことを扱うEditModeテスト。橋の種類名や素材名に依存せず、耐熱性を持つ代表定義と持たない代表定義を使い、水域では両方、マグマでは耐熱性を持つ定義だけ、岩壁と通常地面では両方を拒否するマトリクスを保証する | 再利用セル、問題セル、耐熱性不足の理由、総必要数・在庫数・不足数のプレビュー、範囲保持と再確定、ドローン演出を待たず操作できること、操作プロトタイプ、Gameビュー、Profiler |
 | 搬送アイテムと遠隔工場 | ベルト上の1枠1個制約、FIFO、混載、在庫内の品目別数量集約、液体アイテムの通常搬送、固定Tick境界での個別・集計状態変換、同一入力に対する生産量・消費量・在庫・詰まり・進捗・コア到着Tickの等価性、等価性を保証できない物流網の個別処理継続を扱うECSテスト | カメラ距離を往復した際の搬送順序と表示復元、長時間の遠隔稼働、セーブ・ロード、1,000／10,000／100,000件でのProfiler比較 |
 | 固定Tick、永続ID、保存所有権 | 同一Command列の状態ハッシュ、整数進捗、ID非再利用、定義GUID解決、チャンク境界をまたぐ設備・施設の単一保存と異なるロード順からの復元を扱うEditMode／ECSテスト | Job並列数を変えた決定性、範囲移動による所有チャンク変更、定義参照切れのEditor検証 |
