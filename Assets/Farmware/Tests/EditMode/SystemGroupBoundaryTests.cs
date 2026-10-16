@@ -15,13 +15,13 @@ using CompilationAssembly = UnityEditor.Compilation.Assembly;
 namespace Farmware.Tests.EditMode
 {
     /// <summary>
-    /// SIM-01Aで確定したAssembly依存方向と、共通System Groupの親Groupを保証するテスト群です。
+    /// SIM-01Aで確定したAssembly依存方向と共通System Group、および後続の共通初期化Systemの親Groupを保証するテスト群です。
     /// Unity Test RunnerのEditModeから実行し、SceneやDefault Worldは作成しません。
     /// </summary>
     public sealed class SystemGroupBoundaryTests
     {
         /// <summary>
-        /// 共通Groupと固定Tick関連SystemのUpdateInGroup属性を読み、設計どおりの親Groupへ接続されていることを保証します。
+        /// 共通Group、初期化System、固定Tick関連SystemのUpdateInGroup属性を読み、設計どおりの親Groupへ接続されていることを保証します。
         /// </summary>
         [Test]
         public void CommonSystemGroups_AreConnectedToExpectedUnityGroups()
@@ -43,6 +43,9 @@ namespace Farmware.Tests.EditMode
                 typeof(SimulationTimeInitializationSystem),
                 typeof(FarmwareInitializationSystemGroup),
                 expectedOrderFirst: true);
+            AssertUpdatesInGroup(
+                typeof(PersistentIdInitializationSystem),
+                typeof(FarmwareInitializationSystemGroup));
             AssertUpdatesInGroup(
                 typeof(SimulationTickAdvanceSystem),
                 typeof(FarmwareFixedTickSimulationSystemGroup),
