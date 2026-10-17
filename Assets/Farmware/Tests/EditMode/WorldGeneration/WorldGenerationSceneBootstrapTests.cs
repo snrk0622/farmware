@@ -4,9 +4,14 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using Farmware.Authoring;
+using Farmware.Simulation;
+using Farmware.Simulation.Animals;
 using Farmware.WorldGeneration.Editor;
 using NUnit.Framework;
+using UnityEditor;
 using UnityEditor.SceneManagement;
+using UnityEngine;
 
 namespace Farmware.WorldGeneration.Tests
 {
@@ -111,6 +116,152 @@ namespace Farmware.WorldGeneration.Tests
             CollectionAssert.AreEqual(new[] { "confirm", "capture", "build", "restore" }, calls);
             Assert.That(restoredSetup, Is.SameAs(capturedSetup));
             Assert.That(invocationException.InnerException, Is.TypeOf<InvalidOperationException>());
+        }
+
+        /// <summary>
+        /// Scene構築ツールが鶏1種のGUID、草原・陸地条件、群れ、密度、固定Tick移動、外見差分を再現することを保証します。
+        /// </summary>
+        [Test]
+        public void ConfigurePrototypeAnimalDefinitions_AppliesChickenDefinition()
+        {
+            GameObject settingsObject = new GameObject("Animal Definition Test");
+            try
+            {
+                DefinitionCatalogAuthoring authoring =
+                    settingsObject.AddComponent<DefinitionCatalogAuthoring>();
+                MethodInfo configureMethod = typeof(WorldGenerationSceneBootstrap).GetMethod(
+                    "ConfigurePrototypeAnimalDefinitions",
+                    BindingFlags.NonPublic | BindingFlags.Static);
+                Assert.That(configureMethod, Is.Not.Null, "鶏定義の構築処理が見つかりません。");
+
+                configureMethod.Invoke(null, new object[] { authoring });
+
+                SerializedObject serializedAuthoring = new SerializedObject(authoring);
+                SerializedProperty definitions = serializedAuthoring.FindProperty("definitions");
+                SerializedProperty animalDefinitions =
+                    serializedAuthoring.FindProperty("animalSpeciesDefinitions");
+                Assert.That(definitions.arraySize, Is.EqualTo(1));
+                Assert.That(animalDefinitions.arraySize, Is.EqualTo(1));
+
+                SerializedProperty chickenDefinition = definitions.GetArrayElementAtIndex(0);
+                SerializedProperty chickenSettings = animalDefinitions.GetArrayElementAtIndex(0);
+                Assert.That(
+                    chickenDefinition.FindPropertyRelative("displayName").stringValue,
+                    Is.EqualTo("Chicken"));
+                Assert.That(
+                    chickenDefinition.FindPropertyRelative("kind").intValue,
+                    Is.EqualTo((int)DefinitionKind.AnimalSpecies));
+                Assert.That(
+                    chickenDefinition.FindPropertyRelative("guid").stringValue,
+                    Is.EqualTo("1728e39573b24efa996020e9493cc742"));
+                Assert.That(
+                    chickenSettings.FindPropertyRelative("definitionGuid").stringValue,
+                    Is.EqualTo("1728e39573b24efa996020e9493cc742"));
+                Assert.That(
+                    chickenSettings.FindPropertyRelative("allowedBiomes").intValue,
+                    Is.EqualTo((int)AnimalBiomeMask.Grassland));
+                Assert.That(
+                    chickenSettings.FindPropertyRelative("allowedGrounds").intValue,
+                    Is.EqualTo((int)AnimalGroundMask.Land));
+                Assert.That(
+                    chickenSettings.FindPropertyRelative("minimumHerdSize").intValue,
+                    Is.EqualTo(3));
+                Assert.That(
+                    chickenSettings.FindPropertyRelative("maximumHerdSize").intValue,
+                    Is.EqualTo(6));
+                Assert.That(
+                    chickenSettings.FindPropertyRelative("targetPopulationPer4096EligibleTiles").intValue,
+                    Is.EqualTo(8));
+                Assert.That(
+                    chickenSettings.FindPropertyRelative("minimumIdleTicks").longValue,
+                    Is.EqualTo(20));
+                Assert.That(
+                    chickenSettings.FindPropertyRelative("maximumIdleTicks").longValue,
+                    Is.EqualTo(80));
+                Assert.That(
+                    chickenSettings.FindPropertyRelative("movementStepIntervalTicks").longValue,
+                    Is.EqualTo(5));
+                Assert.That(
+                    chickenSettings.FindPropertyRelative("maximumWanderDistanceInTiles").intValue,
+                    Is.EqualTo(8));
+                Assert.That(
+                    chickenSettings.FindPropertyRelative("appearanceVariantCount").intValue,
+                    Is.EqualTo(3));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(settingsObject);
+            }
+        }
+
+        /// <summary>
+        /// 動物種設定のInspector見出しが、GUIDで対応する共通定義の表示名を使用することを保証します。
+        /// </summary>
+        [Test]
+        public void BuildAnimalSpeciesElementLabel_MatchingGuid_UsesDefinitionDisplayName()
+        {
+            GameObject settingsObject = new GameObject("Animal Definition Label Test");
+            try
+            {
+                DefinitionCatalogAuthoring authoring =
+                    settingsObject.AddComponent<DefinitionCatalogAuthoring>();
+                MethodInfo configureMethod = typeof(WorldGenerationSceneBootstrap).GetMethod(
+                    "ConfigurePrototypeAnimalDefinitions",
+                    BindingFlags.NonPublic | BindingFlags.Static);
+                Assert.That(configureMethod, Is.Not.Null, "鶏定義の構築処理が見つかりません。");
+                configureMethod.Invoke(null, new object[] { authoring });
+
+                SerializedObject serializedAuthoring = new SerializedObject(authoring);
+                SerializedProperty definitions = serializedAuthoring.FindProperty("definitions");
+                SerializedProperty animalDefinitions =
+                    serializedAuthoring.FindProperty("animalSpeciesDefinitions");
+
+                // 動物種固有設定には名前を重複保存せず、共通GUIDから現在の表示名を取得します。
+                string label = DefinitionCatalogAuthoringEditor.BuildAnimalSpeciesElementLabel(
+                    definitions,
+                    animalDefinitions.GetArrayElementAtIndex(0),
+                    0);
+
+                Assert.That(label, Is.EqualTo("0: Chicken"));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(settingsObject);
+            }
+        }
+
+        /// <summary>
+        /// 共通定義に存在しないGUIDでも要素番号と短縮GUIDを表示し、設定ミスを見つけられることを保証します。
+        /// </summary>
+        [Test]
+        public void BuildAnimalSpeciesElementLabel_UnknownGuid_ShowsUnresolvedGuid()
+        {
+            GameObject settingsObject = new GameObject("Unknown Animal Definition Label Test");
+            try
+            {
+                DefinitionCatalogAuthoring authoring =
+                    settingsObject.AddComponent<DefinitionCatalogAuthoring>();
+                SerializedObject serializedAuthoring = new SerializedObject(authoring);
+                SerializedProperty definitions = serializedAuthoring.FindProperty("definitions");
+                SerializedProperty animalDefinitions =
+                    serializedAuthoring.FindProperty("animalSpeciesDefinitions");
+                animalDefinitions.arraySize = 1;
+                SerializedProperty animalSpecies = animalDefinitions.GetArrayElementAtIndex(0);
+                animalSpecies.FindPropertyRelative("definitionGuid").stringValue =
+                    "aaaaaaaa111122223333444444444444";
+
+                // 名前解決に失敗しても単なるElement 0へ戻さず、問題のGUIDを見出しへ残します。
+                string label = DefinitionCatalogAuthoringEditor.BuildAnimalSpeciesElementLabel(
+                    definitions,
+                    animalSpecies,
+                    0);
+
+                Assert.That(label, Is.EqualTo("0: 名前未解決（aaaaaaaa）"));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(settingsObject);
+            }
         }
 
         /// <summary>

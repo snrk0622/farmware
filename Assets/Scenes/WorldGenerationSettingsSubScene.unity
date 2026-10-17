@@ -129,6 +129,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1472122071}
   - component: {fileID: 1472122070}
+  - component: {fileID: 1472122072}
   m_Layer: 0
   m_Name: World Generation Settings
   m_TagString: Untagged
@@ -230,6 +231,35 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1472122072
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1472122069}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4af02094a3894c718f00da1a1a00a426, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Farmware.Authoring::Farmware.Authoring.DefinitionCatalogAuthoring
+  definitions:
+  - displayName: Chicken
+    kind: 5
+    guid: 1728e39573b24efa996020e9493cc742
+    references: []
+  animalSpeciesDefinitions:
+  - definitionGuid: 1728e39573b24efa996020e9493cc742
+    allowedBiomes: 1
+    allowedGrounds: 1
+    minimumHerdSize: 3
+    maximumHerdSize: 6
+    targetPopulationPer4096EligibleTiles: 8
+    minimumIdleTicks: 20
+    maximumIdleTicks: 80
+    movementStepIntervalTicks: 5
+    maximumWanderDistanceInTiles: 8
+    appearanceVariantCount: 3
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

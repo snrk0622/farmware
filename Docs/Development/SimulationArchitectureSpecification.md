@@ -135,6 +135,8 @@ ECSの共通ルートGroupは次のとおりとする。
 
 `SIM-01D`では、全0を無効値とする上位・下位各64bitの`DefinitionGuid`と、1始まりの`DefinitionRuntimeId`を共通Simulation型として実装した。Authoringの定義配列はBakerでGUID昇順へ正規化し、入力順に依存しない連続ID、定義分類、解決済み参照を`DefinitionCatalogBlob`へ格納する。GUID文字列はInspectorとセーブ境界だけで扱い、実行時の定義参照は整数IDを使用する。BakerとEditModeテストは同じ`DefinitionCatalogBuilder`を使い、GUID未設定、重複、参照切れ、参照先分類不一致を破損したBlob Assetの生成前に拒否する。実際のアイテム、設備、施設、レシピ、動物種データとSceneへのカタログ配置は各機能PRで追加する。
 
+`ANIMAL-01A`では、動物種固有の生成条件と移動調整値を`AnimalSpeciesCatalogBlob`へ分離し、共通`DefinitionCatalogBlob`で解決した`DefinitionRuntimeId`を参照する。対応バイオームと有効地形は値域の異なる別々のビットマスクで保持し、通常Tickで文字列、GUID、managed参照を使わない。BakerとEditModeテストが共有する`AnimalSpeciesCatalogBuilder`は、未登録・分類不一致・重複する動物種、未知ビット、群れ範囲、密度、固定Tick範囲、徘徊距離、外見差分数を検証してから、実行時ID順のBlob Assetを作る。最初の定義は草原の通常陸地に生息する鶏であり、個体Entityや動物生成Systemは後続PRで追加する。`AnimalSpeciesStateHasher`は機能固有セクションID 1024へ全静的値を固定順で追加し、同じGUIDでも生成条件や移動値が異なるWorldのハッシュを区別する。
+
 ## 6. チャンク境界と保存所有権
 
 - 複数タイル設備はアンカーセルを含む論理チャンクを保存上の所有チャンクとし、設備全体を1回だけ保存する。

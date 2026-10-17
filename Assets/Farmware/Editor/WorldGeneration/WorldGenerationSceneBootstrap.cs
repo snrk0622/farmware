@@ -1,9 +1,12 @@
-// このファイルは、本番用バイオーム土地・岩壁と、資源・液面アニメーションの仮素材を組み合わせ、マップ生成を確認できるSampleScene構成を再現可能に作ります。
-// Runtimeの生成規則には関与せず、製品・フォールバック表示素材、Sprite Atlas、SubScene、Camera、Grid、TilemapのAuthoring接続だけを担当します。
+// このファイルは、本番用バイオーム土地・岩壁、資源・液面アニメーションの仮素材、初期動物種の静的定義を組み合わせ、マップ生成を確認できるSampleScene構成を再現可能に作ります。
+// Runtimeの生成規則には関与せず、製品・フォールバック表示素材、Sprite Atlas、SubScene、Camera、Grid、Tilemap、静的定義のAuthoring接続だけを担当します。
 
 using System;
 using System.Collections.Generic;
 using System.IO;
+using Farmware.Authoring;
+using Farmware.Simulation;
+using Farmware.Simulation.Animals;
 using Farmware.WorldGeneration.Authoring;
 using Farmware.WorldGeneration.Presentation;
 using Unity.Scenes;
@@ -19,7 +22,7 @@ using UnityEngine.Tilemaps;
 namespace Farmware.WorldGeneration.Editor
 {
     /// <summary>
-    /// 本番用バイオーム土地・岩壁、フォールバック地形、共通Sprite Atlas、資源アイコンを接続し、SampleSceneと設定用SubSceneを安全に構築するEditor専用ツールです。
+    /// 本番用バイオーム土地・岩壁、フォールバック地形、共通Sprite Atlas、資源アイコン、初期動物種の静的定義を接続し、SampleSceneと設定用SubSceneを安全に構築するEditor専用ツールです。
     /// メニューまたはバッチモードのexecuteMethodから呼び出し、同じ名前の構成は再利用して重複作成を防ぎます。
     /// </summary>
     public static class WorldGenerationSceneBootstrap
@@ -73,6 +76,34 @@ namespace Farmware.WorldGeneration.Editor
 
         /// <summary>正式なセーブ互換運用を始めるまで固定する初期生成器バージョンです。</summary>
         private const int PrototypeGeneratorVersion = 1;
+
+        /// <summary>最初の動物種である鶏を名称変更や配列順から独立して識別する変更禁止GUIDです。</summary>
+        private const string PrototypeChickenDefinitionGuid =
+            "1728e39573b24efa996020e9493cc742";
+
+        /// <summary>鶏の1群れを作る開発用最小個体数です。単位は個体です。</summary>
+        private const int PrototypeChickenMinimumHerdSize = 3;
+
+        /// <summary>鶏の1群れを作る開発用最大個体数です。単位は個体です。</summary>
+        private const int PrototypeChickenMaximumHerdSize = 6;
+
+        /// <summary>草原の有効地形4096タイル当たりに配置する鶏の開発用目標個体数です。</summary>
+        private const int PrototypeChickenPopulationPer4096EligibleTiles = 8;
+
+        /// <summary>鶏が次の行動候補を選ぶまでの開発用最小待機時間です。単位は固定Tickです。</summary>
+        private const long PrototypeChickenMinimumIdleTicks = 20;
+
+        /// <summary>鶏が次の行動候補を選ぶまでの開発用最大待機時間です。単位は固定Tickです。</summary>
+        private const long PrototypeChickenMaximumIdleTicks = 80;
+
+        /// <summary>鶏が隣接タイルへ1歩進む開発用時間です。単位は固定Tickです。</summary>
+        private const long PrototypeChickenMovementStepIntervalTicks = 5;
+
+        /// <summary>鶏が群れの基準位置から通常の徘徊で離れてよい開発用距離です。単位はタイルです。</summary>
+        private const int PrototypeChickenMaximumWanderDistanceInTiles = 8;
+
+        /// <summary>鶏の生成時に選択できる開発用外見差分数です。</summary>
+        private const int PrototypeChickenAppearanceVariantCount = 3;
 
         /// <summary>約1.5論理チャンク以内で気温帯が変化する試作格子サイズです。単位はタイルです。</summary>
         private const int PrototypeTemperatureCellSizeInTiles = 96;
@@ -1440,7 +1471,7 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>
-        /// WorldGenerationAuthoringだけを含むSubSceneを作成または更新し、Bakerが設定Singletonを生成できるようにします。
+        /// WorldGenerationAuthoringと静的定義Authoringを含むSubSceneを作成または更新し、Bakerが設定Singletonを生成できるようにします。
         /// </summary>
         /// <returns>SampleSceneのSubScene Componentへ割り当てるSceneAssetです。</returns>
         private static SceneAsset CreateOrUpdateSettingsSubScene()
@@ -1459,6 +1490,9 @@ namespace Farmware.WorldGeneration.Editor
             GameObject settingsObject = FindOrCreateRoot(settingsScene, "World Generation Settings");
             WorldGenerationAuthoring authoring = GetOrAddComponent<WorldGenerationAuthoring>(settingsObject);
             ConfigurePrototypeWorldGenerationSettings(authoring);
+            DefinitionCatalogAuthoring definitionAuthoring =
+                GetOrAddComponent<DefinitionCatalogAuthoring>(settingsObject);
+            ConfigurePrototypeAnimalDefinitions(definitionAuthoring);
 
             EditorSceneManager.MarkSceneDirty(settingsScene);
             if (!EditorSceneManager.SaveScene(settingsScene, SettingsSubScenePath))
@@ -1474,6 +1508,64 @@ namespace Farmware.WorldGeneration.Editor
             }
 
             return sceneAsset;
+        }
+
+        /// <summary>
+        /// 最初の動物種である鶏を共通定義と動物固有設定へ一対一で登録します。
+        /// 構築ツールを再実行してもGUID、配列件数、開発用初期値を同じ状態へ戻します。
+        /// </summary>
+        /// <param name="authoring">設定SubSceneに1つだけ置く共通定義Authoringです。</param>
+        private static void ConfigurePrototypeAnimalDefinitions(
+            DefinitionCatalogAuthoring authoring)
+        {
+            SerializedObject serializedAuthoring = new SerializedObject(authoring);
+            SerializedProperty definitions = serializedAuthoring.FindProperty("definitions");
+            SerializedProperty animalDefinitions =
+                serializedAuthoring.FindProperty("animalSpeciesDefinitions");
+            if (definitions == null || animalDefinitions == null)
+            {
+                throw new InvalidOperationException(
+                    "DefinitionCatalogAuthoringの動物種設定を取得できませんでした。");
+            }
+
+            // ANIMAL-01Aでは鶏1種だけを正式な入力とし、後続種を追加するまでは配列件数も1へ固定します。
+            definitions.arraySize = 1;
+            SerializedProperty chickenDefinition = definitions.GetArrayElementAtIndex(0);
+            chickenDefinition.FindPropertyRelative("displayName").stringValue = "Chicken";
+            chickenDefinition.FindPropertyRelative("kind").intValue =
+                (int)DefinitionKind.AnimalSpecies;
+            chickenDefinition.FindPropertyRelative("guid").stringValue =
+                PrototypeChickenDefinitionGuid;
+            chickenDefinition.FindPropertyRelative("references").arraySize = 0;
+
+            animalDefinitions.arraySize = 1;
+            SerializedProperty chickenSettings = animalDefinitions.GetArrayElementAtIndex(0);
+            chickenSettings.FindPropertyRelative("definitionGuid").stringValue =
+                PrototypeChickenDefinitionGuid;
+            chickenSettings.FindPropertyRelative("allowedBiomes").intValue =
+                (int)AnimalBiomeMask.Grassland;
+            chickenSettings.FindPropertyRelative("allowedGrounds").intValue =
+                (int)AnimalGroundMask.Land;
+            chickenSettings.FindPropertyRelative("minimumHerdSize").intValue =
+                PrototypeChickenMinimumHerdSize;
+            chickenSettings.FindPropertyRelative("maximumHerdSize").intValue =
+                PrototypeChickenMaximumHerdSize;
+            chickenSettings.FindPropertyRelative("targetPopulationPer4096EligibleTiles").intValue =
+                PrototypeChickenPopulationPer4096EligibleTiles;
+            chickenSettings.FindPropertyRelative("minimumIdleTicks").longValue =
+                PrototypeChickenMinimumIdleTicks;
+            chickenSettings.FindPropertyRelative("maximumIdleTicks").longValue =
+                PrototypeChickenMaximumIdleTicks;
+            chickenSettings.FindPropertyRelative("movementStepIntervalTicks").longValue =
+                PrototypeChickenMovementStepIntervalTicks;
+            chickenSettings.FindPropertyRelative("maximumWanderDistanceInTiles").intValue =
+                PrototypeChickenMaximumWanderDistanceInTiles;
+            chickenSettings.FindPropertyRelative("appearanceVariantCount").intValue =
+                PrototypeChickenAppearanceVariantCount;
+
+            // privateなSerializeFieldを正規のUnityシリアライズ経路で更新し、Scene保存対象としてDirtyにします。
+            serializedAuthoring.ApplyModifiedPropertiesWithoutUndo();
+            EditorUtility.SetDirty(authoring);
         }
 
         /// <summary>
