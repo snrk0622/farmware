@@ -27,7 +27,7 @@ Codexは、現在の作業ディレクトリからリポジトリルートまで
 | スキル | 用途 | 主な入力 | 出力 |
 | --- | --- | --- | --- |
 | `animal-prompt-dialogue` | PixelLab Create S-XL Image (Pro)用の動物スプライトPromptを対話で作る | 動物種、Output size、固有ポーズ、身体特徴、禁止事項 | 設定一覧と、一回の生成で全バリエーション・全ポーズを作る英語Prompt |
-| `fixed-resource-prompt-dialogue` | 木、岩、草など、動かない固定資源のPixelLab Create S-XL Image (Pro)用Promptを対話で作る | 資源名、配置分類、Output size、占有範囲、状態、外見、禁止事項 | 設定一覧と、全バリエーション・全状態・通常版・積雪版を作る英語Prompt |
+| `fixed-resource-prompt-dialogue` | 木、岩、草など、動かない固定資源のPixelLab Create S-XL Image (Pro)用Promptを対話で作る | 資源名、配置分類、Output size、Style Image、Reference Images、占有範囲、状態、外見、禁止事項 | 設定一覧と、全バリエーション・全状態・通常版・積雪版を作る英語Prompt |
 
 ### `animal-prompt-dialogue`
 

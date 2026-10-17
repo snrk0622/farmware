@@ -105,12 +105,12 @@ Editorの構築メニューが `Assets/Farmware/Art/WorldGeneration/Fallback/` �
 | 0 | 草原マスタースタイル | 設備の背景として静かな基準Tile | 1 Sprite |
 | 1 | 残りのBase地形 | 森林、砂漠、岩地、湿地、雪原、火山は16×24、淡水、海水、マグマは16×16、岩壁は16×28。各1枚 | 10 Sprite |
 | 2 | 土地・岩壁境界ハイライト | 土地上面と岩壁上面で共有する16×16の透明素材。14形状を90度回転して47接続状態へ展開 | 14 Sprite |
-| 3 | 基礎資源 | 木3、石3、砂資源3 | 9 Sprite |
+| 3 | 基礎資源 | 木、石、砂資源を各3基本バリエーション。各基本バリエーションに通常版と積雪版を用意 | 18 Sprite |
 | 5 | ドローン | 8方向×待機4フレーム、8方向×移動4フレーム | 64 Sprite frame |
 | 6 | 開始コア | 待機4フレーム、稼働4フレーム | 8 Sprite frame |
 
-初期必須合計は、静止Spriteとアニメーションフレームを合わせて106点とする。水面・マグマの任意アニメーション、後続段階の設備、固有資源、ゲーム上の役割が未定義な純粋装飾はこの合計へ含めない。`ART-00B`の土地・岩壁境界ハイライトは、透明状態をTilemapへ配置せず、方向による色・陰影差を持たない14枚の可視Spriteを土地上面と岩壁上面で共有する。
-最初の世界観確認に必要な最小セットは、11地形の代表各1枚と木・石・砂資源の代表各1枚の合計14点である。
+初期必須合計は、静止Spriteとアニメーションフレームを合わせて115点とする。基礎資源は追加状態を採用しない最小構成で数え、採取後などの状態を一つ追加する資源ごとに、3基本バリエーション×通常版・積雪版の6 Spriteを追加する。水面・マグマの任意アニメーション、後続段階の設備、固有資源、ゲーム上の役割が未定義な純粋装飾はこの合計へ含めない。`ART-00B`の土地・岩壁境界ハイライトは、透明状態をTilemapへ配置せず、方向による色・陰影差を持たない14枚の可視Spriteを土地上面と岩壁上面で共有する。
+最初の世界観確認に必要な最小セットは、11地形の代表各1枚と、木・石・砂資源の代表基本バリエーションについて通常版・積雪版を各1組用意した6枚の、合計17点である。
 
 Base地形は合計11種類×1枚の11 Spriteとなる。段階Aの世界観確認では各地形をUnityへ接続し、配色と情報量を確認する。
 土地と岩壁の断面は各Base地形へ最初から含める。Base Spriteと前面断面には外角、内角、左右の側面、孤立形状を制作せず、内角を含む接続表現は5.2の境界ハイライト専用オーバーレイだけで扱う。
@@ -270,6 +270,7 @@ Match the approved grassland reference in canvas size, top-and-face layout, outl
 - 固定資源は、採取や除去を終えるまで施設配置を妨げる`blocking_resource`と、施設配置時に自動除去される非機能の景観要素`auto_clear_scenery`へ分ける。床、道、舗装、耕地、地形Base、動物は含めない。
 - PixelLabツールは`Create S-XL Image (Pro)`とする。`Output size`の最大辺が16～42 pxなら64 frames、43～85 pxなら16 frames、86～170 pxなら4 frames、171 px以上なら1 frameとして総フレーム数を決める。上限はPixelLabが各アスペクト比で許可する最大寸法に従う。`256 ÷ Output Width`や`256 ÷ Output Height`では計算しない。
 - PixelLabの`No Background`を有効にする。Prompt本文の透明背景指定だけに依存せず、生成設定でも背景を無効化する。
+- 最初の自然物では、PixelLabの`Style Image`へ採用済みの対象バイオーム地形を指定する。その自然物を採用した後は、以降の固定資源で最初の自然物を`Style Image`、対象バイオーム地形を`Reference Images`へ指定し、地形と自然物の画風を引き継ぐ。Style Optionsでは地形の輪郭なし設定をコピーせず、`blocking_resource`と`auto_clear_scenery`の輪郭規則を優先する。使用した参照画像、Style Options、Seedを制作記録へ残す。
 - `Outputs per Base Variation = State Count × 2`、`Base Variation Count = floor(Total Frames ÷ Outputs per Base Variation)`、`Unused Frames = Total Frames - Base Variation Count × Outputs per Base Variation`とする。完全な基本バリエーションを1組も作れない組み合わせは使用しない。
 - 完成Prompt本文には`Output size`、1 Spriteの寸法、出力シートのgrid寸法、総フレーム数、基本バリエーション数、出力シート上の行列配置を書かない。画角を示す`orthogonal square grid`と、基本バリエーション内の状態・環境版の順序は書く。
 - 全基本バリエーションと全状態に`standard`と`snow-covered`を一対で用意する。積雪には明部`#EDF3F2`と影色`#C5D6DE`だけを使い、上向きの面へ薄く載せる。対応する通常版から、雪以外の形、状態、材質、配色、接地点、縮尺、画角、輪郭を変えない。
@@ -726,9 +727,10 @@ Six separate sparse top-down pixel-art freshwater overlays: 1) a tiny circular r
 
 ### 7.1 草原の木 `resource_tree_basic`
 
-- 初期採用数: 成木3基本バリエーション。占有は1×1タイル、`Output size`は32×32 pxを初期値とする
+- 初期採用数: 成木3基本バリエーション×通常版・積雪版の6 Sprite。占有は1×1タイル、`Output size`は32×32 pxを初期値とする
 - Placement Class: `blocking_resource`
 - PixelLabツール: `Create S-XL Image (Pro)`
+- Style Image: 採用済みの草原地形。地形の輪郭なし設定はコピーしない。採用した成木は、7.2以降の固定資源で最初の自然物の基準画像として使用する
 - Prompt作成: `fixed-resource-prompt-dialogue`を使用する。状態は`normal`を必須とし、伐採後に切り株を残すゲーム仕様を採用する場合だけ`after_harvest`を追加する
 - 外見要件: 丸みのある葉冠、暖かい中明度の緑葉、落ち着いた茶色の幹。幹の接地点を枠の下中央付近へ置き、葉冠は上方向へはみ出してよい
 - 固有禁止事項: 果実、顔、植木鉢、草の台座、長い投影影、周辺風景
@@ -741,9 +743,10 @@ Six separate sparse top-down pixel-art freshwater overlays: 1) a tiny circular r
 
 ### 7.2 石資源 `resource_stone_basic`
 
-- 初期採用数: 3基本バリエーション。論理占有は1×1、`Output size`は16×24 pxを初期値とする
+- 初期採用数: 3基本バリエーション×通常版・積雪版の6 Sprite。論理占有は1×1、`Output size`は16×24 pxを初期値とする
 - Placement Class: `blocking_resource`
 - PixelLabツール: `Create S-XL Image (Pro)`
+- Style Image: 7.1で採用した成木。Reference Images: 採用済みの岩地
 - Prompt作成: `fixed-resource-prompt-dialogue`を使用する。状態は`normal`を必須とし、採掘後に残骸を残すゲーム仕様を採用する場合だけ`depleted`を追加する
 - 外見要件: 木炭色と落ち着いた茶色の丸い岩を2～3個まとめ、上面と短い正面を読める形にする。接地点を枠の下中央付近へ置く
 - 固有禁止事項: 草の台座、鉱石結晶、長い投影影、文字、周辺風景
@@ -756,9 +759,10 @@ Six separate sparse top-down pixel-art freshwater overlays: 1) a tiny circular r
 
 ### 7.3 砂資源パッチ `resource_sand_patch`
 
-- 初期採用数: 3基本バリエーション。論理占有は1×1、`Output size`は16×16 pxを初期値とする
+- 初期採用数: 3基本バリエーション×通常版・積雪版の6 Sprite。論理占有は1×1、`Output size`は16×16 pxを初期値とする
 - Placement Class: 採取または除去まで施設配置を妨げる`blocking_resource`
 - PixelLabツール: `Create S-XL Image (Pro)`
+- Style Image: 7.1で採用した成木。Reference Images: 採用済みの砂漠地形
 - Prompt作成: `fixed-resource-prompt-dialogue`を使用する。状態は`normal`を必須とし、採取後にパッチを残すゲーム仕様を採用する場合だけ`depleted`を追加する
 - 外見要件: 通常の砂漠地面より少し明るい粗い砂粒と少数の暗い粒で、低く不規則な砂の集積を表す
 - 固有禁止事項: 容器、シャベル、足跡、砂丘、文字、投影影

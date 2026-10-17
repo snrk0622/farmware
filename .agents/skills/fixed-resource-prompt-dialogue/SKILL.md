@@ -28,11 +28,12 @@ Farmwareの静止した固定資源について、初心者でも答えやすい
    - `blocking_resource`: 木や岩など、同じタイルへの施設配置を妨害し、実際に採取・利用される資源。
    - `auto_clear_scenery`: 草など、機能を持たず、同じタイルへ施設を配置すると自動除去される景観資源。
 3. PixelLabで選ぶ`Output size`と論理占有タイル数。Create S-XL Image (Pro)が返す総フレーム数は`Output size`の最大辺から自動計算し、ユーザーには質問しない。`Output size`と総フレーム数は設定一覧と計算には使うが、完成Prompt本文には絶対に書かない。立体物では、地面との接地点、上方向や隣接セルへの描画上のはみ出しも確認する。
-4. `Resource States`。`blocking_resource`では、通常状態に加えて採取後など、その資源で必要になり得る静止状態をスキル側から先に提案し、枚数への影響を示して採否を確認する。`auto_clear_scenery`は通常状態だけとし、状態を質問しない。
-5. `Resource Features`。材質、色、形、構成要素など、対象を判別するために必要な特徴だけを扱う。
-6. `State Requirements`。採用した各状態を、アニメーション途中ではなく一枚で読める完成した静止状態として記述する。
-7. `Variation Rules`。論理占有、接地点、主要配色を保ったまま、基本バリエーション間で変えてよい形状、傾き、色幅などを決める。
-8. `Resource-specific Prohibitions`。誤生成されやすい物、地面、容器、文字などを追加する。対象固有の禁止事項がない場合は空とし、完成時にテンプレートの角括弧プレースホルダーだけを削除する。直前の共通禁止文は削除しない。
+4. PixelLabの`Style Image`と、必要に応じた`Reference Images`へ指定する採用済み基準画像。最初の自然物では対象バイオームの採用済み地形を`Style Image`にする。その自然物を採用した後は、以降の固定資源で最初の自然物を`Style Image`、対象バイオーム地形を`Reference Images`にする。地形をStyle Imageに使う場合も、Style Optionsで地形の輪郭なし設定をコピーせず、このスキルの分類別アウトライン規則を優先する。参照画像を特定できない場合だけ、ユーザーへ画像名または場所を確認する。これらはPixelLabの生成設定として設定一覧に出し、完成Prompt本文には書かない。
+5. `Resource States`。`blocking_resource`では、通常状態に加えて採取後など、その資源で必要になり得る静止状態をスキル側から先に提案し、枚数への影響を示して採否を確認する。`auto_clear_scenery`は通常状態だけとし、状態を質問しない。
+6. `Resource Features`。材質、色、形、構成要素など、対象を判別するために必要な特徴だけを扱う。
+7. `State Requirements`。採用した各状態を、アニメーション途中ではなく一枚で読める完成した静止状態として記述する。
+8. `Variation Rules`。論理占有、接地点、主要配色を保ったまま、基本バリエーション間で変えてよい形状、傾き、色幅などを決める。
+9. `Resource-specific Prohibitions`。誤生成されやすい物、地面、容器、文字などを追加する。対象固有の禁止事項がない場合は空とし、完成時にテンプレートの角括弧プレースホルダーだけを削除する。直前の共通禁止文は削除しない。
 
 ## 分類とアウトライン
 
@@ -107,7 +108,7 @@ Farmwareの静止した固定資源について、初心者でも答えやすい
 
 すべての値が揃ったら、次を日本語で簡潔に出力する。
 
-1. `設定`: Resource、Resource ID、Placement Class、PixelLab tool、Output size、`No Background: enabled`、最大辺、総フレーム数、Resource States、Environment Versions、1基本バリエーション当たりの出力数、基本バリエーション数、未使用フレーム数、論理占有、アウトライン規則。
+1. `設定`: Resource、Resource ID、Placement Class、PixelLab tool、Output size、`No Background: enabled`、Style Image、Reference Images、Style Options、最大辺、総フレーム数、Resource States、Environment Versions、1基本バリエーション当たりの出力数、基本バリエーション数、未使用フレーム数、論理占有、アウトライン規則。
 2. `PixelLab Prompt`: 選択した分類に対応する英語の完成Promptを、一つの`text`コードブロックで出す。
 
 完成Promptでは次を必ず満たす。
