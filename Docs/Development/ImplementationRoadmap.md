@@ -199,6 +199,8 @@ Unity 6.3 LTS（6000.3.8f1）のTest Runnerで`WorldCoordinateConversionTests` 1
 
 比較実装の最終AI確認では、Unity 6000.3.8f1でコンパイル成功、PlayMode全38件と関連EditMode 163件が成功し、Consoleのエラー・警告は0件だった。人間による比較方式の最終表示受け入れと採用判断はまだ行っていない。比較切替をOFFに保った区切りとしてcommitし、次にSetPass増加、GPU、表示単位・プールのメモリを評価する。
 
+`7d65b5ac`でEditor一次評価3文書をcommitした後、MonoのmacOS Development Playerを作成し、Arm64／Metalで比較した。新方式の原点変更2回は分類・書込・消去0、表示処理4.072500／0.093750msであり、初回実行の残るコストも記録した。128チャンクの同一経路を往復して再訪した追加表示Native量は、最初の往路の同じ4地点との差が0〜144 bytesで、プール上限内に収まった。ただし静止比較はOFF背景／ON前面となり、OFF再試行もfocusが切り替わったため、方式だけのGPU／定常CPU差は確定していない。前面維持可能な時間をユーザーへ確認して条件統一を残し、既定OFFとMAP-02D未完了を維持する。製品コード、Scene保存内容、速度、予算、パッケージは変更せず、一時ハーネスとビルド派生差分も整理した。詳細は[Development Playerの一次比較](./Map02DPerformanceReport.md)を参照する。
+
 大項目完了条件:
 
 - 原点から遠い絶対座標でも、Tilemap、診断表示、入力対象が同じセルで一致する。

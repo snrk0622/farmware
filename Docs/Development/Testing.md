@@ -185,6 +185,8 @@ Sprite Packer ModeがV2であること、土地Atlasが7バイオームの本番
 
 チャンク単位Tilemap比較実装の`d114156a`後は、Gameビューの実矩形も1920×1080へ固定し、通常2チャンク／拡大9チャンクの静止状態をOFF/ON各2回、5秒ウォームアップ＋10秒記録で比較した。合計4,804フレームの描画CounterとFrameTiming、所有Native Object、64チャンク移動時のプールを記録した。Frame Debuggerは時間計測と分離した。GPU値の遅延・変動と帰属、Native内部容量の保持があるため、合格判定やリークなしの証明には使用しない。条件、計測中のCLI確認1回の混入、未検証事項は[性能計測レポート](./Map02DPerformanceReport.md#commit後の描画gpu個別メモリ一次評価)を参照する。この追加作業は製品コードや回帰テストを変更せず、Development Buildと長時間比較を残す。
 
+`7d65b5ac`後の追加計測は、同版UnityのmacOS Development Player（Mono／Universal出力をArm64で実行）で行った。静止4ケース、速度36で32秒の自動原点変更、128チャンクの往路・復路・再往路の合成試験を自動ハーネスで実行し、GPUタイムスタンプの重複を除いて集計した。Sceneを保存せず、一時C#と.metaはビルド後に削除した。最初のOFF静止は背景、ONは前面、OFFの再試行もfocusが混在したため、公平な静止CPU／GPUの対照比較は未完了である。これは回帰テストの追加や既存38件／163件の再実行ではなく、MAP-02Dの独立した性能診断である。ビルド警告1件、片付けAPIのEditorエラー2件と復元方法、実測値、残る検証は[Development Playerの一次比較](./Map02DPerformanceReport.md)を参照する。
+
 ## 6. 失敗時に記録する情報
 
 - 失敗した完全なテスト名。
