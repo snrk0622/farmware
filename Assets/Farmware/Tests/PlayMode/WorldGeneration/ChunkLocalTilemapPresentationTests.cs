@@ -240,6 +240,121 @@ namespace Farmware.WorldGeneration.PlayModeTests
             }
         }
 
+        /// <summary>空→空だけを省略し、末尾に1セルだけある配列も書き、非空→空では実際の消去を行うことを保証します。</summary>
+        [Test]
+        public void SparseWrite_SkipsOnlyEmptyToEmpty()
+        {
+            Invoke("SynchronizeDisplayOrigin");
+            ChunkCoordinate coordinate = new ChunkCoordinate(0, 0);
+            TileBase[] empty = new TileBase[256];
+            TileBase[] oneTile = new TileBase[256];
+            oneTile[255] = tile;
+            Assert.That(WriteLayer(coordinate, template, 0, empty), Is.False);
+            Assert.That(WriteLayer(coordinate, template, 0, oneTile), Is.True);
+            Tilemap map = GetTilemap(coordinate, false);
+            Assert.That(map.GetTile(new Vector3Int(15, 15, 0)), Is.SameAs(tile));
+            Assert.That(WriteLayer(coordinate, template, 0, empty), Is.True, "既存タイルを消すnull書込は省略できません。");
+            Assert.That(map.GetUsedTilesCount(), Is.Zero);
+            Assert.That(WriteLayer(coordinate, template, 0, empty), Is.False);
+        }
+
+        /// <summary>2レイヤーと先頭・末尾サブチャンクを別々に反映し、空状態の履歴が混ざらないことを保証します。</summary>
+        [Test]
+        public void SparseWrite_KeepsLayerAndSubChunkHistorySeparate()
+        {
+            GameObject layer = new GameObject("Sparse Resource Layer", typeof(Tilemap), typeof(TilemapRenderer));
+            layer.transform.SetParent(gridObject.transform, false);
+            Tilemap resource = layer.GetComponent<Tilemap>();
+            Field("resourceTilemap").SetValue(presenter, resource);
+            Invoke("SynchronizeDisplayOrigin");
+            ChunkCoordinate coordinate = new ChunkCoordinate(-1, -1);
+            TileBase[] empty = new TileBase[256];
+            TileBase[] oneTile = new TileBase[256];
+            oneTile[0] = tile;
+            Assert.That(WriteLayer(coordinate, template, 0, oneTile), Is.True);
+            Assert.That(WriteLayer(coordinate, resource, 15, oneTile), Is.True);
+            Assert.That(WriteLayer(coordinate, template, 15, empty), Is.False);
+            Assert.That(WriteLayer(coordinate, resource, 0, empty), Is.False);
+            Assert.That(WriteLayer(coordinate, template, 0, empty), Is.True);
+            Tilemap resourceMap = (Tilemap)Invoke("GetTilemapForChunk", coordinate, resource, false);
+            Assert.That(resourceMap.GetTile(new Vector3Int(48, 48, 0)), Is.SameAs(tile));
+            Assert.That(WriteLayer(coordinate, resource, 15, empty), Is.True);
+            Assert.That(resourceMap.GetUsedTilesCount(), Is.Zero);
+        }
+
+        /// <summary>部分反映した領域を全消去してプールへ返し、再貸出時には空履歴から安全に反映できることを保証します。</summary>
+        [Test]
+        public void SparseWrite_PoolReuseStartsWithClearedHistory()
+        {
+            Invoke("SynchronizeDisplayOrigin");
+            ChunkCoordinate coordinate = new ChunkCoordinate(0, 0);
+            TileBase[] oneTile = new TileBase[256];
+            oneTile[0] = tile;
+            WriteLayer(coordinate, template, 15, oneTile);
+            Tilemap original = GetTilemap(coordinate, false);
+            ((HashSet<ChunkCoordinate>)Field("displayedCoordinates").GetValue(presenter)).Add(coordinate);
+            Invoke("CancelApplyAndScheduleClearIfNeeded", coordinate);
+            Invoke("ProcessClearQueue", 8);
+            Assert.That(original.GetTile(new Vector3Int(48, 48, 0)), Is.SameAs(tile));
+            Assert.That(((ICollection)Field("pooledChunkLocalPresentations").GetValue(presenter)).Count, Is.Zero);
+            Invoke("ProcessClearQueue", 8);
+            ChunkCoordinate nextCoordinate = new ChunkCoordinate(1, 0);
+            Assert.That(WriteLayer(nextCoordinate, template, 15, new TileBase[256]), Is.False);
+            Assert.That(GetTilemap(nextCoordinate, false), Is.SameAs(original));
+            Assert.That(original.GetUsedTilesCount(), Is.Zero);
+            Assert.That(WriteLayer(nextCoordinate, template, 15, oneTile), Is.True);
+        }
+
+        /// <summary>共有方式では空配列も従来どおり書き、比較方式への切替時には新しい空履歴を使うことを保証します。</summary>
+        [Test]
+        public void SparseWrite_SharedModeKeepsUnconditionalWrite()
+        {
+            presenter.ConfigureChunkLocalPresentation(false);
+            Invoke("SynchronizeDisplayOrigin");
+            ChunkCoordinate coordinate = new ChunkCoordinate(0, 0);
+            TileBase[] empty = new TileBase[256];
+            template.SetTile(Vector3Int.zero, tile);
+            Assert.That(WriteLayer(coordinate, template, 0, empty), Is.True);
+            Assert.That(template.GetTile(Vector3Int.zero), Is.Null);
+            Assert.That(WriteLayer(coordinate, template, 0, empty), Is.True);
+            presenter.ConfigureChunkLocalPresentation(true);
+            Assert.That(WriteLayer(coordinate, template, 0, empty), Is.False);
+        }
+
+        /// <summary>正負の自動原点変更を挟んでも非空履歴を維持し、その後のnull書込で旧セルを消せることを保証します。</summary>
+        /// <param name="relativeX">自動原点変更を起こす相対Xです。</param>
+        /// <param name="chunkX">移動後も同じ表示を使うチャンクXです。</param>
+        [TestCase(544.5f, 8)]
+        [TestCase(-544.5f, -9)]
+        public void SparseWrite_AutomaticRebasePreservesHistory(float relativeX, int chunkX)
+        {
+            controller.SetAbsoluteWorldPosition(0.5d, 0.5d);
+            Invoke("SynchronizeDisplayOrigin");
+            ChunkCoordinate coordinate = new ChunkCoordinate(chunkX, 0);
+            TileBase[] oneTile = new TileBase[256];
+            oneTile[0] = tile;
+            WriteLayer(coordinate, template, 0, oneTile);
+            Tilemap original = GetTilemap(coordinate, false);
+            ((HashSet<ChunkCoordinate>)Field("displayedCoordinates").GetValue(presenter)).Add(coordinate);
+            controller.SetWorldPosition(new Vector2(relativeX, 0.5f));
+            Invoke("SynchronizeDisplayOrigin");
+            Assert.That(GetTilemap(coordinate, false), Is.SameAs(original));
+            Assert.That(WriteLayer(coordinate, template, 0, new TileBase[256]), Is.True);
+            Assert.That(original.GetTile(Vector3Int.zero), Is.Null);
+        }
+
+        /// <summary>実際のPresenter反映経路へ、指定レイヤーの256セル配列を渡して書込実行の有無を返します。</summary>
+        /// <param name="coordinate">対象チャンク座標です。</param>
+        /// <param name="layer">反映するScene見本です。</param>
+        /// <param name="index">行優先のサブチャンク番号です。</param>
+        /// <param name="tiles">テストが用意した256要素配列です。</param>
+        /// <returns>SetTilesBlockを実行した場合はtrueです。</returns>
+        private bool WriteLayer(ChunkCoordinate coordinate, Tilemap layer, int index, TileBase[] tiles)
+        {
+            BoundsInt bounds = new BoundsInt(index % 4 * 16, index / 4 * 16, 0, 16, 16, 1);
+            return (bool)Invoke("WriteSubChunkLayer", coordinate, layer, bounds, tiles);
+        }
+
         /// <summary>
         /// Presenterを停止・再開しても外周の保存領域を再利用し、破棄時には所有Native配列を解放することを保証します。
         /// 配列の借用コピーは破棄せず、所有者が更新したフィールドを毎回読み直して検証します。

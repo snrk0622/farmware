@@ -200,6 +200,10 @@ Streamingは生成中の保持外Entityも完成まで予算に含め、完成�
 
 地形分類はチャンク内部を現在のECS Bufferから読み、外周1セルだけを`TerrainNeighborHaloUtility`の同期Burst Jobでまとめて生成する。260要素のNative配列（現行GeneratedTileの要素本体で4,680 bytes）はPresenterがAwakeでPersistent確保し、OnDestroyでDisposeする。チャンク別・フレーム間キャッシュにはせず、`ProcessApplyQueue`の呼び出し内で同一チャンクの連続反映範囲を共有し、次フレームや別チャンクでは必要範囲を必ず上書きする。これによりWorld再作成、Entity再利用、生成設定変更の古い外周が混入しない。中心の再コピー、ECS書き戻し、未完了Jobは追加しない。外周のint域外は非接続の水域値を使い、境界・岩壁露出・資源の前後判定を維持する。
 
+### チャンク別Tilemapの空領域履歴
+
+`ChunkLocalTilemapPresentation`は9レイヤーごとに16bitの非空サブチャンク履歴を所有する。通常反映は`WriteSubChunk`を通し、今回の256セルが全nullで、かつ以前も空の領域だけ書込を省く。非空→空は実際のSetTilesBlock成功後に履歴を解除する。全消去は従来どおり全設定レイヤーへnullを書き、成功したサブチャンクの履歴を解除するため、16領域の消去後だけ空の状態でプールへ返せる。原点変更ではセルと履歴を一緒に維持し、World／方式切替では表示単位ごと破棄する。内部Tilemapの通常反映を別経路から直接行わないことが前提である。共有Tilemap方式は旧原点消去との寿命が異なるため、この履歴による省略を適用しない。履歴は表示専用であり、Simulationや保存状態の正にしない。
+
 ## 9. エンドレス座標とFloating Origin
 
 - Simulationの絶対位置は整数のワールドタイル座標で保持する。Transformのfloat座標を生成、占有、接続、セーブの判定に使用しない。

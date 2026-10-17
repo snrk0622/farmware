@@ -1331,34 +1331,57 @@ namespace Farmware.WorldGeneration.Presentation
             using (SubChunkTilemapWriteProfilerMarker.Auto())
             {
                 BoundsInt bounds = CreateSubChunkBounds(coordinate, subChunkIndex);
-                GetTilemapForChunk(coordinate, targetTilemap, true).SetTilesBlock(bounds, subChunkTileBuffer);
-                GetTilemapForChunk(coordinate, liquidBaseTilemap, true).SetTilesBlock(bounds, liquidBaseSubChunkTileBuffer);
-                GetTilemapForChunk(coordinate, resourceTilemap, true).SetTilesBlock(bounds, resourceSubChunkTileBuffer);
-                GetTilemapForChunk(coordinate, resourceBehindRockWallTilemap, true).SetTilesBlock(
+                WriteSubChunkLayer(coordinate, targetTilemap, bounds, subChunkTileBuffer);
+                WriteSubChunkLayer(coordinate, liquidBaseTilemap, bounds, liquidBaseSubChunkTileBuffer);
+                WriteSubChunkLayer(coordinate, resourceTilemap, bounds, resourceSubChunkTileBuffer);
+                WriteSubChunkLayer(coordinate, resourceBehindRockWallTilemap,
                     bounds,
                     resourceBehindRockWallSubChunkTileBuffer);
                 if (liquidAnimationTilemap != null)
                 {
-                    GetTilemapForChunk(coordinate, liquidAnimationTilemap, true).SetTilesBlock(bounds, liquidAnimationSubChunkTileBuffer);
+                    WriteSubChunkLayer(coordinate, liquidAnimationTilemap, bounds, liquidAnimationSubChunkTileBuffer);
                 }
 
                 if (rockWallTilemap != null)
                 {
-                    GetTilemapForChunk(coordinate, rockWallTilemap, true).SetTilesBlock(bounds, rockWallSubChunkTileBuffer);
+                    WriteSubChunkLayer(coordinate, rockWallTilemap, bounds, rockWallSubChunkTileBuffer);
                 }
 
                 if (rockWallResourceTilemap != null)
                 {
-                    GetTilemapForChunk(coordinate, rockWallResourceTilemap, true).SetTilesBlock(bounds, rockWallResourceSubChunkTileBuffer);
+                    WriteSubChunkLayer(coordinate, rockWallResourceTilemap, bounds, rockWallResourceSubChunkTileBuffer);
                 }
 
-                GetTilemapForChunk(coordinate, landBoundaryHighlightTilemap, true).SetTilesBlock(
+                WriteSubChunkLayer(coordinate, landBoundaryHighlightTilemap,
                     bounds,
                     landBoundaryHighlightSubChunkTileBuffer);
-                GetTilemapForChunk(coordinate, rockWallBoundaryHighlightTilemap, true).SetTilesBlock(
+                WriteSubChunkLayer(coordinate, rockWallBoundaryHighlightTilemap,
                     bounds,
                     rockWallBoundaryHighlightSubChunkTileBuffer);
             }
+        }
+
+        /// <summary>
+        /// 1レイヤーの分類済み配列を反映します。比較ONだけ既知の空領域へのnull書込を省き、共有方式は従来どおり反映します。
+        /// </summary>
+        /// <param name="coordinate">対象チャンクの絶対座標です。</param>
+        /// <param name="template">対象レイヤーのScene見本です。未設定なら反映しません。</param>
+        /// <param name="bounds">現在の表示方式で作成した16×16のセル範囲です。</param>
+        /// <param name="tiles">全256セルの分類済み配列です。呼び出し中だけ参照します。</param>
+        /// <returns>SetTilesBlockを実行した場合はtrue、省略した場合はfalseです。</returns>
+        private bool WriteSubChunkLayer(ChunkCoordinate coordinate, Tilemap template, BoundsInt bounds, TileBase[] tiles)
+        {
+            if (template == null) return false;
+            Tilemap target = GetTilemapForChunk(coordinate, template, true);
+            if (chunkLocalTilemapsAreActive)
+            {
+                // 空であるという履歴はチャンク表示が所有します。絶対座標で別Dictionaryを持たず、プールと一緒に寿命を管理します。
+                return chunkLocalPresentations[coordinate].WriteSubChunk(template, bounds, tiles);
+            }
+
+            // 共有方式は旧原点の遅延消去とセル範囲が交差し得るため、この局所的な履歴管理を適用しません。
+            target.SetTilesBlock(bounds, tiles);
+            return true;
         }
 
         /// <summary>

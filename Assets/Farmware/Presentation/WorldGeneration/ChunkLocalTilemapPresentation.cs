@@ -25,6 +25,10 @@ namespace Farmware.WorldGeneration.Presentation
         // チャンクローカルのセルだけを持つ実行時Tilemapです。素材とMaterialは見本と共有し、複製しません。
         private readonly Tilemap[] tilemaps;
 
+        // 各レイヤーでタイルが存在したサブチャンクを16bitで記録します。1bitが16×16領域1個に対応します。
+        // 表示単位の寿命中だけ所有し、書込成功後に更新、消去成功後に解除します。ECSの地形状態には使いません。
+        private readonly ushort[] nonEmptySubChunksByLayer;
+
         /// <summary>
         /// 初めてプールが不足した際に呼び、Sceneの各レイヤー設定を複製した空の表示単位を作ります。
         /// Tilemap以外のComponentやセル内容を複製しないため、Presenterの二重作成を防ぎます。
@@ -34,6 +38,7 @@ namespace Farmware.WorldGeneration.Presentation
         {
             templates = sourceTilemaps;
             tilemaps = new Tilemap[templates.Length];
+            nonEmptySubChunksByLayer = new ushort[templates.Length];
             Root = new GameObject("Chunk Local Terrain", typeof(Grid));
             Root.hideFlags = HideFlags.DontSave;
 
@@ -106,6 +111,58 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
+        /// Presenterから受け取った1レイヤーの16×16配列を反映し、以前も今回も空の領域だけ書き込みを省きます。
+        /// この表示単位への通常反映は必ず本メソッドを通し、取得したTilemapを外部から直接編集しないでください。
+        /// </summary>
+        /// <param name="template">書込先レイヤーに対応するScene見本です。</param>
+        /// <param name="bounds">0〜63のチャンク内に整列した16×16×1の範囲です。</param>
+        /// <param name="tiles">全256セルを含む反映配列です。呼び出し後も保持・変更しません。</param>
+        /// <returns>実際にSetTilesBlockを呼んだ場合はtrue、空領域の省略または未設定レイヤーならfalseです。</returns>
+        public bool WriteSubChunk(Tilemap template, BoundsInt bounds, TileBase[] tiles)
+        {
+            for (int layer = 0; layer < templates.Length; layer++)
+            {
+                if (templates[layer] != template || tilemaps[layer] == null) continue;
+                int subChunkBit = GetSubChunkBit(bounds);
+                bool hasTiles = false;
+                for (int index = 0; index < tiles.Length; index++)
+                {
+                    // 非nullが1個あれば通常書込が必要です。空レイヤーの確認だけが256セルを走査します。
+                    if (tiles[index] != null)
+                    {
+                        hasTiles = true;
+                        break;
+                    }
+                }
+
+                if (!hasTiles && (nonEmptySubChunksByLayer[layer] & subChunkBit) == 0)
+                {
+                    // 新規表示・消去済みプールは空です。以前のタイルがないと確認できる領域だけnull書込を省きます。
+                    return false;
+                }
+
+                tilemaps[layer].SetTilesBlock(bounds, tiles);
+                // 非空→空も必ず実際に消してからbitを解除し、再分類時に旧資源・液面を残さないようにします。
+                nonEmptySubChunksByLayer[layer] = hasTiles
+                    ? (ushort)(nonEmptySubChunksByLayer[layer] | subChunkBit)
+                    : (ushort)(nonEmptySubChunksByLayer[layer] & ~subChunkBit);
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>チャンク内に整列したサブチャンク範囲から、その領域を表す単一bitを求めます。状態は変更しません。</summary>
+        /// <param name="bounds">Presenterが作成する16×16×1のチャンク内範囲です。</param>
+        /// <returns>行優先のサブチャンク番号0〜15に対応するbitです。</returns>
+        private static int GetSubChunkBit(BoundsInt bounds)
+        {
+            int subChunkX = bounds.xMin / WorldGridConstants.SubChunkSize;
+            int subChunkY = bounds.yMin / WorldGridConstants.SubChunkSize;
+            return 1 << (subChunkY * WorldGridConstants.SubChunksPerAxis + subChunkX);
+        }
+
+        /// <summary>
         /// 貸し出し時と原点変更時に、絶対チャンク位置から求めた小さい相対セルへ表示ルートだけを配置します。
         /// </summary>
         /// <param name="relativeMinimum">World Grid上でのチャンク左下の相対セルです。</param>
@@ -134,7 +191,9 @@ namespace Farmware.WorldGeneration.Presentation
             {
                 if (tilemaps[index] != null)
                 {
+                    // 消去経路は従来どおり全設定レイヤーへnullを書きます。途中状態やプール返却の保証を優先します。
                     tilemaps[index].SetTilesBlock(bounds, emptyTiles);
+                    nonEmptySubChunksByLayer[index] &= (ushort)~GetSubChunkBit(bounds);
                 }
             }
         }
