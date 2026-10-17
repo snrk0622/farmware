@@ -4,6 +4,7 @@
   "references": [
     "Farmware.Presentation",
     "Farmware.WorldGeneration.Runtime",
+    "Unity.Burst",
     "Unity.Collections",
     "Unity.Entities",
     "Unity.InputSystem",

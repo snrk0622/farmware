@@ -192,6 +192,10 @@ Presentation
 
 Streamingは生成中の保持外Entityも完成まで予算に含め、完成後の次回更新でアンロードする。破棄済みEntityへ古い結果を公開せず、World／System破棄時には全Handleを完了してからPersistent配列を解放する。これはMonoBehaviourへチャンク状態を移す変更ではなく、要求と生成段階は引き続きECSを正とする。作業枠は通常フレームごとに再確保せず、使用した同時生成上限まで再利用する。計測条件と残るリスクは[性能計測](./Map02DPerformanceReport.md)を参照する。
 
+### 岩壁影マスクの表示専用計算
+
+地形Presentationの岩壁影マスクは、確定済み地形Bufferを読み取り専用のNativeArrayとして同期Burst Jobへ借用する。中心64×64はECSの確定値、外周8タイルは同じ整数座標生成規則を用い、Transformや近隣チャンクのロード順に依存しない。出力80×80のbool配列はPresenterがAwakeでPersistent確保し、表示チャンク間で再利用してOnDestroyでDisposeする。Runが呼び出し内で完了するため借用参照やJobHandleをフレーム間保持せず、Simulation状態へ書き戻さない。Presentation Assemblyは導入済みUnity.Burstを直接参照するが、Editor依存やパッケージ追加はない。
+
 ## 9. エンドレス座標とFloating Origin
 
 - Simulationの絶対位置は整数のワールドタイル座標で保持する。Transformのfloat座標を生成、占有、接続、セーブの判定に使用しない。

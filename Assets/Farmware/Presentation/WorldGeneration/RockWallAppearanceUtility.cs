@@ -1,6 +1,11 @@
 // このファイルは、岩壁の露出面判定と、内部へ重ねる連続グラデーション影の不透明度を純粋計算します。
 // ChunkTilemapPresenterの影メッシュと開発者用Rock Wall可視化が同じ距離・補間規則を共有します。
+// マスク生成だけは呼び出し元所有のNative配列を同期Burst Jobで更新し、余白の座標ノイズ計算をまとめます。
 
+using System;
+using Unity.Burst;
+using Unity.Collections;
+using Unity.Jobs;
 using UnityEngine;
 
 namespace Farmware.WorldGeneration.Presentation
@@ -30,11 +35,98 @@ namespace Farmware.WorldGeneration.Presentation
         /// <summary>最寄りの空地を探す半径です。これより深い内部は最大濃度として扱います。</summary>
         public const int ShadowSearchRadiusInTiles = 7;
 
+        /// <summary>64セルと両側8セルの探索余白を含む、影マスク1辺のタイル数です。</summary>
+        public const int ShadowMaskSizeInTiles = WorldGridConstants.LogicalChunkSize
+            + (2 * (ShadowSearchRadiusInTiles + 1));
+
         /// <summary>露出面の次から最大濃度へ到達するまでの距離です。短めにして浅い内部から明確に暗くします。</summary>
         public const float ShadowFadeDistanceInTiles = 4f;
 
         /// <summary>Mindustry風に深部をほぼ黒くしつつ、完全な不透明だけを避ける影メッシュの最大不透明度です。</summary>
         public const float MaximumShadowOpacity = 0.995f;
+
+        /// <summary>
+        /// チャンク完成時に岩壁マスクを全件更新します。中心は確定済み地形、外周だけは決定論的な再生成を使います。
+        /// 同期Runで呼び出し中に終了するため、配列を保持せず、Worker待ちや影の公開遅延を追加しません。
+        /// </summary>
+        /// <param name="settings">再生成に使う固定設定です。Jobへ値コピーします。</param>
+        /// <param name="coordinate">対象チャンクの絶対整数座標です。</param>
+        /// <param name="tiles">読み取り専用の確定済み4096セルです。呼び出し中は変更・破棄しないでください。</param>
+        /// <param name="mask">呼び出し元が所有・破棄する80×80の再利用配列です。全要素を上書きします。</param>
+        /// <exception cref="ArgumentException">入力地形または出力マスクの要素数が契約と異なる場合です。</exception>
+        public static void FillShadowMask(
+            in WorldGenerationSettings settings,
+            ChunkCoordinate coordinate,
+            NativeArray<GeneratedTile> tiles,
+            NativeArray<bool> mask)
+        {
+            // Burst側では例外による入力検査へ依存せず、公開APIの入口で配列の大きさを検証します。
+            if (tiles.Length != WorldGridConstants.TilesPerChunk
+                || mask.Length != ShadowMaskSizeInTiles * ShadowMaskSizeInTiles)
+            {
+                throw new ArgumentException("岩壁影マスクには4096セルの地形と80×80の出力配列が必要です。");
+            }
+
+            var job = new FillShadowMaskJob
+            {
+                Settings = settings,
+                Coordinate = coordinate,
+                Tiles = tiles,
+                Mask = mask
+            };
+            // Schedule→Completeではなく、その場で計算を完了させます。UnityEngine.ObjectやECS QueryはJobへ渡しません。
+            job.Run();
+        }
+
+        /// <summary>生成規則を変えず、中心Bufferの参照と外周ノイズ計算をまとめてBurstへ渡す同期Jobです。</summary>
+        [BurstCompile]
+        private struct FillShadowMaskJob : IJob
+        {
+            /// <summary>呼び出し時の生成設定です。Job中は読み取りだけを行います。</summary>
+            public WorldGenerationSettings Settings;
+
+            /// <summary>マスク中心の絶対チャンク座標です。表示原点やTransformには依存しません。</summary>
+            public ChunkCoordinate Coordinate;
+
+            /// <summary>呼び出し中だけ借りる確定済み地形です。読み取り専用で保持・破棄しません。</summary>
+            [ReadOnly] public NativeArray<GeneratedTile> Tiles;
+
+            /// <summary>呼び出し元所有の出力です。このJobが全要素へ書き、同期終了後すぐに参照できます。</summary>
+            [WriteOnly] public NativeArray<bool> Mask;
+
+            /// <summary>メインスレッド上で80×80を行優先で埋め、ワールド外は従来どおり非岩壁にします。</summary>
+            public void Execute()
+            {
+                int padding = ShadowSearchRadiusInTiles + 1;
+                for (int y = 0; y < ShadowMaskSizeInTiles; y++)
+                {
+                    int localY = y - padding;
+                    for (int x = 0; x < ShadowMaskSizeInTiles; x++)
+                    {
+                        int localX = x - padding;
+                        bool isRockWall;
+                        if (localX >= 0 && localX < WorldGridConstants.LogicalChunkSize
+                            && localY >= 0 && localY < WorldGridConstants.LogicalChunkSize)
+                        {
+                            // 中心を再生成しないことで、ECS側の確定結果を表示の正として維持します。
+                            isRockWall = Tiles[WorldGrid.ToTileIndex(localX, localY)].Ground == GroundType.RockWall;
+                        }
+                        else if (WorldGrid.TryToWorldTileCoordinate(Coordinate.X, Coordinate.Y,
+                                     localX, localY, out int worldX, out int worldY))
+                        {
+                            isRockWall = DeterministicChunkGenerator.IsRockWall(Settings, worldX, worldY);
+                        }
+                        else
+                        {
+                            // int端の外周を反対側のワールドへ周回させず、影が閉じないよう空地として扱います。
+                            isRockWall = false;
+                        }
+
+                        Mask[(y * ShadowMaskSizeInTiles) + x] = isRockWall;
+                    }
+                }
+            }
+        }
 
         /// <summary>
         /// ワールド座標の中心岩壁が、空間へ接する露出面か囲まれた内部かを分類します。

@@ -311,8 +311,9 @@ namespace Farmware.WorldGeneration.Presentation
         private readonly HashSet<ChunkCoordinate> reusableRockWallShadowCoordinates =
             new HashSet<ChunkCoordinate>();
 
-        // 影距離の探索半径を含む岩壁有無を1チャンク分保持し、各頂点で生成判定を繰り返さない再利用配列です。
-        private bool[] rockWallShadowMaskBuffer;
+        // 影距離の探索半径を含む80×80の岩壁有無です。同期Burst Jobへ貸すためNative配列を使います。
+        // Awakeで一度確保し、全チャンクで再利用してOnDestroyで破棄します。未完了Jobは保持しません。
+        private NativeArray<bool> rockWallShadowMaskBuffer;
 
         // チャンク境界の頂点を計算するため、-1〜64の66×66タイル中心の影不透明度を保持する再利用配列です。
         private float[] rockWallShadowTileOpacityBuffer;
@@ -512,9 +513,9 @@ namespace Farmware.WorldGeneration.Presentation
         /// </summary>
         private void AllocateRockWallShadowBuffers()
         {
-            int maskPadding = RockWallAppearanceUtility.ShadowSearchRadiusInTiles + 1;
-            int maskSize = WorldGridConstants.LogicalChunkSize + (maskPadding * 2);
-            rockWallShadowMaskBuffer = new bool[maskSize * maskSize];
+            int maskSize = RockWallAppearanceUtility.ShadowMaskSizeInTiles;
+            rockWallShadowMaskBuffer = new NativeArray<bool>(maskSize * maskSize,
+                Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
 
             int opacitySize = WorldGridConstants.LogicalChunkSize + 2;
             rockWallShadowTileOpacityBuffer = new float[opacitySize * opacitySize];
@@ -870,7 +871,7 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// Component破棄時にUnityから呼ばれ、明示作成したEntityQueryを解放します。
+        /// Component破棄時にUnityから呼ばれ、EntityQuery、影マスクのNative配列、所有する描画Objectを解放します。
         /// </summary>
         private void OnDestroy()
         {
@@ -878,6 +879,12 @@ namespace Farmware.WorldGeneration.Presentation
             DestroyAllRockWallShadows();
             DestroyChunkLocalPresentations();
             DestroyGeneratedBoundaryHighlightTiles();
+
+            // マスクJobは呼び出し内で終了するため、破棄時にWorkerの完了を待つ必要はありません。
+            if (rockWallShadowMaskBuffer.IsCreated)
+            {
+                rockWallShadowMaskBuffer.Dispose();
+            }
 
             // 各影Meshは共有Materialを所有しないため、Presenterが作成したMaterialだけを最後に1回破棄します。
             if (generatedRockWallShadowMaterial != null)
@@ -2137,7 +2144,7 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// 影の探索半径を含むチャンク周辺を一度だけ岩壁判定し、距離計算から座標ノイズの重複評価を除きます。
+        /// 影の探索半径を含むチャンク周辺を同期Burst Jobで判定し、余白ノイズ計算のC#実行負荷を減らします。
         /// </summary>
         /// <param name="coordinate">中心となる論理チャンク座標です。</param>
         /// <param name="tiles">中心チャンクの生成済み地形Bufferです。</param>
@@ -2147,24 +2154,9 @@ namespace Farmware.WorldGeneration.Presentation
             DynamicBuffer<GeneratedTile> tiles,
             in WorldGenerationSettings generationSettings)
         {
-            int maskPadding = RockWallAppearanceUtility.ShadowSearchRadiusInTiles + 1;
-            int maskSize = WorldGridConstants.LogicalChunkSize + (maskPadding * 2);
-
-            for (int maskY = 0; maskY < maskSize; maskY++)
-            {
-                int localTileY = maskY - maskPadding;
-                for (int maskX = 0; maskX < maskSize; maskX++)
-                {
-                    int localTileX = maskX - maskPadding;
-                    rockWallShadowMaskBuffer[(maskY * maskSize) + maskX] =
-                        IsRockWallNeighbor(
-                            coordinate,
-                            localTileX,
-                            localTileY,
-                            tiles,
-                            generationSettings);
-                }
-            }
+            // AsNativeArrayはBufferを複製しない借用です。同期Run終了まで構造変更せず、メソッド外へ保持しません。
+            RockWallAppearanceUtility.FillShadowMask(generationSettings, coordinate,
+                tiles.AsNativeArray(), rockWallShadowMaskBuffer);
         }
 
         /// <summary>
