@@ -479,6 +479,157 @@ namespace Farmware.WorldGeneration.PlayModeTests
         }
 
         /// <summary>
+        /// 自動原点変更前に作成した岩壁影Meshを準備し、同じ論理チャンクの新表示でGameObjectとMeshを再利用することを保証します。
+        /// 毎回の影マスク計算とMesh再生成が戻ると原点変更スパイクが再発するため、位置変更と再利用候補の消費まで確認します。
+        /// </summary>
+        [Test]
+        public void AutomaticRebase_ReusesRockWallShadowForSameLogicalChunk()
+        {
+            GameObject cameraObject = null;
+            GameObject gridObject = null;
+            GameObject tilemapObject = null;
+            GameObject presenterObject = null;
+
+            try
+            {
+                cameraObject = new GameObject("Rock Wall Shadow Rebase Test Camera");
+                cameraObject.transform.position = new Vector3(0f, 0f, -10f);
+                cameraObject.AddComponent<Camera>();
+                CameraPanController panController =
+                    cameraObject.AddComponent<CameraPanController>();
+
+                gridObject = new GameObject("Rock Wall Shadow Rebase Test Grid");
+                gridObject.AddComponent<Grid>();
+                tilemapObject = new GameObject("Rock Wall Shadow Rebase Test Tilemap");
+                tilemapObject.transform.SetParent(gridObject.transform, false);
+                Tilemap tilemap = tilemapObject.AddComponent<Tilemap>();
+                tilemapObject.AddComponent<TilemapRenderer>();
+
+                presenterObject = new GameObject("Rock Wall Shadow Rebase Test Presenter");
+                ChunkTilemapPresenter presenter =
+                    presenterObject.AddComponent<ChunkTilemapPresenter>();
+                presenter.ConfigureDisplayOrigin(panController);
+
+                FieldInfo targetTilemapField = typeof(ChunkTilemapPresenter).GetField(
+                    "targetTilemap",
+                    BindingFlags.NonPublic | BindingFlags.Instance);
+                FieldInfo displayedCoordinatesField = typeof(ChunkTilemapPresenter).GetField(
+                    "displayedCoordinates",
+                    BindingFlags.NonPublic | BindingFlags.Instance);
+                FieldInfo reusableShadowsField = typeof(ChunkTilemapPresenter).GetField(
+                    "reusableRockWallShadowCoordinates",
+                    BindingFlags.NonPublic | BindingFlags.Instance);
+                MethodInfo synchronizeDisplayOrigin = typeof(ChunkTilemapPresenter).GetMethod(
+                    "SynchronizeDisplayOrigin",
+                    BindingFlags.NonPublic | BindingFlags.Instance);
+                MethodInfo getOrCreateShadow = typeof(ChunkTilemapPresenter).GetMethod(
+                    "GetOrCreateRockWallShadowPresentation",
+                    BindingFlags.NonPublic | BindingFlags.Instance);
+                MethodInfo tryReuseShadow = typeof(ChunkTilemapPresenter).GetMethod(
+                    "TryReuseRockWallShadowAfterAutomaticRebase",
+                    BindingFlags.NonPublic | BindingFlags.Instance);
+                MethodInfo destroyUnusedShadows = typeof(ChunkTilemapPresenter).GetMethod(
+                    "DestroyUnusedRebasedRockWallShadows",
+                    BindingFlags.NonPublic | BindingFlags.Instance);
+                Assert.That(targetTilemapField, Is.Not.Null);
+                Assert.That(displayedCoordinatesField, Is.Not.Null);
+                Assert.That(reusableShadowsField, Is.Not.Null);
+                Assert.That(synchronizeDisplayOrigin, Is.Not.Null);
+                Assert.That(getOrCreateShadow, Is.Not.Null);
+                Assert.That(tryReuseShadow, Is.Not.Null);
+                Assert.That(destroyUnusedShadows, Is.Not.Null);
+                targetTilemapField.SetValue(presenter, tilemap);
+
+                // 旧原点0で絶対チャンク(8, 0)を表示済みにし、実際のPresenter経路で影GameObjectとMeshを1組作ります。
+                synchronizeDisplayOrigin.Invoke(presenter, null);
+                ChunkCoordinate coordinate = new ChunkCoordinate(8, 0);
+                HashSet<ChunkCoordinate> displayedCoordinates =
+                    (HashSet<ChunkCoordinate>)displayedCoordinatesField.GetValue(presenter);
+                displayedCoordinates.Add(coordinate);
+                object originalPresentation = getOrCreateShadow.Invoke(
+                    presenter,
+                    new object[] { coordinate });
+                Assert.That(originalPresentation, Is.Not.Null);
+                ChunkCoordinate unusedCoordinate = new ChunkCoordinate(7, 0);
+                object unusedPresentation = getOrCreateShadow.Invoke(
+                    presenter,
+                    new object[] { unusedCoordinate });
+                Assert.That(unusedPresentation, Is.Not.Null);
+                FieldInfo shadowGameObjectField = originalPresentation.GetType().GetField(
+                    "GameObject",
+                    BindingFlags.Public | BindingFlags.Instance);
+                FieldInfo shadowMeshField = originalPresentation.GetType().GetField(
+                    "Mesh",
+                    BindingFlags.Public | BindingFlags.Instance);
+                Assert.That(shadowGameObjectField, Is.Not.Null);
+                Assert.That(shadowMeshField, Is.Not.Null);
+                GameObject originalShadowObject =
+                    (GameObject)shadowGameObjectField.GetValue(originalPresentation);
+                Mesh originalShadowMesh = (Mesh)shadowMeshField.GetValue(originalPresentation);
+                originalShadowObject.transform.localPosition = new Vector3(
+                    WorldGridConstants.LogicalChunkSize * 8,
+                    TerrainLayerPresentationUtility.RockWallElevationInCells,
+                    0f);
+
+                // 絶対Camera位置は保ったまま表示原点を512へ進め、影の形状を作り直さず相対セル0へ移します。
+                panController.SetWorldPosition(new Vector2(544.5f, 0.5f));
+                synchronizeDisplayOrigin.Invoke(presenter, null);
+                object retainedPresentation = getOrCreateShadow.Invoke(
+                    presenter,
+                    new object[] { coordinate });
+                Assert.That(retainedPresentation, Is.SameAs(originalPresentation));
+                Assert.That(
+                    shadowGameObjectField.GetValue(retainedPresentation),
+                    Is.SameAs(originalShadowObject));
+                Assert.That(
+                    shadowMeshField.GetValue(retainedPresentation),
+                    Is.SameAs(originalShadowMesh));
+                Assert.That(originalShadowObject.transform.localPosition.x, Is.EqualTo(0f));
+
+                // 新Tilemap反映完了を模擬して再利用候補を消費し、未使用影の掃除から採用済み影が除外されることを確認します。
+                HashSet<ChunkCoordinate> reusableShadows =
+                    (HashSet<ChunkCoordinate>)reusableShadowsField.GetValue(presenter);
+                Assert.That(reusableShadows.Count, Is.EqualTo(2));
+                Assert.That(
+                    tryReuseShadow.Invoke(presenter, new object[] { coordinate }),
+                    Is.EqualTo(true));
+                Assert.That(reusableShadows.Count, Is.EqualTo(1));
+                destroyUnusedShadows.Invoke(presenter, null);
+                Assert.That(reusableShadows.Count, Is.EqualTo(0));
+                Assert.That(
+                    getOrCreateShadow.Invoke(presenter, new object[] { coordinate }),
+                    Is.SameAs(originalPresentation),
+                    "新表示で採用した影は原点変更フレーム末の未使用掃除で破棄してはいけません。");
+                Assert.That(
+                    getOrCreateShadow.Invoke(presenter, new object[] { unusedCoordinate }),
+                    Is.Not.SameAs(unusedPresentation),
+                    "新Viewportで採用しなかった旧影は辞書から除き、表示・メモリへ残してはいけません。");
+            }
+            finally
+            {
+                if (presenterObject != null)
+                {
+                    Object.DestroyImmediate(presenterObject);
+                }
+
+                if (tilemapObject != null)
+                {
+                    Object.DestroyImmediate(tilemapObject);
+                }
+
+                if (gridObject != null)
+                {
+                    Object.DestroyImmediate(gridObject);
+                }
+
+                if (cameraObject != null)
+                {
+                    Object.DestroyImmediate(cameraObject);
+                }
+            }
+        }
+
+        /// <summary>
         /// 現在の負座標と記録済み初期スポーンを準備し、F3文字列が両者を混同せずタイル・チャンク座標として表示することを保証します。
         /// </summary>
         [Test]

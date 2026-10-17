@@ -28,6 +28,50 @@ namespace Farmware.WorldGeneration.Presentation
         private static readonly ProfilerMarker FloatingOriginRebaseProfilerMarker =
             new ProfilerMarker("Farmware.WorldGeneration.FloatingOriginRebase");
 
+        // 表示原点変更時のキャッシュ移動と旧岩壁影破棄を、再描画本体と分けて確認する計測区間です。
+        private static readonly ProfilerMarker DisplayOriginSynchronizationProfilerMarker =
+            new ProfilerMarker("Farmware.WorldGeneration.DisplayOriginSynchronization");
+
+        // ECSチャンク状態から反映・消去Queueを更新する時間を、Tilemap書き込みから分けて確認する計測区間です。
+        private static readonly ProfilerMarker PresentationWorkCollectionProfilerMarker =
+            new ProfilerMarker("Farmware.WorldGeneration.PresentationWorkCollection");
+
+        // 1サブチャンク256セルの地形・境界・資源表示を再利用配列へ分類する時間を確認する計測区間です。
+        private static readonly ProfilerMarker SubChunkClassificationProfilerMarker =
+            new ProfilerMarker("Farmware.WorldGeneration.SubChunkClassification");
+
+        // 分類済み配列を9枚のTilemapへSetTilesBlockする時間を確認する計測区間です。
+        private static readonly ProfilerMarker SubChunkTilemapWriteProfilerMarker =
+            new ProfilerMarker("Farmware.WorldGeneration.SubChunkTilemapWrite");
+
+        // 旧表示のnull配列を9枚のTilemapへSetTilesBlockする時間を確認する計測区間です。
+        private static readonly ProfilerMarker SubChunkTilemapClearProfilerMarker =
+            new ProfilerMarker("Farmware.WorldGeneration.SubChunkTilemapClear");
+
+        // 1チャンクの岩壁影をマスク作成からMesh反映まで構築する総時間を確認する計測区間です。
+        private static readonly ProfilerMarker RockWallShadowBuildProfilerMarker =
+            new ProfilerMarker("Farmware.WorldGeneration.RockWallShadowBuild");
+
+        // チャンク外余白を含む岩壁判定マスクの作成時間を確認する計測区間です。
+        private static readonly ProfilerMarker RockWallShadowMaskProfilerMarker =
+            new ProfilerMarker("Farmware.WorldGeneration.RockWallShadowMask");
+
+        // 岩壁マスクから最寄り空地距離と不透明度を求める時間を確認する計測区間です。
+        private static readonly ProfilerMarker RockWallShadowOpacityProfilerMarker =
+            new ProfilerMarker("Farmware.WorldGeneration.RockWallShadowOpacity");
+
+        // 不透明度から影Meshの頂点座標と頂点色を作る時間を確認する計測区間です。
+        private static readonly ProfilerMarker RockWallShadowGeometryProfilerMarker =
+            new ProfilerMarker("Farmware.WorldGeneration.RockWallShadowGeometry");
+
+        // 影用GameObjectの取得・作成とMeshデータ反映に使う時間を確認する計測区間です。
+        private static readonly ProfilerMarker RockWallShadowUploadProfilerMarker =
+            new ProfilerMarker("Farmware.WorldGeneration.RockWallShadowUpload");
+
+        // 自動Floating Origin時に既存の岩壁影Meshを新しい相対位置へ動かす時間を確認する計測区間です。
+        private static readonly ProfilerMarker RockWallShadowRepositionProfilerMarker =
+            new ProfilerMarker("Farmware.WorldGeneration.RockWallShadowReposition");
+
         // URP 2D Rendererで頂点色と透明度を扱えるShader名です。利用できない環境では標準Sprite Shaderへフォールバックします。
         private const string PrimaryRockWallShadowShaderName =
             "Universal Render Pipeline/2D/Sprite-Unlit-Default";
@@ -236,6 +280,11 @@ namespace Farmware.WorldGeneration.Presentation
         private readonly Dictionary<ChunkCoordinate, RockWallShadowChunkPresentation>
             rockWallShadowByCoordinate =
                 new Dictionary<ChunkCoordinate, RockWallShadowChunkPresentation>();
+
+        // 自動原点変更前から存在し、新原点側の同じ論理チャンクで再利用できる岩壁影座標です。
+        // 原点変更フレームだけ保持し、再反映されなかった座標は同じフレーム末に破棄します。
+        private readonly HashSet<ChunkCoordinate> reusableRockWallShadowCoordinates =
+            new HashSet<ChunkCoordinate>();
 
         // 影距離の探索半径を含む岩壁有無を1チャンク分保持し、各頂点で生成判定を繰り返さない再利用配列です。
         private bool[] rockWallShadowMaskBuffer;
@@ -591,9 +640,17 @@ namespace Farmware.WorldGeneration.Presentation
                     return;
                 }
 
-                DisplayOriginChangeKind displayOriginChange = SynchronizeDisplayOrigin();
+                DisplayOriginChangeKind displayOriginChange;
+                using (DisplayOriginSynchronizationProfilerMarker.Auto())
+                {
+                    displayOriginChange = SynchronizeDisplayOrigin();
+                }
+
                 ChunkStreamingObserver observer = observerQuery.GetSingleton<ChunkStreamingObserver>();
-                CollectPresentationWork(observer);
+                using (PresentationWorkCollectionProfilerMarker.Auto())
+                {
+                    CollectPresentationWork(observer);
+                }
 
                 if (displayOriginChange != DisplayOriginChangeKind.None)
                 {
@@ -603,6 +660,7 @@ namespace Farmware.WorldGeneration.Presentation
                         // 自動変更の旧セルは設定閾値以上離れた画面外にあるため、通常予算で後から消去します。
                         int unlimitedVisibleBudget = ProcessClearQueue(int.MaxValue);
                         ProcessApplyQueue(unlimitedVisibleBudget);
+                        DestroyUnusedRebasedRockWallShadows();
                         ProcessStaleOriginClearQueue(GetSubChunkBudget());
                     }
 
@@ -648,7 +706,9 @@ namespace Farmware.WorldGeneration.Presentation
                     && cameraPanController.LastDisplayOriginChangeWasAutomatic;
                 if (isAutomaticRebase)
                 {
-                    MoveCurrentPresentationToStaleClearQueue(presentedDisplayOrigin);
+                    MoveCurrentPresentationToStaleClearQueue(
+                        presentedDisplayOrigin,
+                        currentOrigin);
                 }
                 else
                 {
@@ -667,9 +727,13 @@ namespace Farmware.WorldGeneration.Presentation
         /// <summary>
         /// 現在の原点でTilemapへ書いた可能性があるチャンクを、旧原点付きの分割消去Queueへ移します。
         /// 新しい可視チャンクと同じ論理座標でも別の相対セルへ書けるよう、通常の表示管理キャッシュは直ちに空にします。
+        /// 岩壁影は論理チャンク内容が変わらないため、新原点へ移動して再利用候補として保持します。
         /// </summary>
         /// <param name="staleOrigin">旧Tilemapセルの計算に使用した表示原点です。</param>
-        private void MoveCurrentPresentationToStaleClearQueue(DisplayOrigin staleOrigin)
+        /// <param name="currentOrigin">Cameraが変更した新しい表示原点です。</param>
+        private void MoveCurrentPresentationToStaleClearQueue(
+            DisplayOrigin staleOrigin,
+            DisplayOrigin currentOrigin)
         {
             coordinateScratch.Clear();
             foreach (ChunkCoordinate coordinate in displayedCoordinates)
@@ -693,9 +757,9 @@ namespace Farmware.WorldGeneration.Presentation
                 }
             }
 
-            // 影MeshはTilemapより少数で、同じ論理座標の新しい影とDictionaryキーが競合するため先に破棄します。
-            // 旧Tileは自動原点変更後に設定閾値以上画面外へ移るので、以下のQueueで予算分割しても表示欠けになりません。
-            DestroyAllRockWallShadows();
+            // 影Meshの頂点はチャンク内ローカル座標なので、GameObjectの位置だけを新原点へ合わせれば再生成せず使えます。
+            // 同じフレームに新Tilemapも完成するため、Cameraへ古い位置の影だけが描画される中間フレームは発生しません。
+            PrepareRockWallShadowsForAutomaticRebase(currentOrigin);
             applyProgressByCoordinate.Clear();
             applyQueue.Clear();
             displayedCoordinates.Clear();
@@ -984,8 +1048,13 @@ namespace Farmware.WorldGeneration.Presentation
 
                 if (progress.NextSubChunkIndex >= WorldGridConstants.SubChunksPerChunk)
                 {
+                    // 自動原点変更では同じ論理チャンクの既存Meshを使い、地形が新規または変化した通常反映だけ再構築します。
                     // 全4096タイルがそろった時点で1チャンク1Meshを作り、サブチャンクごとのGameObject生成を避けます。
-                    BuildRockWallShadowMesh(coordinate, tiles, generationSettings);
+                    if (!TryReuseRockWallShadowAfterAutomaticRebase(coordinate))
+                    {
+                        BuildRockWallShadowMesh(coordinate, tiles, generationSettings);
+                    }
+
                     applyProgressByCoordinate.Remove(coordinate);
                     applyQueue.Dequeue();
                     displayedCoordinates.Add(coordinate);
@@ -1050,135 +1119,141 @@ namespace Farmware.WorldGeneration.Presentation
             int localStartX = subChunkX * WorldGridConstants.SubChunkSize;
             int localStartY = subChunkY * WorldGridConstants.SubChunkSize;
 
-            for (int localY = 0; localY < WorldGridConstants.SubChunkSize; localY++)
+            using (SubChunkClassificationProfilerMarker.Auto())
             {
-                for (int localX = 0; localX < WorldGridConstants.SubChunkSize; localX++)
+                for (int localY = 0; localY < WorldGridConstants.SubChunkSize; localY++)
                 {
-                    int sourceIndex = WorldGrid.ToTileIndex(localStartX + localX, localStartY + localY);
-                    int destinationIndex = (localY * WorldGridConstants.SubChunkSize) + localX;
-                    int tileLocalX = localStartX + localX;
-                    int tileLocalY = localStartY + localY;
-                    GeneratedTile tile = tiles[sourceIndex];
-                    RockWallAppearance rockWallAppearance = ClassifyRockWallAppearance(
-                        coordinate,
-                        tileLocalX,
-                        tileLocalY,
-                        tile,
-                        tiles,
-                        generationSettings);
-                    bool isLiquid = tile.Ground == GroundType.Water
-                        || tile.Ground == GroundType.Magma;
-
-                    BoundaryHighlightSelection landBoundarySelection = default;
-                    BoundaryHighlightSelection rockWallBoundarySelection = default;
-                    if (tile.Ground == GroundType.Land || tile.Ground == GroundType.RockWall)
+                    for (int localX = 0; localX < WorldGridConstants.SubChunkSize; localX++)
                     {
-                        // 8近傍は現在のチャンクBufferを優先し、外周だけ決定論的に再生成するためロード順へ依存しません。
-                        TerrainNeighborTiles neighbors = GetTerrainNeighborTiles(
+                        int sourceIndex = WorldGrid.ToTileIndex(localStartX + localX, localStartY + localY);
+                        int destinationIndex = (localY * WorldGridConstants.SubChunkSize) + localX;
+                        int tileLocalX = localStartX + localX;
+                        int tileLocalY = localStartY + localY;
+                        GeneratedTile tile = tiles[sourceIndex];
+                        RockWallAppearance rockWallAppearance = ClassifyRockWallAppearance(
                             coordinate,
                             tileLocalX,
                             tileLocalY,
+                            tile,
                             tiles,
                             generationSettings);
-                        if (tile.Ground == GroundType.Land)
+                        bool isLiquid = tile.Ground == GroundType.Water
+                            || tile.Ground == GroundType.Magma;
+
+                        BoundaryHighlightSelection landBoundarySelection = default;
+                        BoundaryHighlightSelection rockWallBoundarySelection = default;
+                        if (tile.Ground == GroundType.Land || tile.Ground == GroundType.RockWall)
                         {
-                            landBoundarySelection =
-                                TerrainBoundaryHighlightUtility.SelectLand(tile, neighbors);
+                            // 8近傍は現在のチャンクBufferを優先し、外周だけ決定論的に再生成するためロード順へ依存しません。
+                            TerrainNeighborTiles neighbors = GetTerrainNeighborTiles(
+                                coordinate,
+                                tileLocalX,
+                                tileLocalY,
+                                tiles,
+                                generationSettings);
+                            if (tile.Ground == GroundType.Land)
+                            {
+                                landBoundarySelection =
+                                    TerrainBoundaryHighlightUtility.SelectLand(tile, neighbors);
+                            }
+                            else
+                            {
+                                rockWallBoundarySelection =
+                                    TerrainBoundaryHighlightUtility.SelectRockWall(tile, neighbors);
+                            }
                         }
-                        else
-                        {
-                            rockWallBoundarySelection =
-                                TerrainBoundaryHighlightUtility.SelectRockWall(tile, neighbors);
-                        }
-                    }
 
-                    // 土地Spriteは上面と断面を一体化し、液体だけを別Tilemapで8px下へ投影します。
-                    // Individual ModeとTop Left順により、画面奥の行から先に描きます。
-                    // 画面手前の土地ブロックを後から重ねることで、奥側の不要な断面を自然に隠します。
-                    subChunkTileBuffer[destinationIndex] = isLiquid
-                        ? null
-                        : SelectLandTile(tile);
-                    liquidBaseSubChunkTileBuffer[destinationIndex] = isLiquid
-                        ? SelectLiquidBaseTile(tile)
-                        : null;
-                    liquidAnimationSubChunkTileBuffer[destinationIndex] =
-                        SelectLiquidAnimationTile(tile);
-
-                    // 岩壁セルにもBiome由来の16×24土地ブロックを残し、その上へ16×28岩壁ブロックを重ねます。
-                    // 岩壁SpriteのPivotが側面12px分の高さを表すため、Tilemap Transform自体は基準面から動かしません。
-                    bool isRockWall = tile.Ground == GroundType.RockWall;
-                    rockWallSubChunkTileBuffer[destinationIndex] = isRockWall
-                        ? rockWallTile
-                        : null;
-                    landBoundaryHighlightSubChunkTileBuffer[destinationIndex] =
-                        SelectBoundaryHighlightTile(landBoundarySelection);
-                    rockWallBoundaryHighlightSubChunkTileBuffer[destinationIndex] =
-                        SelectBoundaryHighlightTile(rockWallBoundarySelection);
-
-                    // 内部影に覆われる資源アイコンだけを隠します。ECSの資源データと露出面の表示は維持します。
-                    TileBase selectedResource =
-                        RockWallAppearanceUtility.ShouldDisplayResource(rockWallAppearance)
-                            ? SelectResourceTile(resources[sourceIndex])
+                        // 土地Spriteは上面と断面を一体化し、液体だけを別Tilemapで8px下へ投影します。
+                        // Individual ModeとTop Left順により、画面奥の行から先に描きます。
+                        // 画面手前の土地ブロックを後から重ねることで、奥側の不要な断面を自然に隠します。
+                        subChunkTileBuffer[destinationIndex] = isLiquid
+                            ? null
+                            : SelectLandTile(tile);
+                        liquidBaseSubChunkTileBuffer[destinationIndex] = isLiquid
+                            ? SelectLiquidBaseTile(tile)
                             : null;
-                    // TilemapRendererの行順は別Tilemap間を交互に並べないため、遠方座標でも確実な固定レイヤーへ振り分けます。
-                    // 画面手前はワールドYが小さい方向なので、直下1セルが岩壁なら資源を壁より先に描いて重なる部分を隠します。
-                    bool isBehindFrontRockWall = false;
-                    if (!isRockWall && selectedResource != null)
-                    {
-                        GeneratedTile frontTerrainTile = GetGeneratedTile(
-                            coordinate,
-                            tileLocalX,
-                            tileLocalY - 1,
-                            tiles,
-                            generationSettings);
-                        isBehindFrontRockWall =
-                            TerrainLayerPresentationUtility.ShouldRenderResourceBehindRockWall(
-                                resources[sourceIndex],
-                                tile,
-                                frontTerrainTile);
-                    }
-                    resourceSubChunkTileBuffer[destinationIndex] = !isRockWall
-                        && !isBehindFrontRockWall
+                        liquidAnimationSubChunkTileBuffer[destinationIndex] =
+                            SelectLiquidAnimationTile(tile);
+
+                        // 岩壁セルにもBiome由来の16×24土地ブロックを残し、その上へ16×28岩壁ブロックを重ねます。
+                        // 岩壁SpriteのPivotが側面12px分の高さを表すため、Tilemap Transform自体は基準面から動かしません。
+                        bool isRockWall = tile.Ground == GroundType.RockWall;
+                        rockWallSubChunkTileBuffer[destinationIndex] = isRockWall
+                            ? rockWallTile
+                            : null;
+                        landBoundaryHighlightSubChunkTileBuffer[destinationIndex] =
+                            SelectBoundaryHighlightTile(landBoundarySelection);
+                        rockWallBoundaryHighlightSubChunkTileBuffer[destinationIndex] =
+                            SelectBoundaryHighlightTile(rockWallBoundarySelection);
+
+                        // 内部影に覆われる資源アイコンだけを隠します。ECSの資源データと露出面の表示は維持します。
+                        TileBase selectedResource =
+                            RockWallAppearanceUtility.ShouldDisplayResource(rockWallAppearance)
+                                ? SelectResourceTile(resources[sourceIndex])
+                                : null;
+                        // TilemapRendererの行順は別Tilemap間を交互に並べないため、遠方座標でも確実な固定レイヤーへ振り分けます。
+                        // 画面手前はワールドYが小さい方向なので、直下1セルが岩壁なら資源を壁より先に描いて重なる部分を隠します。
+                        bool isBehindFrontRockWall = false;
+                        if (!isRockWall && selectedResource != null)
+                        {
+                            GeneratedTile frontTerrainTile = GetGeneratedTile(
+                                coordinate,
+                                tileLocalX,
+                                tileLocalY - 1,
+                                tiles,
+                                generationSettings);
+                            isBehindFrontRockWall =
+                                TerrainLayerPresentationUtility.ShouldRenderResourceBehindRockWall(
+                                    resources[sourceIndex],
+                                    tile,
+                                    frontTerrainTile);
+                        }
+                        resourceSubChunkTileBuffer[destinationIndex] = !isRockWall
+                            && !isBehindFrontRockWall
+                                ? selectedResource
+                                : null;
+                        resourceBehindRockWallSubChunkTileBuffer[destinationIndex] =
+                            isBehindFrontRockWall
+                                ? selectedResource
+                                : null;
+                        rockWallResourceSubChunkTileBuffer[destinationIndex] = isRockWall
                             ? selectedResource
                             : null;
-                    resourceBehindRockWallSubChunkTileBuffer[destinationIndex] =
-                        isBehindFrontRockWall
-                            ? selectedResource
-                            : null;
-                    rockWallResourceSubChunkTileBuffer[destinationIndex] = isRockWall
-                        ? selectedResource
-                        : null;
+                    }
                 }
             }
 
-            BoundsInt bounds = CreateSubChunkBounds(coordinate, subChunkIndex);
-            targetTilemap.SetTilesBlock(bounds, subChunkTileBuffer);
-            liquidBaseTilemap.SetTilesBlock(bounds, liquidBaseSubChunkTileBuffer);
-            resourceTilemap.SetTilesBlock(bounds, resourceSubChunkTileBuffer);
-            resourceBehindRockWallTilemap.SetTilesBlock(
-                bounds,
-                resourceBehindRockWallSubChunkTileBuffer);
-            if (liquidAnimationTilemap != null)
+            using (SubChunkTilemapWriteProfilerMarker.Auto())
             {
-                liquidAnimationTilemap.SetTilesBlock(bounds, liquidAnimationSubChunkTileBuffer);
-            }
+                BoundsInt bounds = CreateSubChunkBounds(coordinate, subChunkIndex);
+                targetTilemap.SetTilesBlock(bounds, subChunkTileBuffer);
+                liquidBaseTilemap.SetTilesBlock(bounds, liquidBaseSubChunkTileBuffer);
+                resourceTilemap.SetTilesBlock(bounds, resourceSubChunkTileBuffer);
+                resourceBehindRockWallTilemap.SetTilesBlock(
+                    bounds,
+                    resourceBehindRockWallSubChunkTileBuffer);
+                if (liquidAnimationTilemap != null)
+                {
+                    liquidAnimationTilemap.SetTilesBlock(bounds, liquidAnimationSubChunkTileBuffer);
+                }
 
-            if (rockWallTilemap != null)
-            {
-                rockWallTilemap.SetTilesBlock(bounds, rockWallSubChunkTileBuffer);
-            }
+                if (rockWallTilemap != null)
+                {
+                    rockWallTilemap.SetTilesBlock(bounds, rockWallSubChunkTileBuffer);
+                }
 
-            if (rockWallResourceTilemap != null)
-            {
-                rockWallResourceTilemap.SetTilesBlock(bounds, rockWallResourceSubChunkTileBuffer);
-            }
+                if (rockWallResourceTilemap != null)
+                {
+                    rockWallResourceTilemap.SetTilesBlock(bounds, rockWallResourceSubChunkTileBuffer);
+                }
 
-            landBoundaryHighlightTilemap.SetTilesBlock(
-                bounds,
-                landBoundaryHighlightSubChunkTileBuffer);
-            rockWallBoundaryHighlightTilemap.SetTilesBlock(
-                bounds,
-                rockWallBoundaryHighlightSubChunkTileBuffer);
+                landBoundaryHighlightTilemap.SetTilesBlock(
+                    bounds,
+                    landBoundaryHighlightSubChunkTileBuffer);
+                rockWallBoundaryHighlightTilemap.SetTilesBlock(
+                    bounds,
+                    rockWallBoundaryHighlightSubChunkTileBuffer);
+            }
         }
 
         /// <summary>
@@ -1215,53 +1290,56 @@ namespace Farmware.WorldGeneration.Presentation
                 DestroyRockWallShadow(coordinate);
             }
 
-            BoundsInt bounds = CreateSubChunkBounds(
-                coordinate,
-                subChunkIndex,
-                cellDisplayOrigin);
-            if (targetTilemap != null)
+            using (SubChunkTilemapClearProfilerMarker.Auto())
             {
-                targetTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
-            }
+                BoundsInt bounds = CreateSubChunkBounds(
+                    coordinate,
+                    subChunkIndex,
+                    cellDisplayOrigin);
+                if (targetTilemap != null)
+                {
+                    targetTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
+                }
 
-            if (resourceTilemap != null)
-            {
-                resourceTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
-            }
+                if (resourceTilemap != null)
+                {
+                    resourceTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
+                }
 
-            if (resourceBehindRockWallTilemap != null)
-            {
-                resourceBehindRockWallTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
-            }
+                if (resourceBehindRockWallTilemap != null)
+                {
+                    resourceBehindRockWallTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
+                }
 
-            if (liquidBaseTilemap != null)
-            {
-                liquidBaseTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
-            }
+                if (liquidBaseTilemap != null)
+                {
+                    liquidBaseTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
+                }
 
-            if (liquidAnimationTilemap != null)
-            {
-                liquidAnimationTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
-            }
+                if (liquidAnimationTilemap != null)
+                {
+                    liquidAnimationTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
+                }
 
-            if (rockWallTilemap != null)
-            {
-                rockWallTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
-            }
+                if (rockWallTilemap != null)
+                {
+                    rockWallTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
+                }
 
-            if (rockWallResourceTilemap != null)
-            {
-                rockWallResourceTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
-            }
+                if (rockWallResourceTilemap != null)
+                {
+                    rockWallResourceTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
+                }
 
-            if (landBoundaryHighlightTilemap != null)
-            {
-                landBoundaryHighlightTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
-            }
+                if (landBoundaryHighlightTilemap != null)
+                {
+                    landBoundaryHighlightTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
+                }
 
-            if (rockWallBoundaryHighlightTilemap != null)
-            {
-                rockWallBoundaryHighlightTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
+                if (rockWallBoundaryHighlightTilemap != null)
+                {
+                    rockWallBoundaryHighlightTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
+                }
             }
         }
 
@@ -1702,64 +1780,58 @@ namespace Farmware.WorldGeneration.Presentation
             DynamicBuffer<GeneratedTile> tiles,
             in WorldGenerationSettings generationSettings)
         {
-            FillRockWallShadowMask(coordinate, tiles, generationSettings);
-            FillRockWallShadowTileOpacityBuffer();
+            // using宣言は早期returnを含むメソッド終了時に自動で閉じ、影構築全体を漏れなく計測します。
+            using ProfilerMarker.AutoScope buildScope =
+                RockWallShadowBuildProfilerMarker.Auto();
+            using (RockWallShadowMaskProfilerMarker.Auto())
+            {
+                FillRockWallShadowMask(coordinate, tiles, generationSettings);
+            }
+
+            using (RockWallShadowOpacityProfilerMarker.Auto())
+            {
+                FillRockWallShadowTileOpacityBuffer();
+            }
 
             int vertexSize = WorldGridConstants.LogicalChunkSize + 1;
             int opacitySize = WorldGridConstants.LogicalChunkSize + 2;
-            int worldMinimumX = WorldGrid.ToWorldTileX(coordinate.X, 0);
-            int worldMinimumY = WorldGrid.ToWorldTileY(coordinate.Y, 0);
-
-            // Simulationの絶対チャンク座標を現在の表示原点からの相対セルへ戻し、Tilemapと同じ位置へ影を重ねます。
-            // 変換結果は64bitになり得るため、UnityのVector3Intへ狭める前に範囲を検証します。
-            RelativeCellCoordinate relativeMinimumCoordinate =
-                WorldCoordinateConversion.ToRelativeCellCoordinate(
-                    new int2(worldMinimumX, worldMinimumY),
-                    presentedDisplayOrigin);
-            if (relativeMinimumCoordinate.X < int.MinValue
-                || relativeMinimumCoordinate.X > int.MaxValue
-                || relativeMinimumCoordinate.Y < int.MinValue
-                || relativeMinimumCoordinate.Y > int.MaxValue)
-            {
-                throw new System.InvalidOperationException(
-                    $"表示原点から離れ過ぎた岩壁影を配置できません: Chunk=({coordinate.X}, {coordinate.Y}), Relative=({relativeMinimumCoordinate.X}, {relativeMinimumCoordinate.Y})");
-            }
-
-            Vector3Int relativeMinimum = new Vector3Int(
-                (int)relativeMinimumCoordinate.X,
-                (int)relativeMinimumCoordinate.Y,
-                0);
+            Vector3Int relativeMinimum = CalculateRockWallShadowMinimumCell(
+                coordinate,
+                presentedDisplayOrigin);
             Vector3 meshOrigin = targetTilemap.CellToLocal(relativeMinimum);
             byte maximumAlpha = 0;
 
-            // 4つのタイル中心を共有頂点へ平均し、MeshRendererの三角形補間でタイル内部の段差を消します。
-            for (int vertexY = 0; vertexY < vertexSize; vertexY++)
+            using (RockWallShadowGeometryProfilerMarker.Auto())
             {
-                for (int vertexX = 0; vertexX < vertexSize; vertexX++)
+                // 4つのタイル中心を共有頂点へ平均し、MeshRendererの三角形補間でタイル内部の段差を消します。
+                for (int vertexY = 0; vertexY < vertexSize; vertexY++)
                 {
-                    int vertexIndex = (vertexY * vertexSize) + vertexX;
-                    int bottomLeftOpacityIndex = (vertexY * opacitySize) + vertexX;
-                    float vertexOpacity = RockWallAppearanceUtility.CalculateVertexOpacity(
-                        rockWallShadowTileOpacityBuffer[bottomLeftOpacityIndex],
-                        rockWallShadowTileOpacityBuffer[bottomLeftOpacityIndex + 1],
-                        rockWallShadowTileOpacityBuffer[bottomLeftOpacityIndex + opacitySize],
-                        rockWallShadowTileOpacityBuffer[bottomLeftOpacityIndex + opacitySize + 1]);
-                    byte alpha = (byte)Mathf.Clamp(
-                        Mathf.RoundToInt(vertexOpacity * byte.MaxValue),
-                        0,
-                        byte.MaxValue);
-                    if (alpha > maximumAlpha)
+                    for (int vertexX = 0; vertexX < vertexSize; vertexX++)
                     {
-                        maximumAlpha = alpha;
-                    }
+                        int vertexIndex = (vertexY * vertexSize) + vertexX;
+                        int bottomLeftOpacityIndex = (vertexY * opacitySize) + vertexX;
+                        float vertexOpacity = RockWallAppearanceUtility.CalculateVertexOpacity(
+                            rockWallShadowTileOpacityBuffer[bottomLeftOpacityIndex],
+                            rockWallShadowTileOpacityBuffer[bottomLeftOpacityIndex + 1],
+                            rockWallShadowTileOpacityBuffer[bottomLeftOpacityIndex + opacitySize],
+                            rockWallShadowTileOpacityBuffer[bottomLeftOpacityIndex + opacitySize + 1]);
+                        byte alpha = (byte)Mathf.Clamp(
+                            Mathf.RoundToInt(vertexOpacity * byte.MaxValue),
+                            0,
+                            byte.MaxValue);
+                        if (alpha > maximumAlpha)
+                        {
+                            maximumAlpha = alpha;
+                        }
 
-                    Vector3 cellCorner = targetTilemap.CellToLocal(
-                        new Vector3Int(
-                            relativeMinimum.x + vertexX,
-                            relativeMinimum.y + vertexY,
-                            0));
-                    rockWallShadowVertexBuffer[vertexIndex] = cellCorner - meshOrigin;
-                    rockWallShadowColorBuffer[vertexIndex] = new Color32(0, 0, 0, alpha);
+                        Vector3 cellCorner = targetTilemap.CellToLocal(
+                            new Vector3Int(
+                                relativeMinimum.x + vertexX,
+                                relativeMinimum.y + vertexY,
+                                0));
+                        rockWallShadowVertexBuffer[vertexIndex] = cellCorner - meshOrigin;
+                        rockWallShadowColorBuffer[vertexIndex] = new Color32(0, 0, 0, alpha);
+                    }
                 }
             }
 
@@ -1770,21 +1842,117 @@ namespace Farmware.WorldGeneration.Presentation
                 return;
             }
 
-            RockWallShadowChunkPresentation presentation =
-                GetOrCreateRockWallShadowPresentation(coordinate);
-            if (presentation == null)
+            using (RockWallShadowUploadProfilerMarker.Auto())
             {
-                return;
+                RockWallShadowChunkPresentation presentation =
+                    GetOrCreateRockWallShadowPresentation(coordinate);
+                if (presentation == null)
+                {
+                    return;
+                }
+
+                // 岩壁上面Tilemapと同じ12px上へ移し、基準面に影だけ残るずれを防ぎます。
+                presentation.GameObject.transform.localPosition = meshOrigin
+                    + (Vector3.up * TerrainLayerPresentationUtility.RockWallElevationInCells);
+                presentation.Mesh.Clear();
+                presentation.Mesh.vertices = rockWallShadowVertexBuffer;
+                presentation.Mesh.colors32 = rockWallShadowColorBuffer;
+                presentation.Mesh.triangles = rockWallShadowTriangleBuffer;
+                presentation.Mesh.RecalculateBounds();
+            }
+        }
+
+        /// <summary>
+        /// 自動Floating Origin前の岩壁影を、新しい表示原点からの相対位置へ移して再利用候補として記録します。
+        /// </summary>
+        /// <param name="currentOrigin">Cameraが変更した新しい表示原点です。</param>
+        private void PrepareRockWallShadowsForAutomaticRebase(DisplayOrigin currentOrigin)
+        {
+            reusableRockWallShadowCoordinates.Clear();
+            using (RockWallShadowRepositionProfilerMarker.Auto())
+            {
+                foreach (KeyValuePair<ChunkCoordinate, RockWallShadowChunkPresentation> pair in
+                         rockWallShadowByCoordinate)
+                {
+                    // Mesh頂点はチャンク左下を原点とするため、GameObject位置だけを変えれば形状と色をそのまま使えます。
+                    pair.Value.GameObject.transform.localPosition =
+                        targetTilemap.CellToLocal(
+                            CalculateRockWallShadowMinimumCell(pair.Key, currentOrigin))
+                        + (Vector3.up * TerrainLayerPresentationUtility.RockWallElevationInCells);
+                    reusableRockWallShadowCoordinates.Add(pair.Key);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 新原点側で同じ論理チャンクが完成したとき、移動済みの岩壁影Meshを再構築せず採用します。
+        /// </summary>
+        /// <param name="coordinate">新しいTilemap反映が完了した論理チャンク座標です。</param>
+        /// <returns>再利用可能な既存影を採用した場合はtrue、新規構築が必要な場合はfalseです。</returns>
+        private bool TryReuseRockWallShadowAfterAutomaticRebase(ChunkCoordinate coordinate)
+        {
+            if (!reusableRockWallShadowCoordinates.Remove(coordinate))
+            {
+                return false;
             }
 
-            // 岩壁上面Tilemapと同じ12px上へ移し、基準面に影だけ残るずれを防ぎます。
-            presentation.GameObject.transform.localPosition = meshOrigin
-                + (Vector3.up * TerrainLayerPresentationUtility.RockWallElevationInCells);
-            presentation.Mesh.Clear();
-            presentation.Mesh.vertices = rockWallShadowVertexBuffer;
-            presentation.Mesh.colors32 = rockWallShadowColorBuffer;
-            presentation.Mesh.triangles = rockWallShadowTriangleBuffer;
-            presentation.Mesh.RecalculateBounds();
+            // 座標集合と辞書は同時に更新しますが、将来の破棄経路追加で不整合が起きても影を省略しないよう辞書も確認します。
+            return rockWallShadowByCoordinate.ContainsKey(coordinate);
+        }
+
+        /// <summary>
+        /// 自動原点変更後の新しい可視範囲で採用されなかった旧岩壁影を破棄します。
+        /// </summary>
+        private void DestroyUnusedRebasedRockWallShadows()
+        {
+            coordinateScratch.Clear();
+            foreach (ChunkCoordinate coordinate in reusableRockWallShadowCoordinates)
+            {
+                // HashSetを列挙中に変更しないよう、一度既存の再利用Listへ座標だけを退避します。
+                coordinateScratch.Add(coordinate);
+            }
+
+            for (int index = 0; index < coordinateScratch.Count; index++)
+            {
+                DestroyRockWallShadow(coordinateScratch[index]);
+            }
+
+            reusableRockWallShadowCoordinates.Clear();
+            coordinateScratch.Clear();
+        }
+
+        /// <summary>
+        /// 論理チャンク左下を表示原点基準のTilemapセルへ変換し、影Meshの配置セルを返します。
+        /// </summary>
+        /// <param name="coordinate">影を重ねる絶対論理チャンク座標です。</param>
+        /// <param name="displayOrigin">相対表示座標の基準とする表示原点です。</param>
+        /// <returns>対象チャンク左下の相対Tilemapセルです。</returns>
+        private static Vector3Int CalculateRockWallShadowMinimumCell(
+            ChunkCoordinate coordinate,
+            DisplayOrigin displayOrigin)
+        {
+            int worldMinimumX = WorldGrid.ToWorldTileX(coordinate.X, 0);
+            int worldMinimumY = WorldGrid.ToWorldTileY(coordinate.Y, 0);
+
+            // Simulationの絶対チャンク座標を表示原点からの相対セルへ戻し、Tilemapと同じ位置へ影を重ねます。
+            // 変換結果は64bitになり得るため、UnityのVector3Intへ狭める前に範囲を検証します。
+            RelativeCellCoordinate relativeMinimumCoordinate =
+                WorldCoordinateConversion.ToRelativeCellCoordinate(
+                    new int2(worldMinimumX, worldMinimumY),
+                    displayOrigin);
+            if (relativeMinimumCoordinate.X < int.MinValue
+                || relativeMinimumCoordinate.X > int.MaxValue
+                || relativeMinimumCoordinate.Y < int.MinValue
+                || relativeMinimumCoordinate.Y > int.MaxValue)
+            {
+                throw new System.InvalidOperationException(
+                    $"表示原点から離れ過ぎた岩壁影を配置できません: Chunk=({coordinate.X}, {coordinate.Y}), Relative=({relativeMinimumCoordinate.X}, {relativeMinimumCoordinate.Y})");
+            }
+
+            return new Vector3Int(
+                (int)relativeMinimumCoordinate.X,
+                (int)relativeMinimumCoordinate.Y,
+                0);
         }
 
         /// <summary>
@@ -1984,6 +2152,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="coordinate">アンロードまたは再構築する論理チャンク座標です。</param>
         private void DestroyRockWallShadow(ChunkCoordinate coordinate)
         {
+            reusableRockWallShadowCoordinates.Remove(coordinate);
             if (!rockWallShadowByCoordinate.Remove(
                     coordinate,
                     out RockWallShadowChunkPresentation presentation))
@@ -2006,6 +2175,7 @@ namespace Farmware.WorldGeneration.Presentation
             }
 
             rockWallShadowByCoordinate.Clear();
+            reusableRockWallShadowCoordinates.Clear();
         }
 
         /// <summary>
@@ -2119,6 +2289,7 @@ namespace Farmware.WorldGeneration.Presentation
             clearQueue.Clear();
             staleOriginClearQueue.Clear();
             coordinateScratch.Clear();
+            reusableRockWallShadowCoordinates.Clear();
         }
 
         /// <summary>
