@@ -1,7 +1,9 @@
-// このファイルは、ECSで生成済みの可視タイルをPlayMode中だけ色分けして、ノイズ・バイオーム・土壌・水域・岩壁・資源・地形配置属性を確認できるようにします。
+// このファイルは、ECSで生成済みの可視タイルをPlayMode中だけ色分けして、地形・資源・動物個体群の生成結果を確認できるようにします。
 // 操作入口はEditor AssemblyのWorldGenerationDebugVisualizationMenuに置き、Simulationとプレイヤー用F3/F4入力から分離します。
 
 using System.Collections.Generic;
+using Farmware.Simulation.Animals;
+using Farmware.WorldGeneration.Animals;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
@@ -56,7 +58,10 @@ namespace Farmware.WorldGeneration.Presentation
         Soil = 12,
 
         /// <summary>通常設備・通常ベルト・橋の配置可否と、橋の耐熱要件を地形契約ごとの固定色で表示します。</summary>
-        TerrainPlacement = 13
+        TerrainPlacement = 13,
+
+        /// <summary>動物種定義を満たす候補タイルと、初期補充で確定した個体位置を別色で表示します。</summary>
+        AnimalPopulation = 14
     }
 
     /// <summary>
@@ -100,6 +105,12 @@ namespace Farmware.WorldGeneration.Presentation
         // 中央タイルHUDへ資源の最低間隔と群半径を表示するため、ResourceGenerationSettings Singletonを読むQueryです。
         private EntityQuery resourceSettingsQuery;
 
+        // 動物種の適格条件を読むSingleton Queryです。候補表示を選んだRepaintだけ参照します。
+        private EntityQuery animalCatalogQuery;
+
+        // 確定済み野生動物の整数タイル座標を読むQueryです。Simulation状態は変更しません。
+        private EntityQuery animalPositionQuery;
+
         // EntityQueryを現在のDefault World向けに作成済みかを示します。
         private bool queriesAreCreated;
 
@@ -112,6 +123,9 @@ namespace Farmware.WorldGeneration.Presentation
         // Rock Wall表示の1回のRepaint内で座標ごとの岩壁判定を共有し、同じ重いノイズ生成を近隣タイルごとに繰り返さないキャッシュです。
         private readonly Dictionary<long, bool> rockWallProbeCache =
             new Dictionary<long, bool>();
+
+        // 同じタイルに複数の描画判定を行ってもEntity Queryを繰り返さないよう、1 Repaint分の確定個体座標を再利用します。
+        private readonly HashSet<long> animalPositionCache = new HashSet<long>();
 
         /// <summary>Editorメニューが選択中として表示する、現在の開発者用可視化モードです。</summary>
         public WorldGenerationDebugVisualizationMode CurrentMode => currentMode;
@@ -312,7 +326,7 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// 指定モード、GeneratedTile、岩壁影不透明度、最終資源ID、マグマ影響域からGameビューへ重ねる色を純粋計算します。
+        /// 指定モード、GeneratedTile、岩壁影不透明度、資源、マグマ、動物候補・確定状態からGameビューへ重ねる色を純粋計算します。
         /// PlayModeテストも同じ入口を使い、凡例と実描画の対応が変わっていないことを保証します。
         /// </summary>
         /// <param name="mode">色の意味を決める可視化モードです。</param>
@@ -320,13 +334,17 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="rockWallShadowOpacity">RockWallモードで使う0〜1の連続影不透明度です。他モードでは参照しません。</param>
         /// <param name="resourceType">Resourcesモードで色分けする競合解決後の資源IDです。</param>
         /// <param name="isMagmaInfluenceArea">Magmaモードで淡水抑制域を暗赤色表示する場合はtrueです。</param>
+        /// <param name="isAnimalCandidate">Animal Populationモードで、いずれかの動物種が利用できる地形ならtrueです。</param>
+        /// <param name="hasConfirmedAnimal">Animal Populationモードで、確定済み個体がこのタイルに存在するならtrueです。</param>
         /// <returns>IMGUIへ設定するRGBA色です。Noneの場合は完全な透明色です。</returns>
         public static Color GetVisualizationColor(
             WorldGenerationDebugVisualizationMode mode,
             GeneratedTile tile,
             float rockWallShadowOpacity = 0f,
             GeneratedResourceType resourceType = GeneratedResourceType.None,
-            bool isMagmaInfluenceArea = false)
+            bool isMagmaInfluenceArea = false,
+            bool isAnimalCandidate = false,
+            bool hasConfirmedAnimal = false)
         {
             switch (mode)
             {
@@ -525,6 +543,17 @@ namespace Farmware.WorldGeneration.Presentation
 
                     return new Color32(24, 24, 30, 165);
 
+                case WorldGenerationDebugVisualizationMode.AnimalPopulation:
+                    // 確定位置を候補色より優先し、抽選結果を1タイル単位で見失わないようにします。
+                    if (hasConfirmedAnimal)
+                    {
+                        return new Color32(38, 224, 236, 248);
+                    }
+
+                    return isAnimalCandidate
+                        ? new Color32(246, 186, 52, 218)
+                        : new Color32(20, 20, 26, 172);
+
                 default:
                     return Color.clear;
             }
@@ -586,6 +615,11 @@ namespace Farmware.WorldGeneration.Presentation
             settingsQuery = entityManager.CreateEntityQuery(ComponentType.ReadOnly<WorldGenerationSettings>());
             resourceSettingsQuery = entityManager.CreateEntityQuery(
                 ComponentType.ReadOnly<ResourceGenerationSettings>());
+            animalCatalogQuery = entityManager.CreateEntityQuery(
+                ComponentType.ReadOnly<AnimalSpeciesCatalog>());
+            animalPositionQuery = entityManager.CreateEntityQuery(
+                ComponentType.ReadOnly<WildAnimal>(),
+                ComponentType.ReadOnly<AnimalTilePosition>());
             queriesAreCreated = true;
             return true;
         }
@@ -624,9 +658,19 @@ namespace Farmware.WorldGeneration.Presentation
             ResourceGenerationSettings resourceSettings = hasResourceSettings
                 ? resourceSettingsQuery.GetSingleton<ResourceGenerationSettings>()
                 : default;
+            BlobAssetReference<AnimalSpeciesCatalogBlob> animalCatalog = default;
+            bool hasAnimalCatalog = currentMode
+                    == WorldGenerationDebugVisualizationMode.AnimalPopulation
+                && animalCatalogQuery.CalculateEntityCount() == 1;
+            if (hasAnimalCatalog)
+            {
+                animalCatalog = animalCatalogQuery.GetSingleton<AnimalSpeciesCatalog>().Value;
+                hasAnimalCatalog = animalCatalog.IsCreated;
+            }
 
             // 距離探索範囲は隣接タイル同士で重なるため、Rock Wallモードの1描画中だけ座標判定を共有します。
             rockWallProbeCache.Clear();
+            CacheAnimalPositionsForCurrentRepaint();
 
             using NativeArray<Entity> entities = chunkQuery.ToEntityArray(Allocator.Temp);
             using NativeArray<ChunkCoordinateComponent> coordinates =
@@ -709,12 +753,19 @@ namespace Farmware.WorldGeneration.Presentation
                                     tileY);
                             isMagmaInfluenceArea = magmaInfo.IsInfluenceArea;
                         }
+                        bool isAnimalCandidate = hasAnimalCatalog
+                            && IsEligibleForAnyAnimalSpecies(tile, animalCatalog);
+                        bool hasConfirmedAnimal = currentMode
+                                == WorldGenerationDebugVisualizationMode.AnimalPopulation
+                            && animalPositionCache.Contains(EncodeTileCoordinate(tileX, tileY));
                         GUI.color = GetVisualizationColor(
                             currentMode,
                             tile,
                             rockWallShadowOpacity,
                             resource.Type,
-                            isMagmaInfluenceArea);
+                            isMagmaInfluenceArea,
+                            isAnimalCandidate,
+                            hasConfirmedAnimal);
                         GUI.DrawTexture(CalculateTileGuiRect(tileX, tileY), Texture2D.whiteTexture);
 
                         if (hasCenterCoordinate
@@ -737,6 +788,59 @@ namespace Farmware.WorldGeneration.Presentation
                 centerResource,
                 settings,
                 resourceSettings);
+        }
+
+        /// <summary>
+        /// Animal Populationモードの1 Repaintで使う確定個体座標を、ECS QueryからHashSetへまとめます。
+        /// </summary>
+        private void CacheAnimalPositionsForCurrentRepaint()
+        {
+            animalPositionCache.Clear();
+            if (currentMode != WorldGenerationDebugVisualizationMode.AnimalPopulation)
+            {
+                return;
+            }
+
+            using NativeArray<AnimalTilePosition> positions =
+                animalPositionQuery.ToComponentDataArray<AnimalTilePosition>(Allocator.Temp);
+            for (int index = 0; index < positions.Length; index++)
+            {
+                AnimalTilePosition position = positions[index];
+                animalPositionCache.Add(EncodeTileCoordinate(position.TileX, position.TileY));
+            }
+        }
+
+        /// <summary>
+        /// 1タイルが現在登録されているいずれかの動物種のBiome・Ground条件を満たすか確認します。
+        /// </summary>
+        /// <param name="tile">生成済みの地形分類です。</param>
+        /// <param name="catalog">Bakerが検証した動物種定義Blobです。</param>
+        /// <returns>少なくとも1種の配置候補ならtrueです。</returns>
+        private static bool IsEligibleForAnyAnimalSpecies(
+            GeneratedTile tile,
+            BlobAssetReference<AnimalSpeciesCatalogBlob> catalog)
+        {
+            ref AnimalSpeciesCatalogBlob root = ref catalog.Value;
+            for (int speciesIndex = 0; speciesIndex < root.Species.Length; speciesIndex++)
+            {
+                if (AnimalPopulationGenerator.IsTileEligible(tile, root.Species[speciesIndex]))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// 符号付き2次元タイル座標を衝突しない64bitキーへ変換し、Repaint内の検索に使用します。
+        /// </summary>
+        /// <param name="tileX">絶対水平タイル座標です。</param>
+        /// <param name="tileY">絶対垂直タイル座標です。</param>
+        /// <returns>Xを上位32bit、Yを下位32bitへ保持した検索キーです。</returns>
+        private static long EncodeTileCoordinate(int tileX, int tileY)
+        {
+            return ((long)tileX << 32) | (uint)tileY;
         }
 
         /// <summary>
@@ -1267,6 +1371,11 @@ namespace Farmware.WorldGeneration.Presentation
                 return "Terrain Placement";
             }
 
+            if (mode == WorldGenerationDebugVisualizationMode.AnimalPopulation)
+            {
+                return "Animal Population";
+            }
+
             return mode == WorldGenerationDebugVisualizationMode.BiomeTransition
                 ? "Biome Transition"
                 : mode.ToString();
@@ -1601,6 +1710,32 @@ namespace Farmware.WorldGeneration.Presentation
                         "Sand",
                         64f);
                     break;
+                case WorldGenerationDebugVisualizationMode.AnimalPopulation:
+                    DrawLegendEntry(
+                        ref nextX,
+                        y,
+                        GetVisualizationColor(mode, default),
+                        "Ineligible",
+                        88f);
+                    DrawLegendEntry(
+                        ref nextX,
+                        y,
+                        GetVisualizationColor(
+                            mode,
+                            default,
+                            isAnimalCandidate: true),
+                        "Candidate",
+                        88f);
+                    DrawLegendEntry(
+                        ref nextX,
+                        y,
+                        GetVisualizationColor(
+                            mode,
+                            default,
+                            hasConfirmedAnimal: true),
+                        "Confirmed animal",
+                        126f);
+                    break;
                 default:
                     GUI.Label(new Rect(nextX, y - 2f, 40f, 18f), "Off", informationStyle);
                     break;
@@ -1709,8 +1844,11 @@ namespace Farmware.WorldGeneration.Presentation
                 chunkQuery.Dispose();
                 settingsQuery.Dispose();
                 resourceSettingsQuery.Dispose();
+                animalCatalogQuery.Dispose();
+                animalPositionQuery.Dispose();
             }
 
+            animalPositionCache.Clear();
             queriesAreCreated = false;
             presentationWorld = null;
         }

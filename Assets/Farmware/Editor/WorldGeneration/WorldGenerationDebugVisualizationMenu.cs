@@ -1,4 +1,4 @@
-// このファイルは、PlayMode中のノイズ・バイオーム・土壌・水域・マグマ・岩壁・資源・地形配置属性の可視化をUnity Editorメニューから切り替えます。
+// このファイルは、PlayMode中の地形・資源・動物個体群の開発者用可視化をUnity Editorメニューから切り替えます。
 // Editor Assemblyだけに属し、プレイヤー用入力や製品版ビルドへ開発者専用の操作UIを追加しません。
 
 using Farmware.WorldGeneration.Presentation;
@@ -61,6 +61,10 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>通常設備・通常ベルト・橋と耐熱要件の地形属性表示へ切り替えるメニューパスです。</summary>
         private const string TerrainPlacementMenuPath =
             "Farmware/World Generation/Debug Visualization/Terrain Placement";
+
+        /// <summary>動物の配置候補と確定個体位置の表示へ切り替えるメニューパスです。</summary>
+        private const string AnimalPopulationMenuPath =
+            "Farmware/World Generation/Debug Visualization/Animal Population";
 
         /// <summary>PlayMode中の開発者用可視化を通常表示へ戻します。</summary>
         [MenuItem(OffMenuPath, false, 200)]
@@ -158,6 +162,13 @@ namespace Farmware.WorldGeneration.Editor
         private static void SelectTerrainPlacement()
         {
             SelectMode(WorldGenerationDebugVisualizationMode.TerrainPlacement);
+        }
+
+        /// <summary>PlayMode中の動物配置候補と確定個体位置を別色で表示します。</summary>
+        [MenuItem(AnimalPopulationMenuPath, false, 214)]
+        private static void SelectAnimalPopulation()
+        {
+            SelectMode(WorldGenerationDebugVisualizationMode.AnimalPopulation);
         }
 
         /// <summary>Off項目の有効状態とチェック表示を更新します。</summary>
@@ -276,6 +287,16 @@ namespace Farmware.WorldGeneration.Editor
             return ValidateMode(
                 TerrainPlacementMenuPath,
                 WorldGenerationDebugVisualizationMode.TerrainPlacement);
+        }
+
+        /// <summary>Animal Population項目の有効状態とチェック表示を更新します。</summary>
+        /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
+        [MenuItem(AnimalPopulationMenuPath, true)]
+        private static bool ValidateAnimalPopulation()
+        {
+            return ValidateMode(
+                AnimalPopulationMenuPath,
+                WorldGenerationDebugVisualizationMode.AnimalPopulation);
         }
 
         /// <summary>

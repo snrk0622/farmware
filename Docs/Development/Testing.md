@@ -46,6 +46,10 @@ Sceneを使わない最小ECS Worldで、受付番号が1から単調増加し�
 
 `xxHash3-128`へ渡す整数の固定バイト表現、セクションIDの昇順・重複禁止、Complete後の再利用禁止を検証する。共通状態では必須Singletonの欠落・重複、正規化前の固定Tick設定、未処理Command、無効な永続IDアロケーター、定義カタログを検査し、不完全な値を比較へ使わないことを保証する。同じ定義を異なる入力順から構築した場合もGUID順に同じハッシュとなることを確認する。さらに、同じCommand列とTick数を、Entity IndexとChunk配置をずらした2つのWorldで`Run`と`ScheduleParallel`へ分けて実行し、永続ID順へ正規化した機能状態ハッシュが一致すること、論理値の変更と永続ID重複を検出することを保証する。
 
+#### `AnimalPopulationStateHashTests`
+
+動物個体群Seed、地域別乱数状態・次回受付順・初期化Tick、個体の永続ID・種類・整数位置・群れID・外見差分を機能固有セクション1025へ追加する。地域Entityと個体Entityの作成順を逆転しても同じハッシュになること、将来の抽選結果を変える地域乱数状態の変更を検出すること、存在しない群れ先頭IDと必須Componentが欠けた野生動物を正式な状態として受理しないことを検証する。
+
 ### 3.2 EditMode: `Farmware.WorldGeneration.Tests`
 
 #### `WorldGenerationTests`
@@ -84,6 +88,14 @@ MAP-02Aの純粋な座標変換について、表示原点が相対セル`(0, 0)
 
 Editorの分布監査と同じAnalyzerを小さな固定サンプルで2回実行し、バイオーム・基礎地形・土壌・水域の集計漏れがないことと、署名・レポートが決定論的に一致することを保証する。
 広域のバランス確認はテストへ組み込まず、`Farmware > World Generation > Analyze Distribution`から実行する。
+
+#### `AnimalPopulationGenerationTests`
+
+新規Worldへ非0の個体群Seedを1件だけ作り、復元済みSeedを上書きしないことを確認する。全タイルが有効な地域では密度8の目標数、3〜6羽の群れ、最大徘徊距離、位置重複なし、外見差分範囲を検証する。同じ個体群Seedと地域状態では候補が一致し、地形が同じでも個体群Seedが異なれば配置が変わること、負座標の地域位置、BiomeとGroundの両条件、面積比例を確認する。ECS Systemでは逆順に作った地形チャンクへ地域座標順の永続IDを割り当て、初期化済み地域の再ロードで個体やIDを追加しないことを保証する。
+
+#### `AnimalPopulationDistributionAuditTests`
+
+Editorの動物分布監査と同じAnalyzerを負座標を含む2組のSeed・18地域で2回実行し、適格タイル・目標数・生成候補が存在すること、群れ契約違反と位置重複が0件であること、署名と集計値が一致することを保証する。約100万タイルの既定監査は通常テストへ含めず、`Farmware > World Generation > Analyze Animal Population`から明示実行する。
 
 #### `WorldGenerationMapViewerTests`
 
@@ -126,7 +138,7 @@ Sprite Packer ModeがV2であること、土地Atlasが7バイオームの本番
 
 #### `WorldGenerationScenePlayModeTests`
 
-`SampleScene_StreamsAndDeterministicallyRegeneratesTerrainTiles`は、保存された既定ONを確認し、見本Tilemapではなく実際のチャンク内Tilemapのセルを読む。初期表示、岩壁と下層土地、資源、正負の遠方、アンロード、帰還時の決定論、液面、F3/F4・開発者可視化の既存契約を維持する。`SampleScene_SharedModeStreamsAndRegeneratesTerrainTiles`も同じ検証経路をOFFで実行し、旧共有方式の回帰を残す。テスト内の反射は表示参照を読むためだけに使い、未割当表示をテストから生成しない。
+`SampleScene_StreamsAndDeterministicallyRegeneratesTerrainTiles`は、保存された既定ONを確認し、見本Tilemapではなく実際のチャンク内Tilemapのセルを読む。初期表示、岩壁と下層土地、資源、正負の遠方、アンロード、帰還時の決定論、液面、F3/F4・開発者可視化の既存契約を維持する。さらに、実際のDefault Worldで非0の`AnimalPopulationSeed`、地域状態、共通永続ID・種類・整数位置・群れID・外見差分を持つ野生動物Entityが作られ、`Animal Population`可視化が候補・確定位置Queryを例外なく描画できることを確認する。`SampleScene_SharedModeStreamsAndRegeneratesTerrainTiles`も同じ検証経路をOFFで実行し、旧共有方式の回帰を残す。テスト内の反射は表示参照を読むためだけに使い、未割当表示をテストから生成しない。
 
 | 分類 | 用途 |
 | --- | --- |
@@ -162,13 +174,13 @@ Sprite Packer ModeがV2であること、土地Atlasが7バイオームの本番
 | 複数タイル設備、ベルト、橋 | 占有、回転、接続方向、分岐・合流、詰まり、地形配置可否、単体・範囲配置と撤去の即時反映、同種既設物の無償再利用、資材不足または配置不可セルがある場合に一部だけ建築されないことを扱うEditModeテスト。橋の種類名や素材名に依存せず、耐熱性を持つ代表定義と持たない代表定義を使い、水域では両方、マグマでは耐熱性を持つ定義だけ、岩壁と通常地面では両方を拒否するマトリクスを保証する | 再利用セル、問題セル、耐熱性不足の理由、総必要数・在庫数・不足数のプレビュー、範囲保持と再確定、ドローン演出を待たず操作できること、操作プロトタイプ、Gameビュー、Profiler |
 | 搬送アイテムと遠隔工場 | ベルト上の1枠1個制約、FIFO、混載、在庫内の品目別数量集約、液体アイテムの通常搬送、固定Tick境界での個別・集計状態変換、同一入力に対する生産量・消費量・在庫・詰まり・進捗・コア到着Tickの等価性、等価性を保証できない物流網の個別処理継続を扱うECSテスト | カメラ距離を往復した際の搬送順序と表示復元、長時間の遠隔稼働、セーブ・ロード、1,000／10,000／100,000件でのProfiler比較 |
 | 固定Tick | 固定Tick Singletonの一意な初期化、Tick未満の端数蓄積、1フレーム最大4 Tick、上限超過分の破棄、一時停止中の非蓄積、再開後に停止時間を追いつかないこと、許容誤差で先行した時間負債の保持、異なる描画フレーム分割でのTick一致を扱う`FixedTickSimulationTests` | 将来の生産・物流Systemを接続した後、同じTick数で状態が一致することと、Profiler上で追いつきが4回以内であることを確認 |
-| 永続ID、定義、保存所有権 | `PersistentIdTests`で`0`の無効扱い、`1`からの単調増加、削除後のID非再利用、上限値を1回発行した後の停止、安定キー順の一括発行、重複キー・ID不足時の非消費、次回発行IDと上限到達状態の保存・復元を扱う。`DefinitionCatalogTests`で128bit GUIDの解析、入力順に依存しない連続ID、GUIDから実行時IDへの解決、解決済み参照、重複・未設定・参照切れ・分類不一致の拒否を扱う。`AnimalSpeciesCatalogTests`で鶏の実行時ID解決、草原・通常陸地の適格判定、入力順に依存しない並び、未登録・分類不一致・重複・未知マスク・各数値範囲の拒否を扱う。後続では初期配置・リスポーン動物を含む実行時オブジェクト間の重複不在と、チャンク境界をまたぐ設備・施設の単一保存を追加する | Job並列数を変えても生成要求の安定順が変わらないこと、範囲移動による所有チャンク変更、定義参照切れのBaker検証 |
+| 永続ID、定義、保存所有権 | `PersistentIdTests`で`0`の無効扱い、`1`からの単調増加、削除後のID非再利用、上限値を1回発行した後の停止、安定キー順の一括発行、重複キー・ID不足時の非消費、次回発行IDと上限到達状態の保存・復元を扱う。`DefinitionCatalogTests`で128bit GUIDの解析、入力順に依存しない連続ID、GUIDから実行時IDへの解決、解決済み参照、重複・未設定・参照切れ・分類不一致の拒否を扱う。`AnimalSpeciesCatalogTests`で鶏の実行時ID解決、草原・通常陸地の適格判定、入力順に依存しない並び、未登録・分類不一致・重複・未知マスク・各数値範囲の拒否を扱う。`AnimalPopulationGenerationTests`で初期配置動物が地域座標・受付順の共通IDを使い、地域再ロードでIDを追加消費しないことを扱う。後続ではリスポーン動物を含む実行時オブジェクト間の重複不在と、チャンク境界をまたぐ設備・施設の単一保存を追加する | Job並列数を変えても生成要求の安定順が変わらないこと、範囲移動による所有チャンク変更、定義参照切れのBaker検証 |
 | セーブ形式 | 固定Tick境界のSnapshot、設備・在庫・搬送順序・進捗・ID・地形差分の復元、一時ファイルから本ファイルへの置換、初期開発中は固定した`SaveFormatVersion`を扱うEditModeテスト | 書き込み中断後に直前の正常セーブを読めること、形式変更後の非対応な開発用セーブを安全に拒否することをPlayMode確認 |
 | 共通Command Queue | `SimulationCommandQueueTests`で受付番号、一時停止中の非受理、番号上限、受付順のValidation／Commit、失敗時無変更、成功CommandごとのECB再生、未完了CommitのECB破棄、連続失敗後の成功、同TickのGameplay前確定、担当System不在時の拒否、結果寿命を扱うECS EditModeテスト。`SystemGroupBoundaryTests`で宣言上のGroup順序も確認する | 機能固有Commandを接続した時点で、入力から結果表示までと、一時停止中に予約されないことをPlayMode確認 |
-| 状態ハッシュと決定論 | `SimulationStateHashTests`で固定バイト表現、スキーマ、セクション順、Singletonと固定Tick境界の検証、定義入力順の正規化、永続ID順、重複ID拒否、論理値の変更検出を扱う。同じCommand列とTick数をEntity配置およびJob実行方法の異なるWorldで実行し、状態ハッシュ一致を確認する。`AnimalSpeciesCatalogTests`では機能固有セクション1024が鶏の全静的値を含み、移動値の変更を検出し、必要なカタログSingletonの欠落を拒否することを確認する | 各機能追加時に保存対象となる論理状態のセクションを追加し、Presentation・キャッシュ・チャンク表示状態を変えても一致することを確認 |
+| 状態ハッシュと決定論 | `SimulationStateHashTests`で固定バイト表現、スキーマ、セクション順、Singletonと固定Tick境界の検証、定義入力順の正規化、永続ID順、重複ID拒否、論理値の変更検出を扱う。同じCommand列とTick数をEntity配置およびJob実行方法の異なるWorldで実行し、状態ハッシュ一致を確認する。`AnimalSpeciesCatalogTests`ではセクション1024が鶏の全静的値を含むこと、`AnimalPopulationStateHashTests`ではセクション1025がSeed、地域抽選状態、永続ID順の個体状態を含むことを確認する | 各機能追加時に保存対象となる論理状態のセクションを追加し、Presentation・キャッシュ・チャンク表示状態を変えても一致することを確認 |
 | 建築Commandトランザクション | Command受付順、全体事前検証、資材・配置・履歴の全成功または全失敗、Commit後のDirty再構築、同Tickの生産前に確定するSystem順序を扱うECSテスト | 複数範囲編集の競合、失敗・キャンセル時に中間状態が表示されないことをPlayMode確認 |
 | Floating Origin | `WorldCoordinateConversionTests`で絶対整数座標、表示原点、相対セル・相対ワールド座標の相互変換、負座標の床丸め、int両端、無効入力、原点変更前後の絶対タイル一致を扱う。`WorldGenerationScenePlayModeTests`で初期スポーンと明示的な絶対移動の表示原点、絶対Camera位置・Observer範囲、負座標初期位置、遠方の相対Tilemap表示を扱う。通常移動は512タイル未満で原点を維持し、正負の閾値到達時は所属チャンク境界へ自動更新して絶対位置とObserver範囲を維持すること、旧原点セルの分割消去が新原点側のセルを消さないことを保証する。正負の遠方表示原点では、開発者用可視化の絶対Viewport範囲がActiveな絶対チャンクと交差し、中央タイル情報、Tilemapセル、色面が同じ絶対セルを示すことも保証する。選択・建築入力を追加するPRでは、相対画面座標から絶対タイル座標への変換とCommandを検証する | Gridを原点へ固定したまま、最大ズームアウト、通常移動、Shift高速移動、複数回の正負原点移動を行い、Tilemap、Sprite、F3、F4、開発者用可視化に空白、旧セル、ずれ、揺れがないことをGameビューで確認する。Profilerでは専用Markerを使い、原点変更フレームと通常フレームのCPU時間、GC Alloc、生成待ち数を比較する |
-| 動物の定義・初期生成・移動 | `AnimalSpeciesCatalogTests`で最初の動物種である鶏の対応バイオーム、有効地形、群れサイズ、密度、固定Tick単位の移動値、外見差分を検証する。後続PRでは、地形とは独立して保存した`AnimalPopulationSeed`、地域別抽選状態、初期化状態が同じなら初期補充結果、群れ、初期位置が一致すること、同じ地形シードだけでは配置を固定しないこと、初期補充でも共通アロケーターの永続IDを使うこと、固定Tickの移動・待機が決定論的であること、表示チャンクのアンロードでSimulation状態を失わないことを扱う | 施設が存在しない新規ワールドでの動物表示、表示補間、接地点Y順、カメラ往復後の同一個体復元、可視範囲外のPresentation解放をPlayMode確認 |
+| 動物の定義・初期生成・移動 | `AnimalSpeciesCatalogTests`で鶏の対応バイオーム、有効地形、群れサイズ、密度、固定Tick単位の移動値、外見差分を検証する。`AnimalPopulationGenerationTests`で独立した`AnimalPopulationSeed`、地域別抽選状態、初期化状態、群れ、初期位置、外見差分、共通永続ID、再初期化防止を扱い、`AnimalPopulationDistributionAuditTests`で複数Seed・負座標地域の契約を確認する。後続PRでは固定Tickの移動・待機が決定論的であること、表示チャンクのアンロードでSimulation状態を失わないことを扱う | `WorldGenerationScenePlayModeTests`で施設が存在しないSampleSceneにも地域状態と野生動物Entityが作られること、候補・確定位置の開発者可視化を確認する。通常Sprite表示、表示補間、接地点Y順、カメラ往復後の同一個体復元、可視範囲外のPresentation解放は後続で確認 |
 | 動物の保存 | `AnimalPopulationSeed`、地域の初期化済み状態、地域別抽選状態、次回リスポーンTick、次回発行ID、個体ID、種類、位置、移動状態、所属群れを保存し、異なるチャンクロード順でも個体が重複・消失せず、初期化済み地域を再補充しないことを扱うEditMode／ECSテスト | セーブ・ロード前後の個体、群れ、位置、移動表示の一致をPlayMode確認 |
 | 動物の捕獲・再出現 | 捕獲・解放Command、地域上限、クールダウン、保存済み抽選状態によるリスポーン、初期補充とリスポーンの共通生成パイプライン、新規永続IDの発行、ロード反復で抽選結果が変わらないことを扱うEditMode／ECSテスト | 捕獲対象の選択、ドローン表示を待たないCommand受理、解放位置、牧場がなくても操作できることをPlayMode確認 |
 | 牧場施設 | 牧場成立・不成立時の所属変更、動物を消費しない畜産、飼料・水・共有在庫、個別・遠距離集計、保存・復元の等価性を扱うEditMode／ECSテスト | 施設不成立時に動物が消えないこと、牧場内移動、飼料・給水不足と停止理由、畜産物の搬出をPlayMode確認 |
