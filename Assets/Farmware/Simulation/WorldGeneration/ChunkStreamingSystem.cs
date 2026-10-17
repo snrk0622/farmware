@@ -126,7 +126,8 @@ namespace Farmware.WorldGeneration
                         pendingGenerationCount++;
                     }
 
-                    // 表示済みチャンクが画面外へ出たらInactiveにします。Tilemap側はこの状態を見て予算内で消去します。
+                    // 可視範囲を外れた完成済みデータはInactiveにします。表示側は状態名だけで消去せず、
+                    // 外側1チャンクの先行準備範囲では確定Bufferと表示を再利用し、その外で予算内消去します。
                     if (!isVisible && status.Phase == ChunkGenerationPhase.Active)
                     {
                         status.Phase = ChunkGenerationPhase.Inactive;

@@ -1,5 +1,5 @@
 // このファイルは、ECSで生成済みの地形・資源チャンクデータを、バイオームだけを示す一体型土地、岩壁Sprite、液面を含む複数Tilemapへ16×16サブチャンク単位で反映・消去します。
-// 既定の共有Tilemap方式と、チャンクごとのローカルTilemapを自動原点変更で再利用する比較方式を切り替えられます。
+// 既定のチャンク別ローカルTilemapを自動原点変更で再利用し、比較・診断用に旧共有Tilemap方式へ切り替えられます。
 // Tilemapは表示専用キャッシュであり、地形はGeneratedTile、資源はGeneratedResourceTileをゲーム状態の正として参照します。
 // 分類用の外周1セルは反映バッチごとに同期Burstでまとめ、同じ隣接地形の重複生成を減らします。
 
@@ -16,8 +16,8 @@ using UnityEngine.Tilemaps;
 namespace Farmware.WorldGeneration.Presentation
 {
     /// <summary>
-    /// カメラに見える生成済みチャンクだけを、共有されたフレーム予算内でTilemapへ反映します。
-    /// 画面外またはアンロード済みチャンクも同じ単位で消去し、4096タイル一括更新による停止を避けます。
+    /// 可視範囲と外側1チャンクの生成済み地形を、共有されたフレーム予算内でTilemapへ反映します。
+    /// 先行準備範囲の外またはアンロード済みチャンクも同じ単位で消去し、表示遅れと一括更新による停止を抑えます。
     /// </summary>
     [DisallowMultipleComponent]
     public sealed class ChunkTilemapPresenter : MonoBehaviour
@@ -82,6 +82,10 @@ namespace Farmware.WorldGeneration.Presentation
         private static readonly ProfilerMarker ChunkTilemapRepositionProfilerMarker =
             new ProfilerMarker("Farmware.WorldGeneration.ChunkTilemapReposition");
 
+        // 生成側の最低プリロード1チャンク内だけを表示も準備します。保持余白全体へ表示を広げないための固定上限です。
+        // 速度36では64タイル分を約1.78秒で移動するため、通常の分割反映を画面へ入る前に進められます。
+        private const int PresentationPreloadMarginInChunks = 1;
+
         // URP 2D Rendererで頂点色と透明度を扱えるShader名です。利用できない環境では標準Sprite Shaderへフォールバックします。
         private const string PrimaryRockWallShadowShaderName =
             "Universal Render Pipeline/2D/Sprite-Unlit-Default";
@@ -130,9 +134,9 @@ namespace Farmware.WorldGeneration.Presentation
         [Tooltip("CameraとTilemapで共有する表示原点の所有者です。未指定時は絶対原点(0, 0)を使用します。")]
         [SerializeField] private CameraPanController cameraPanController;
 
-        // 性能比較用の切替です。採用判断まではSceneの既定方式を変更せず、PlayMode中の比較にだけ使用します。
-        [Tooltip("比較用です。有効にすると64×64チャンクごとのTilemapを保持し、自動原点変更では位置だけ更新します。切替時は表示を作り直します。")]
-        [SerializeField] private bool useChunkLocalTilemaps;
+        // 自動原点変更で既存表示を再利用する既定方式です。OFFは旧共有方式との診断・比較用に残します。
+        [Tooltip("既定ONです。64×64チャンクごとのTilemapを保持し、自動原点変更では位置だけ更新します。OFFは旧共有方式で、切替時は表示を作り直します。")]
+        [SerializeField] private bool useChunkLocalTilemaps = true;
 
         // 消去済みの表示単位だけを保持する上限です。可視チャンク数の上限やSimulationの保持範囲ではありません。
         [Min(0)]
@@ -706,13 +710,16 @@ namespace Farmware.WorldGeneration.Presentation
                 }
 
                 ChunkStreamingObserver observer = observerQuery.GetSingleton<ChunkStreamingObserver>();
+                bool requiresImmediateVisibleRebuild = displayOriginChange != DisplayOriginChangeKind.None
+                    && !(chunkLocalTilemapsAreActive && displayOriginChange == DisplayOriginChangeKind.Automatic);
                 using (PresentationWorkCollectionProfilerMarker.Auto())
                 {
-                    CollectPresentationWork(observer);
+                    // 共有方式の原点変更と明示移動では、余白まで同期再構築して停止を増やさないよう可視範囲だけに限定します。
+                    // 先行準備は次の通常フレームから同じ予算で再開します。
+                    CollectPresentationWork(observer, requiresImmediateVisibleRebuild);
                 }
 
-                if (displayOriginChange != DisplayOriginChangeKind.None
-                    && !(chunkLocalTilemapsAreActive && displayOriginChange == DisplayOriginChangeKind.Automatic))
+                if (requiresImmediateVisibleRebuild)
                 {
                     using (FloatingOriginRebaseProfilerMarker.Auto())
                     {
@@ -736,7 +743,7 @@ namespace Farmware.WorldGeneration.Presentation
 
         /// <summary>
         /// Camera側の表示原点変更を検出し、旧相対セルを片付けて新しい原点で再収集できる状態へ戻します。
-        /// 既定方式の自動変更では旧セルを分割消去へ移します。比較方式では既存表示の位置だけ更新し、反映進捗を保ちます。
+        /// 旧共有方式の自動変更では旧セルを分割消去へ移します。既定のローカル方式では位置だけ更新し、反映進捗を保ちます。
         /// 明示テレポートでは両方式とも重なりを避けるため即時消去します。
         /// </summary>
         /// <returns>変更なし、自動変更、明示変更のいずれかです。</returns>
@@ -963,10 +970,11 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// 現在のECSチャンクを調べ、可視チャンクの反映と非表示・消失チャンクの消去を予約します。
+        /// 現在のECSチャンクを調べ、可視範囲と外側1チャンクの先行反映、範囲外・消失チャンクの消去を予約します。
         /// </summary>
         /// <param name="observer">カメラが要求する可視チャンク包含矩形です。</param>
-        private void CollectPresentationWork(ChunkStreamingObserver observer)
+        /// <param name="visibleOnly">原点変更の同期反映を可視範囲だけに抑える場合はtrueです。</param>
+        private void CollectPresentationWork(ChunkStreamingObserver observer, bool visibleOnly)
         {
             EntityManager entityManager = presentationWorld.EntityManager;
             using NativeArray<Entity> entities = chunkQuery.ToEntityArray(Allocator.Temp);
@@ -976,24 +984,37 @@ namespace Farmware.WorldGeneration.Presentation
                 chunkQuery.ToComponentDataArray<ChunkGenerationStatus>(Allocator.Temp);
             seenCoordinates.Clear();
 
-            // 保持対象チャンクはカメラ周辺だけに制限されています。ここでは表示状態の変化時だけQueueを更新します。
-            for (int index = 0; index < entities.Length; index++)
+            // ECS Queryの列挙順で画面外が先頭になることがあるため、可視集合を先に予約します。
+            // 2回とも既存の配列を読むだけで、別のソート配列や毎フレームのmanaged allocationは追加しません。
+            for (int pass = 0; pass < 2; pass++)
             {
-                ChunkCoordinate coordinate = new ChunkCoordinate(coordinates[index].X, coordinates[index].Y);
-                ChunkGenerationStatus status = statuses[index];
-                seenCoordinates.Add(coordinate);
-
-                bool isVisible = Contains(observer, coordinate);
-                bool hasCompleteData = status.Phase == ChunkGenerationPhase.ReadyToApply
-                    || status.Phase == ChunkGenerationPhase.Active;
-
-                if (isVisible && hasCompleteData)
+                for (int index = 0; index < entities.Length; index++)
                 {
-                    ScheduleApply(coordinate, entities[index]);
-                }
-                else
-                {
-                    CancelApplyAndScheduleClearIfNeeded(coordinate);
+                    ChunkCoordinate coordinate = new ChunkCoordinate(coordinates[index].X, coordinates[index].Y);
+                    bool isVisible = Contains(observer, coordinate, 0);
+                    if (isVisible != (pass == 0))
+                    {
+                        continue;
+                    }
+
+                    ChunkGenerationStatus status = statuses[index];
+                    seenCoordinates.Add(coordinate);
+                    bool isInsidePreparation = isVisible || (!visibleOnly
+                        && Contains(observer, coordinate, PresentationPreloadMarginInChunks));
+                    // Streamingは画面外の完成データをInactiveへ進めます。表示準備の有効性をActiveだけで判断すると
+                    // 毎回消去・再構築してしまうため、確定Bufferを持つInactiveも再利用します。
+                    bool hasCompleteData = status.Phase == ChunkGenerationPhase.ReadyToApply
+                        || status.Phase == ChunkGenerationPhase.Active
+                        || status.Phase == ChunkGenerationPhase.Inactive;
+
+                    if (isInsidePreparation && hasCompleteData)
+                    {
+                        ScheduleApply(coordinate, entities[index]);
+                    }
+                    else
+                    {
+                        CancelApplyAndScheduleClearIfNeeded(coordinate);
+                    }
                 }
             }
 
@@ -1022,7 +1043,7 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// 未表示の可視チャンクを反映待ちへ追加し、すでに待機中なら最新Entity参照へ更新します。
+        /// 未表示の可視・先行準備チャンクを反映待ちへ追加し、すでに待機中なら最新Entity参照へ更新します。
         /// </summary>
         /// <param name="coordinate">反映する論理チャンク座標です。</param>
         /// <param name="entity">GeneratedTile Bufferを所有する現在のEntityです。</param>
@@ -2336,17 +2357,20 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// 正規化前のObserverにも対応し、指定チャンクがカメラ表示矩形に含まれるか判定します。
+        /// 正規化前のObserverにも対応し、指定チャンクが可視矩形と指定余白内に含まれるか判定します。
         /// </summary>
         /// <param name="observer">Presentation Bridgeが送った可視範囲です。</param>
         /// <param name="coordinate">検査する論理チャンク座標です。</param>
+        /// <param name="margin">四辺の外側へ追加する非負のチャンク数です。表示準備では最大1を渡します。</param>
         /// <returns>4辺を含む矩形内ならtrueです。</returns>
-        private static bool Contains(ChunkStreamingObserver observer, ChunkCoordinate coordinate)
+        private static bool Contains(ChunkStreamingObserver observer, ChunkCoordinate coordinate, int margin)
         {
-            int minimumX = Mathf.Min(observer.MinimumVisibleChunkX, observer.MaximumVisibleChunkX);
-            int maximumX = Mathf.Max(observer.MinimumVisibleChunkX, observer.MaximumVisibleChunkX);
-            int minimumY = Mathf.Min(observer.MinimumVisibleChunkY, observer.MaximumVisibleChunkY);
-            int maximumY = Mathf.Max(observer.MinimumVisibleChunkY, observer.MaximumVisibleChunkY);
+            // int端のObserverでも余白の加減算が反対端へ周回しないよう、計算だけ64bitへ広げます。
+            // 実際のEntity生成はStreaming側で有効なタイル領域へ制限され、この判定は要求を追加しません。
+            long minimumX = (long)Mathf.Min(observer.MinimumVisibleChunkX, observer.MaximumVisibleChunkX) - margin;
+            long maximumX = (long)Mathf.Max(observer.MinimumVisibleChunkX, observer.MaximumVisibleChunkX) + margin;
+            long minimumY = (long)Mathf.Min(observer.MinimumVisibleChunkY, observer.MaximumVisibleChunkY) - margin;
+            long maximumY = (long)Mathf.Max(observer.MinimumVisibleChunkY, observer.MaximumVisibleChunkY) + margin;
             return coordinate.X >= minimumX
                 && coordinate.X <= maximumX
                 && coordinate.Y >= minimumY

@@ -1790,6 +1790,8 @@ namespace Farmware.WorldGeneration.Editor
             Camera camera = FindMainCamera(mainScene);
             CameraPanController panController = ConfigureCamera(camera, grid);
             presenter.ConfigureDisplayOrigin(panController);
+            // 構築し直したSceneも採用済みの既定方式へそろえ、自動原点変更で全タイルを書き直さないようにします。
+            presenter.ConfigureChunkLocalPresentation(true);
             EditorUtility.SetDirty(presenter);
 
             EditorSceneManager.MarkSceneDirty(mainScene);

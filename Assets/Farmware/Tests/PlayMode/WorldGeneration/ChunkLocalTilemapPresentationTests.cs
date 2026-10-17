@@ -72,6 +72,22 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Object.DestroyImmediate(tile);
         }
 
+        /// <summary>新規Componentの保存前の既定値がONで、生成ツールからの新規追加も採用方式になることを保証します。</summary>
+        [Test]
+        public void NewPresenter_DefaultsToChunkLocalTilemaps()
+        {
+            GameObject temporary = new GameObject("Default Presenter Test");
+            try
+            {
+                var component = temporary.AddComponent<ChunkTilemapPresenter>();
+                Assert.That(Field("useChunkLocalTilemaps").GetValue(component), Is.True);
+            }
+            finally
+            {
+                Object.DestroyImmediate(temporary);
+            }
+        }
+
         /// <summary>
         /// 正・負・斜め・遠方の自動原点変更で、同じTilemapとセル内容、完成済み集合、部分構築の進捗を保持することを保証します。
         /// </summary>
@@ -341,6 +357,130 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(GetTilemap(coordinate, false), Is.SameAs(original));
             Assert.That(WriteLayer(coordinate, template, 0, new TileBase[256]), Is.True);
             Assert.That(original.GetTile(Vector3Int.zero), Is.Null);
+        }
+
+        /// <summary>
+        /// 完成した画面外データを先に作り、可視優先・外側1チャンクだけの予約・Inactive再利用・範囲外消去を保証します。
+        /// 共有方式とローカル方式で同じ有限範囲を使い、Observer自身は変更しません。
+        /// </summary>
+        /// <param name="local">チャンク別Tilemapを使う場合はtrueです。</param>
+        /// <param name="center">可視中心の絶対チャンク座標です。正負・遠方を確認します。</param>
+        [TestCase(true, 0)]
+        [TestCase(false, 0)]
+        [TestCase(true, -7)]
+        [TestCase(false, 15625000)]
+        public void PresentationPreload_SchedulesVisibleFirstAndRetainsOnlyOneChunkMargin(bool local, int center)
+        {
+            World previous = World.DefaultGameObjectInjectionWorld;
+            using World world = new World("Presentation Preload Test");
+            try
+            {
+                World.DefaultGameObjectInjectionWorld = world;
+                presenter.ConfigureChunkLocalPresentation(local);
+                EntityManager manager = world.EntityManager;
+                // Queryの順序が画面外を先に返しても、可視1件を先頭に予約できるよう外側から作ります。
+                for (int y = -2; y <= 2; y++)
+                {
+                    for (int x = -2; x <= 2; x++)
+                    {
+                        CreateCompletedChunk(manager, center + x, center + y, ChunkGenerationPhase.Inactive);
+                    }
+                }
+
+                Assert.That(Invoke("TryEnsureQueries"), Is.True);
+                ChunkStreamingObserver observer = new ChunkStreamingObserver
+                {
+                    MinimumVisibleChunkX = center, MaximumVisibleChunkX = center,
+                    MinimumVisibleChunkY = center, MaximumVisibleChunkY = center
+                };
+                Invoke("CollectPresentationWork", observer, false);
+                var queue = (Queue<ChunkCoordinate>)Field("applyQueue").GetValue(presenter);
+                var progress = (IDictionary)Field("applyProgressByCoordinate").GetValue(presenter);
+                Assert.That(queue.Count, Is.EqualTo(9), "5×5の保持データ全体ではなく、可視1＋余白8件だけを準備します。");
+                Assert.That(queue.Peek(), Is.EqualTo(new ChunkCoordinate(center, center)));
+
+                // 完成済みの1件が次に可視へ入っても、消去・先頭からの反映を予約し直してはいけません。
+                ChunkCoordinate entering = new ChunkCoordinate(center + 1, center);
+                progress.Remove(entering);
+                var displayed = (HashSet<ChunkCoordinate>)Field("displayedCoordinates").GetValue(presenter);
+                displayed.Add(entering);
+                observer.MinimumVisibleChunkX = center + 1;
+                observer.MaximumVisibleChunkX = center + 1;
+                Invoke("CollectPresentationWork", observer, false);
+                Assert.That(displayed.Contains(entering), Is.True);
+                Assert.That(progress.Contains(entering), Is.False);
+                var pendingClear = (HashSet<ChunkCoordinate>)Field("pendingClearCoordinates").GetValue(presenter);
+                Assert.That(pendingClear.Contains(entering), Is.False);
+                Assert.That(pendingClear.Contains(new ChunkCoordinate(center - 1, center)), Is.True);
+                Assert.That(progress.Contains(new ChunkCoordinate(center + 2, center)), Is.True);
+                Assert.That(progress.Contains(new ChunkCoordinate(center + 3, center)), Is.False);
+            }
+            finally
+            {
+                // Queryの所有Worldを破棄する前にPresenter側の参照を解放し、元のDefault Worldを復元します。
+                presenter.enabled = false;
+                World.DefaultGameObjectInjectionWorld = previous;
+            }
+        }
+
+        /// <summary>
+        /// 同期再構築は可視だけを予約し、通常時は生成中を読まず、完成した先行反映も1回の予算4を越えないことを保証します。
+        /// </summary>
+        [Test]
+        public void PresentationPreload_VisibleOnlyRebuildAndApplyRespectBudget()
+        {
+            World previous = World.DefaultGameObjectInjectionWorld;
+            using World world = new World("Presentation Preload Budget Test");
+            try
+            {
+                World.DefaultGameObjectInjectionWorld = world;
+                EntityManager manager = world.EntityManager;
+                CreateCompletedChunk(manager, 0, 0, ChunkGenerationPhase.ReadyToApply);
+                CreateCompletedChunk(manager, 1, 0, ChunkGenerationPhase.Inactive);
+                CreateCompletedChunk(manager, -1, 0, ChunkGenerationPhase.GeneratingData);
+                Entity settingsEntity = manager.CreateEntity(typeof(WorldGenerationSettings));
+                manager.SetComponentData(settingsEntity, WorldGenerationSettings.CreateDefault(1UL, 1));
+                Assert.That(Invoke("TryEnsureQueries"), Is.True);
+                Invoke("SynchronizeDisplayOrigin");
+                ChunkStreamingObserver observer = new ChunkStreamingObserver();
+                Invoke("CollectPresentationWork", observer, true);
+                var progress = (IDictionary)Field("applyProgressByCoordinate").GetValue(presenter);
+                Assert.That(progress.Count, Is.EqualTo(1), "原点変更の同期経路へ余白を含めません。");
+                Invoke("CollectPresentationWork", observer, false);
+                Assert.That(progress.Count, Is.EqualTo(2), "生成中の未確定データは予約しません。");
+                Assert.That(Invoke("ProcessApplyQueue", 4), Is.EqualTo(0));
+                object partial = progress[new ChunkCoordinate(0, 0)];
+                Assert.That(partial.GetType().GetField("NextSubChunkIndex").GetValue(partial), Is.EqualTo(4));
+                object waiting = progress[new ChunkCoordinate(1, 0)];
+                Assert.That(waiting.GetType().GetField("NextSubChunkIndex").GetValue(waiting), Is.EqualTo(0));
+            }
+            finally
+            {
+                presenter.enabled = false;
+                World.DefaultGameObjectInjectionWorld = previous;
+            }
+        }
+
+        /// <summary>表示予約に必要なComponentと確定BufferをテストWorldへ作り、指定状態を設定します。</summary>
+        /// <param name="manager">Fixtureの一時WorldのEntityManagerです。</param>
+        /// <param name="x">絶対チャンクXです。</param>
+        /// <param name="y">絶対チャンクYです。</param>
+        /// <param name="phase">完成・画面外・生成中を識別する状態です。</param>
+        private static void CreateCompletedChunk(EntityManager manager, int x, int y, ChunkGenerationPhase phase)
+        {
+            Entity entity = manager.CreateEntity(typeof(ChunkCoordinateComponent), typeof(ChunkGenerationStatus));
+            manager.SetComponentData(entity, new ChunkCoordinateComponent { X = x, Y = y });
+            manager.SetComponentData(entity, new ChunkGenerationStatus { Phase = phase });
+            manager.AddBuffer<GeneratedTile>(entity).ResizeUninitialized(WorldGridConstants.TilesPerChunk);
+            manager.AddBuffer<GeneratedResourceTile>(entity).ResizeUninitialized(WorldGridConstants.TilesPerChunk);
+            // 分類処理の入力を未初期化メモリに依存させず、資源なし・既定値の4096セルにそろえます。
+            DynamicBuffer<GeneratedTile> terrain = manager.GetBuffer<GeneratedTile>(entity);
+            DynamicBuffer<GeneratedResourceTile> resources = manager.GetBuffer<GeneratedResourceTile>(entity);
+            for (int index = 0; index < WorldGridConstants.TilesPerChunk; index++)
+            {
+                terrain[index] = default;
+                resources[index] = default;
+            }
         }
 
         /// <summary>実際のPresenter反映経路へ、指定レイヤーの256セル配列を渡して書込実行の有無を返します。</summary>

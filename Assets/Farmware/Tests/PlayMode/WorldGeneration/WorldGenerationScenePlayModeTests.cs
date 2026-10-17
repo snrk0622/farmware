@@ -1669,6 +1669,22 @@ namespace Farmware.WorldGeneration.PlayModeTests
         [UnityTest]
         public IEnumerator SampleScene_StreamsAndDeterministicallyRegeneratesTerrainTiles()
         {
+            return VerifySampleSceneStreaming(true);
+        }
+
+        /// <summary>旧共有方式でも同じScene連携・決定論・表示契約を維持することを確認します。</summary>
+        /// <returns>共有方式に切り替えて共通の縦切り検証を進めるIEnumeratorです。</returns>
+        [UnityTest]
+        public IEnumerator SampleScene_SharedModeStreamsAndRegeneratesTerrainTiles()
+        {
+            return VerifySampleSceneStreaming(false);
+        }
+
+        /// <summary>Sceneを読み込み、指定表示方式で地形・液面・資源・診断表示と再生成を実際に検証します。</summary>
+        /// <param name="local">既定のチャンク別方式ならtrue、旧共有方式を検証するときはfalseです。</param>
+        /// <returns>SceneロードとECS・表示の完了をフレーム上限付きで待つIEnumeratorです。</returns>
+        private IEnumerator VerifySampleSceneStreaming(bool local)
+        {
             AsyncOperation loadOperation = SceneManager.LoadSceneAsync("SampleScene", LoadSceneMode.Single);
             Assert.That(loadOperation, Is.Not.Null, "Build SettingsからSampleSceneを読み込めませんでした。");
 
@@ -1985,6 +2001,14 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 "8px下げた液面の下辺は、手前にある土地上面より奥へ描画する必要があります。");
             CameraPanController cameraPanController = Object.FindFirstObjectByType<CameraPanController>();
             Assert.That(cameraPanController, Is.Not.Null, "Main CameraにCameraPanControllerがありません。");
+            Assert.That(typeof(ChunkTilemapPresenter).GetField("useChunkLocalTilemaps",
+                BindingFlags.Instance | BindingFlags.NonPublic).GetValue(terrainPresenter), Is.True,
+                "SampleSceneの保存値も既定ONへそろえる必要があります。");
+            terrainPresenter.ConfigureChunkLocalPresentation(local);
+            // ローカル方式のScene見本は空です。表示原点基準セルから、実際に描くチャンク内セルへ読取だけを変換します。
+            // 方式にかかわらず以降の検証内容を共通にし、表示されていない見本を成功条件へ使わないようにします。
+            System.Func<Tilemap, Vector3Int, TileBase> readPresentedTile = (layer, cell) =>
+                GetPresentedTile(terrainPresenter, layer, cell, cameraPanController.CurrentDisplayOrigin);
 
             // SampleSceneへ保存した操作速度がコードの既定値とずれると、構築メニューを再実行した後だけ体感が変わります。
             // privateなInspector値を読み取り、現在のSceneと新規構築時の両方が通常12タイル/秒・高速36タイル/秒になることを保証します。
@@ -2155,7 +2179,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                             initialSpawnChunk.X,
                             initialSpawnChunk.Y,
                             out originalChunkEntity)
-                        && tilemap.GetTile(spawnCell) != null
+                        && readPresentedTile(tilemap, spawnCell) != null
                         && TryGetDisplayedResourceCell(
                             world.EntityManager,
                             originalChunkEntity,
@@ -2163,6 +2187,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                             cameraPanController.CurrentDisplayOrigin,
                             resourceTilemap,
                             resourceBehindRockWallTilemap,
+                            readPresentedTile,
                             out originalResourceCell))
                     {
                         initialLoadCompleted = true;
@@ -2185,20 +2210,24 @@ namespace Farmware.WorldGeneration.PlayModeTests
             // 一体型岩壁が存在するセルを実際の表示結果から探し、同じ論理セルに土地ブロックも残る二段構成を保証します。
             // TransformとPivotだけを検査すると、Presenterが岩壁を書き忘れてもテストが通るため、Tilemapの内容まで確認します。
             bool foundDisplayedRockWall = false;
-            foreach (Vector3Int cellPosition in rockWallTilemap.cellBounds.allPositionsWithin)
+            Tilemap initialRockWallMap = GetPresentedTilemap(terrainPresenter, rockWallTilemap, initialSpawnChunk);
+            Tilemap initialGroundMap = GetPresentedTilemap(terrainPresenter, tilemap, initialSpawnChunk);
+            Assert.That(initialRockWallMap, Is.Not.Null);
+            Assert.That(initialGroundMap, Is.Not.Null);
+            foreach (Vector3Int cellPosition in initialRockWallMap.cellBounds.allPositionsWithin)
             {
-                if (!rockWallTilemap.HasTile(cellPosition))
+                if (!initialRockWallMap.HasTile(cellPosition))
                 {
                     continue;
                 }
 
                 foundDisplayedRockWall = true;
                 Assert.That(
-                    rockWallTilemap.GetTile(cellPosition),
+                    initialRockWallMap.GetTile(cellPosition),
                     Is.SameAs(productionRockWallTile),
                     $"岩壁セル {cellPosition} がSampleSceneの本番用岩壁Tileを参照していません。");
                 Assert.That(
-                    tilemap.HasTile(cellPosition),
+                    initialGroundMap.HasTile(cellPosition),
                     Is.True,
                     $"岩壁セル {cellPosition} の下に、Biome由来の一体型土地ブロックが残っていません。");
             }
@@ -2298,15 +2327,15 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     Mathf.FloorToInt(farCameraWorldPosition.x),
                     Mathf.FloorToInt(farCameraWorldPosition.y),
                     cameraPanController.CurrentDisplayOrigin);
-                bool farCameraCellIsDisplayed = tilemap.HasTile(farCameraDisplayCell)
-                    || liquidBaseTilemap.HasTile(farCameraDisplayCell);
+                bool farCameraCellIsDisplayed = readPresentedTile(tilemap, farCameraDisplayCell) != null
+                    || readPresentedTile(liquidBaseTilemap, farCameraDisplayCell) != null;
                 Vector3Int originalResourceDisplayCell = ToDisplayCell(
                     originalResourceAbsoluteTileX,
                     originalResourceAbsoluteTileY,
                     cameraPanController.CurrentDisplayOrigin);
                 bool originalResourceWasCleared =
-                    resourceTilemap.GetTile(originalResourceDisplayCell) == null
-                    && resourceBehindRockWallTilemap.GetTile(originalResourceDisplayCell) == null;
+                    readPresentedTile(resourceTilemap, originalResourceDisplayCell) == null
+                    && readPresentedTile(resourceBehindRockWallTilemap, originalResourceDisplayCell) == null;
                 bool displayOriginMoved = !cameraPanController.CurrentDisplayOrigin
                     .AbsoluteTileCoordinate.Equals(initialDisplayOrigin);
 
@@ -2363,8 +2392,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     Mathf.FloorToInt(negativeFarCameraWorldPosition.x),
                     Mathf.FloorToInt(negativeFarCameraWorldPosition.y),
                     cameraPanController.CurrentDisplayOrigin);
-                bool negativeFarCellIsDisplayed = tilemap.HasTile(negativeFarDisplayCell)
-                    || liquidBaseTilemap.HasTile(negativeFarDisplayCell);
+                bool negativeFarCellIsDisplayed = readPresentedTile(tilemap, negativeFarDisplayCell) != null
+                    || readPresentedTile(liquidBaseTilemap, negativeFarDisplayCell) != null;
                 if (negativeFarChunkIsActive && negativeFarCellIsDisplayed)
                 {
                     negativeFarLoadCompleted = true;
@@ -2403,7 +2432,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                         initialSpawnChunk.X,
                         initialSpawnChunk.Y,
                         out regeneratedChunkEntity)
-                    && tilemap.GetTile(
+                    && readPresentedTile(tilemap,
                         ToDisplayCell(
                             initialSpawnLocation.TileX,
                             initialSpawnLocation.TileY,
@@ -2448,8 +2477,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 regeneratedResources[WorldGridConstants.TilesPerChunk - 1],
                 WorldGridConstants.TilesPerChunk - 1);
             Assert.That(
-                resourceTilemap.GetTile(originalResourceCell) != null
-                    || resourceBehindRockWallTilemap.GetTile(originalResourceCell) != null,
+                readPresentedTile(resourceTilemap, originalResourceCell) != null
+                    || readPresentedTile(resourceBehindRockWallTilemap, originalResourceCell) != null,
                 Is.True,
                 "原点へ戻った後、決定論的に再生成された資源アイコンが再表示される必要があります。");
 
@@ -2476,8 +2505,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     liquidCell.y,
                     cameraPanController.CurrentDisplayOrigin);
                 // 静止面とアニメーションが同じ論理セルへそろって初めて、実際の液面表示が完成したと判断します。
-                if (liquidBaseTilemap.HasTile(liquidDisplayCell)
-                    && liquidAnimationTilemap.HasTile(liquidDisplayCell))
+                if (readPresentedTile(liquidBaseTilemap, liquidDisplayCell) != null
+                    && readPresentedTile(liquidAnimationTilemap, liquidDisplayCell) != null)
                 {
                     liquidDisplayCompleted = true;
                     break;
@@ -2491,7 +2520,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Is.True,
                 $"液体セル {liquidCell} の静止面とアニメーションが{MaximumWaitFrames}フレーム以内に表示されませんでした。");
             Assert.That(
-                tilemap.HasTile(liquidDisplayCell),
+                readPresentedTile(tilemap, liquidDisplayCell) != null,
                 Is.False,
                 $"液体セル {liquidCell} がGround Tilemapにも重複し、元の高さの液面が残っています。");
 
@@ -2625,6 +2654,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
         /// <param name="displayOrigin">絶対ワールドセルをTilemapの相対セルへ変換する現在の表示原点です。</param>
         /// <param name="resourceTilemap">岩壁に隠れない資源を重ね描画するTilemapです。</param>
         /// <param name="resourceBehindRockWallTilemap">直前方の岩壁に隠す資源を描画するTilemapです。</param>
+        /// <param name="readPresentedTile">見本レイヤーと表示原点基準セルから実際の表示Tileを読む、テスト用の変換です。</param>
         /// <param name="resourceCell">成功時に、表示済み資源の表示原点基準セル座標を返します。</param>
         /// <returns>配置済み資源が1件以上あり、そのTileが表示済みならtrueです。</returns>
         private static bool TryGetDisplayedResourceCell(
@@ -2634,6 +2664,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
             DisplayOrigin displayOrigin,
             Tilemap resourceTilemap,
             Tilemap resourceBehindRockWallTilemap,
+            System.Func<Tilemap, Vector3Int, TileBase> readPresentedTile,
             out Vector3Int resourceCell)
         {
             DynamicBuffer<GeneratedResourceTile> resources =
@@ -2653,12 +2684,46 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     WorldGrid.ToWorldTileX(chunkCoordinate.X, localX),
                     WorldGrid.ToWorldTileY(chunkCoordinate.Y, localY),
                     displayOrigin);
-                return resourceTilemap.GetTile(resourceCell) != null
-                    || resourceBehindRockWallTilemap.GetTile(resourceCell) != null;
+                return readPresentedTile(resourceTilemap, resourceCell) != null
+                    || readPresentedTile(resourceBehindRockWallTilemap, resourceCell) != null;
             }
 
             resourceCell = default;
             return false;
+        }
+
+        /// <summary>
+        /// 表示方式に対応するTilemapを、作成せずに取得します。非公開キャッシュの確認はテスト内だけに閉じます。
+        /// </summary>
+        /// <param name="presenter">Sceneの表示キャッシュ所有者です。</param>
+        /// <param name="template">Sceneの対応レイヤー見本です。</param>
+        /// <param name="coordinate">確認する絶対チャンク座標です。</param>
+        /// <returns>描画先のTilemap、まだ未割当ならnullです。共有方式では見本自身です。</returns>
+        private static Tilemap GetPresentedTilemap(ChunkTilemapPresenter presenter, Tilemap template, ChunkCoordinate coordinate)
+        {
+            var flags = BindingFlags.Instance | BindingFlags.NonPublic;
+            return (Tilemap)typeof(ChunkTilemapPresenter).GetMethod("GetTilemapForChunk", flags)
+                .Invoke(presenter, new object[] { coordinate, template, false });
+        }
+
+        /// <summary>表示原点基準セルを実際の描画先へ変換し、Tileを読んで返します。表示状態は変更しません。</summary>
+        /// <param name="presenter">Sceneの表示キャッシュ所有者です。</param>
+        /// <param name="template">対応するScene見本レイヤーです。</param>
+        /// <param name="relativeCell">Cameraと共通の表示原点基準セルです。</param>
+        /// <param name="origin">現在の表示原点です。</param>
+        /// <returns>実際の表示Tile、未割当または空セルならnullです。</returns>
+        private static TileBase GetPresentedTile(ChunkTilemapPresenter presenter, Tilemap template, Vector3Int relativeCell, DisplayOrigin origin)
+        {
+            int absoluteX = relativeCell.x + origin.AbsoluteTileCoordinate.x;
+            int absoluteY = relativeCell.y + origin.AbsoluteTileCoordinate.y;
+            ChunkCoordinate coordinate = WorldGrid.ToChunkCoordinate(absoluteX, absoluteY);
+            Tilemap map = GetPresentedTilemap(presenter, template, coordinate);
+            if (map == null) return null;
+            var flags = BindingFlags.Instance | BindingFlags.NonPublic;
+            bool local = (bool)typeof(ChunkTilemapPresenter).GetField("chunkLocalTilemapsAreActive", flags).GetValue(presenter);
+            // 両方式とも論理セルは同じです。ローカル方式だけ、負座標にも対応する床除算の余りで0〜63へ戻します。
+            ChunkLocalTileCoordinate cell = WorldGrid.ToLocalTileCoordinate(absoluteX, absoluteY);
+            return map.GetTile(local ? new Vector3Int(cell.X, cell.Y, 0) : relativeCell);
         }
 
         /// <summary>
@@ -2667,7 +2732,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
         /// <param name="absoluteTileX">Simulationが保持する絶対水平タイル座標です。</param>
         /// <param name="absoluteTileY">Simulationが保持する絶対垂直タイル座標です。</param>
         /// <param name="displayOrigin">Tilemapローカルセル(0, 0)へ対応する絶対タイル座標です。</param>
-        /// <returns>GameビューのTilemapへ実際に書き込まれる相対セル座標です。</returns>
+        /// <returns>Cameraと見本Gridが共有する相対セル座標です。チャンク別方式の読取時はGetPresentedTileで0〜63へ変換します。</returns>
         private static Vector3Int ToDisplayCell(
             int absoluteTileX,
             int absoluteTileY,
