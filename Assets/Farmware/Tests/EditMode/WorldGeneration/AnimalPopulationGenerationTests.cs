@@ -77,6 +77,61 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// 6羽を一群で置けない3タイルずつの分断地形でも、3羽の群れへ縮小して目標6羽を配置することを保証します。
+        /// </summary>
+        [Test]
+        public void SpeciesPopulation_RetriesSmallerHerdsAcrossFragmentedTiles()
+        {
+            AnimalSpeciesDefinitionBlob chicken = CreateChickenBlob(new DefinitionRuntimeId(1));
+            using NativeArray<int> eligibleLocalTileIndices = new NativeArray<int>(
+                new[]
+                {
+                    0,
+                    1,
+                    WorldGridConstants.LogicalChunkSize,
+                    32 + (32 * WorldGridConstants.LogicalChunkSize),
+                    33 + (32 * WorldGridConstants.LogicalChunkSize),
+                    32 + (33 * WorldGridConstants.LogicalChunkSize)
+                },
+                Allocator.Temp);
+            using NativeList<int> occupiedLocalTileIndices =
+                new NativeList<int>(6, Allocator.Temp);
+            using NativeList<AnimalSpawnCandidate> candidates =
+                new NativeList<AnimalSpawnCandidate>(6, Allocator.Temp);
+            AnimalPopulationRegionState regionState = CreateRegionState(
+                0x123456789ABCDEF0UL,
+                0,
+                0);
+
+            bool succeeded = AnimalPopulationGenerator.TryAppendSpeciesPopulation(
+                chicken,
+                6,
+                eligibleLocalTileIndices,
+                occupiedLocalTileIndices,
+                ref regionState,
+                candidates);
+
+            Assert.That(succeeded, Is.True);
+            Assert.That(candidates.Length, Is.EqualTo(6));
+            Assert.That(occupiedLocalTileIndices.Length, Is.EqualTo(6));
+            Assert.That(regionState.NextSpawnSequence, Is.EqualTo(7ul));
+
+            Dictionary<int, int> herdSizes = new Dictionary<int, int>();
+            for (int index = 0; index < candidates.Length; index++)
+            {
+                int herdLeaderCandidateIndex = candidates[index].HerdLeaderCandidateIndex;
+                herdSizes.TryGetValue(herdLeaderCandidateIndex, out int herdSize);
+                herdSizes[herdLeaderCandidateIndex] = herdSize + 1;
+            }
+
+            Assert.That(herdSizes.Count, Is.EqualTo(2));
+            foreach (KeyValuePair<int, int> herd in herdSizes)
+            {
+                Assert.That(herd.Value, Is.EqualTo(3));
+            }
+        }
+
+        /// <summary>
         /// 同じ地形と個体群Seedは同じ候補を返し、個体群Seedだけを変えると初期配置が変わることを保証します。
         /// </summary>
         [Test]

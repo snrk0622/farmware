@@ -205,15 +205,28 @@ namespace Farmware.WorldGeneration.Animals
                     remaining,
                     species.MinimumHerdSize,
                     species.MaximumHerdSize);
-                if (!TryFindHerdAnchor(
-                        eligibleLocalTileIndices,
-                        occupiedLocalTileIndices,
-                        herdSize,
-                        species.MaximumWanderDistanceInTiles,
-                        ref stagedState.RandomState,
-                        out int anchorLocalTileIndex))
+
+                // 適格タイルが複数の小さな領域へ分かれていると、抽選した大きさだけが置けない場合があります。
+                // そのまま終了すると、小さい有効な群れを複数作れる地域まで空になるため、最小群れ数まで縮めて再探索します。
+                int anchorLocalTileIndex;
+                while (!TryFindHerdAnchor(
+                           eligibleLocalTileIndices,
+                           occupiedLocalTileIndices,
+                           herdSize,
+                           species.MaximumWanderDistanceInTiles,
+                           ref stagedState.RandomState,
+                           out anchorLocalTileIndex))
                 {
-                    // 適格タイルが細かく分断されて群れを置けない残数は、無理に徘徊距離契約を破らず未補充とします。
+                    herdSize--;
+                    if (herdSize < species.MinimumHerdSize)
+                    {
+                        break;
+                    }
+                }
+
+                if (herdSize < species.MinimumHerdSize)
+                {
+                    // 最小群れさえ置けない残数は、無理に徘徊距離契約を破らず未補充とします。
                     break;
                 }
 
