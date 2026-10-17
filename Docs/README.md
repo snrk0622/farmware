@@ -20,6 +20,7 @@
 - [Unity Editorツール](./Development/EditorTools.md)
 - [テスト](./Development/Testing.md)
 - [MAP-02D 性能計測](./Development/Map02DPerformanceReport.md)
+- [PERF-GATE-A 終了時ComputeBuffer警告の切り分け](./Development/PerfGateAComputeBufferReport.md)
 
 ## 更新ルール
 
