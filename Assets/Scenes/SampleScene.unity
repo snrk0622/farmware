@@ -566,8 +566,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 2aa1b1ef38564b2aad725d152d1f9aba, type: 3}
   m_Name:
   m_EditorClassIdentifier: Farmware.WorldGeneration.Presentation::Farmware.WorldGeneration.Presentation.CameraPanController
-  movementSpeedInTilesPerSecond: 24
-  fastMovementMultiplier: 4
+  movementSpeedInTilesPerSecond: 12
+  fastMovementMultiplier: 3
+  automaticRebaseThresholdInTiles: 512
   pixelsPerUnit: 16
 --- !u!114 &519420036
 MonoBehaviour:
@@ -1506,6 +1507,8 @@ MonoBehaviour:
   landBoundaryHighlightTilemap: {fileID: 743018148}
   rockWallBoundaryHighlightTilemap: {fileID: 1800664789}
   cameraPanController: {fileID: 519420035}
+  useChunkLocalTilemaps: 1
+  maximumPooledChunkPresentations: 8
   grasslandTile: {fileID: 11400000, guid: 8742ae7a60f7f434f894678fe1add07b, type: 2}
   forestTile: {fileID: 11400000, guid: 7ee287944b9ff4c5087fa64923bb4251, type: 2}
   desertTile: {fileID: 11400000, guid: b642a3ae94175467a93817fae33bf345, type: 2}

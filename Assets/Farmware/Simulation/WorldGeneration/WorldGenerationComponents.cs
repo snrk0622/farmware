@@ -779,7 +779,7 @@ namespace Farmware.WorldGeneration
     /// </summary>
     public struct ChunkGenerationStatus : IComponentData
     {
-        /// <summary>現在の処理段階です。生成SystemがQueuedからReadyToApplyへ進めます。</summary>
+        /// <summary>現在の処理段階です。生成開始でGeneratingData、後続更新の完成結果公開でReadyToApplyへ進みます。</summary>
         public ChunkGenerationPhase Phase;
 
         /// <summary>このチャンクの基礎データを作ったGeneratorVersionです。</summary>
@@ -788,7 +788,7 @@ namespace Farmware.WorldGeneration
 
     /// <summary>
     /// チャンクの純粋データ生成が必要であることを示すEnableable Componentです。
-    /// 完了時は削除せず無効化し、頻繁な構造変更と毎フレームの生成済みチャンク走査を避けます。
+    /// Job開始時に削除せず無効化して二重投入を防ぎ、実行中と完成済みはChunkGenerationStatusで区別します。
     /// </summary>
     public struct ChunkGenerationRequest : IComponentData, IEnableableComponent
     {

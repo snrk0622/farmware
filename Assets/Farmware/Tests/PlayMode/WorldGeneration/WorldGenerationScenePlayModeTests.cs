@@ -159,10 +159,11 @@ namespace Farmware.WorldGeneration.PlayModeTests
         }
 
         /// <summary>
-        /// 通常移動相当の大きな相対座標を準備し、MAP-02Bでは表示原点を自動変更せずObserverがその絶対範囲を要求することを保証します。
+        /// 通常移動で512タイル閾値を越え、表示原点をチャンク境界へ自動更新しても絶対Camera位置とObserver範囲が変わらないことを保証します。
+        /// 正負の両方向を通し、C#の0方向丸めではなく床方向のチャンク境界が選ばれることも確認します。
         /// </summary>
         [Test]
-        public void NormalCameraMovement_DoesNotChangeDisplayOriginOrAbsoluteChunkBounds()
+        public void NormalCameraMovement_AutomaticallyRebasesAndPreservesAbsoluteChunkBounds()
         {
             GameObject gridObject = null;
             GameObject cameraObject = null;
@@ -196,20 +197,33 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Assert.That(calculateVisibleChunkBounds, Is.Not.Null);
                 targetGridField.SetValue(bridge, grid);
 
-                // 4チャンクを越える相対位置へ通常移動しても、MAP-02Dまで表示原点とGridは固定します。
+                // 閾値の直前までは不要な原点変更を行わず、ピクセル整列可能な相対座標を維持します。
+                panController.SetWorldPosition(new Vector2(511.9375f, 32.5f));
+                Assert.That(
+                    panController.CurrentDisplayOrigin.AbsoluteTileCoordinate,
+                    Is.EqualTo(int2.zero));
+                Assert.That(
+                    panController.GetAbsoluteWorldPosition(),
+                    Is.EqualTo(new double2(511.9375d, 32.5d)));
+
+                // 8チャンク閾値を越える位置へ通常移動し、Cameraだけを小さな相対座標へ戻します。
                 panController.SetWorldPosition(new Vector2(544.5f, 32.5f));
                 ChunkStreamingObserver bounds = (ChunkStreamingObserver)
                     calculateVisibleChunkBounds.Invoke(bridge, null);
 
                 Assert.That(
                     panController.CurrentDisplayOrigin.AbsoluteTileCoordinate,
-                    Is.EqualTo(int2.zero),
-                    "通常移動だけで表示原点を変更してはいけません。");
+                    Is.EqualTo(new int2(512, 0)),
+                    "正方向の自動原点はCamera所属チャンク境界へ移動する必要があります。");
+                Assert.That(
+                    panController.LastDisplayOriginChangeWasAutomatic,
+                    Is.True,
+                    "通常移動の閾値到達は明示テレポートと区別できる必要があります。");
                 Assert.That(
                     grid.transform.localPosition,
                     Is.EqualTo(Vector3.zero),
-                    "通常移動でWorld Gridへ一時オフセットを設定してはいけません。");
-                Assert.That(cameraObject.transform.position.x, Is.EqualTo(544.5f));
+                    "Floating OriginでWorld Grid自体を移動してはいけません。");
+                Assert.That(cameraObject.transform.position.x, Is.EqualTo(32.5f));
                 Assert.That(cameraObject.transform.position.y, Is.EqualTo(32.5f));
                 Assert.That(
                     bounds.MinimumVisibleChunkX,
@@ -226,6 +240,22 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Assert.That(
                     panController.GetAbsoluteWorldPosition(),
                     Is.EqualTo(new double2(544.5d, 32.5d)));
+
+                // 現在原点から負方向へ大きく移動し、絶対座標-32.5が所属する-64境界へ床方向に更新します。
+                panController.SetWorldPosition(new Vector2(-544.5f, 32.5f));
+                ChunkStreamingObserver negativeBounds = (ChunkStreamingObserver)
+                    calculateVisibleChunkBounds.Invoke(bridge, null);
+                Assert.That(
+                    panController.CurrentDisplayOrigin.AbsoluteTileCoordinate,
+                    Is.EqualTo(new int2(-64, 0)),
+                    "負方向の自動原点は0方向ではなく床方向のチャンク境界を使用してください。");
+                Assert.That(cameraObject.transform.position.x, Is.EqualTo(31.5f));
+                Assert.That(cameraObject.transform.position.y, Is.EqualTo(32.5f));
+                Assert.That(negativeBounds.MinimumVisibleChunkX, Is.EqualTo(-1));
+                Assert.That(negativeBounds.MaximumVisibleChunkX, Is.EqualTo(-1));
+                Assert.That(
+                    panController.GetAbsoluteWorldPosition(),
+                    Is.EqualTo(new double2(-32.5d, 32.5d)));
             }
             finally
             {
@@ -237,6 +267,364 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 if (gridObject != null)
                 {
                     Object.DestroyImmediate(gridObject);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Pixel Perfect Cameraの前回描画行列を保持したまま自動原点変更し、Observerが8チャンク先へ飛ばないことを保証します。
+        /// 実際にちらついたX=448と960、および負方向を、描画フレームのタイミングに依存せず再現します。
+        /// </summary>
+        /// <param name="initialOriginX">原点更新前の絶対表示原点Xです。単位はタイルです。</param>
+        /// <param name="previousRelativeX">前フレームの描画行列へ保存する相対Camera Xです。</param>
+        /// <param name="nextRelativeX">通常移動APIへ渡す、原点更新閾値上の相対Camera Xです。</param>
+        /// <param name="expectedOriginX">更新後に期待する絶対表示原点Xです。</param>
+        /// <param name="expectedMinimumChunkX">期待する最小可視絶対チャンクXです。</param>
+        /// <param name="expectedMaximumChunkX">期待する最大可視絶対チャンクXです。</param>
+        [TestCase(-64, 511.75f, 512f, 448, 6, 7)]
+        [TestCase(448, 511.75f, 512f, 960, 14, 15)]
+        [TestCase(-64, -511.75f, -512f, -576, -10, -9)]
+        public void AutomaticRebase_PreviousPixelPerfectCameraMatrixDoesNotShiftObserver(
+            int initialOriginX,
+            float previousRelativeX,
+            float nextRelativeX,
+            int expectedOriginX,
+            int expectedMinimumChunkX,
+            int expectedMaximumChunkX)
+        {
+            GameObject gridObject = null;
+            GameObject cameraObject = null;
+
+            try
+            {
+                gridObject = new GameObject("Previous Render Matrix Test Grid");
+                Grid grid = gridObject.AddComponent<Grid>();
+                cameraObject = new GameObject("Previous Render Matrix Test Camera");
+                cameraObject.SetActive(false);
+                cameraObject.transform.position = new Vector3(0f, 0f, -10f);
+                Camera camera = cameraObject.AddComponent<Camera>();
+                camera.orthographic = true;
+                CameraPanController panController = cameraObject.AddComponent<CameraPanController>();
+                CameraChunkStreamingBridge bridge = cameraObject.AddComponent<CameraChunkStreamingBridge>();
+                PixelPerfectCamera pixelPerfectCamera = cameraObject.AddComponent<PixelPerfectCamera>();
+                pixelPerfectCamera.assetsPPU = 16;
+                pixelPerfectCamera.gridSnapping = PixelPerfectCamera.GridSnapping.PixelSnapping;
+                cameraObject.SetActive(true);
+                camera.orthographicSize = 8f;
+                camera.aspect = 1f;
+
+                // Sceneを変えず、実際のBridgeのCamera/Grid変換を直接呼んで比較します。
+                FieldInfo targetGridField = typeof(CameraChunkStreamingBridge).GetField(
+                    "targetGrid", BindingFlags.NonPublic | BindingFlags.Instance);
+                MethodInfo calculateVisibleChunkBounds = typeof(CameraChunkStreamingBridge).GetMethod(
+                    "CalculateVisibleChunkBounds", BindingFlags.NonPublic | BindingFlags.Instance);
+                Assert.That(targetGridField, Is.Not.Null);
+                Assert.That(calculateVisibleChunkBounds, Is.Not.Null);
+                targetGridField.SetValue(bridge, grid);
+                Assert.That(
+                    panController.SetAbsoluteWorldPosition(initialOriginX + 0.5d, -18.5d),
+                    Is.True);
+                panController.SetWorldPosition(new Vector2(previousRelativeX, 45.5f));
+
+                // 行列への明示代入で、URPが前回描画時の位置を保持する状態を再現します。
+                // Transformだけを動かしても行列が追従しない点が、不具合に必要な前提です。
+                camera.ResetWorldToCameraMatrix();
+                Matrix4x4 previousRenderMatrix = camera.worldToCameraMatrix;
+                camera.worldToCameraMatrix = previousRenderMatrix;
+                panController.SetWorldPosition(new Vector2(nextRelativeX, 45.5f));
+                Assert.That(
+                    camera.cameraToWorldMatrix.MultiplyPoint3x4(Vector3.zero).x,
+                    Is.EqualTo(previousRelativeX).Within(0.0001f),
+                    "可視範囲の計算直前まで前フレームの行列を保持している必要があります。");
+
+                ChunkStreamingObserver actual = (ChunkStreamingObserver)
+                    calculateVisibleChunkBounds.Invoke(bridge, null);
+                Assert.That(panController.CurrentDisplayOrigin.AbsoluteTileCoordinate.x, Is.EqualTo(expectedOriginX));
+                Assert.That(panController.GetAbsoluteWorldPosition().x, Is.EqualTo((double)initialOriginX + nextRelativeX));
+                Assert.That(actual.MinimumVisibleChunkX, Is.EqualTo(expectedMinimumChunkX));
+                Assert.That(actual.MaximumVisibleChunkX, Is.EqualTo(expectedMaximumChunkX));
+                Assert.That(actual.MinimumVisibleChunkY, Is.EqualTo(-1));
+                Assert.That(actual.MaximumVisibleChunkY, Is.EqualTo(-1));
+            }
+            finally
+            {
+                // テストが失敗しても、Cameraの描画イベント購読と表示用オブジェクトを残しません。
+                if (cameraObject != null)
+                {
+                    Object.DestroyImmediate(cameraObject);
+                }
+
+                if (gridObject != null)
+                {
+                    Object.DestroyImmediate(gridObject);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 自動原点変更前のチャンク表示を準備し、新原点側の同じ論理チャンクを残したまま旧相対セルだけを分割消去できることを保証します。
+        /// 旧表示の掃除が新しい可視セルを消すと原点変更直後に空白が出るため、2つの表示原点を明示して回帰確認します。
+        /// </summary>
+        [Test]
+        public void AutomaticRebase_DeferredCleanupClearsOnlyStaleOriginCells()
+        {
+            GameObject cameraObject = null;
+            GameObject gridObject = null;
+            GameObject tilemapObject = null;
+            GameObject presenterObject = null;
+            Tile testTile = null;
+
+            try
+            {
+                cameraObject = new GameObject("Automatic Rebase Test Camera");
+                cameraObject.transform.position = new Vector3(0f, 0f, -10f);
+                cameraObject.AddComponent<Camera>();
+                CameraPanController panController =
+                    cameraObject.AddComponent<CameraPanController>();
+
+                gridObject = new GameObject("Automatic Rebase Test Grid");
+                gridObject.AddComponent<Grid>();
+                tilemapObject = new GameObject("Automatic Rebase Test Tilemap");
+                tilemapObject.transform.SetParent(gridObject.transform, false);
+                Tilemap tilemap = tilemapObject.AddComponent<Tilemap>();
+                tilemapObject.AddComponent<TilemapRenderer>();
+
+                presenterObject = new GameObject("Automatic Rebase Test Presenter");
+                ChunkTilemapPresenter presenter =
+                    presenterObject.AddComponent<ChunkTilemapPresenter>();
+                presenter.ConfigureDisplayOrigin(panController);
+
+                FieldInfo targetTilemapField = typeof(ChunkTilemapPresenter).GetField(
+                    "targetTilemap",
+                    BindingFlags.NonPublic | BindingFlags.Instance);
+                FieldInfo displayedCoordinatesField = typeof(ChunkTilemapPresenter).GetField(
+                    "displayedCoordinates",
+                    BindingFlags.NonPublic | BindingFlags.Instance);
+                FieldInfo staleClearQueueField = typeof(ChunkTilemapPresenter).GetField(
+                    "staleOriginClearQueue",
+                    BindingFlags.NonPublic | BindingFlags.Instance);
+                MethodInfo synchronizeDisplayOrigin = typeof(ChunkTilemapPresenter).GetMethod(
+                    "SynchronizeDisplayOrigin",
+                    BindingFlags.NonPublic | BindingFlags.Instance);
+                MethodInfo processStaleClearQueue = typeof(ChunkTilemapPresenter).GetMethod(
+                    "ProcessStaleOriginClearQueue",
+                    BindingFlags.NonPublic | BindingFlags.Instance);
+                Assert.That(targetTilemapField, Is.Not.Null);
+                Assert.That(displayedCoordinatesField, Is.Not.Null);
+                Assert.That(staleClearQueueField, Is.Not.Null);
+                Assert.That(synchronizeDisplayOrigin, Is.Not.Null);
+                Assert.That(processStaleClearQueue, Is.Not.Null);
+                targetTilemapField.SetValue(presenter, tilemap);
+
+                // Presenterへ旧原点0を記録し、絶対チャンク(8, 0)を相対セルX=512へ表示済みとして準備します。
+                synchronizeDisplayOrigin.Invoke(presenter, null);
+                HashSet<ChunkCoordinate> displayedCoordinates =
+                    (HashSet<ChunkCoordinate>)displayedCoordinatesField.GetValue(presenter);
+                displayedCoordinates.Add(new ChunkCoordinate(8, 0));
+                testTile = ScriptableObject.CreateInstance<Tile>();
+                Vector3Int staleCell = new Vector3Int(512, 0, 0);
+                tilemap.SetTile(staleCell, testTile);
+
+                // Cameraの絶対位置544.5を変えず、表示原点だけ512へ進めて旧チャンクを分割消去Queueへ移します。
+                panController.SetWorldPosition(new Vector2(544.5f, 0.5f));
+                synchronizeDisplayOrigin.Invoke(presenter, null);
+                object staleClearQueue = staleClearQueueField.GetValue(presenter);
+                Assert.That(staleClearQueue, Is.InstanceOf<System.Collections.ICollection>());
+                int queuedChunkCount = ((System.Collections.ICollection)staleClearQueue).Count;
+                Assert.That(queuedChunkCount, Is.EqualTo(1));
+                Assert.That(tilemap.GetTile(staleCell), Is.SameAs(testTile));
+
+                // 新原点512では同じ絶対チャンクの先頭が相対セル0になります。旧セル掃除後もこの新表示を残します。
+                Vector3Int currentCell = Vector3Int.zero;
+                tilemap.SetTile(currentCell, testTile);
+                processStaleClearQueue.Invoke(
+                    presenter,
+                    new object[] { WorldGridConstants.SubChunksPerChunk });
+                Assert.That(
+                    tilemap.GetTile(staleCell),
+                    Is.Null,
+                    "旧表示原点の相対セルはフレーム予算内で消去される必要があります。");
+                Assert.That(
+                    tilemap.GetTile(currentCell),
+                    Is.SameAs(testTile),
+                    "旧原点セルの消去で新原点側の同じ論理チャンクを消してはいけません。");
+            }
+            finally
+            {
+                if (presenterObject != null)
+                {
+                    Object.DestroyImmediate(presenterObject);
+                }
+
+                if (tilemapObject != null)
+                {
+                    Object.DestroyImmediate(tilemapObject);
+                }
+
+                if (gridObject != null)
+                {
+                    Object.DestroyImmediate(gridObject);
+                }
+
+                if (cameraObject != null)
+                {
+                    Object.DestroyImmediate(cameraObject);
+                }
+
+                if (testTile != null)
+                {
+                    Object.DestroyImmediate(testTile);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 自動原点変更前に作成した岩壁影Meshを準備し、同じ論理チャンクの新表示でGameObjectとMeshを再利用することを保証します。
+        /// 毎回の影マスク計算とMesh再生成が戻ると原点変更スパイクが再発するため、位置変更と再利用候補の消費まで確認します。
+        /// </summary>
+        [Test]
+        public void AutomaticRebase_ReusesRockWallShadowForSameLogicalChunk()
+        {
+            GameObject cameraObject = null;
+            GameObject gridObject = null;
+            GameObject tilemapObject = null;
+            GameObject presenterObject = null;
+
+            try
+            {
+                cameraObject = new GameObject("Rock Wall Shadow Rebase Test Camera");
+                cameraObject.transform.position = new Vector3(0f, 0f, -10f);
+                cameraObject.AddComponent<Camera>();
+                CameraPanController panController =
+                    cameraObject.AddComponent<CameraPanController>();
+
+                gridObject = new GameObject("Rock Wall Shadow Rebase Test Grid");
+                gridObject.AddComponent<Grid>();
+                tilemapObject = new GameObject("Rock Wall Shadow Rebase Test Tilemap");
+                tilemapObject.transform.SetParent(gridObject.transform, false);
+                Tilemap tilemap = tilemapObject.AddComponent<Tilemap>();
+                tilemapObject.AddComponent<TilemapRenderer>();
+
+                presenterObject = new GameObject("Rock Wall Shadow Rebase Test Presenter");
+                ChunkTilemapPresenter presenter =
+                    presenterObject.AddComponent<ChunkTilemapPresenter>();
+                presenter.ConfigureDisplayOrigin(panController);
+
+                FieldInfo targetTilemapField = typeof(ChunkTilemapPresenter).GetField(
+                    "targetTilemap",
+                    BindingFlags.NonPublic | BindingFlags.Instance);
+                FieldInfo displayedCoordinatesField = typeof(ChunkTilemapPresenter).GetField(
+                    "displayedCoordinates",
+                    BindingFlags.NonPublic | BindingFlags.Instance);
+                FieldInfo reusableShadowsField = typeof(ChunkTilemapPresenter).GetField(
+                    "reusableRockWallShadowCoordinates",
+                    BindingFlags.NonPublic | BindingFlags.Instance);
+                MethodInfo synchronizeDisplayOrigin = typeof(ChunkTilemapPresenter).GetMethod(
+                    "SynchronizeDisplayOrigin",
+                    BindingFlags.NonPublic | BindingFlags.Instance);
+                MethodInfo getOrCreateShadow = typeof(ChunkTilemapPresenter).GetMethod(
+                    "GetOrCreateRockWallShadowPresentation",
+                    BindingFlags.NonPublic | BindingFlags.Instance);
+                MethodInfo tryReuseShadow = typeof(ChunkTilemapPresenter).GetMethod(
+                    "TryReuseRockWallShadowAfterAutomaticRebase",
+                    BindingFlags.NonPublic | BindingFlags.Instance);
+                MethodInfo destroyUnusedShadows = typeof(ChunkTilemapPresenter).GetMethod(
+                    "DestroyUnusedRebasedRockWallShadows",
+                    BindingFlags.NonPublic | BindingFlags.Instance);
+                Assert.That(targetTilemapField, Is.Not.Null);
+                Assert.That(displayedCoordinatesField, Is.Not.Null);
+                Assert.That(reusableShadowsField, Is.Not.Null);
+                Assert.That(synchronizeDisplayOrigin, Is.Not.Null);
+                Assert.That(getOrCreateShadow, Is.Not.Null);
+                Assert.That(tryReuseShadow, Is.Not.Null);
+                Assert.That(destroyUnusedShadows, Is.Not.Null);
+                targetTilemapField.SetValue(presenter, tilemap);
+
+                // 旧原点0で絶対チャンク(8, 0)を表示済みにし、実際のPresenter経路で影GameObjectとMeshを1組作ります。
+                synchronizeDisplayOrigin.Invoke(presenter, null);
+                ChunkCoordinate coordinate = new ChunkCoordinate(8, 0);
+                HashSet<ChunkCoordinate> displayedCoordinates =
+                    (HashSet<ChunkCoordinate>)displayedCoordinatesField.GetValue(presenter);
+                displayedCoordinates.Add(coordinate);
+                object originalPresentation = getOrCreateShadow.Invoke(
+                    presenter,
+                    new object[] { coordinate });
+                Assert.That(originalPresentation, Is.Not.Null);
+                ChunkCoordinate unusedCoordinate = new ChunkCoordinate(7, 0);
+                object unusedPresentation = getOrCreateShadow.Invoke(
+                    presenter,
+                    new object[] { unusedCoordinate });
+                Assert.That(unusedPresentation, Is.Not.Null);
+                FieldInfo shadowGameObjectField = originalPresentation.GetType().GetField(
+                    "GameObject",
+                    BindingFlags.Public | BindingFlags.Instance);
+                FieldInfo shadowMeshField = originalPresentation.GetType().GetField(
+                    "Mesh",
+                    BindingFlags.Public | BindingFlags.Instance);
+                Assert.That(shadowGameObjectField, Is.Not.Null);
+                Assert.That(shadowMeshField, Is.Not.Null);
+                GameObject originalShadowObject =
+                    (GameObject)shadowGameObjectField.GetValue(originalPresentation);
+                Mesh originalShadowMesh = (Mesh)shadowMeshField.GetValue(originalPresentation);
+                originalShadowObject.transform.localPosition = new Vector3(
+                    WorldGridConstants.LogicalChunkSize * 8,
+                    TerrainLayerPresentationUtility.RockWallElevationInCells,
+                    0f);
+
+                // 絶対Camera位置は保ったまま表示原点を512へ進め、影の形状を作り直さず相対セル0へ移します。
+                panController.SetWorldPosition(new Vector2(544.5f, 0.5f));
+                synchronizeDisplayOrigin.Invoke(presenter, null);
+                object retainedPresentation = getOrCreateShadow.Invoke(
+                    presenter,
+                    new object[] { coordinate });
+                Assert.That(retainedPresentation, Is.SameAs(originalPresentation));
+                Assert.That(
+                    shadowGameObjectField.GetValue(retainedPresentation),
+                    Is.SameAs(originalShadowObject));
+                Assert.That(
+                    shadowMeshField.GetValue(retainedPresentation),
+                    Is.SameAs(originalShadowMesh));
+                Assert.That(originalShadowObject.transform.localPosition.x, Is.EqualTo(0f));
+
+                // 新Tilemap反映完了を模擬して再利用候補を消費し、未使用影の掃除から採用済み影が除外されることを確認します。
+                HashSet<ChunkCoordinate> reusableShadows =
+                    (HashSet<ChunkCoordinate>)reusableShadowsField.GetValue(presenter);
+                Assert.That(reusableShadows.Count, Is.EqualTo(2));
+                Assert.That(
+                    tryReuseShadow.Invoke(presenter, new object[] { coordinate }),
+                    Is.EqualTo(true));
+                Assert.That(reusableShadows.Count, Is.EqualTo(1));
+                destroyUnusedShadows.Invoke(presenter, null);
+                Assert.That(reusableShadows.Count, Is.EqualTo(0));
+                Assert.That(
+                    getOrCreateShadow.Invoke(presenter, new object[] { coordinate }),
+                    Is.SameAs(originalPresentation),
+                    "新表示で採用した影は原点変更フレーム末の未使用掃除で破棄してはいけません。");
+                Assert.That(
+                    getOrCreateShadow.Invoke(presenter, new object[] { unusedCoordinate }),
+                    Is.Not.SameAs(unusedPresentation),
+                    "新Viewportで採用しなかった旧影は辞書から除き、表示・メモリへ残してはいけません。");
+            }
+            finally
+            {
+                if (presenterObject != null)
+                {
+                    Object.DestroyImmediate(presenterObject);
+                }
+
+                if (tilemapObject != null)
+                {
+                    Object.DestroyImmediate(tilemapObject);
+                }
+
+                if (gridObject != null)
+                {
+                    Object.DestroyImmediate(gridObject);
+                }
+
+                if (cameraObject != null)
+                {
+                    Object.DestroyImmediate(cameraObject);
                 }
             }
         }
@@ -1281,6 +1669,22 @@ namespace Farmware.WorldGeneration.PlayModeTests
         [UnityTest]
         public IEnumerator SampleScene_StreamsAndDeterministicallyRegeneratesTerrainTiles()
         {
+            return VerifySampleSceneStreaming(true);
+        }
+
+        /// <summary>旧共有方式でも同じScene連携・決定論・表示契約を維持することを確認します。</summary>
+        /// <returns>共有方式に切り替えて共通の縦切り検証を進めるIEnumeratorです。</returns>
+        [UnityTest]
+        public IEnumerator SampleScene_SharedModeStreamsAndRegeneratesTerrainTiles()
+        {
+            return VerifySampleSceneStreaming(false);
+        }
+
+        /// <summary>Sceneを読み込み、指定表示方式で地形・液面・資源・診断表示と再生成を実際に検証します。</summary>
+        /// <param name="local">既定のチャンク別方式ならtrue、旧共有方式を検証するときはfalseです。</param>
+        /// <returns>SceneロードとECS・表示の完了をフレーム上限付きで待つIEnumeratorです。</returns>
+        private IEnumerator VerifySampleSceneStreaming(bool local)
+        {
             AsyncOperation loadOperation = SceneManager.LoadSceneAsync("SampleScene", LoadSceneMode.Single);
             Assert.That(loadOperation, Is.Not.Null, "Build SettingsからSampleSceneを読み込めませんでした。");
 
@@ -1597,6 +2001,60 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 "8px下げた液面の下辺は、手前にある土地上面より奥へ描画する必要があります。");
             CameraPanController cameraPanController = Object.FindFirstObjectByType<CameraPanController>();
             Assert.That(cameraPanController, Is.Not.Null, "Main CameraにCameraPanControllerがありません。");
+            Assert.That(typeof(ChunkTilemapPresenter).GetField("useChunkLocalTilemaps",
+                BindingFlags.Instance | BindingFlags.NonPublic).GetValue(terrainPresenter), Is.True,
+                "SampleSceneの保存値も既定ONへそろえる必要があります。");
+            terrainPresenter.ConfigureChunkLocalPresentation(local);
+            // ローカル方式のScene見本は空です。表示原点基準セルから、実際に描くチャンク内セルへ読取だけを変換します。
+            // 方式にかかわらず以降の検証内容を共通にし、表示されていない見本を成功条件へ使わないようにします。
+            System.Func<Tilemap, Vector3Int, TileBase> readPresentedTile = (layer, cell) =>
+                GetPresentedTile(terrainPresenter, layer, cell, cameraPanController.CurrentDisplayOrigin);
+
+            // SampleSceneへ保存した操作速度がコードの既定値とずれると、構築メニューを再実行した後だけ体感が変わります。
+            // privateなInspector値を読み取り、現在のSceneと新規構築時の両方が通常12タイル/秒・高速36タイル/秒になることを保証します。
+            FieldInfo movementSpeedField = typeof(CameraPanController).GetField(
+                "movementSpeedInTilesPerSecond",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            FieldInfo fastMovementMultiplierField = typeof(CameraPanController).GetField(
+                "fastMovementMultiplier",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            FieldInfo automaticRebaseThresholdField = typeof(CameraPanController).GetField(
+                "automaticRebaseThresholdInTiles",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.That(
+                movementSpeedField,
+                Is.Not.Null,
+                "CameraPanControllerの通常移動速度フィールドが見つかりません。");
+            Assert.That(
+                fastMovementMultiplierField,
+                Is.Not.Null,
+                "CameraPanControllerの高速移動倍率フィールドが見つかりません。");
+            Assert.That(
+                automaticRebaseThresholdField,
+                Is.Not.Null,
+                "CameraPanControllerの自動Floating Origin距離フィールドが見つかりません。");
+            float movementSpeedInTilesPerSecond =
+                (float)movementSpeedField.GetValue(cameraPanController);
+            float fastMovementMultiplier =
+                (float)fastMovementMultiplierField.GetValue(cameraPanController);
+            int automaticRebaseThresholdInTiles =
+                (int)automaticRebaseThresholdField.GetValue(cameraPanController);
+            Assert.That(
+                movementSpeedInTilesPerSecond,
+                Is.EqualTo(CameraPanController.DefaultMovementSpeedInTilesPerSecond),
+                "SampleSceneの通常移動速度はコード既定値の12タイル/秒と一致する必要があります。");
+            Assert.That(
+                fastMovementMultiplier,
+                Is.EqualTo(CameraPanController.DefaultFastMovementMultiplier),
+                "SampleSceneの高速移動倍率はコード既定値の3倍と一致する必要があります。");
+            Assert.That(
+                movementSpeedInTilesPerSecond * fastMovementMultiplier,
+                Is.EqualTo(36f),
+                "Shift併用時の移動速度は36タイル/秒になる必要があります。");
+            Assert.That(
+                automaticRebaseThresholdInTiles,
+                Is.EqualTo(CameraPanController.DefaultAutomaticRebaseThresholdInTiles),
+                "SampleSceneの自動Floating Origin距離はコード既定値の512タイルと一致する必要があります。");
             InitialCameraPositionController initialPositionController =
                 Object.FindFirstObjectByType<InitialCameraPositionController>();
             Assert.That(
@@ -1721,7 +2179,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                             initialSpawnChunk.X,
                             initialSpawnChunk.Y,
                             out originalChunkEntity)
-                        && tilemap.GetTile(spawnCell) != null
+                        && readPresentedTile(tilemap, spawnCell) != null
                         && TryGetDisplayedResourceCell(
                             world.EntityManager,
                             originalChunkEntity,
@@ -1729,6 +2187,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                             cameraPanController.CurrentDisplayOrigin,
                             resourceTilemap,
                             resourceBehindRockWallTilemap,
+                            readPresentedTile,
                             out originalResourceCell))
                     {
                         initialLoadCompleted = true;
@@ -1751,20 +2210,24 @@ namespace Farmware.WorldGeneration.PlayModeTests
             // 一体型岩壁が存在するセルを実際の表示結果から探し、同じ論理セルに土地ブロックも残る二段構成を保証します。
             // TransformとPivotだけを検査すると、Presenterが岩壁を書き忘れてもテストが通るため、Tilemapの内容まで確認します。
             bool foundDisplayedRockWall = false;
-            foreach (Vector3Int cellPosition in rockWallTilemap.cellBounds.allPositionsWithin)
+            Tilemap initialRockWallMap = GetPresentedTilemap(terrainPresenter, rockWallTilemap, initialSpawnChunk);
+            Tilemap initialGroundMap = GetPresentedTilemap(terrainPresenter, tilemap, initialSpawnChunk);
+            Assert.That(initialRockWallMap, Is.Not.Null);
+            Assert.That(initialGroundMap, Is.Not.Null);
+            foreach (Vector3Int cellPosition in initialRockWallMap.cellBounds.allPositionsWithin)
             {
-                if (!rockWallTilemap.HasTile(cellPosition))
+                if (!initialRockWallMap.HasTile(cellPosition))
                 {
                     continue;
                 }
 
                 foundDisplayedRockWall = true;
                 Assert.That(
-                    rockWallTilemap.GetTile(cellPosition),
+                    initialRockWallMap.GetTile(cellPosition),
                     Is.SameAs(productionRockWallTile),
                     $"岩壁セル {cellPosition} がSampleSceneの本番用岩壁Tileを参照していません。");
                 Assert.That(
-                    tilemap.HasTile(cellPosition),
+                    initialGroundMap.HasTile(cellPosition),
                     Is.True,
                     $"岩壁セル {cellPosition} の下に、Biome由来の一体型土地ブロックが残っていません。");
             }
@@ -1864,15 +2327,15 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     Mathf.FloorToInt(farCameraWorldPosition.x),
                     Mathf.FloorToInt(farCameraWorldPosition.y),
                     cameraPanController.CurrentDisplayOrigin);
-                bool farCameraCellIsDisplayed = tilemap.HasTile(farCameraDisplayCell)
-                    || liquidBaseTilemap.HasTile(farCameraDisplayCell);
+                bool farCameraCellIsDisplayed = readPresentedTile(tilemap, farCameraDisplayCell) != null
+                    || readPresentedTile(liquidBaseTilemap, farCameraDisplayCell) != null;
                 Vector3Int originalResourceDisplayCell = ToDisplayCell(
                     originalResourceAbsoluteTileX,
                     originalResourceAbsoluteTileY,
                     cameraPanController.CurrentDisplayOrigin);
                 bool originalResourceWasCleared =
-                    resourceTilemap.GetTile(originalResourceDisplayCell) == null
-                    && resourceBehindRockWallTilemap.GetTile(originalResourceDisplayCell) == null;
+                    readPresentedTile(resourceTilemap, originalResourceDisplayCell) == null
+                    && readPresentedTile(resourceBehindRockWallTilemap, originalResourceDisplayCell) == null;
                 bool displayOriginMoved = !cameraPanController.CurrentDisplayOrigin
                     .AbsoluteTileCoordinate.Equals(initialDisplayOrigin);
 
@@ -1929,8 +2392,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     Mathf.FloorToInt(negativeFarCameraWorldPosition.x),
                     Mathf.FloorToInt(negativeFarCameraWorldPosition.y),
                     cameraPanController.CurrentDisplayOrigin);
-                bool negativeFarCellIsDisplayed = tilemap.HasTile(negativeFarDisplayCell)
-                    || liquidBaseTilemap.HasTile(negativeFarDisplayCell);
+                bool negativeFarCellIsDisplayed = readPresentedTile(tilemap, negativeFarDisplayCell) != null
+                    || readPresentedTile(liquidBaseTilemap, negativeFarDisplayCell) != null;
                 if (negativeFarChunkIsActive && negativeFarCellIsDisplayed)
                 {
                     negativeFarLoadCompleted = true;
@@ -1969,7 +2432,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                         initialSpawnChunk.X,
                         initialSpawnChunk.Y,
                         out regeneratedChunkEntity)
-                    && tilemap.GetTile(
+                    && readPresentedTile(tilemap,
                         ToDisplayCell(
                             initialSpawnLocation.TileX,
                             initialSpawnLocation.TileY,
@@ -2014,8 +2477,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 regeneratedResources[WorldGridConstants.TilesPerChunk - 1],
                 WorldGridConstants.TilesPerChunk - 1);
             Assert.That(
-                resourceTilemap.GetTile(originalResourceCell) != null
-                    || resourceBehindRockWallTilemap.GetTile(originalResourceCell) != null,
+                readPresentedTile(resourceTilemap, originalResourceCell) != null
+                    || readPresentedTile(resourceBehindRockWallTilemap, originalResourceCell) != null,
                 Is.True,
                 "原点へ戻った後、決定論的に再生成された資源アイコンが再表示される必要があります。");
 
@@ -2042,8 +2505,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     liquidCell.y,
                     cameraPanController.CurrentDisplayOrigin);
                 // 静止面とアニメーションが同じ論理セルへそろって初めて、実際の液面表示が完成したと判断します。
-                if (liquidBaseTilemap.HasTile(liquidDisplayCell)
-                    && liquidAnimationTilemap.HasTile(liquidDisplayCell))
+                if (readPresentedTile(liquidBaseTilemap, liquidDisplayCell) != null
+                    && readPresentedTile(liquidAnimationTilemap, liquidDisplayCell) != null)
                 {
                     liquidDisplayCompleted = true;
                     break;
@@ -2057,7 +2520,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Is.True,
                 $"液体セル {liquidCell} の静止面とアニメーションが{MaximumWaitFrames}フレーム以内に表示されませんでした。");
             Assert.That(
-                tilemap.HasTile(liquidDisplayCell),
+                readPresentedTile(tilemap, liquidDisplayCell) != null,
                 Is.False,
                 $"液体セル {liquidCell} がGround Tilemapにも重複し、元の高さの液面が残っています。");
 
@@ -2191,6 +2654,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
         /// <param name="displayOrigin">絶対ワールドセルをTilemapの相対セルへ変換する現在の表示原点です。</param>
         /// <param name="resourceTilemap">岩壁に隠れない資源を重ね描画するTilemapです。</param>
         /// <param name="resourceBehindRockWallTilemap">直前方の岩壁に隠す資源を描画するTilemapです。</param>
+        /// <param name="readPresentedTile">見本レイヤーと表示原点基準セルから実際の表示Tileを読む、テスト用の変換です。</param>
         /// <param name="resourceCell">成功時に、表示済み資源の表示原点基準セル座標を返します。</param>
         /// <returns>配置済み資源が1件以上あり、そのTileが表示済みならtrueです。</returns>
         private static bool TryGetDisplayedResourceCell(
@@ -2200,6 +2664,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
             DisplayOrigin displayOrigin,
             Tilemap resourceTilemap,
             Tilemap resourceBehindRockWallTilemap,
+            System.Func<Tilemap, Vector3Int, TileBase> readPresentedTile,
             out Vector3Int resourceCell)
         {
             DynamicBuffer<GeneratedResourceTile> resources =
@@ -2219,12 +2684,46 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     WorldGrid.ToWorldTileX(chunkCoordinate.X, localX),
                     WorldGrid.ToWorldTileY(chunkCoordinate.Y, localY),
                     displayOrigin);
-                return resourceTilemap.GetTile(resourceCell) != null
-                    || resourceBehindRockWallTilemap.GetTile(resourceCell) != null;
+                return readPresentedTile(resourceTilemap, resourceCell) != null
+                    || readPresentedTile(resourceBehindRockWallTilemap, resourceCell) != null;
             }
 
             resourceCell = default;
             return false;
+        }
+
+        /// <summary>
+        /// 表示方式に対応するTilemapを、作成せずに取得します。非公開キャッシュの確認はテスト内だけに閉じます。
+        /// </summary>
+        /// <param name="presenter">Sceneの表示キャッシュ所有者です。</param>
+        /// <param name="template">Sceneの対応レイヤー見本です。</param>
+        /// <param name="coordinate">確認する絶対チャンク座標です。</param>
+        /// <returns>描画先のTilemap、まだ未割当ならnullです。共有方式では見本自身です。</returns>
+        private static Tilemap GetPresentedTilemap(ChunkTilemapPresenter presenter, Tilemap template, ChunkCoordinate coordinate)
+        {
+            var flags = BindingFlags.Instance | BindingFlags.NonPublic;
+            return (Tilemap)typeof(ChunkTilemapPresenter).GetMethod("GetTilemapForChunk", flags)
+                .Invoke(presenter, new object[] { coordinate, template, false });
+        }
+
+        /// <summary>表示原点基準セルを実際の描画先へ変換し、Tileを読んで返します。表示状態は変更しません。</summary>
+        /// <param name="presenter">Sceneの表示キャッシュ所有者です。</param>
+        /// <param name="template">対応するScene見本レイヤーです。</param>
+        /// <param name="relativeCell">Cameraと共通の表示原点基準セルです。</param>
+        /// <param name="origin">現在の表示原点です。</param>
+        /// <returns>実際の表示Tile、未割当または空セルならnullです。</returns>
+        private static TileBase GetPresentedTile(ChunkTilemapPresenter presenter, Tilemap template, Vector3Int relativeCell, DisplayOrigin origin)
+        {
+            int absoluteX = relativeCell.x + origin.AbsoluteTileCoordinate.x;
+            int absoluteY = relativeCell.y + origin.AbsoluteTileCoordinate.y;
+            ChunkCoordinate coordinate = WorldGrid.ToChunkCoordinate(absoluteX, absoluteY);
+            Tilemap map = GetPresentedTilemap(presenter, template, coordinate);
+            if (map == null) return null;
+            var flags = BindingFlags.Instance | BindingFlags.NonPublic;
+            bool local = (bool)typeof(ChunkTilemapPresenter).GetField("chunkLocalTilemapsAreActive", flags).GetValue(presenter);
+            // 両方式とも論理セルは同じです。ローカル方式だけ、負座標にも対応する床除算の余りで0〜63へ戻します。
+            ChunkLocalTileCoordinate cell = WorldGrid.ToLocalTileCoordinate(absoluteX, absoluteY);
+            return map.GetTile(local ? new Vector3Int(cell.X, cell.Y, 0) : relativeCell);
         }
 
         /// <summary>
@@ -2233,7 +2732,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
         /// <param name="absoluteTileX">Simulationが保持する絶対水平タイル座標です。</param>
         /// <param name="absoluteTileY">Simulationが保持する絶対垂直タイル座標です。</param>
         /// <param name="displayOrigin">Tilemapローカルセル(0, 0)へ対応する絶対タイル座標です。</param>
-        /// <returns>GameビューのTilemapへ実際に書き込まれる相対セル座標です。</returns>
+        /// <returns>Cameraと見本Gridが共有する相対セル座標です。チャンク別方式の読取時はGetPresentedTileで0〜63へ変換します。</returns>
         private static Vector3Int ToDisplayCell(
             int absoluteTileX,
             int absoluteTileY,
