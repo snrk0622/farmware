@@ -1,6 +1,6 @@
 ---
 name: fixed-resource-prompt-dialogue
-description: Farmware向けPixelLab Create Image固定資源スプライトPromptを、ユーザーとの対話で完成させる。木・岩など施設配置を妨害する採取資源と、草など配置時に自動除去される景観資源を分類し、Output size、採取後などの状態、全バリエーションの積雪版、輪郭、接地点、禁止事項を決めるときに使う。動物、地形Base、アニメーション、画像生成やUnityへの取り込み自体には使わない。
+description: Farmware向けPixelLab Create S-XL Image (Pro)固定資源スプライトPromptを、ユーザーとの対話で完成させる。木・岩など施設配置を妨害する採取資源と、草など配置時に自動除去される景観資源を分類し、Output size、採取後などの状態、全バリエーションの積雪版、輪郭、接地点、禁止事項を決めるときに使う。動物、地形Base、アニメーション、画像生成やUnityへの取り込み自体には使わない。
 ---
 
 # 固定資源Prompt対話作成
@@ -27,7 +27,7 @@ Farmwareの静止した固定資源について、初心者でも答えやすい
 2. `Placement Class`。次のどちらか一つを選ぶ。
    - `blocking_resource`: 木や岩など、同じタイルへの施設配置を妨害し、実際に採取・利用される資源。
    - `auto_clear_scenery`: 草など、機能を持たず、同じタイルへ施設を配置すると自動除去される景観資源。
-3. PixelLabで選ぶ`Output size`と論理占有タイル数。Create Imageのキャンバスは256×256 px固定なので、gridと総出力数は質問せず自動計算する。`Output size`、grid、総出力数は設定一覧と計算には使うが、完成Prompt本文には絶対に書かない。立体物では、地面との接地点、上方向や隣接セルへの描画上のはみ出しも確認する。
+3. PixelLabで選ぶ`Output size`と論理占有タイル数。Create S-XL Image (Pro)が返す総フレーム数は`Output size`の最大辺から自動計算し、ユーザーには質問しない。`Output size`と総フレーム数は設定一覧と計算には使うが、完成Prompt本文には絶対に書かない。立体物では、地面との接地点、上方向や隣接セルへの描画上のはみ出しも確認する。
 4. `Resource States`。`blocking_resource`では、通常状態に加えて採取後など、その資源で必要になり得る静止状態をスキル側から先に提案し、枚数への影響を示して採否を確認する。`auto_clear_scenery`は通常状態だけとし、状態を質問しない。
 5. `Resource Features`。材質、色、形、構成要素など、対象を判別するために必要な特徴だけを扱う。
 6. `State Requirements`。採用した各状態を、アニメーション途中ではなく一枚で読める完成した静止状態として記述する。
@@ -58,28 +58,30 @@ Farmwareの静止した固定資源について、初心者でも答えやすい
 - 例として木には`normal`と`after_harvest`（切り株）、採掘後も残骸が残る岩には`normal`と`depleted`を提案できる。
 - 成長途中、揺れ、採取モーション、破片が飛ぶ瞬間などのアニメーションフレームは提案しない。
 - ゲーム仕様に存在しない破損、枯死、再成長、品質段階を暗黙に追加しない。
-- 追加状態ごとに英語の`State ID`、日本語の説明、積雪版を含む`Outputs per Base Variation`、`Base Variation Count`、`Unused Slots`を示す。
+- 追加状態ごとに英語の`State ID`と日本語の説明を示し、状態候補の組み合わせごとに積雪版を含む`Outputs per Base Variation`、`Base Variation Count`、`Unused Frames`を示す。
 - 提案後、採用する状態一覧を一問で確認する。ユーザーの選択前に確定しない。
 
 `auto_clear_scenery`は施設配置時に即時除去されるため、状態は`normal`だけとする。
 
-## Create Image、計算、配置
+## Create S-XL Image、計算、配置
 
-- 両方の`Placement Class`でPixelLabの`Create Image`を使用する。
-- Create Imageのキャンバスは256×256 px固定とする。
-- `Grid Columns = 256 ÷ Output Width`。
-- `Grid Rows = 256 ÷ Output Height`。
-- `Total Slots = Grid Columns × Grid Rows`。
-- PixelLabで選択可能な`Output size`を使用し、除算で端数が出る寸法を独自に補正しない。
+- 両方の`Placement Class`でPixelLabの`Create S-XL Image (Pro)`を使用する。
+- `Max Dimension = max(Output Width, Output Height)`として、次のPixelLab公式サイズ帯から`Total Frames`を決める。
+  - `16～42 px`: 64 frames。
+  - `43～85 px`: 16 frames。
+  - `86～170 px`: 4 frames。
+  - `171 px以上`: 1 frame。上限はPixelLabが各アスペクト比で許可する最大寸法に従う。
+- `256 ÷ Output Width`や`256 ÷ Output Height`では計算しない。表示上のgridと非正方形の配置はPixelLab出力に従う。
 - 全固定資源で`Environment Versions = standard, snow-covered`の2種類を必須とする。
 - `Outputs per Base Variation = State Count × 2`。
-- `Base Variation Count = floor(Total Slots ÷ Outputs per Base Variation)`。
-- `Unused Slots = Total Slots - Base Variation Count × Outputs per Base Variation`。
+- `Base Variation Count = floor(Total Frames ÷ Outputs per Base Variation)`。
+- `Unused Frames = Total Frames - Base Variation Count × Outputs per Base Variation`。
+- `Total Frames < Outputs per Base Variation`の場合は、一度の生成で完全な基本バリエーションを作れない。完成Promptを出さず、より小さい`Output size`または状態数の削減をユーザーへ提案する。
 - 各基本バリエーション内では、`state 1 standard, state 1 snow-covered, state 2 standard, state 2 snow-covered...`の順で一まとまりにする。状態別や積雪有無別に全基本バリエーションをまとめない。
-- 余り枠がある場合は末尾だけを透明な未使用セルにする。採用する全状態と積雪有無の枚数比率は均等にする。
-- `Output size`、1Spriteの画像寸法、grid、総出力数、基本バリエーション数、セル順はPrompt本文へ書かない。
+- 余りフレームがある場合は末尾だけを透明な未使用フレームにする。採用する全状態と積雪有無の枚数比率は均等にする。
+- `Output size`、1Spriteの画像寸法、grid、総フレーム数、基本バリエーション数、grid上の行列配置はPrompt本文へ書かない。基本バリエーション内の状態と環境版の順序は書く。
 
-例として`Output size: 32×32`は8×8 grid、総出力64枚となる。木で`normal`と`after_harvest`の2状態を採用すると、1基本バリエーション当たり`2状態 × 2環境版 = 4枚`、16基本バリエーション、未使用0枠となる。これは寸法や状態数の固定規則ではない。
+例として`Output size: 32×32`は最大辺32 pxなので総出力64 framesとなる。木で`normal`と`after_harvest`の2状態を採用すると、1基本バリエーション当たり`2状態 × 2環境版 = 4 frames`、16基本バリエーション、未使用0 framesとなる。これは寸法や状態数の固定規則ではない。
 
 ## 積雪版の共通規則
 
@@ -105,7 +107,7 @@ Farmwareの静止した固定資源について、初心者でも答えやすい
 
 すべての値が揃ったら、次を日本語で簡潔に出力する。
 
-1. `設定`: Resource、Resource ID、Placement Class、PixelLab tool、Output size、grid、総出力数、Resource States、Environment Versions、1基本バリエーション当たりの出力数、基本バリエーション数、未使用枠数、論理占有、アウトライン規則。
+1. `設定`: Resource、Resource ID、Placement Class、PixelLab tool、Output size、最大辺、総フレーム数、Resource States、Environment Versions、1基本バリエーション当たりの出力数、基本バリエーション数、未使用フレーム数、論理占有、アウトライン規則。
 2. `PixelLab Prompt`: 選択した分類に対応する英語の完成Promptを、一つの`text`コードブロックで出す。
 
 完成Promptでは次を必ず満たす。
@@ -114,7 +116,7 @@ Farmwareの静止した固定資源について、初心者でも答えやすい
 - 一度の生成で、全基本バリエーション、採用した全状態、それぞれの通常環境版と積雪版を作るよう明記する。
 - 各基本バリエーションの全状態と積雪有無を一まとまりにし、種類ごとに全基本バリエーションをまとめない。
 - バリエーションや状態をアニメーションフレームとして扱わない。
-- `Output size`、1Spriteの画像寸法、grid、総出力数、基本バリエーション数、セル順をPrompt本文へ書かない。
+- `Output size`、1Spriteの画像寸法、grid、総フレーム数、基本バリエーション数、grid上の行列配置をPrompt本文へ書かない。基本バリエーション内の状態と環境版の順序は含める。
 - 積雪版へ固定色`#EDF3F2`と`#C5D6DE`を使用し、対応する通常環境版から積雪以外を変えないよう明記する。
 - `blocking_resource`には、露出外周の`#333333`アウトラインと、地面との接地点にアウトラインを付けない指示を含める。
 - `auto_clear_scenery`には、どの部分にもアウトラインを付けない指示を含める。

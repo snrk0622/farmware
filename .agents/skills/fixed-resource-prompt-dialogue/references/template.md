@@ -10,7 +10,7 @@
 - `[VARIATION RULES]`: 基本バリエーション間で変えてよい内容と維持する内容。
 - `[RESOURCE-SPECIFIC PROHIBITIONS]`: 対象固有の禁止事項。不要なら文ごと削除する。
 
-PixelLab Create Imageのキャンバスは256×256 px固定であり、gridと総出力数は`Output size`から決まる。`Output size`、1Spriteの寸法、grid、総出力数、基本バリエーション数、セル順は角括弧にもPrompt本文にも入れない。
+PixelLab Create S-XL Image (Pro)の総フレーム数は、`Output size`の最大辺に応じて64、16、4、1 framesのいずれかになる。`Output size`、1Spriteの寸法、grid、総フレーム数、基本バリエーション数、grid上の行列配置は角括弧にもPrompt本文にも入れない。基本バリエーション内の状態と環境版の順序はPromptへ含める。
 
 ## 施設配置を妨害する採取資源
 
@@ -19,7 +19,7 @@ PixelLab Create Imageのキャンバスは256×256 px固定であり、gridと�
 ```text
 Create one organized set of static pixel-art sprites of [RESOURCE] for a cozy agricultural automation game. These are functional harvestable resources that block facility placement until removed. Use one generation to create every available base variation, every selected resource state, and both environment versions of every state.
 
-For every base variation, create one complete output set in this order: [ALL OUTPUTS IN ORDER]. Keep each base variation's complete output set together. Do not group all base variations by state or by environment version. Fill the available output with as many complete base variations as possible. If the available cells do not divide evenly by the complete output-set size, leave only the final remainder cells transparent and unused.
+For every base variation, create one complete output set in this order: [ALL OUTPUTS IN ORDER]. Keep each base variation's complete output set together. Do not group all base variations by state or by environment version. Fill the available output with as many complete base variations as possible. If the available frames do not divide evenly by the complete output-set size, leave only the final remainder frames transparent and unused.
 
 [PLACEMENT] Show the object in a top-down oblique view for an orthogonal square grid, not on an isometric diamond base. [RESOURCE FEATURES] [STATE REQUIREMENTS] Each selected state is a finished static gameplay state, not an animation frame or an in-between action.
 
@@ -37,7 +37,7 @@ Use broad readable color areas, simplified compact forms, crisp native pixels, u
 ```text
 Create one organized set of static pixel-art sprites of [RESOURCE] for a cozy agricultural automation game. These are small non-functional scenery elements that are automatically removed when a facility is placed on the same tile. Use one generation to create every available base variation and both environment versions.
 
-For every base variation, create one complete output set in this order: normal standard, normal snow-covered. Keep each base variation's two environment versions together. Do not group all base variations by environment version. Fill the available output with as many complete base variations as possible. If the available cells do not divide evenly by two, leave only the final remainder cells transparent and unused.
+For every base variation, create one complete output set in this order: normal standard, normal snow-covered. Keep each base variation's two environment versions together. Do not group all base variations by environment version. Fill the available output with as many complete base variations as possible. If the available frames do not divide evenly by two, leave only the final remainder frames transparent and unused.
 
 [PLACEMENT] Show the element in a top-down oblique view for an orthogonal square grid, not on an isometric diamond base. [RESOURCE FEATURES]
 
@@ -54,7 +54,7 @@ Use broad readable color areas, simplified compact forms, crisp native pixels, u
 - 分類が`blocking_resource`または`auto_clear_scenery`の一方だけである。
 - 一度の生成で、全基本バリエーション、全採用状態、各状態の通常環境版と積雪版を生成する。
 - 各基本バリエーションの全出力を一まとまりにし、状態別や積雪有無別にまとめていない。
-- Prompt本文に`Output size`、1Spriteの寸法、grid、総出力数、基本バリエーション数、セル順がない。
+- Prompt本文に`Output size`、1Spriteの寸法、grid、総フレーム数、基本バリエーション数、grid上の行列配置がない。基本バリエーション内の状態と環境版の順序は含まれている。
 - 積雪版が通常環境版と対になり、積雪以外の形、状態、材質、色、構成要素、接地点、縮尺、画角、輪郭が一致する。
 - 雪は`#EDF3F2`と`#C5D6DE`だけを使い、上向きの面へ薄く載っている。
 - `blocking_resource`では露出外周だけが`#333333`で、地面との接地点にアウトラインがない。

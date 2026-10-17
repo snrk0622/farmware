@@ -265,14 +265,16 @@ Match the approved grassland reference in canvas size, top-and-face layout, outl
 
 ### 3.9 固定資源スプライト共通フォーマット
 
-`fixed-resource-prompt-dialogue`スキルを使用して、木、岩、草などの静止した固定資源をPixelLab Create Imageで新規制作または作り直す場合は、本節を正とする。7章の個別Promptは初期用途と検品対象を確認する資料として残し、生成方式、出力構成、積雪版、輪郭規則は本節を優先する。
+`fixed-resource-prompt-dialogue`スキルを使用して、木、岩、草などの静止した固定資源をPixelLab Create S-XL Image (Pro)で新規制作または作り直す場合は、本節を正とする。7章では必要素材と個別検品項目だけを定め、完成Promptは同スキルで作成する。
 
 - 固定資源は、採取や除去を終えるまで施設配置を妨げる`blocking_resource`と、施設配置時に自動除去される非機能の景観要素`auto_clear_scenery`へ分ける。床、道、舗装、耕地、地形Base、動物は含めない。
-- PixelLabツールは`Create Image`、キャンバスは256×256 px固定とする。PixelLabで選択した`Output size`から列数、行数、総枠数を計算し、完成Prompt本文には`Output size`、1 Spriteの寸法、grid、総枠数、基本バリエーション数、セル順を書かない。
+- PixelLabツールは`Create S-XL Image (Pro)`とする。`Output size`の最大辺が16～42 pxなら64 frames、43～85 pxなら16 frames、86～170 pxなら4 frames、171 px以上なら1 frameとして総フレーム数を決める。上限はPixelLabが各アスペクト比で許可する最大寸法に従う。`256 ÷ Output Width`や`256 ÷ Output Height`では計算しない。
+- `Outputs per Base Variation = State Count × 2`、`Base Variation Count = floor(Total Frames ÷ Outputs per Base Variation)`、`Unused Frames = Total Frames - Base Variation Count × Outputs per Base Variation`とする。完全な基本バリエーションを1組も作れない組み合わせは使用しない。
+- 完成Prompt本文には`Output size`、1 Spriteの寸法、grid、総フレーム数、基本バリエーション数、grid上の行列配置を書かない。基本バリエーション内の状態と環境版の順序は書く。
 - 全基本バリエーションと全状態に`standard`と`snow-covered`を一対で用意する。積雪には明部`#EDF3F2`と影色`#C5D6DE`だけを使い、上向きの面へ薄く載せる。対応する通常版から、雪以外の形、状態、材質、配色、接地点、縮尺、画角、輪郭を変えない。
 - `blocking_resource`は、地面から露出する外周だけを不透明な`#333333`で囲み、地面との接地点には輪郭、黒い横線、台座を付けない。通常状態に加えて伐採後や枯渇後の静止状態がゲーム仕様上必要かを確認し、必要な状態だけを同じ生成へ含める。
 - `auto_clear_scenery`は通常状態だけとし、外周、内部、接地点のいずれにも輪郭を付けない。採取資源より控えめなシルエットとコントラストにする。
-- 各基本バリエーションでは、状態ごとに`standard`、`snow-covered`の順でまとめる。余り枠が出る場合は末尾だけを透明な未使用セルとし、状態と積雪有無の枚数比率を崩さない。
+- 各基本バリエーションでは、状態ごとに`standard`、`snow-covered`の順でまとめる。余りフレームが出る場合は末尾だけを透明な未使用フレームとし、状態と積雪有無の枚数比率を崩さない。
 - 全出力を斜め見下ろしの正方形グリッド向けPixel Art、左上光源、透明背景へ統一する。地面Tile、草の台座、投影影、風景、文字、アンチエイリアス、半透明の輪郭、未指定の顔や手足を追加しない。
 - 論理占有タイル数、地面との接地点、上下左右への最大描画はみ出し量を制作記録へ残す。Unityへ取り込むときは8章と9章に従い、論理状態をECSまたはセーブデータ、表示をPresentation側で管理する。
 
@@ -707,48 +709,45 @@ Six separate sparse top-down pixel-art freshwater overlays: 1) a tiny circular r
 
 ### 7.1 草原の木 `resource_tree_basic`
 
-- 必要数: 成木3差分。占有は1×1タイル、描画枠は32×32 pxを初期値とする
-- PixelLabツール: `Map Objects`
-- 設定: 3.6の共通設定、Canvas `32×32`、Transparent background
-- Prompt（全文をそのまま入力）:
-
-```text
-A small friendly deciduous resource tree for a cozy agricultural automation game, top-down oblique pixel-art view on an orthogonal square grid, with the crown top and the front of the trunk both readable. Rounded leafy crown, warm medium green leaves, muted brown trunk, and crisp pixel clusters. The trunk contact point occupies one 16 by 16 ground cell while the crown extends upward into the tile above. Place the ground contact point near the lower center of the canvas. Thin dark outline, upper-left light, transparent background. No isometric diamond base, fruit, face, planter, grass base, long cast shadow, or scenery.
-```
-
-- [ ] 3差分を生成
+- 初期採用数: 成木3基本バリエーション。占有は1×1タイル、`Output size`は32×32 pxを初期値とする
+- Placement Class: `blocking_resource`
+- PixelLabツール: `Create S-XL Image (Pro)`
+- Prompt作成: `fixed-resource-prompt-dialogue`を使用する。状態は`normal`を必須とし、伐採後に切り株を残すゲーム仕様を採用する場合だけ`after_harvest`を追加する
+- 外見要件: 丸みのある葉冠、暖かい中明度の緑葉、落ち着いた茶色の幹。幹の接地点を枠の下中央付近へ置き、葉冠は上方向へはみ出してよい
+- 固有禁止事項: 果実、顔、植木鉢、草の台座、長い投影影、周辺風景
+- [ ] スキルが算出した全基本バリエーション、全採用状態、通常版・積雪版を一度の生成で作成
+- [ ] 通常版と積雪版の対応関係、露出外周の`#333333`、接地点に輪郭がないことを確認
+- [ ] 採用する成木3基本バリエーションを選定
 - [ ] 取込
 - [ ] 資源Prefabまたは表示定義へ設定
 - [ ] 隣接する木と設備の重なり順を確認
 
 ### 7.2 石資源 `resource_stone_basic`
 
-- 必要数: 3差分。論理占有は1×1、描画枠は16×24 pxを初期値とする
-- PixelLabツール: `Map Objects`
-- 設定: 3.6の共通設定、Canvas `16×24`、Transparent background
-- Prompt（全文をそのまま入力）:
-
-```text
-A small mineable stone deposit for a cozy agricultural automation game, top-down oblique pixel-art view on an orthogonal square grid, showing the top and short front faces of two or three rounded charcoal-gray and muted brown rocks. The ground contact point occupies one 16 by 16 cell while the rock tops may extend upward into the tile above. Place the contact point near the lower center of a 16 by 24 canvas. Crisp 1-pixel clusters, thin dark outline, upper-left light, transparent background. No isometric diamond base, grass base, ore crystal, long cast shadow, text, or scenery.
-```
-
-- [ ] 3差分を生成
+- 初期採用数: 3基本バリエーション。論理占有は1×1、`Output size`は16×24 pxを初期値とする
+- Placement Class: `blocking_resource`
+- PixelLabツール: `Create S-XL Image (Pro)`
+- Prompt作成: `fixed-resource-prompt-dialogue`を使用する。状態は`normal`を必須とし、採掘後に残骸を残すゲーム仕様を採用する場合だけ`depleted`を追加する
+- 外見要件: 木炭色と落ち着いた茶色の丸い岩を2～3個まとめ、上面と短い正面を読める形にする。接地点を枠の下中央付近へ置く
+- 固有禁止事項: 草の台座、鉱石結晶、長い投影影、文字、周辺風景
+- [ ] スキルが算出した全基本バリエーション、全採用状態、通常版・積雪版を一度の生成で作成
+- [ ] 通常版と積雪版の対応関係、露出外周の`#333333`、接地点に輪郭がないことを確認
+- [ ] 採用する3基本バリエーションを選定
 - [ ] 取込
 - [ ] 資源Prefabまたは表示定義へ設定
 - [ ] 草原、森林、砂漠の全背景で確認
 
 ### 7.3 砂資源パッチ `resource_sand_patch`
 
-- 必要数: 3差分。16×16 px
-- PixelLabツール: `Create tiles (Pro)`
-- 設定: Square top-down、16×16、Transparent background、Outlineなし、Details Low
-- Prompt（全文をそのまま入力）:
-
-```text
-Three separate mineable sand-resource overlays for a top-down 16 by 16 pixel tile: compact irregular piles of slightly brighter coarse sand grains with a few darker grains, clearly distinct from ordinary desert ground but still low profile. Transparent background, no container, shovel, footprint, dune, border, text, or cast shadow.
-```
-
-- [ ] 3差分を生成
+- 初期採用数: 3基本バリエーション。論理占有は1×1、`Output size`は16×16 pxを初期値とする
+- Placement Class: 採取または除去まで施設配置を妨げる`blocking_resource`
+- PixelLabツール: `Create S-XL Image (Pro)`
+- Prompt作成: `fixed-resource-prompt-dialogue`を使用する。状態は`normal`を必須とし、採取後にパッチを残すゲーム仕様を採用する場合だけ`depleted`を追加する
+- 外見要件: 通常の砂漠地面より少し明るい粗い砂粒と少数の暗い粒で、低く不規則な砂の集積を表す
+- 固有禁止事項: 容器、シャベル、足跡、砂丘、文字、投影影
+- [ ] スキルが算出した全基本バリエーション、全採用状態、通常版・積雪版を一度の生成で作成
+- [ ] 通常版と積雪版の対応関係、露出外周の`#333333`、接地点に輪郭がないことを確認
+- [ ] 採用する3基本バリエーションを選定
 - [ ] 取込
 - [ ] 資源Prefabまたは表示定義へ設定
 - [ ] 通常の砂漠地面と識別できることを確認
@@ -970,6 +969,7 @@ Editor構築ツールとPlayerビルド前処理は、`terrain_biomes_base.png`�
 
 ## 13. PixelLab参照資料
 
+- [Create S-XL image (Pro)](https://www.pixellab.ai/docs/tools/create-sl-image-pro): 固定資源の`Output size`最大辺から64、16、4、1 framesのいずれかを決める
 - [Create tiles (Pro)](https://www.pixellab.ai/docs/tools/create-tiles-pro): 各分類1枚のBase地形に使用する。Base地形を混ぜる接続Tilesetには使用せず、`ART-00B`の土地・岩壁境界ハイライトは透明な別素材として制作する
 - [Create texture](https://www.pixellab.ai/docs/tools/create-texture): 接続素材と組み合わせる地表テクスチャ。土地・岩壁境界ハイライトへ使用する場合もBase地形へ焼き込まない
 - [PixelLab API](https://api.pixellab.ai/v2/docs): Map Objects、Object、Character、Animationを含むツール一覧
