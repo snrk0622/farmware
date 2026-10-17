@@ -241,6 +241,12 @@ M3／24GBなど手元の環境での計測は比較データとして残し、8G
 
 MAP-02Eでは上記の継続回帰を通常PlayModeテストへ追加し、同じ区間で`Farmware.WorldGeneration.ChunkStreaming`、`Farmware.WorldGeneration.TilemapPresentation`、`Farmware.WorldGeneration.FloatingOriginRebase`を容量4,096の`ProfilerRecorder`へ記録する。単独実行の最大値は4.595／9.144／0.418ms、PlayMode全53件内では4.618／3.486／0.007msだった。実行順やEditor負荷で変動する比較記録であり、製品の時間閾値は未決定なので数値自体を通常テストの合否条件にしない。Markerが有効で0より大きい記録を持つことだけを検査する。Unity 6000.3.8f1で新規テスト単独1件、PlayMode全53件、EditMode全243件が成功し、最終Consoleはコンパイル失敗なし、エラー0・警告0だった。Development Player、製品最大Viewport、Windows／8GB・16GB機、長時間の正式性能評価とは区別する。
 
+### PERF-GATE-Aの最小Player診断
+
+2026-10-17のPERF-GATE-Aでは、FarmwareのランタイムSceneオブジェクトを含まない空SceneからmacOS Development Playerを1本作成した。同じバイナリを、通常起動と2D Animationの管理インスタンスを診断用に生成する起動引数の2条件で正常終了させた。通常起動だけで既存のComputeBuffer自動解放警告が1件再現し、管理インスタンスを生成した条件では警告が消えた。固定中の`com.unity.2d.animation` 13.0.4のソース上の生成・解放経路とも一致するため、Farmware所有リソースではなくパッケージ境界と判断した。条件とログは[PERF-GATE-A調査記録](./PerfGateAComputeBufferReport.md)を参照する。
+
+この診断は非公開型への反射を原因確認だけに使用しており、製品コードと自動テストには残さない。外部パッケージの内部実装へ結合する回帰テストは保守上の誤った契約になるため追加していない。Unityまたは2D Animation更新時、Sprite Skin採用時、警告件数や実行中メモリが増えた時に、空SceneのControlを再実行して確認する。
+
 ## 6. 失敗時に記録する情報
 
 - 失敗した完全なテスト名。

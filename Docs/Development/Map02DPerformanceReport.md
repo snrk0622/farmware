@@ -904,6 +904,10 @@ Assetsの一時ハーネスと.metaは除去し、ビルド生成のResources性
 
 一時コード除去後の製品再コンパイルは成功し、Console現表示エラー0・既存ビルド警告1、PlayMode停止、Scene・Asset未保存なしだった。更新文書は本レポート・ロードマップ・Testing・技術仕様・生成仕様の5本。EditorToolsの操作と採用設定、素材・制作、ゲームルールとRAM目標、スキル・開発ルール、文書索引は変わらないため、他文書は確認したが更新不要である。Unity CLIの未保存・復元ガードとPixel PerfectスキルのURP確認を使い、製品Camera設定は保持した。2026-10-17にユーザーが最終計測・完了整理のcommitを許可した。commit対象はこの5文書のMAP-02D関連差分だけとし、景観・積雪やアート・スキル等の別作業差分は含めない。製品コード・テストは未変更で、commit時は文書整合性・差分を確認し、自動テストは再実行していない。push・GitHub PR更新は行っていない。
 
+### 後続PERF-GATE-Aでの終了時警告の確定
+
+MAP-02D時点で未解決としていた終了時ComputeBuffer警告は、後続のPERF-GATE-AでFarmwareのSceneとランタイム処理を含まない空Sceneでも再現した。同一Development PlayerのA/B起動により、固定中の`com.unity.2d.animation` 13.0.4が未使用時にも生成するGPU変形用フォールバックバッファと、その管理インスタンスの寿命差へ切り分けた。Farmware所有リソースの破棄不備ではなく、終了時1件以外の継続増加やデータ破損を示す証拠はない。再現条件、責任境界、採用しなかった回避策、監視方法は[PERF-GATE-A調査記録](./PerfGateAComputeBufferReport.md)を正とする。
+
 ## MAP-02E 遠距離継続回帰
 
 ### シナリオと回帰契約
