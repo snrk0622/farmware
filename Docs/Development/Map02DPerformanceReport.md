@@ -892,7 +892,7 @@ OS経由の実ウィンドウ画像は拡大ON598枚、通常ON408枚、拡大OF
 
 **MAP-02Dの実装・方式と予算の選定・今回範囲の検証を完了と判断する。** 原点変更時の全地形再構築と生成Job待ちを除き、影・分類・書込と画面端の先行準備を改善した。最終コードの関連EditMode196件・依存境界4件・PlayMode52件は前回成功済みで、正負遠方の地形・資源・決定論的再生成・液面・F3/F4・開発者可視化、ON/OFFの契約を含む。今回製品コードとテストは変更していないため再実行していない。これら、人間の受け入れ、今回の限定Player確認を合わせ、採用ONの未解決P0／P1はなく、AIレビュー完了の判断を維持する。
 
-MAP-02系列全体は未完了で、次候補は`MAP-02E`の複数原点・往復・負座標横断を組み合わせた継続回帰とProfiler記録である。今回は着手しない。Windows／8GB・16GB実機、CPU・GPU・OS要件、製品最大Viewport・FPSとゲーム単体メモリ予算、設備・物流を含む性能保証、長時間・全シード・終了時ComputeBuffer警告の調査は後続に残す。診断用OFFに残る原点変更後の再構築・追従遅れも既知の制約として維持する。未実測の製品合格を宣言したり、新たなFPS／メモリ合格値を設定したりしない。
+MAP-02D完了時点ではMAP-02系列全体を未完了とし、次候補を`MAP-02E`の複数原点・往復・負座標横断を組み合わせた継続回帰とProfiler記録として、この変更単位では着手しなかった。後続のMAP-02E実施結果は下記の節を正とする。Windows／8GB・16GB実機、CPU・GPU・OS要件、製品最大Viewport・FPSとゲーム単体メモリ予算、設備・物流を含む性能保証、長時間・全シード・終了時ComputeBuffer警告の調査は引き続き後続に残す。診断用OFFに残る原点変更後の再構築・追従遅れも既知の制約として維持する。未実測の製品合格を宣言したり、新たなFPS／メモリ合格値を設定したりしない。
 
 本PRの実装commitは`c39f458c`（速度）、`d283abaa`（自動原点・ちらつき修正）、`adff3b63`（影再利用）、`d114156a`（チャンク別表示）、`d8767a52`（非同期公開）、`58d10b16`（影マスク）、`12f9819e`（外周生成）、`f7db201c`（空レイヤー省略）、`1d05dd3f`（先行表示・既定ON）である。調査・計測のcommitは`7d65b5ac`、`9f6311dd`、`3ea6c19f`、`9a1d5112`、`cf3710ad`、`5ee8b1ec`で、上記経緯に条件と制約を保持する。
 
@@ -903,3 +903,24 @@ MAP-02系列全体は未完了で、次候補は`MAP-02E`の複数原点・往�
 Assetsの一時ハーネスと.metaは除去し、ビルド生成のResources性能テスト設定も残っていない。ハーネス原文、ビルド・設定退避／復元eval、CSV・Snapshot・PNG・manifest・Playerログは`/private/tmp/farmware-map02d-acceptance.1gWd5H/`へ保存し、調査用の控えを残した。往復Player終了後の追加画像取得はprocNotFoundとなったが、取得済み画像とmanifestは保存した。3ログに既存のComputeBuffer自動解放・終了時Native診断があり、errors=0だけでリークなしとはしない。
 
 一時コード除去後の製品再コンパイルは成功し、Console現表示エラー0・既存ビルド警告1、PlayMode停止、Scene・Asset未保存なしだった。更新文書は本レポート・ロードマップ・Testing・技術仕様・生成仕様の5本。EditorToolsの操作と採用設定、素材・制作、ゲームルールとRAM目標、スキル・開発ルール、文書索引は変わらないため、他文書は確認したが更新不要である。Unity CLIの未保存・復元ガードとPixel PerfectスキルのURP確認を使い、製品Camera設定は保持した。2026-10-17にユーザーが最終計測・完了整理のcommitを許可した。commit対象はこの5文書のMAP-02D関連差分だけとし、景観・積雪やアート・スキル等の別作業差分は含めない。製品コード・テストは未変更で、commit時は文書整合性・差分を確認し、自動テストは再実行していない。push・GitHub PR更新は行っていない。
+
+## MAP-02E 遠距離継続回帰
+
+### シナリオと回帰契約
+
+MAP-02Dで採用したチャンク別Tilemap方式を対象に、`WorldGenerationScenePlayModeTests.SampleScene_RepeatedAutomaticRebasesPreserveStreamingAcrossRoundTripAndNegativeCrossing`を通常PlayMode回帰へ追加した。SampleSceneを1回読み込み、Cameraを絶対`(32.5, 32.5)`から開始した後、通常移動と同じ`SetWorldPosition`へ相対座標を渡し、絶対X=32.5→544.5→1056.5→479.5→-96.5→416.5→1056.5→-96.5→32.5の9地点を巡回する。表示原点は0→512→1024→448→-128→384→1024→-128→-128となり、6種類の原点、東西往復、0境界横断、保持範囲外からの3チャンク再訪を一つのScene寿命で起こす。最後の開始地点再訪では絶対位置32.5を表示原点-128から表し、絶対座標とPresentation相対座標を分離したまま戻れることも確認する。
+
+各地点では、Cameraの絶対位置と期待原点、自動変更フラグ、Observerの絶対可視範囲、対象チャンクがActiveかつ生成完了していること、地形または液面が現在の相対セルへ表示されること、同じ絶対チャンク座標を持つEntityが1件だけであることを検査する。再訪時は旧Entityが保持範囲外で破棄され、別Entityへ再生成されたことを確認する。全4096セルの生成一致は既存EditModeテストが保証するため、この継続回帰では先頭・中央・末尾の地形と資源を比較する。`WorldGenerationSettings`と`InitialSpawnLocation`は全9地点で初期値と一致し、Floating OriginがSimulationの生成条件や初期スポーンを変更しないことも保証する。
+
+### Profiler記録と検証結果
+
+同じテスト中に既存の`Farmware.WorldGeneration.ChunkStreaming`、`Farmware.WorldGeneration.TilemapPresentation`、`Farmware.WorldGeneration.FloatingOriginRebase`を容量4,096の`ProfilerRecorder`へ記録する。製品のFPS・Marker時間の合格閾値は未決定なので、時間上限を通常テストへ導入しない。Markerが有効で、シナリオ中に0より大きい値を持ったことだけを合否条件とし、最大値は比較用ログへ残す。
+
+| Unity 6000.3.8f1 Editor条件 | ChunkStreaming最大 ms | TilemapPresentation最大 ms | FloatingOriginRebase最大 ms | 結果 |
+| --- | ---: | ---: | ---: | --- |
+| 新規テスト単独 | 4.595 | 9.144 | 0.418 | 1件成功 |
+| PlayMode全体 | 4.618 | 3.486 | 0.007 | 53件成功、失敗0 |
+
+実行順、JIT、Editor負荷を固定した性能ベンチマークではないため、2行の差を改善率や回帰率として扱わない。時間値はEditor Test Runner内の比較記録であり、Development Player、製品最大Viewport、Windows、最低8GB・推奨16GB機、長時間の正式性能合格へ外挿しない。
+
+EditMode全243件も19.73秒で成功し、失敗・Skip・Inconclusiveは0だった。最終ConsoleのGround Truthはコンパイル失敗なし、エラー0・警告0である。製品コード、Scene、Prefab、パッケージ、生成規則、採用済みの距離・速度・予算は変更していない。今回の変更は既存PlayModeテストAssembly内の継続回帰と5文書だけである。EditorToolsの操作、アート仕様、ゲームルール、開発ルール、スキル、文書構成は変わらないため、`EditorTools.md`、`Docs/Art/`、ゲームコンセプト、`AGENTS.md`、`CodexSkills.md`、`Docs/README.md`は確認したが更新不要とした。未解決P0／P1はなく、MAP-02Eと大項目MAP-02を完了と判断する。commitとpushは別途明示的な依頼時だけ行う。
