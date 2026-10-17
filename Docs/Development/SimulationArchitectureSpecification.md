@@ -196,6 +196,10 @@ Streamingは生成中の保持外Entityも完成まで予算に含め、完成�
 
 地形Presentationの岩壁影マスクは、確定済み地形Bufferを読み取り専用のNativeArrayとして同期Burst Jobへ借用する。中心64×64はECSの確定値、外周8タイルは同じ整数座標生成規則を用い、Transformや近隣チャンクのロード順に依存しない。出力80×80のbool配列はPresenterがAwakeでPersistent確保し、表示チャンク間で再利用してOnDestroyでDisposeする。Runが呼び出し内で完了するため借用参照やJobHandleをフレーム間保持せず、Simulation状態へ書き戻さない。Presentation Assemblyは導入済みUnity.Burstを直接参照するが、Editor依存やパッケージ追加はない。
 
+### 分類用の外周地形キャッシュ
+
+地形分類はチャンク内部を現在のECS Bufferから読み、外周1セルだけを`TerrainNeighborHaloUtility`の同期Burst Jobでまとめて生成する。260要素のNative配列（現行GeneratedTileの要素本体で4,680 bytes）はPresenterがAwakeでPersistent確保し、OnDestroyでDisposeする。チャンク別・フレーム間キャッシュにはせず、`ProcessApplyQueue`の呼び出し内で同一チャンクの連続反映範囲を共有し、次フレームや別チャンクでは必要範囲を必ず上書きする。これによりWorld再作成、Entity再利用、生成設定変更の古い外周が混入しない。中心の再コピー、ECS書き戻し、未完了Jobは追加しない。外周のint域外は非接続の水域値を使い、境界・岩壁露出・資源の前後判定を維持する。
+
 ## 9. エンドレス座標とFloating Origin
 
 - Simulationの絶対位置は整数のワールドタイル座標で保持する。Transformのfloat座標を生成、占有、接続、セーブの判定に使用しない。

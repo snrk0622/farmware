@@ -1,6 +1,7 @@
 // このファイルは、ECSで生成済みの地形・資源チャンクデータを、バイオームだけを示す一体型土地、岩壁Sprite、液面を含む複数Tilemapへ16×16サブチャンク単位で反映・消去します。
 // 既定の共有Tilemap方式と、チャンクごとのローカルTilemapを自動原点変更で再利用する比較方式を切り替えられます。
 // Tilemapは表示専用キャッシュであり、地形はGeneratedTile、資源はGeneratedResourceTileをゲーム状態の正として参照します。
+// 分類用の外周1セルは反映バッチごとに同期Burstでまとめ、同じ隣接地形の重複生成を減らします。
 
 using System.Collections.Generic;
 using Unity.Collections;
@@ -40,6 +41,10 @@ namespace Farmware.WorldGeneration.Presentation
         // 1サブチャンク256セルの地形・境界・資源表示を再利用配列へ分類する時間を確認する計測区間です。
         private static readonly ProfilerMarker SubChunkClassificationProfilerMarker =
             new ProfilerMarker("Farmware.WorldGeneration.SubChunkClassification");
+
+        // 分類の前処理も含めて比較できるよう、外周地形の同期Burst生成を独立して計測します。
+        private static readonly ProfilerMarker TerrainNeighborHaloProfilerMarker =
+            new ProfilerMarker("Farmware.WorldGeneration.TerrainNeighborHaloBuild");
 
         // 分類済み配列を9枚のTilemapへSetTilesBlockする時間を確認する計測区間です。
         private static readonly ProfilerMarker SubChunkTilemapWriteProfilerMarker =
@@ -315,6 +320,10 @@ namespace Farmware.WorldGeneration.Presentation
         // Awakeで一度確保し、全チャンクで再利用してOnDestroyで破棄します。未完了Jobは保持しません。
         private NativeArray<bool> rockWallShadowMaskBuffer;
 
+        // 分類用の外周1セルを保持する260要素です。Awakeで確保しOnDestroyで破棄します。
+        // チャンクと反映フレームが変わるたびに必要範囲を上書きし、フレームをまたぐキャッシュにはしません。
+        private NativeArray<GeneratedTile> terrainNeighborHaloBuffer;
+
         // チャンク境界の頂点を計算するため、-1〜64の66×66タイル中心の影不透明度を保持する再利用配列です。
         private float[] rockWallShadowTileOpacityBuffer;
 
@@ -503,6 +512,8 @@ namespace Farmware.WorldGeneration.Presentation
             rockWallResourceSubChunkTileBuffer = new TileBase[tileCount];
             landBoundaryHighlightSubChunkTileBuffer = new TileBase[tileCount];
             rockWallBoundaryHighlightSubChunkTileBuffer = new TileBase[tileCount];
+            terrainNeighborHaloBuffer = new NativeArray<GeneratedTile>(TerrainNeighborHaloUtility.TileCount,
+                Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
             AllocateRockWallShadowBuffers();
             EnsureFreshWaterFallbackTile();
             RebuildBoundaryHighlightTiles();
@@ -886,6 +897,12 @@ namespace Farmware.WorldGeneration.Presentation
                 rockWallShadowMaskBuffer.Dispose();
             }
 
+            // 分類用外周も同期Runだけで使用するため、この時点で配列を借りている未完了Jobはありません。
+            if (terrainNeighborHaloBuffer.IsCreated)
+            {
+                terrainNeighborHaloBuffer.Dispose();
+            }
+
             // 各影Meshは共有Materialを所有しないため、Presenterが作成したMaterialだけを最後に1回破棄します。
             if (generatedRockWallShadowMaterial != null)
             {
@@ -1087,6 +1104,8 @@ namespace Farmware.WorldGeneration.Presentation
             WorldGenerationSettings generationSettings =
                 generationSettingsQuery.GetSingleton<WorldGenerationSettings>();
             EntityManager entityManager = presentationWorld.EntityManager;
+            // 同一呼び出し内の連続サブチャンクだけで外周を共有します。次フレームは必ず現在の設定で再生成します。
+            ChunkApplyProgress preparedProgress = null;
             while (remainingBudget > 0 && applyQueue.Count > 0)
             {
                 ChunkCoordinate coordinate = applyQueue.Peek();
@@ -1116,12 +1135,24 @@ namespace Farmware.WorldGeneration.Presentation
                     return remainingBudget;
                 }
 
+                if (preparedProgress != progress)
+                {
+                    int batchCount = math.min(remainingBudget,
+                        WorldGridConstants.SubChunksPerChunk - progress.NextSubChunkIndex);
+                    using (TerrainNeighborHaloProfilerMarker.Auto())
+                    {
+                        TerrainNeighborHaloUtility.Fill(generationSettings, coordinate,
+                            progress.NextSubChunkIndex, batchCount, terrainNeighborHaloBuffer);
+                    }
+
+                    preparedProgress = progress;
+                }
+
                 ApplySubChunk(
                     coordinate,
                     progress.NextSubChunkIndex,
                     tiles,
-                    resources,
-                    generationSettings);
+                    resources);
                 progress.NextSubChunkIndex++;
                 remainingBudget--;
 
@@ -1185,13 +1216,11 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="subChunkIndex">行優先の0〜15サブチャンク番号です。</param>
         /// <param name="tiles">4096件の生成済みタイルBufferです。</param>
         /// <param name="resources">地形と同じ行優先4096件の生成済み資源Bufferです。</param>
-        /// <param name="generationSettings">チャンク外周の隣接岩壁を再生成する設定です。</param>
         private void ApplySubChunk(
             ChunkCoordinate coordinate,
             int subChunkIndex,
             DynamicBuffer<GeneratedTile> tiles,
-            DynamicBuffer<GeneratedResourceTile> resources,
-            in WorldGenerationSettings generationSettings)
+            DynamicBuffer<GeneratedResourceTile> resources)
         {
             int subChunkX = subChunkIndex % WorldGridConstants.SubChunksPerAxis;
             int subChunkY = subChunkIndex / WorldGridConstants.SubChunksPerAxis;
@@ -1210,12 +1239,11 @@ namespace Farmware.WorldGeneration.Presentation
                         int tileLocalY = localStartY + localY;
                         GeneratedTile tile = tiles[sourceIndex];
                         RockWallAppearance rockWallAppearance = ClassifyRockWallAppearance(
-                            coordinate,
                             tileLocalX,
                             tileLocalY,
                             tile,
                             tiles,
-                            generationSettings);
+                            terrainNeighborHaloBuffer);
                         bool isLiquid = tile.Ground == GroundType.Water
                             || tile.Ground == GroundType.Magma;
 
@@ -1223,13 +1251,12 @@ namespace Farmware.WorldGeneration.Presentation
                         BoundaryHighlightSelection rockWallBoundarySelection = default;
                         if (tile.Ground == GroundType.Land || tile.Ground == GroundType.RockWall)
                         {
-                            // 8近傍は現在のチャンクBufferを優先し、外周だけ決定論的に再生成するためロード順へ依存しません。
+                            // 内部は現在のECS Buffer、外周は同じ反映バッチで一度だけ生成した値を読み、ロード順へ依存しません。
                             TerrainNeighborTiles neighbors = GetTerrainNeighborTiles(
-                                coordinate,
                                 tileLocalX,
                                 tileLocalY,
                                 tiles,
-                                generationSettings);
+                                terrainNeighborHaloBuffer);
                             if (tile.Ground == GroundType.Land)
                             {
                                 landBoundarySelection =
@@ -1275,12 +1302,11 @@ namespace Farmware.WorldGeneration.Presentation
                         bool isBehindFrontRockWall = false;
                         if (!isRockWall && selectedResource != null)
                         {
-                            GeneratedTile frontTerrainTile = GetGeneratedTile(
-                                coordinate,
+                            GeneratedTile frontTerrainTile = TerrainNeighborHaloUtility.GetTile(
                                 tileLocalX,
                                 tileLocalY - 1,
                                 tiles,
-                                generationSettings);
+                                terrainNeighborHaloBuffer);
                             isBehindFrontRockWall =
                                 TerrainLayerPresentationUtility.ShouldRenderResourceBehindRockWall(
                                     resources[sourceIndex],
@@ -1674,75 +1700,25 @@ namespace Farmware.WorldGeneration.Presentation
                 1);
         }
 
-        /// <summary>
-        /// 中央セルを囲む8方向を、同一チャンクBufferまたは決定論的な境界外再生成から取得します。
-        /// </summary>
-        /// <param name="coordinate">中央セルが属する論理チャンク座標です。</param>
-        /// <param name="localTileX">中央セルの水平チャンク内座標です。</param>
-        /// <param name="localTileY">中央セルの垂直チャンク内座標です。</param>
-        /// <param name="tiles">中央チャンクの4096件の生成済み地形Bufferです。</param>
-        /// <param name="generationSettings">チャンク外周を同じ結果へ再生成する設定です。</param>
-        /// <returns>北から時計回りの8近傍地形です。</returns>
+        /// <summary>中央セルの8近傍を、現在のECS Bufferとこの反映バッチの外周配列から取得します。</summary>
+        /// <param name="localTileX">中心セルの水平ローカル座標です。</param>
+        /// <param name="localTileY">中心セルの垂直ローカル座標です。</param>
+        /// <param name="tiles">現在のチャンクの生成済み地形Bufferです。</param>
+        /// <param name="halo">中心セルを含む反映範囲でFill済みの外周配列です。</param>
+        /// <returns>境界表示へ渡す8方向の生成地形です。</returns>
         private static TerrainNeighborTiles GetTerrainNeighborTiles(
-            ChunkCoordinate coordinate,
-            int localTileX,
-            int localTileY,
-            DynamicBuffer<GeneratedTile> tiles,
-            in WorldGenerationSettings generationSettings)
+            int localTileX, int localTileY, DynamicBuffer<GeneratedTile> tiles,
+            NativeArray<GeneratedTile> halo)
         {
             return new TerrainNeighborTiles(
-                GetGeneratedTile(coordinate, localTileX, localTileY + 1, tiles, generationSettings),
-                GetGeneratedTile(coordinate, localTileX + 1, localTileY, tiles, generationSettings),
-                GetGeneratedTile(coordinate, localTileX, localTileY - 1, tiles, generationSettings),
-                GetGeneratedTile(coordinate, localTileX - 1, localTileY, tiles, generationSettings),
-                GetGeneratedTile(coordinate, localTileX + 1, localTileY + 1, tiles, generationSettings),
-                GetGeneratedTile(coordinate, localTileX + 1, localTileY - 1, tiles, generationSettings),
-                GetGeneratedTile(coordinate, localTileX - 1, localTileY - 1, tiles, generationSettings),
-                GetGeneratedTile(coordinate, localTileX - 1, localTileY + 1, tiles, generationSettings));
-        }
-
-        /// <summary>
-        /// 同一チャンク内では生成済みBufferを読み、チャンク外ではSimulationと同じ生成器で1セルだけ再生成します。
-        /// </summary>
-        /// <param name="coordinate">中心チャンクの論理座標です。</param>
-        /// <param name="localTileX">読み取る水平チャンク内座標です。境界外の値も許可します。</param>
-        /// <param name="localTileY">読み取る垂直チャンク内座標です。境界外の値も許可します。</param>
-        /// <param name="tiles">中心チャンクの4096件の生成済み地形Bufferです。</param>
-        /// <param name="generationSettings">境界外セルを同じ結果へ再生成する設定です。</param>
-        /// <returns>有効域内では指定座標の生成地形、ワールド外では土地・岩壁へ接続しない表示専用の水域値です。</returns>
-        private static GeneratedTile GetGeneratedTile(
-            ChunkCoordinate coordinate,
-            int localTileX,
-            int localTileY,
-            DynamicBuffer<GeneratedTile> tiles,
-            in WorldGenerationSettings generationSettings)
-        {
-            bool isInsideChunk = localTileX >= 0
-                && localTileX < WorldGridConstants.LogicalChunkSize
-                && localTileY >= 0
-                && localTileY < WorldGridConstants.LogicalChunkSize;
-            if (isInsideChunk)
-            {
-                return tiles[WorldGrid.ToTileIndex(localTileX, localTileY)];
-            }
-
-            if (!WorldGrid.TryToWorldTileCoordinate(
-                    coordinate.X,
-                    coordinate.Y,
-                    localTileX,
-                    localTileY,
-                    out int worldTileX,
-                    out int worldTileY))
-            {
-                // intワールドの外側には地形が存在しません。水域を表示専用の非接続値として使うことで、
-                // 土地と岩壁のどちらにも接続せず、資源を存在しない前面岩壁の背後へ隠しません。
-                return new GeneratedTile { Ground = GroundType.Water };
-            }
-
-            return DeterministicChunkGenerator.GenerateTile(
-                generationSettings,
-                worldTileX,
-                worldTileY);
+                TerrainNeighborHaloUtility.GetTile(localTileX, localTileY + 1, tiles, halo),
+                TerrainNeighborHaloUtility.GetTile(localTileX + 1, localTileY, tiles, halo),
+                TerrainNeighborHaloUtility.GetTile(localTileX, localTileY - 1, tiles, halo),
+                TerrainNeighborHaloUtility.GetTile(localTileX - 1, localTileY, tiles, halo),
+                TerrainNeighborHaloUtility.GetTile(localTileX + 1, localTileY + 1, tiles, halo),
+                TerrainNeighborHaloUtility.GetTile(localTileX + 1, localTileY - 1, tiles, halo),
+                TerrainNeighborHaloUtility.GetTile(localTileX - 1, localTileY - 1, tiles, halo),
+                TerrainNeighborHaloUtility.GetTile(localTileX - 1, localTileY + 1, tiles, halo));
         }
 
         /// <summary>
@@ -1860,101 +1836,29 @@ namespace Farmware.WorldGeneration.Presentation
             return grasslandTile;
         }
 
-        /// <summary>
-        /// 生成済みチャンクBufferを優先して上下左右を調べ、資源を残す露出面と影で隠す内部を分類します。
-        /// 影の濃さは別途連続距離場から求めるため、この分類は段階的なTile色には使用しません。
-        /// </summary>
-        /// <param name="coordinate">中心タイルを所有する論理チャンク座標です。</param>
-        /// <param name="localTileX">チャンク内の水平タイル座標です。</param>
-        /// <param name="localTileY">チャンク内の垂直タイル座標です。</param>
-        /// <param name="tile">中心の生成済み地形データです。</param>
-        /// <param name="tiles">同じチャンクの4096件の生成済み地形Bufferです。</param>
-        /// <param name="generationSettings">チャンク外の隣接セルを再生成する設定です。</param>
-        /// <returns>中心が非岩壁ならNone、空地へ接する岩壁ならExposed、それ以外はInteriorです。</returns>
+        /// <summary>現在のBufferと準備済み外周の4方向を調べ、資源を残す露出面と内部を区別します。</summary>
+        /// <param name="localX">中心セルの水平ローカル座標です。</param>
+        /// <param name="localY">中心セルの垂直ローカル座標です。</param>
+        /// <param name="tile">中心セルの現在の生成地形です。</param>
+        /// <param name="tiles">現在のチャンクの生成済み地形Bufferです。</param>
+        /// <param name="halo">中心セルを含む反映範囲でFill済みの外周配列です。</param>
+        /// <returns>非岩壁ならNone、非岩壁に接する岩壁ならExposed、それ以外はInteriorです。</returns>
         private static RockWallAppearance ClassifyRockWallAppearance(
-            ChunkCoordinate coordinate,
-            int localTileX,
-            int localTileY,
-            GeneratedTile tile,
-            DynamicBuffer<GeneratedTile> tiles,
-            in WorldGenerationSettings generationSettings)
+            int localX, int localY, GeneratedTile tile, DynamicBuffer<GeneratedTile> tiles,
+            NativeArray<GeneratedTile> halo)
         {
             if (tile.Ground != GroundType.RockWall)
             {
                 return RockWallAppearance.None;
             }
 
-            bool touchesOpenTile = !IsRockWallNeighbor(
-                    coordinate,
-                    localTileX - 1,
-                    localTileY,
-                    tiles,
-                    generationSettings)
-                || !IsRockWallNeighbor(
-                    coordinate,
-                    localTileX + 1,
-                    localTileY,
-                    tiles,
-                    generationSettings)
-                || !IsRockWallNeighbor(
-                    coordinate,
-                    localTileX,
-                    localTileY - 1,
-                    tiles,
-                    generationSettings)
-                || !IsRockWallNeighbor(
-                    coordinate,
-                    localTileX,
-                    localTileY + 1,
-                    tiles,
-                    generationSettings);
-            return touchesOpenTile
-                ? RockWallAppearance.Exposed
-                : RockWallAppearance.Interior;
-        }
-
-        /// <summary>
-        /// 同一チャンク内なら生成済みBufferを読み、外側ならワールド座標から岩壁判定だけを再生成します。
-        /// </summary>
-        /// <param name="coordinate">中心タイルを所有する論理チャンク座標です。</param>
-        /// <param name="neighborLocalX">隣接セルの水平チャンク内座標です。影マスク生成時は探索余白まで範囲外になります。</param>
-        /// <param name="neighborLocalY">隣接セルの垂直チャンク内座標です。影マスク生成時は探索余白まで範囲外になります。</param>
-        /// <param name="tiles">同じチャンクの生成済み地形Bufferです。</param>
-        /// <param name="generationSettings">境界外セルの決定論的生成設定です。</param>
-        /// <returns>対象隣接セルが有効域内の岩壁ならtrue、ワールド外または岩壁以外ならfalseです。</returns>
-        private static bool IsRockWallNeighbor(
-            ChunkCoordinate coordinate,
-            int neighborLocalX,
-            int neighborLocalY,
-            DynamicBuffer<GeneratedTile> tiles,
-            in WorldGenerationSettings generationSettings)
-        {
-            bool isInsideChunk = neighborLocalX >= 0
-                && neighborLocalX < WorldGridConstants.LogicalChunkSize
-                && neighborLocalY >= 0
-                && neighborLocalY < WorldGridConstants.LogicalChunkSize;
-            if (isInsideChunk)
-            {
-                int neighborIndex = WorldGrid.ToTileIndex(neighborLocalX, neighborLocalY);
-                return tiles[neighborIndex].Ground == GroundType.RockWall;
-            }
-
-            if (!WorldGrid.TryToWorldTileCoordinate(
-                    coordinate.X,
-                    coordinate.Y,
-                    neighborLocalX,
-                    neighborLocalY,
-                    out int worldTileX,
-                    out int worldTileY))
-            {
-                // ワールド外を岩壁として扱うと端の影が閉じて見えるため、存在しない隣接セルは空地側として扱います。
-                return false;
-            }
-
-            return DeterministicChunkGenerator.IsRockWall(
-                generationSettings,
-                worldTileX,
-                worldTileY);
+            // 影の連続濃度は別処理です。ここでは資源を隠すかどうかだけを従来と同じ上下左右で決めます。
+            bool touchesOpenTile =
+                TerrainNeighborHaloUtility.GetTile(localX - 1, localY, tiles, halo).Ground != GroundType.RockWall
+                || TerrainNeighborHaloUtility.GetTile(localX + 1, localY, tiles, halo).Ground != GroundType.RockWall
+                || TerrainNeighborHaloUtility.GetTile(localX, localY - 1, tiles, halo).Ground != GroundType.RockWall
+                || TerrainNeighborHaloUtility.GetTile(localX, localY + 1, tiles, halo).Ground != GroundType.RockWall;
+            return touchesOpenTile ? RockWallAppearance.Exposed : RockWallAppearance.Interior;
         }
 
         /// <summary>

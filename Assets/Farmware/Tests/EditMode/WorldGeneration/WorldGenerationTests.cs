@@ -115,50 +115,26 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(worldTileY, Is.Zero);
         }
 
-        /// <summary>
-        /// ワールド外となる表示用隣接セルを準備し、境界ハイライトでは非接続値、岩壁影では空地として扱うことを保証します。
-        /// privateメソッドを直接呼ぶことで、範囲検査APIを追加してもPresenterが未検査変換へ戻る退行を検出します。
-        /// </summary>
+        /// <summary>ワールド外の表示用外周を生成し、土地・岩壁へ接続しない水域値になることを保証します。</summary>
         /// <param name="chunkCoordinate">正または負の端にある論理チャンク座標です。</param>
-        /// <param name="outsideLocalCoordinate">表示処理が参照するワールド外ローカル座標です。</param>
-        [TestCase(WorldGridConstants.MinimumLogicalChunkCoordinate, -8)]
-        [TestCase(WorldGridConstants.MaximumLogicalChunkCoordinate, 71)]
-        public void ChunkTilemapPresenter_WorldEdge_TreatsOutsideNeighborAsDisconnected(
-            int chunkCoordinate,
-            int outsideLocalCoordinate)
+        /// <param name="outsideLocalCoordinate">外周1セルのローカル座標です。</param>
+        [TestCase(WorldGridConstants.MinimumLogicalChunkCoordinate, -1)]
+        [TestCase(WorldGridConstants.MaximumLogicalChunkCoordinate, 64)]
+        public void TerrainNeighborHalo_WorldEdge_TreatsOutsideNeighborAsDisconnected(
+            int chunkCoordinate, int outsideLocalCoordinate)
         {
             using World world = new World("WorldEdgePresentationNeighborTests");
             Entity entity = world.EntityManager.CreateEntity();
             DynamicBuffer<GeneratedTile> tiles = world.EntityManager.AddBuffer<GeneratedTile>(entity);
+            using var halo = new Unity.Collections.NativeArray<GeneratedTile>(TerrainNeighborHaloUtility.TileCount,
+                Unity.Collections.Allocator.TempJob);
             WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
-                WorldSeedUtility.FromString("world-edge-presentation-neighbor-test"),
-                1);
-            MethodInfo getGeneratedTile = typeof(ChunkTilemapPresenter).GetMethod(
-                "GetGeneratedTile",
-                BindingFlags.NonPublic | BindingFlags.Static);
-            MethodInfo isRockWallNeighbor = typeof(ChunkTilemapPresenter).GetMethod(
-                "IsRockWallNeighbor",
-                BindingFlags.NonPublic | BindingFlags.Static);
-
-            Assert.That(getGeneratedTile, Is.Not.Null);
-            Assert.That(isRockWallNeighbor, Is.Not.Null);
-            object[] arguments =
-            {
-                new ChunkCoordinate(chunkCoordinate, chunkCoordinate),
-                outsideLocalCoordinate,
-                0,
-                tiles,
-                settings
-            };
-
-            GeneratedTile presentationNeighbor = (GeneratedTile)getGeneratedTile.Invoke(null, arguments);
-            bool isRockWall = (bool)isRockWallNeighbor.Invoke(null, arguments);
-
-            Assert.That(
-                presentationNeighbor.Ground,
-                Is.EqualTo(GroundType.Water),
-                "存在しない隣接セルは、土地・岩壁のどちらにも接続しない表示専用値にする必要があります。");
-            Assert.That(isRockWall, Is.False);
+                WorldSeedUtility.FromString("world-edge-presentation-neighbor-test"), 1);
+            TerrainNeighborHaloUtility.Fill(settings, new ChunkCoordinate(chunkCoordinate, chunkCoordinate),
+                0, WorldGridConstants.SubChunksPerChunk, halo);
+            GeneratedTile neighbor = TerrainNeighborHaloUtility.GetTile(outsideLocalCoordinate, 0, tiles, halo);
+            Assert.That(neighbor.Ground, Is.EqualTo(GroundType.Water),
+                "int端の外側は土地・岩壁のどちらにも接続せず、資源を壁の背後へ隠さない値にします。");
         }
 
         /// <summary>

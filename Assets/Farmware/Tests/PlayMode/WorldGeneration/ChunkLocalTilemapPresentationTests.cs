@@ -241,6 +241,26 @@ namespace Farmware.WorldGeneration.PlayModeTests
         }
 
         /// <summary>
+        /// Presenterを停止・再開しても外周の保存領域を再利用し、破棄時には所有Native配列を解放することを保証します。
+        /// 配列の借用コピーは破棄せず、所有者が更新したフィールドを毎回読み直して検証します。
+        /// </summary>
+        [Test]
+        public void TerrainNeighborHalo_PresenterLifetime_ReusesUntilDestroyed()
+        {
+            FieldInfo field = Field("terrainNeighborHaloBuffer");
+            var halo = (Unity.Collections.NativeArray<GeneratedTile>)field.GetValue(presenter);
+            Assert.That(halo.IsCreated, Is.True);
+            Assert.That(halo.Length, Is.EqualTo(TerrainNeighborHaloUtility.TileCount));
+            presenter.enabled = false;
+            presenter.enabled = true;
+            halo = (Unity.Collections.NativeArray<GeneratedTile>)field.GetValue(presenter);
+            Assert.That(halo.IsCreated, Is.True);
+            Object.DestroyImmediate(gridObject);
+            halo = (Unity.Collections.NativeArray<GeneratedTile>)field.GetValue(presenter);
+            Assert.That(halo.IsCreated, Is.False, "OnDestroyでPresenter所有の外周配列を解放する必要があります。");
+        }
+
+        /// <summary>
         /// テスト対象の非公開Fieldを取得し、名前の変更で検証が抜け落ちる場合は明示的に失敗させます。
         /// </summary>
         /// <param name="name">PresenterのField名です。</param>

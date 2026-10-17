@@ -60,7 +60,7 @@
 
 性能の一次計測条件と結果は[MAP-02D 性能計測](./Map02DPerformanceReport.md)を参照する。計測用の拡大Viewportは製品の最大ズームではない。また、原点変更なしの対照や60FPS目標は計測時だけの条件であり、Sceneへ保存しない。通常の再現確認は既定の512タイル閾値と12／36タイル/秒で行う。
 
-Profilerでは、全体の`Farmware.WorldGeneration.TilemapPresentation`と原点変更本体の`Farmware.WorldGeneration.FloatingOriginRebase`に加え、`DisplayOriginSynchronization`、`PresentationWorkCollection`、`SubChunkClassification`、`SubChunkTilemapWrite`、`SubChunkTilemapClear`、`RockWallShadowBuild`を確認できる。岩壁影は`RockWallShadowMask`、`RockWallShadowOpacity`、`RockWallShadowGeometry`、`RockWallShadowUpload`へ分かれ、自動原点変更で既存Meshを移した時間は`RockWallShadowReposition`へ記録する。いずれも名前空間接頭辞は`Farmware.WorldGeneration.`である。子Markerは親Markerの時間に含まれるため、合算時に二重計上しない。
+Profilerでは、全体の`Farmware.WorldGeneration.TilemapPresentation`と原点変更本体の`Farmware.WorldGeneration.FloatingOriginRebase`に加え、`DisplayOriginSynchronization`、`PresentationWorkCollection`、`TerrainNeighborHaloBuild`、`SubChunkClassification`、`SubChunkTilemapWrite`、`SubChunkTilemapClear`、`RockWallShadowBuild`を確認できる。岩壁影は`RockWallShadowMask`、`RockWallShadowOpacity`、`RockWallShadowGeometry`、`RockWallShadowUpload`へ分かれ、自動原点変更で既存Meshを移した時間は`RockWallShadowReposition`へ記録する。いずれも名前空間接頭辞は`Farmware.WorldGeneration.`である。子Markerは親Markerの時間に含まれるため、合算時に二重計上しない。
 
 地形表示再利用の比較は、PlayMode中に`World Grid / Ground Tilemap`の`ChunkTilemapPresenter`で`Use Chunk Local Tilemaps`をONにして行う。既定はOFFで、比較用変更をSceneへ保存しない。切替直後は旧表示を消去して通常予算で再反映するため、表示完了を待ってから移動を始める。新方式では実行時の`Chunk Local Terrain`以下へチャンク内0〜63のTilemapを作り、自動原点変更は`ChunkTilemapReposition`で位置更新だけを計測する。消去済みの空きプール上限は`Maximum Pooled Chunk Presentations`（候補8）であり、可視範囲やECS保持数の上限ではない。停止・無効化・World切替で実行時表示を破棄する。
 
@@ -69,6 +69,10 @@ Profilerでは、全体の`Farmware.WorldGeneration.TilemapPresentation`と原�
 生成の非同期公開比較では、`ChunkGenerationPublish`が完了確認後のECSコピー、`ChunkGenerationSchedule`が作業枠確保・Job投入を計測する。接頭辞はいずれも`Farmware.WorldGeneration.`である。`PresentationWorkCollection`と`ChunkStreaming`も同時に確認し、生成Jobの待ちが別の区間へ移っていないことを調べる。Workerの生成は`GenerateChunkJob (Burst)`で確認する。開発者可視化は従来どおり`ReadyToApply`／`Active`の完成Bufferだけを読むため、生成中の作業配列は表示しない。新規メニューやプレイヤー用キーは追加しない。
 
 岩壁影マスクの改善後も同じ`RockWallShadowMask`で比較する。80×80のマスク作成は同期Burst `IJob.Run`でメインスレッド上に完了し、Workerへ未完了Jobを残す方式ではない。親の`RockWallShadowBuild`、後続の`RockWallShadowOpacity`も確認し、Native配列参照への変更で後続処理へ負荷が移っていないか調べる。停止・再開時のNativeメモリ寿命、チャンク境界の影、原点変更前後の位置も確認する。Rock Wall開発者可視化の生成式・凡例・キー／メニューは変更しない。
+
+影なしの停止を調べる場合は、`SubChunkClassification`と`SubChunkTilemapWrite`の同フレーム内の回数も確認する。書込MarkerにはTilemapの取得・再利用処理も含まれ、子の`ITilemap.FindAllRefreshPositions`だけを全書込時間とはしない。フレーム間隔はMain／Render ThreadのTimelineで`WaitForTargetFPS`、描画コマンド待ち、Renderer更新と照合し、表示Markerの時間やGPU時間と混同しない。CSV／PNGの出力と終了時の大きな停止は移動区間から除外する。詳しい帰属と制約は[影なしのスパイク切り分け](./Map02DPerformanceReport.md#影構築なしの表示スパイクとフレーム待機の切り分け)を参照する。製品の目標FPSや予算の既定値は、この診断だけで変更しない。
+
+分類用外周の改善後は、前処理の`TerrainNeighborHaloBuild`と後続の`SubChunkClassification`を合わせて比較する。現在フレームで同じチャンクへ反映する連続サブチャンクの外周だけを同期Burstで生成し、同じバッチで再利用する。フレーム間の値は再使用せず、内部セルは常に現在のECS Bufferを読む。境界ハイライト、露出岩壁の資源、岩壁手前の資源レイヤー、負座標、方式切替・停止再開を確認する。キー、メニュー、カメラ、生成式、開発者可視化の凡例は変更しない。
 
 ### 2.2 World Generation Sprite Atlas Prebuild
 
