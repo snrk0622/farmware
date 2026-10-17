@@ -62,6 +62,10 @@
 
 Profilerでは、全体の`Farmware.WorldGeneration.TilemapPresentation`と原点変更本体の`Farmware.WorldGeneration.FloatingOriginRebase`に加え、`DisplayOriginSynchronization`、`PresentationWorkCollection`、`SubChunkClassification`、`SubChunkTilemapWrite`、`SubChunkTilemapClear`、`RockWallShadowBuild`を確認できる。岩壁影は`RockWallShadowMask`、`RockWallShadowOpacity`、`RockWallShadowGeometry`、`RockWallShadowUpload`へ分かれ、自動原点変更で既存Meshを移した時間は`RockWallShadowReposition`へ記録する。いずれも名前空間接頭辞は`Farmware.WorldGeneration.`である。子Markerは親Markerの時間に含まれるため、合算時に二重計上しない。
 
+地形表示再利用の比較は、PlayMode中に`World Grid / Ground Tilemap`の`ChunkTilemapPresenter`で`Use Chunk Local Tilemaps`をONにして行う。既定はOFFで、比較用変更をSceneへ保存しない。切替直後は旧表示を消去して通常予算で再反映するため、表示完了を待ってから移動を始める。新方式では実行時の`Chunk Local Terrain`以下へチャンク内0〜63のTilemapを作り、自動原点変更は`ChunkTilemapReposition`で位置更新だけを計測する。消去済みの空きプール上限は`Maximum Pooled Chunk Presentations`（候補8）であり、可視範囲やECS保持数の上限ではない。停止・無効化・World切替で実行時表示を破棄する。
+
+比較方式では、通常の原点変更2地点に加え、Y=64付近の上下チャンク境界、岩壁と影、水面、F3/F4、開発者可視化を確認する。現行URP 2DのOrthographic距離ソートへ小さい相対Z差を与えて上下順を保っているため、Camera方向や透明ソート設定を変える場合は再検証する。最大ズームとGPU / SetPass評価が残るため、既定方式への採用は未確定である。
+
 ### 2.2 World Generation Sprite Atlas Prebuild
 
 - 実装: `WorldGenerationSpriteAtlasPrebuildGenerator`

@@ -1,4 +1,5 @@
 // このファイルは、ECSで生成済みの地形・資源チャンクデータを、バイオームだけを示す一体型土地、岩壁Sprite、液面を含む複数Tilemapへ16×16サブチャンク単位で反映・消去します。
+// 既定の共有Tilemap方式と、チャンクごとのローカルTilemapを自動原点変更で再利用する比較方式を切り替えられます。
 // Tilemapは表示専用キャッシュであり、地形はGeneratedTile、資源はGeneratedResourceTileをゲーム状態の正として参照します。
 
 using System.Collections.Generic;
@@ -72,6 +73,10 @@ namespace Farmware.WorldGeneration.Presentation
         private static readonly ProfilerMarker RockWallShadowRepositionProfilerMarker =
             new ProfilerMarker("Farmware.WorldGeneration.RockWallShadowReposition");
 
+        // 比較方式で、タイル内容を変更せず既存表示ルートだけを移動した時間です。
+        private static readonly ProfilerMarker ChunkTilemapRepositionProfilerMarker =
+            new ProfilerMarker("Farmware.WorldGeneration.ChunkTilemapReposition");
+
         // URP 2D Rendererで頂点色と透明度を扱えるShader名です。利用できない環境では標準Sprite Shaderへフォールバックします。
         private const string PrimaryRockWallShadowShaderName =
             "Universal Render Pipeline/2D/Sprite-Unlit-Default";
@@ -119,6 +124,26 @@ namespace Farmware.WorldGeneration.Presentation
         // Cameraと全Tilemapで共有する表示原点を提供します。Tilemapセルへ絶対座標を直接書かないために使用します。
         [Tooltip("CameraとTilemapで共有する表示原点の所有者です。未指定時は絶対原点(0, 0)を使用します。")]
         [SerializeField] private CameraPanController cameraPanController;
+
+        // 性能比較用の切替です。採用判断まではSceneの既定方式を変更せず、PlayMode中の比較にだけ使用します。
+        [Tooltip("比較用です。有効にすると64×64チャンクごとのTilemapを保持し、自動原点変更では位置だけ更新します。切替時は表示を作り直します。")]
+        [SerializeField] private bool useChunkLocalTilemaps;
+
+        // 消去済みの表示単位だけを保持する上限です。可視チャンク数の上限やSimulationの保持範囲ではありません。
+        [Min(0)]
+        [Tooltip("消去済みチャンク表示を再利用する空きプールの上限（チャンク数）です。小さくするとメモリを減らせますが、再作成が増えます。")]
+        [SerializeField] private int maximumPooledChunkPresentations = 8;
+
+        // Inspectorの要求と実際にセルを書いた方式を区別し、切替前の方式で古い表示を消去します。
+        private bool chunkLocalTilemapsAreActive;
+
+        // 可視・部分構築・消去途中の表示単位を論理座標で保持します。Simulation状態は所有しません。
+        private readonly Dictionary<ChunkCoordinate, ChunkLocalTilemapPresentation> chunkLocalPresentations =
+            new Dictionary<ChunkCoordinate, ChunkLocalTilemapPresentation>();
+
+        // 全16サブチャンクの消去が完了した表示単位だけを再貸し出しする、上限付き空きプールです。
+        private readonly Stack<ChunkLocalTilemapPresentation> pooledChunkLocalPresentations =
+            new Stack<ChunkLocalTilemapPresentation>();
 
         // 草原Biomeの土地へ使用するTileです。プレイヤー表示にはSoilTypeを反映せず、バイオームの識別だけに使います。
         [Tooltip("草原バイオームの土地に表示するTileです。SoilTypeによる見た目の差は付けません。")]
@@ -313,6 +338,22 @@ namespace Farmware.WorldGeneration.Presentation
 
         // presentedDisplayOriginを初期化済みか示し、絶対原点(0, 0)自体も有効値として区別します。
         private bool hasPresentedDisplayOrigin;
+
+        /// <summary>
+        /// 比較実行時に表示方式を切り替えます。旧方式の表示を消してから切り替え、次のUpdateでECSから再反映します。
+        /// </summary>
+        /// <param name="enabled">チャンク内ローカルTilemapを使用する場合はtrueです。</param>
+        public void ConfigureChunkLocalPresentation(bool enabled)
+        {
+            if (chunkLocalTilemapsAreActive == enabled && useChunkLocalTilemaps == enabled)
+            {
+                return;
+            }
+
+            ClearAllPresentedChunksImmediately();
+            useChunkLocalTilemaps = enabled;
+            chunkLocalTilemapsAreActive = enabled;
+        }
 
         /// <summary>
         /// Editor構築ツールまたはテストから、地形・資源TilemapとBiomeごとの基準Tileをまとめて設定します。
@@ -620,6 +661,12 @@ namespace Farmware.WorldGeneration.Presentation
         {
             using (PresentationProfilerMarker.Auto())
             {
+                // Inspectorでの比較切替も同じ消去経路を通し、異なるセル座標方式を混在させません。
+                if (useChunkLocalTilemaps != chunkLocalTilemapsAreActive)
+                {
+                    ConfigureChunkLocalPresentation(useChunkLocalTilemaps);
+                }
+
                 if (targetTilemap == null
                     || liquidBaseTilemap == null
                     || resourceTilemap == null
@@ -652,7 +699,8 @@ namespace Farmware.WorldGeneration.Presentation
                     CollectPresentationWork(observer);
                 }
 
-                if (displayOriginChange != DisplayOriginChangeKind.None)
+                if (displayOriginChange != DisplayOriginChangeKind.None
+                    && !(chunkLocalTilemapsAreActive && displayOriginChange == DisplayOriginChangeKind.Automatic))
                 {
                     using (FloatingOriginRebaseProfilerMarker.Auto())
                     {
@@ -676,7 +724,8 @@ namespace Farmware.WorldGeneration.Presentation
 
         /// <summary>
         /// Camera側の表示原点変更を検出し、旧相対セルを片付けて新しい原点で再収集できる状態へ戻します。
-        /// 自動変更では画面外になった旧セルを分割消去へ移し、明示テレポートでは重なりを避けるため即時消去します。
+        /// 既定方式の自動変更では旧セルを分割消去へ移します。比較方式では既存表示の位置だけ更新し、反映進捗を保ちます。
+        /// 明示テレポートでは両方式とも重なりを避けるため即時消去します。
         /// </summary>
         /// <returns>変更なし、自動変更、明示変更のいずれかです。</returns>
         private DisplayOriginChangeKind SynchronizeDisplayOrigin()
@@ -706,9 +755,30 @@ namespace Farmware.WorldGeneration.Presentation
                     && cameraPanController.LastDisplayOriginChangeWasAutomatic;
                 if (isAutomaticRebase)
                 {
-                    MoveCurrentPresentationToStaleClearQueue(
-                        presentedDisplayOrigin,
-                        currentOrigin);
+                    if (chunkLocalTilemapsAreActive)
+                    {
+                        // 同じ論理チャンクの内容は変化しないため、完成済み集合と構築途中の番号を保持します。
+                        // 原点変更だけを理由に分類・SetTilesBlock・旧セル消去を予約しません。
+                        using (FloatingOriginRebaseProfilerMarker.Auto())
+                        {
+                            using (ChunkTilemapRepositionProfilerMarker.Auto())
+                            {
+                                foreach (KeyValuePair<ChunkCoordinate, ChunkLocalTilemapPresentation> pair in chunkLocalPresentations)
+                                {
+                                    pair.Value.Reposition(CalculateRockWallShadowMinimumCell(pair.Key, currentOrigin));
+                                }
+                            }
+
+                            PrepareRockWallShadowsForAutomaticRebase(currentOrigin);
+                            reusableRockWallShadowCoordinates.Clear();
+                        }
+                    }
+                    else
+                    {
+                        MoveCurrentPresentationToStaleClearQueue(
+                            presentedDisplayOrigin,
+                            currentOrigin);
+                    }
                 }
                 else
                 {
@@ -806,6 +876,7 @@ namespace Farmware.WorldGeneration.Presentation
         {
             DisposeQueries();
             DestroyAllRockWallShadows();
+            DestroyChunkLocalPresentations();
             DestroyGeneratedBoundaryHighlightTiles();
 
             // 各影Meshは共有Materialを所有しないため、Presenterが作成したMaterialだけを最後に1回破棄します。
@@ -986,6 +1057,7 @@ namespace Farmware.WorldGeneration.Presentation
                     clearQueue.Dequeue();
                     pendingClearCoordinates.Remove(progress.Coordinate);
                     displayedCoordinates.Remove(progress.Coordinate);
+                    ReleaseChunkLocalPresentation(progress.Coordinate);
                 }
             }
 
@@ -1226,31 +1298,31 @@ namespace Farmware.WorldGeneration.Presentation
             using (SubChunkTilemapWriteProfilerMarker.Auto())
             {
                 BoundsInt bounds = CreateSubChunkBounds(coordinate, subChunkIndex);
-                targetTilemap.SetTilesBlock(bounds, subChunkTileBuffer);
-                liquidBaseTilemap.SetTilesBlock(bounds, liquidBaseSubChunkTileBuffer);
-                resourceTilemap.SetTilesBlock(bounds, resourceSubChunkTileBuffer);
-                resourceBehindRockWallTilemap.SetTilesBlock(
+                GetTilemapForChunk(coordinate, targetTilemap, true).SetTilesBlock(bounds, subChunkTileBuffer);
+                GetTilemapForChunk(coordinate, liquidBaseTilemap, true).SetTilesBlock(bounds, liquidBaseSubChunkTileBuffer);
+                GetTilemapForChunk(coordinate, resourceTilemap, true).SetTilesBlock(bounds, resourceSubChunkTileBuffer);
+                GetTilemapForChunk(coordinate, resourceBehindRockWallTilemap, true).SetTilesBlock(
                     bounds,
                     resourceBehindRockWallSubChunkTileBuffer);
                 if (liquidAnimationTilemap != null)
                 {
-                    liquidAnimationTilemap.SetTilesBlock(bounds, liquidAnimationSubChunkTileBuffer);
+                    GetTilemapForChunk(coordinate, liquidAnimationTilemap, true).SetTilesBlock(bounds, liquidAnimationSubChunkTileBuffer);
                 }
 
                 if (rockWallTilemap != null)
                 {
-                    rockWallTilemap.SetTilesBlock(bounds, rockWallSubChunkTileBuffer);
+                    GetTilemapForChunk(coordinate, rockWallTilemap, true).SetTilesBlock(bounds, rockWallSubChunkTileBuffer);
                 }
 
                 if (rockWallResourceTilemap != null)
                 {
-                    rockWallResourceTilemap.SetTilesBlock(bounds, rockWallResourceSubChunkTileBuffer);
+                    GetTilemapForChunk(coordinate, rockWallResourceTilemap, true).SetTilesBlock(bounds, rockWallResourceSubChunkTileBuffer);
                 }
 
-                landBoundaryHighlightTilemap.SetTilesBlock(
+                GetTilemapForChunk(coordinate, landBoundaryHighlightTilemap, true).SetTilesBlock(
                     bounds,
                     landBoundaryHighlightSubChunkTileBuffer);
-                rockWallBoundaryHighlightTilemap.SetTilesBlock(
+                GetTilemapForChunk(coordinate, rockWallBoundaryHighlightTilemap, true).SetTilesBlock(
                     bounds,
                     rockWallBoundaryHighlightSubChunkTileBuffer);
             }
@@ -1292,6 +1364,19 @@ namespace Farmware.WorldGeneration.Presentation
 
             using (SubChunkTilemapClearProfilerMarker.Auto())
             {
+                if (chunkLocalTilemapsAreActive)
+                {
+                    if (chunkLocalPresentations.TryGetValue(coordinate, out ChunkLocalTilemapPresentation presentation))
+                    {
+                        // 消去中の断片が画面へ残らないよう、最初に非表示にしてから通常予算でセルを空にします。
+                        presentation.ClearSubChunk(
+                            CreateSubChunkBounds(coordinate, subChunkIndex),
+                            emptySubChunkTileBuffer);
+                    }
+
+                    return;
+                }
+
                 BoundsInt bounds = CreateSubChunkBounds(
                     coordinate,
                     subChunkIndex,
@@ -1425,21 +1510,117 @@ namespace Farmware.WorldGeneration.Presentation
             }
 
             DestroyAllRockWallShadows();
+            // 即時消去は方式切替・テレポート・World切替に限ります。空きプールも破棄して設定やWorldを持ち越しません。
+            DestroyChunkLocalPresentations();
             ResetPresentationCaches();
         }
 
         /// <summary>
-        /// 論理チャンク座標とサブチャンク番号から、Tilemapセル用の16×16 BoundsIntを作ります。
+        /// 論理チャンク座標とサブチャンク番号から、現在の方式に対応する16×16 BoundsIntを作ります。
+        /// 比較方式では0〜63のチャンク内セルを使い、原点変更によってセル位置を変更しません。
         /// </summary>
         /// <param name="coordinate">親となる論理チャンク座標です。</param>
         /// <param name="subChunkIndex">行優先の0〜15サブチャンク番号です。</param>
         /// <returns>Z=0平面にある16×16×1セルの範囲です。</returns>
         private BoundsInt CreateSubChunkBounds(ChunkCoordinate coordinate, int subChunkIndex)
         {
+            if (chunkLocalTilemapsAreActive)
+            {
+                return new BoundsInt(
+                    (subChunkIndex % WorldGridConstants.SubChunksPerAxis) * WorldGridConstants.SubChunkSize,
+                    (subChunkIndex / WorldGridConstants.SubChunksPerAxis) * WorldGridConstants.SubChunkSize,
+                    0,
+                    WorldGridConstants.SubChunkSize,
+                    WorldGridConstants.SubChunkSize,
+                    1);
+            }
+
             return CreateSubChunkBounds(
                 coordinate,
                 subChunkIndex,
                 presentedDisplayOrigin);
+        }
+
+        /// <summary>
+        /// 新しい表示単位を作るときだけ、Scene上の9レイヤーを固定順で取得します。毎フレームの反映・消去では配列を作りません。
+        /// </summary>
+        /// <returns>表示設定の見本です。セル内容はコピーしません。</returns>
+        private Tilemap[] GetTilemapTemplates()
+        {
+            return new[] { targetTilemap, liquidBaseTilemap, resourceTilemap, resourceBehindRockWallTilemap,
+                liquidAnimationTilemap, rockWallTilemap, rockWallResourceTilemap,
+                landBoundaryHighlightTilemap, rockWallBoundaryHighlightTilemap };
+        }
+
+        /// <summary>
+        /// 現在の比較方式に対応する書き込み先を取得します。新方式の初回反映だけ空き表示を借ります。
+        /// </summary>
+        /// <param name="coordinate">対象の絶対チャンク座標です。</param>
+        /// <param name="template">Scene上のレイヤー設定見本です。</param>
+        /// <param name="createIfMissing">未割当チャンクへ表示単位を貸し出してよい場合はtrueです。</param>
+        /// <returns>旧方式では見本そのもの、新方式ではチャンク専用Tilemapです。</returns>
+        private Tilemap GetTilemapForChunk(ChunkCoordinate coordinate, Tilemap template, bool createIfMissing)
+        {
+            if (!chunkLocalTilemapsAreActive || template == null)
+            {
+                return template;
+            }
+
+            if (!chunkLocalPresentations.TryGetValue(coordinate, out ChunkLocalTilemapPresentation presentation))
+            {
+                if (!createIfMissing)
+                {
+                    return null;
+                }
+
+                presentation = pooledChunkLocalPresentations.Count > 0
+                    ? pooledChunkLocalPresentations.Pop()
+                    : new ChunkLocalTilemapPresentation(GetTilemapTemplates());
+                presentation.Reposition(CalculateRockWallShadowMinimumCell(coordinate, presentedDisplayOrigin));
+                presentation.Root.SetActive(true);
+                chunkLocalPresentations.Add(coordinate, presentation);
+            }
+
+            return presentation.GetTilemap(template);
+        }
+
+        /// <summary>
+        /// 全16サブチャンク消去後だけ表示単位を返却し、別チャンクへ古いセルが混ざることを防ぎます。
+        /// </summary>
+        /// <param name="coordinate">消去を終えた論理チャンク座標です。</param>
+        private void ReleaseChunkLocalPresentation(ChunkCoordinate coordinate)
+        {
+            if (!chunkLocalPresentations.Remove(coordinate, out ChunkLocalTilemapPresentation presentation))
+            {
+                return;
+            }
+
+            presentation.Root.SetActive(false);
+            if (pooledChunkLocalPresentations.Count < Mathf.Max(0, maximumPooledChunkPresentations))
+            {
+                pooledChunkLocalPresentations.Push(presentation);
+            }
+            else
+            {
+                presentation.Destroy();
+            }
+        }
+
+        /// <summary>
+        /// 無効化、World切替、方式切替、破棄で、貸し出し中と空きプールの実行時表示をすべて破棄します。
+        /// </summary>
+        private void DestroyChunkLocalPresentations()
+        {
+            foreach (ChunkLocalTilemapPresentation presentation in chunkLocalPresentations.Values)
+            {
+                presentation.Destroy();
+            }
+
+            chunkLocalPresentations.Clear();
+            while (pooledChunkLocalPresentations.Count > 0)
+            {
+                pooledChunkLocalPresentations.Pop().Destroy();
+            }
         }
 
         /// <summary>

@@ -108,6 +108,12 @@ Sprite Packer ModeがV2であること、土地Atlasが7バイオームの本番
 
 ### 3.3 PlayMode: `Farmware.WorldGeneration.PlayModeTests`
 
+#### `ChunkLocalTilemapPresentationTests`
+
+既定OFFの比較方式について、正方向・負方向と斜め・遠方の自動原点変更で同じTilemap・セル内容・完成済み集合・部分反映番号を保持することを検証する。消去途中ではプールへ返さず、全16サブチャンク消去後だけ空の表示単位を別チャンクへ再利用すること、プール上限0、方式切替、World切替で表示とプールを残さないことも保証する。上下チャンクの相対Z順は現行Orthographic描画の継ぎ目対策であり、XY位置とSorting Orderを変えないことを確認する。実際の描画ピクセル、GPU、メモリ帰属は別途Gameビューと性能計測で確認する。
+
+2026-10-17に比較方式の7ケースを含むPlayMode全38件と、関連ワールド生成EditMode 163件がUnity 6000.3.8f1で成功した。原点変更前後と拡大・負座標・遠方の44画像確認、前面EditorのCPU比較、未検証事項は[性能計測レポート](./Map02DPerformanceReport.md)を参照する。
+
 #### `WorldGenerationScenePlayModeTests`
 
 | 分類 | 用途 |
