@@ -279,6 +279,47 @@ namespace Farmware.WorldGeneration.Tests
             }
         }
 
+        /// <summary>
+        /// 固定Tick停止中にPresentationが完成チャンクをActiveまたはInactiveへ進めても、
+        /// 再開後の初回Tickで地域状態と動物を作り、表示状態をSimulationの生存条件にしないことを保証します。
+        /// </summary>
+        /// <param name="completedPhase">Presentationによる反映後を再現する完成チャンク状態です。</param>
+        [TestCase(ChunkGenerationPhase.Active)]
+        [TestCase(ChunkGenerationPhase.Inactive)]
+        public void InitializationSystem_PopulatesCompletedChunkAfterPresentationTransition(
+            ChunkGenerationPhase completedPhase)
+        {
+            BlobAssetReference<DefinitionCatalogBlob> definitionCatalog = default;
+            BlobAssetReference<AnimalSpeciesCatalogBlob> animalCatalog = default;
+            using World world = new World("Animal Population Presentation Transition Test");
+            try
+            {
+                CreateCatalogs(out definitionCatalog, out animalCatalog);
+                PrepareWorldSingletons(world, animalCatalog);
+                Entity chunkEntity = CreateReadyChunk(world.EntityManager, 0, 0);
+
+                // 固定Tickが止まっている間に表示処理だけが完了した状況を、System実行前の状態変更で再現します。
+                ChunkGenerationStatus status =
+                    world.EntityManager.GetComponentData<ChunkGenerationStatus>(chunkEntity);
+                status.Phase = completedPhase;
+                world.EntityManager.SetComponentData(chunkEntity, status);
+
+                SystemHandle system =
+                    world.GetOrCreateSystem<AnimalPopulationInitializationSystem>();
+                system.Update(world.Unmanaged);
+
+                Assert.That(CountRegionStates(world.EntityManager), Is.EqualTo(1));
+                Assert.That(CountAnimals(world.EntityManager), Is.EqualTo(8));
+                Assert.That(
+                    world.EntityManager.HasComponent<AnimalPopulationRegionProcessed>(chunkEntity),
+                    Is.True);
+            }
+            finally
+            {
+                DisposeCatalogs(definitionCatalog, animalCatalog);
+            }
+        }
+
         /// <summary>指定Seedと地域座標からテスト用初期地域状態を作ります。</summary>
         private static AnimalPopulationRegionState CreateRegionState(
             ulong seed,

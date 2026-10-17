@@ -72,10 +72,18 @@ namespace Farmware.WorldGeneration.Animals
                          .WithNone<AnimalPopulationRegionProcessed>()
                          .WithEntityAccess())
             {
-                if (statusReference.ValueRO.Phase != ChunkGenerationPhase.ReadyToApply)
+                ChunkGenerationPhase phase = statusReference.ValueRO.Phase;
+                if (phase != ChunkGenerationPhase.ReadyToApply
+                    && phase != ChunkGenerationPhase.Active
+                    && phase != ChunkGenerationPhase.Inactive)
                 {
                     continue;
                 }
+
+                // 一時停止中は固定Tickが止まっていてもPresentationが動き、完成チャンクを
+                // ReadyToApplyからActive、さらに画面外ならInactiveへ進める場合があります。
+                // 3状態はいずれも4096タイルの確定Bufferを保持するため、表示状態にかかわらず
+                // 未処理地域を初期化し、再開後も動物が欠落しないようにします。
 
                 pendingRegions.Add(new PendingRegion
                 {
