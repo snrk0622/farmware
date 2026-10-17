@@ -2,6 +2,8 @@
   "name": "Farmware.WorldGeneration.Editor",
   "rootNamespace": "Farmware.WorldGeneration.Editor",
   "references": [
+    "Farmware.Simulation",
+    "Farmware.Authoring",
     "Farmware.WorldGeneration.Runtime",
     "Farmware.WorldGeneration.Authoring",
     "Farmware.WorldGeneration.Presentation",

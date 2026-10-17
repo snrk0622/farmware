@@ -3,6 +3,7 @@
   "rootNamespace": "Farmware.WorldGeneration.Tests",
   "references": [
     "Farmware.Simulation",
+    "Farmware.Authoring",
     "Farmware.WorldGeneration.Runtime",
     "Farmware.WorldGeneration.Authoring",
     "Farmware.WorldGeneration.Editor",

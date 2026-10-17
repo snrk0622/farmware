@@ -1,10 +1,12 @@
-// このファイルは、SampleSceneを実際に再生し、初期カメラ位置、ECS地形・資源生成、Tilemap表示までの縦切りを検証します。
+// このファイルは、SampleSceneを実際に再生し、初期動物種の静的定義、初期カメラ位置、ECS地形・資源生成、Tilemap表示までの縦切りを検証します。
 // F3/F4と開発者用表示を含め、純粋計算では確認できないGameObject・SubScene・Presentation間の参照切れを検出します。
 // 遠距離の往復ではFloating Originとチャンク再生成の継続性を確認し、既存Profiler Markerの比較値も記録します。
 
 using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
+using Farmware.Simulation;
+using Farmware.Simulation.Animals;
 using Farmware.WorldGeneration.Presentation;
 using NUnit.Framework;
 using Unity.Collections;
@@ -20,7 +22,7 @@ using UnityEngine.Tilemaps;
 namespace Farmware.WorldGeneration.PlayModeTests
 {
     /// <summary>
-    /// SampleSceneの起動後にデバッグ表示、生成設定Singleton、チャンクEntity、地形・資源Tileが正しく連携することを保証します。
+    /// SampleSceneの起動後に動物種定義、デバッグ表示、生成設定Singleton、チャンクEntity、地形・資源Tileが正しく連携することを保証します。
     /// Unity Test RunnerのPlayModeテストから実行されます。
     /// </summary>
     public sealed class WorldGenerationScenePlayModeTests
@@ -2405,6 +2407,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
 
             World world = null;
             EntityQuery settingsQuery = default;
+            EntityQuery animalCatalogQuery = default;
             EntityQuery locationQuery = default;
             EntityQuery chunkQuery = default;
             bool queriesCreated = false;
@@ -2424,6 +2427,9 @@ namespace Farmware.WorldGeneration.PlayModeTests
                         ComponentType.ReadOnly<WorldGenerationSettings>(),
                         ComponentType.ReadOnly<ResourceGenerationSettings>(),
                         ComponentType.ReadOnly<ChunkStreamingSettings>());
+                    animalCatalogQuery = world.EntityManager.CreateEntityQuery(
+                        ComponentType.ReadOnly<DefinitionCatalog>(),
+                        ComponentType.ReadOnly<AnimalSpeciesCatalog>());
                     locationQuery = world.EntityManager.CreateEntityQuery(
                         ComponentType.ReadOnly<InitialSpawnLocation>());
                     chunkQuery = world.EntityManager.CreateEntityQuery(
@@ -2437,6 +2443,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 // 設定、初期スポーン記録、カメラ移動、スポーン先チャンク、地形・資源Tileがそろうまで固定秒数に依存せず待ちます。
                 if (queriesCreated
                     && settingsQuery.CalculateEntityCount() == 1
+                    && animalCatalogQuery.CalculateEntityCount() == 1
                     && locationQuery.CalculateEntityCount() == 1)
                 {
                     initialSpawnLocation = locationQuery.GetSingleton<InitialSpawnLocation>();
@@ -2481,6 +2488,41 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 initialLoadCompleted,
                 Is.True,
                 $"{MaximumWaitFrames}フレーム以内に初回生成と表示が完了しませんでした。");
+
+            // 実際のSubScene Baker結果を読み、Sceneの文字列だけ正しくてもRuntime Blobが欠ける回帰を検出します。
+            DefinitionCatalog runtimeDefinitionCatalog =
+                animalCatalogQuery.GetSingleton<DefinitionCatalog>();
+            AnimalSpeciesCatalog runtimeAnimalCatalog =
+                animalCatalogQuery.GetSingleton<AnimalSpeciesCatalog>();
+            Assert.That(
+                DefinitionGuid.TryParse(
+                    "1728e39573b24efa996020e9493cc742",
+                    out DefinitionGuid chickenGuid),
+                Is.True);
+            Assert.That(
+                DefinitionCatalogLookup.TryResolve(
+                    runtimeDefinitionCatalog.Value,
+                    chickenGuid,
+                    out DefinitionRuntimeId chickenRuntimeId),
+                Is.True,
+                "設定SubSceneの鶏GUIDが共通DefinitionCatalogへBakeされていません。");
+            Assert.That(
+                AnimalSpeciesCatalogLookup.TryGetDefinition(
+                    runtimeAnimalCatalog.Value,
+                    chickenRuntimeId,
+                    out AnimalSpeciesDefinitionBlob chickenDefinition),
+                Is.True,
+                "共通実行時IDに対応する鶏の固有設定がBakeされていません。");
+            Assert.That(chickenDefinition.AllowedBiomes, Is.EqualTo(AnimalBiomeMask.Grassland));
+            Assert.That(chickenDefinition.AllowedGrounds, Is.EqualTo(AnimalGroundMask.Land));
+            Assert.That(chickenDefinition.MinimumHerdSize, Is.EqualTo(3));
+            Assert.That(chickenDefinition.MaximumHerdSize, Is.EqualTo(6));
+            Assert.That(chickenDefinition.TargetPopulationPer4096EligibleTiles, Is.EqualTo(8));
+            Assert.That(chickenDefinition.MinimumIdleTicks, Is.EqualTo(20));
+            Assert.That(chickenDefinition.MaximumIdleTicks, Is.EqualTo(80));
+            Assert.That(chickenDefinition.MovementStepIntervalTicks, Is.EqualTo(5));
+            Assert.That(chickenDefinition.MaximumWanderDistanceInTiles, Is.EqualTo(8));
+            Assert.That(chickenDefinition.AppearanceVariantCount, Is.EqualTo(3));
             int2 initialDisplayOrigin =
                 cameraPanController.CurrentDisplayOrigin.AbsoluteTileCoordinate;
             int originalResourceAbsoluteTileX = initialDisplayOrigin.x + originalResourceCell.x;
@@ -2806,6 +2848,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
             if (queriesCreated && world != null && world.IsCreated)
             {
                 settingsQuery.Dispose();
+                animalCatalogQuery.Dispose();
                 locationQuery.Dispose();
                 chunkQuery.Dispose();
             }
