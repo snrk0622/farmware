@@ -361,4 +361,37 @@ ONの総Reservedはこの往復中425.656MiBで一定だった。方式OFF後、
 
 ビルドと`off`／`on`／`off-foreground`／`off-focus-confirmed`のCSV・画像・Playerログは`/private/tmp/farmware-map02d-player.pqzLUd/`へ保持する。ビルド内Presentation DLLのSHA256は`5ef08c767437526e5aa431084ce2bebd15884cde575e6cee6b1b03c244e96d45`である。これは検証用ハーネスを埋め込んだビルドであり、配布用ではない。
 
-現段階では原点変更の全再構築除去と、有限経路のNative容量再利用をPlayerでも確認できた。前面条件をそろえた静止比較でもSetPass増加と通常描画CPUの増加があり、GPU中央値の近さだけでは採用を確定しない。次は原点変更以外の残る停止の内訳確認を優先する。複数プロセスでの反復、GPUパス別の帰属、製品の最大Viewport・対象機器・許容フレーム時間、人間によるF3/F4・開発者可視化を含む表示受け入れも残る。既定OFFと`MAP-02D`未完了を維持する。
+現段階では原点変更の全再構築除去と、有限経路のNative容量再利用をPlayerでも確認できた。前面条件をそろえた静止比較でもSetPass増加と通常描画CPUの増加があり、GPU中央値の近さだけでは採用を確定しない。次節の追加調査で、原点変更以外の主な停止は表示対象収集時の生成Job待ちと特定した。複数プロセスでの反復、GPUパス別の帰属、製品の最大Viewport・対象機器・許容フレーム時間、人間によるF3/F4・開発者可視化を含む表示受け入れも残る。既定OFFと`MAP-02D`未完了を維持する。
+
+## 通常移動中に残る停止の原因特定
+
+`3ea6c19f`後、製品コードやSceneを変更せず、まずEditorで既存の`PresentationWorkCollection`、`DisplayOriginSynchronization`も同時記録した。基準480×270、5秒待機後に速度36で20秒移動し、有効1,197フレームはすべて前面だった。この試行の表示処理最大は6.876958msで、分類1.390584ms、書込1.751708ms、影構築3.712458ms、収集0.010208msだった。Playerの約17.7msは再現しなかったため、Editorの低い値で原因を判定しなかった。途中のCLI状態確認1回もあり、性能合否の比較用記録ではない。
+
+### 同一Playerによる詳細記録
+
+前節と同じDevelopment PlayerをONで再起動し、[Unity 6.3公式のProfiler起動引数](https://docs.unity3d.com/6000.3/Documentation/Manual/profiler-command-line-arguments.html)の`-profiler-log-file`と`-profiler-capture-frame-count 6600`でバイナリ記録を追加した。Deep Profileは使わず、再ビルドも行っていない。既存ハーネスの速度36・32秒の移動は1,901フレームすべて背景だったため、前節の全フレーム前面の静止比較へ混ぜない。Profilerの追加負荷もあり、以下は原因の帰属を調べる値で、前節との改善率ではない。
+
+Recorderでは最大18.180083ms（分類1.736876ms、書込2.714959ms、影構築0）を再現した。Editorへ読み込んだ履歴は設定上限の最後の2,000フレーム、4601〜6600であり、初期化・移動全区間を解析したとはしない。その範囲に含まれる同じ長時間イベントを`RawFrameDataView`の親子サンプルで照合した。下表はRaw側の値を小数6桁へ丸めたもので、Recorder値とは丸め・計時処理により微小差がある。
+
+| Rawフレーム | 表示処理 ms | 表示対象収集 ms | 収集内JobHandle.Complete ms | 分類 ms | 書込 ms | 影構築 ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 4793 | 18.179541 | 13.696541 | 13.652458 | 1.736501 | 2.714583 | 0 |
+| 5637 | 16.728832 | 12.560500 | 12.512916 | 1.561542 | 2.567918 | 0 |
+| 4898 | 15.680166 | 10.846166 | 10.798375 | 1.324292 | 3.476584 | 0 |
+| 5956（通常完成） | 14.099458 | 0.020667 | — | 3.207708 | 2.820999 | 8.026416 |
+
+4793の親子関係は`TilemapPresentation → PresentationWorkCollection → JobHandle.Complete → WaitForJobGroupID → Idle`だった。待機は13.649709ms、Idleは13.620333msで、表示対象収集が表示処理全体の約75%を占めた。Worker 1では同時刻に`ChunkGenerationSystem:GenerateQueuedChunksJob (Burst)`が13.970959ms動いており、その終了の約0.022ms後にメインスレッドの待機が終わった。したがって、この長い残余は新しいTilemap群の生成ではなく、生成Job完了の同期待ちで説明できる。先行する前面ON記録の約17.7msそのものにはTimelineがないため、その過去フレームまで直接証明したとはしない。
+
+### コード上の原因と改善対象
+
+`ChunkGenerationSystem`は`GenerateQueuedChunksJob`で`ChunkGenerationStatus`、`GeneratedTile`、`GeneratedResourceTile`へ書き込み、同じフレームの後続Presenterが`CollectPresentationWork`から`ToComponentDataArray<ChunkGenerationStatus>`を呼ぶ。導入済みEntities 1.5.0の同APIは対象Componentの書き込み依存を`CompleteWriteDependency`で完了させるため、Jobがまだ動いていればここで待つ。現在のQueryは可視だけでなく保持中チャンクも対象とするため、画面外の先読み生成でも表示対象収集を止め得る。Profilerの待機経路とこのコード経路が一致している。
+
+改善候補は、生成中の作業データを表示側が読む確定済みECSデータから分離し、Jobの`IsCompleted`を確認できた結果だけを後続フレームで公開する方式である。生成Jobと確定処理の所有権、アンロード時の結果破棄、World終了時の解放、実際の同時生成上限を同じ変更単位で扱う。Presenterだけを読み飛ばす対策では、次フレームの`ChunkStreamingSystem`の明示的`Complete()`へ待ちを移す可能性があるため、両者の境界を合わせて検証する必要がある。生成規則・決定論・速度・予算は維持する。
+
+別のボトルネックとして、5956では影構築8.026416msのうちマスク作成6.756791msが残った。生成同期待ちを減らしても、通常完成時の影処理まで自動的に解消しない。まず生成結果公開の同期待ちを改善し、その後に影マスク処理を別の比較として評価する。今回の変更は原因特定と方針記録までで、改善候補の製品実装や性能改善の確認はまだ行っていない。
+
+### 復元と記録
+
+EditorのPlayModeを終了し、背景実行false、targetFrameRate=-1、比較OFF、基準480×270へ復元した。Sceneは保存せず、開始前からのScene・アート文書差分を保持した。Profilerは記録開始前に無効・履歴空だったため、今回読み込んだ範囲のままであることを確認して履歴だけを空へ戻した。最終確認はPlayMode停止、Scene未変更、Profiler無効・履歴空、コンパイル失敗なし、Consoleの現表示エラー0・警告0だった。解析途中には、名前がnullのサンプルへの一時evalがCLI Runtime Errorになったため、nullを除外して再実行した。製品の実行時不具合ではなく、Console履歴は手動消去していない。
+
+Playerは後続の有限経路試験も完走し、完了ファイル・自動終了・失敗ファイルなしを確認した。製品コード・テスト・パッケージは未変更であり、既存回帰テストは再実行していない。使用した一時evalソース2件は削除し、追加のAssetsや.metaはない。CSV、親子サンプルJSON、Worker時刻、Playerログと約1.37GiBのraw記録は`/private/tmp/farmware-map02d-remaining.kagZci/`へ保持する。既定OFFと`MAP-02D`未完了を維持する。
