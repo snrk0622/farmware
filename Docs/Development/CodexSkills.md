@@ -10,6 +10,10 @@ Farmware専用スキルは、リポジトリ直下の `.agents/skills/` を正�
 
 ```text
 .agents/skills/
+├── animal-prompt-dialogue/
+│   ├── SKILL.md
+│   ├── agents/openai.yaml
+│   └── references/template.md
 └── fixed-resource-prompt-dialogue/
     ├── SKILL.md
     ├── agents/openai.yaml
@@ -22,7 +26,20 @@ Codexは、現在の作業ディレクトリからリポジトリルートまで
 
 | スキル | 用途 | 主な入力 | 出力 |
 | --- | --- | --- | --- |
-| `fixed-resource-prompt-dialogue` | 木、岩、草など、動かない固定資源のPixelLab Create Image用Promptを対話で作る | 資源名、配置分類、Output size、占有範囲、状態、外見、禁止事項 | 設定一覧と、全バリエーション・全状態・通常版・積雪版を作る英語Prompt |
+| `animal-prompt-dialogue` | PixelLab Create S-XL Image (Pro)用の動物スプライトPromptを対話で作る | 動物種、Output size、固有ポーズ、身体特徴、禁止事項 | 設定一覧と、一回の生成で全バリエーション・全ポーズを作る英語Prompt |
+| `fixed-resource-prompt-dialogue` | 木、岩、草など、動かない固定資源のPixelLab Create S-XL Image (Pro)用Promptを対話で作る | 資源名、配置分類、Output size、占有範囲、状態、外見、禁止事項 | 設定一覧と、全バリエーション・全状態・通常版・積雪版を作る英語Prompt |
+
+### `animal-prompt-dialogue`
+
+次の内容をスキル側で統一する。
+
+- 全動物を正面より横向きに近い左向きの斜め横から見た画角とし、頭と胴体をともに画面左へ向け、頭をカメラ正面へ向けない。
+- 共通ポーズを `idle`、`move`、`eat`、`sleep` とする。
+- 動物らしい固有ポーズがある場合は、採用前に候補と出力枚数への影響を提案する。
+- 通常ポーズは黒い縦長の目、`sleep`は閉じた両目とし、装飾禁止、輪郭色、光源、透明背景などの共通画風を適用する。
+- `Output size`の最大辺から総フレーム数を計算するが、完成Prompt本文には寸法、出力シートのgrid寸法、総フレーム数を書かない。
+
+画像生成、UnityへのImport、アニメーション制作は行わない。
 
 ### `fixed-resource-prompt-dialogue`
 
@@ -42,6 +59,10 @@ Codexは、現在の作業ディレクトリからリポジトリルートまで
 チャットで `$スキル名` に続けて依頼を書く。
 
 ```text
+$animal-prompt-dialogue 乳牛のPixelLab Promptを作成してください
+```
+
+```text
 $fixed-resource-prompt-dialogue 雪原にも対応する針葉樹のPixelLab Promptを作成してください
 ```
 
@@ -53,7 +74,7 @@ Codexのスキル一覧を開き、目的に合うスキルを選択して依頼
 
 ### 3. 自然文で依頼する
 
-スキル名を書かなくても、説明と一致する依頼ではCodexが自動選択できる。ただし、確実に使用したい場合は `$fixed-resource-prompt-dialogue` を明記する。
+スキル名を書かなくても、説明と一致する依頼ではCodexが自動選択できる。ただし、確実に使用したい場合は `$animal-prompt-dialogue` または `$fixed-resource-prompt-dialogue` を明記する。
 
 ### スキルが表示されない場合
 
