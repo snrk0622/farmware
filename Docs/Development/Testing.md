@@ -133,7 +133,7 @@ Sprite Packer ModeがV2であること、土地Atlasが7バイオームの本番
 | Windowbox | 480×270の整数倍表示と黒帯内の描画矩形を保証する。 |
 | F3 | 現在座標、サブチャンク座標、ECSのBiome・GeneratorVersion・ワールドシード、記録済み初期スポーン座標を保証する。初期スポーン探索失敗時は探索中表示を残さず、Scene保存位置を使用中であることを示すHUD文字列も検証する。 |
 | F4 | 初期スポーンの赤いTile・Chunk表示と、縦横グリッド線の矩形計算を保証する。32bit絶対タイル座標域の正負端では、最大タイルの外周を含む境界線数を64bitで有限に求め、整数周回による終了しない描画ループを起こさないことも確認する。 |
-| Floating Origin | 初期スポーンと明示的な絶対座標移動では所属する64タイル境界を表示原点に選び、負座標では床方向の境界を選ぶことを保証する。Cameraの相対Viewportへ表示原点を加えたObserverが正しい絶対可視チャンク範囲を要求し、SampleSceneの遠方移動では新しい相対Tilemapセルへ地形が表示され、旧原点の資源セルが残らないことも確認する。正負の遠方表示原点では開発者用可視化の絶対Viewport範囲、中央絶対タイル、Tilemapセル、色面が一致する。通常移動では512タイル未満で原点を維持し、閾値到達時は正負とも所属チャンク境界へ自動更新して絶対Camera位置とObserver範囲を維持する。旧原点セルの分割消去が、新原点側の同じ論理チャンクを消さないことも単独テストで保証する。最大ズームアウトと高速パン時の無停止性は自動テストだけで合否を決めず、ProfilerとGameビューで追加確認する。 |
+| Floating Origin | 初期スポーンと明示的な絶対座標移動では所属する64タイル境界を表示原点に選び、負座標では床方向の境界を選ぶことを保証する。Cameraの相対Viewportへ表示原点を加えたObserverが正しい絶対可視チャンク範囲を要求し、SampleSceneの遠方移動では新しい相対Tilemapセルへ地形が表示され、旧原点の資源セルが残らないことも確認する。正負の遠方表示原点では開発者用可視化の絶対Viewport範囲、中央絶対タイル、Tilemapセル、色面が一致する。通常移動では512タイル未満で原点を維持し、閾値到達時は正負とも所属チャンク境界へ自動更新して絶対Camera位置とObserver範囲を維持する。旧原点セルの分割消去が、新原点側の同じ論理チャンクを消さないことも単独テストで保証する。MAP-02Eでは複数回の自動原点変更、東西往復、0境界横断、保持範囲外からの再訪を一つの通常PlayModeテストで継続し、同一座標Entityの非重複、再生成した地形・資源の代表セル一致、生成設定・初期スポーンの不変性を確認する。最大ズームアウトと高速パン時の無停止性は自動テストだけで合否を決めず、ProfilerとGameビューで追加確認する。 |
 | 初期スポーン失敗 | Scene保存位置を維持し、失敗状態の確定後にチャンクストリーミングを開始できることを保証する。 |
 | Presentation寿命 | Camera GameObjectを維持したDefault World再作成時に新しい初期スポーンを再適用する。Camera Bridgeは新Worldの初期スポーン探索中でも旧WorldのObserverを直ちに破棄し、初期位置の確定前は新Observerを作らず、確定後に1件だけ作り直す。同一Worldでカメラ制御を再有効化した場合はプレイヤーの移動後位置を保つ。正負座標のGrid 64タイル境界へViewport右上端が一致しても、上限側の面積を持たない隣接チャンクを要求しない。Tilemap PresenterがWorld切替または無効化時に表示済み・反映途中・消去途中の旧表示を残さないことも保証する。 |
 | 開発者用可視化 | バイオーム、ノイズ、水域、移行帯、岩壁、マグマ、資源、共通配置APIの判定結果を使う地形配置マトリクスの色写像がSimulationを変更しないことを保証する。正負の遠方表示原点でも、相対Viewportから得た絶対範囲と中央タイルを検索し、絶対タイルを正しい相対セルへ投影することを確認する。 |
@@ -141,6 +141,8 @@ Sprite Packer ModeがV2であること、土地Atlasが7バイオームの本番
 | SampleScene縦切り | SubSceneロード、Authoringと共通既定閾値、初期カメラ、通常12タイル/秒・Shift併用36タイル/秒のカメラ操作設定、512タイルの自動Floating Origin設定、チャンク生成、境界2層を含む9枚のTilemap、Ground・Rock WallのIndividual ModeおよびTop Left順、土地境界Order 1・岩壁境界Order 4と表示高、14 Sprite参照、境界の既定不透明度20%と実行時Tileへの反映、同じBiomeなら標準・肥沃・砂質のいずれも同じプレイヤー向けTileを選ぶこと、SampleSceneの7バイオーム参照が本番用`terrain_biomes_base.png`の同名Spriteへ対応すること、岩壁参照と全表示セルが本番用`terrain_rock_wall_01.png`の専用Tileへ対応すること、Editor専用Soil可視化が3種類を別色にすること、通常資源の岩壁背面用Order 2・前面用Order 10への振り分け、静止液面・アニメーションの-8pxオフセット、液体セルのGround Tilemapとの排他表示、岩壁セルの下層土地、岩壁上資源の12pxオフセット、土地・岩壁Spriteの上下はみ出しを含む可視チャンク範囲、液面4fps設定、アンロード、同一地形の再生成を保証する。EditModeでは、境界選択と資源背面分類の純粋計算を保証する。 |
 
 `AutomaticRebase_PreviousPixelPerfectCameraMatrixDoesNotShiftObserver`は、URP Pixel Perfect Cameraが前回描画時の`worldToCameraMatrix`を保持する条件を明示代入で再現する。Camera Transformと表示原点を更新した後、Bridgeが現在のTransformに基づく行列へ戻してからViewportを変換することを検証する。実際にちらついた絶対X=448・960（チャンク7・15への進入）と負方向の3条件で、可視要求が8チャンク先へ飛ばず正しい範囲を示すことを保証する。描画イベントの発火時刻やGameビューの解像度へ依存せず、前フレームの行列が残っていることも前提条件として検査する。
+
+`SampleScene_RepeatedAutomaticRebasesPreserveStreamingAcrossRoundTripAndNegativeCrossing`は、採用済みのチャンク別Tilemap方式で絶対X=32.5、544.5、1056.5、479.5、-96.5、416.5、1056.5、-96.5、32.5の9地点を順に確認する。移動は明示テレポートではなく通常移動と同じ相対座標APIを使い、表示原点6種類、自動変更、東西往復、0境界横断、3チャンク再訪を一つのScene寿命で起こす。各地点のCamera、Observer、Activeチャンク、Tilemap表示、座標重複を検証し、再訪時には旧Entityのアンロードと地形・資源の代表3セルの決定論的一致を確認する。全4096セルの生成一致は既存EditModeテストへ任せ、通常回帰の実行時間を抑える。
 
 ## 4. 変更内容ごとの実行範囲
 
@@ -235,7 +237,9 @@ M3／24GBなど手元の環境での計測は比較データとして残し、8G
 
 `1d05dd3f`後の最終補助確認では、保存済み既定ONを強制変更しないDevelopment Playerで、拡大120×67.5タイル・速度36の負方向32秒、正負10億タイル付近32秒、同じ512タイル区間の有限往復86秒を実行した。計8,877フレームはすべて前面、可視未完成0、原点変更計5回、Playerの完了記録はすべてerrors=0だった。表示単位最大20・プール最大4、3帰還の使用メモリ中央値約386〜389MiBを確認したが、予約メモリは約4MiB増えており、長時間のリーク不存在とはしない。実画面は保存画像の抜粋確認で、全フレーム検査ではない。今回の製品コード・テストは未変更で196件＋4件／52件は再実行せず、一時コード除去後のコンパイル成功を確認した。
 
-この限定Player確認と既存回帰・人間の受け入れからMAP-02Dの今回範囲を完了と判断する。継続回帰の追加はMAP-02Eへ残し、Windows・8GB／16GB機・製品最大Viewport・正式FPS／メモリ予算の合格とは区別する。採用値・測定方法・画像とメモリの制約・既存ComputeBuffer警告・後片付けは[最終計測とPR完了判断](./Map02DPerformanceReport.md#最終採用設定の補助確認とpr完了判断)を参照する。一時ハーネスと.meta、ビルド由来のResources性能テスト設定はAssetsに残さず、ビルド・CSV・画像・ソースの控えはGit対象外の一時出力先へ保持した。
+この限定Player確認と既存回帰・人間の受け入れからMAP-02Dの今回範囲を完了と判断した。MAP-02D完了時点では継続回帰の追加をMAP-02Eへ残し、Windows・8GB／16GB機・製品最大Viewport・正式FPS／メモリ予算の合格とは区別した。採用値・測定方法・画像とメモリの制約・既存ComputeBuffer警告・後片付けは[最終計測とPR完了判断](./Map02DPerformanceReport.md#最終採用設定の補助確認とpr完了判断)を参照する。一時ハーネスと.meta、ビルド由来のResources性能テスト設定はAssetsに残さず、ビルド・CSV・画像・ソースの控えはGit対象外の一時出力先へ保持した。
+
+MAP-02Eでは上記の継続回帰を通常PlayModeテストへ追加し、同じ区間で`Farmware.WorldGeneration.ChunkStreaming`、`Farmware.WorldGeneration.TilemapPresentation`、`Farmware.WorldGeneration.FloatingOriginRebase`を容量4,096の`ProfilerRecorder`へ記録する。単独実行の最大値は4.595／9.144／0.418ms、PlayMode全53件内では4.618／3.486／0.007msだった。実行順やEditor負荷で変動する比較記録であり、製品の時間閾値は未決定なので数値自体を通常テストの合否条件にしない。Markerが有効で0より大きい記録を持つことだけを検査する。Unity 6000.3.8f1で新規テスト単独1件、PlayMode全53件、EditMode全243件が成功し、最終Consoleはコンパイル失敗なし、エラー0・警告0だった。Development Player、製品最大Viewport、Windows／8GB・16GB機、長時間の正式性能評価とは区別する。
 
 ## 6. 失敗時に記録する情報
 

@@ -1,5 +1,6 @@
 // このファイルは、SampleSceneを実際に再生し、初期カメラ位置、ECS地形・資源生成、Tilemap表示までの縦切りを検証します。
 // F3/F4と開発者用表示を含め、純粋計算では確認できないGameObject・SubScene・Presentation間の参照切れを検出します。
+// 遠距離の往復ではFloating Originとチャンク再生成の継続性を確認し、既存Profiler Markerの比較値も記録します。
 
 using System.Collections;
 using System.Collections.Generic;
@@ -9,6 +10,7 @@ using NUnit.Framework;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
+using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.Rendering.Universal;
@@ -29,6 +31,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
         /// <summary>初期スポーンチャンクが保持範囲外へ確実に出る、テスト用カメラ水平移動量です。</summary>
         private const int FarCameraOffsetInTiles = WorldGridConstants.LogicalChunkSize * 8;
 
+        /// <summary>MAP-02Eの継続移動中に、各Profiler Markerのフレーム値を保持する最大件数です。</summary>
+        private const int LongDistanceProfilerSampleCapacity = 4096;
 
         /// <summary>
         /// Windowboxの基準解像度を整数倍して中央配置し、余ったGameビュー領域が黒帯として除外されることを検証します。
@@ -1680,6 +1684,281 @@ namespace Farmware.WorldGeneration.PlayModeTests
             return VerifySampleSceneStreaming(false);
         }
 
+        /// <summary>
+        /// 採用済みのチャンク別Tilemap方式で、自動Floating Originを正負へ繰り返し、再訪したチャンクが重複せず同じ内容になることを保証します。
+        /// MAP-02Eの通常回帰として、複数回の表示原点変更、東西往復、0境界横断を一つのPlayModeセッション内で実行します。
+        /// </summary>
+        /// <returns>各移動先の非同期生成・表示完了を、フレーム上限付きで待つIEnumeratorです。</returns>
+        [UnityTest]
+        public IEnumerator SampleScene_RepeatedAutomaticRebasesPreserveStreamingAcrossRoundTripAndNegativeCrossing()
+        {
+            AsyncOperation loadOperation = SceneManager.LoadSceneAsync("SampleScene", LoadSceneMode.Single);
+            Assert.That(loadOperation, Is.Not.Null, "Build SettingsからSampleSceneを読み込めませんでした。");
+
+            while (!loadOperation.isDone)
+            {
+                yield return null;
+            }
+
+            CameraPanController cameraPanController = Object.FindFirstObjectByType<CameraPanController>();
+            InitialCameraPositionController initialPositionController =
+                Object.FindFirstObjectByType<InitialCameraPositionController>();
+            ChunkTilemapPresenter terrainPresenter = Object.FindFirstObjectByType<ChunkTilemapPresenter>();
+            Tilemap groundTilemap = GameObject.Find("World Grid/Ground Tilemap")?.GetComponent<Tilemap>();
+            Tilemap liquidBaseTilemap = GameObject.Find("World Grid/Liquid Base Tilemap")?.GetComponent<Tilemap>();
+            Assert.That(cameraPanController, Is.Not.Null, "Main CameraにCameraPanControllerがありません。");
+            Assert.That(initialPositionController, Is.Not.Null, "Main CameraにInitialCameraPositionControllerがありません。");
+            Assert.That(terrainPresenter, Is.Not.Null, "SampleSceneにChunkTilemapPresenterがありません。");
+            Assert.That(groundTilemap, Is.Not.Null, "SampleSceneにGround Tilemapがありません。");
+            Assert.That(liquidBaseTilemap, Is.Not.Null, "SampleSceneにLiquid Base Tilemapがありません。");
+
+            // MAP-02Dで採用した方式だけを継続回帰の対象にし、診断用の旧共有方式との二重実行で通常テストを重くしません。
+            terrainPresenter.ConfigureChunkLocalPresentation(true);
+
+            World world = null;
+            EntityQuery settingsQuery = default;
+            EntityQuery locationQuery = default;
+            EntityQuery observerQuery = default;
+            EntityQuery chunkQuery = default;
+            bool queriesCreated = false;
+            bool sceneReady = false;
+
+            for (int frame = 0; frame < MaximumWaitFrames; frame++)
+            {
+                world = World.DefaultGameObjectInjectionWorld;
+                if (world != null && world.IsCreated && !queriesCreated)
+                {
+                    settingsQuery = world.EntityManager.CreateEntityQuery(
+                        ComponentType.ReadOnly<WorldGenerationSettings>());
+                    locationQuery = world.EntityManager.CreateEntityQuery(
+                        ComponentType.ReadOnly<InitialSpawnLocation>());
+                    observerQuery = world.EntityManager.CreateEntityQuery(
+                        ComponentType.ReadOnly<ChunkStreamingObserver>());
+                    chunkQuery = world.EntityManager.CreateEntityQuery(
+                        ComponentType.ReadOnly<ChunkCoordinateComponent>(),
+                        ComponentType.ReadOnly<ChunkGenerationStatus>(),
+                        ComponentType.ReadOnly<GeneratedTile>(),
+                        ComponentType.ReadOnly<GeneratedResourceTile>());
+                    queriesCreated = true;
+                }
+
+                // 初期スポーン適用が完了する前にテスト座標へ動かすと、初期化側が次フレームにCameraを上書きするため待機します。
+                if (queriesCreated
+                    && settingsQuery.CalculateEntityCount() == 1
+                    && locationQuery.CalculateEntityCount() == 1
+                    && initialPositionController.HasCompletedInitialPositioning)
+                {
+                    sceneReady = true;
+                    break;
+                }
+
+                yield return null;
+            }
+
+            Assert.That(sceneReady, Is.True, $"{MaximumWaitFrames}フレーム以内にScene初期化が完了しませんでした。");
+            WorldGenerationSettings initialSettings = settingsQuery.GetSingleton<WorldGenerationSettings>();
+            InitialSpawnLocation initialSpawnLocation = locationQuery.GetSingleton<InitialSpawnLocation>();
+
+            // 開始地点をチャンク(0, 0)へ固定し、以降は実際の通常移動と同じ相対座標APIだけで原点変更を起こします。
+            Assert.That(cameraPanController.SetAbsoluteWorldPosition(32.5d, 32.5d), Is.True);
+
+            // 各入力は「現在の表示原点からの相対座標」です。同じ値でも直前の原点が違えば別の絶対座標へ進みます。
+            // 東へ2回、西へ0境界を越えて2回、東へ戻り、既訪問の東端・負座標・開始地点を順に再訪します。
+            Vector2[] relativeMoves =
+            {
+                new Vector2(544.5f, 32.5f),
+                new Vector2(544.5f, 32.5f),
+                new Vector2(-544.5f, 32.5f),
+                new Vector2(-544.5f, 32.5f),
+                new Vector2(544.5f, 32.5f),
+                new Vector2(672.5f, 32.5f),
+                new Vector2(-1120.5f, 32.5f),
+                new Vector2(160.5f, 32.5f)
+            };
+            double2[] expectedAbsolutePositions =
+            {
+                new double2(32.5d, 32.5d),
+                new double2(544.5d, 32.5d),
+                new double2(1056.5d, 32.5d),
+                new double2(479.5d, 32.5d),
+                new double2(-96.5d, 32.5d),
+                new double2(416.5d, 32.5d),
+                new double2(1056.5d, 32.5d),
+                new double2(-96.5d, 32.5d),
+                new double2(32.5d, 32.5d)
+            };
+            int2[] expectedDisplayOrigins =
+            {
+                new int2(0, 0),
+                new int2(512, 0),
+                new int2(1024, 0),
+                new int2(448, 0),
+                new int2(-128, 0),
+                new int2(384, 0),
+                new int2(1024, 0),
+                new int2(-128, 0),
+                new int2(-128, 0)
+            };
+
+            // 再訪前のEntityと代表セルを退避し、アンロード後の別Entityでも同じ決定論的内容になることを検証します。
+            var lastEntityByCoordinate = new Dictionary<ChunkCoordinate, Entity>();
+            var terrainSamplesByCoordinate = new Dictionary<ChunkCoordinate, GeneratedTile[]>();
+            var resourceSamplesByCoordinate = new Dictionary<ChunkCoordinate, GeneratedResourceTile[]>();
+            var visitedDisplayOrigins = new HashSet<int2>();
+            int revisitedChunkCount = 0;
+
+            // 合否閾値は未決定なので時間の上限は設けず、回帰時に比較できる実測値だけをNUnitログへ残します。
+            using ProfilerRecorder streamingRecorder = ProfilerRecorder.StartNew(
+                ProfilerCategory.Scripts,
+                "Farmware.WorldGeneration.ChunkStreaming",
+                LongDistanceProfilerSampleCapacity);
+            using ProfilerRecorder presentationRecorder = ProfilerRecorder.StartNew(
+                ProfilerCategory.Scripts,
+                "Farmware.WorldGeneration.TilemapPresentation",
+                LongDistanceProfilerSampleCapacity);
+            using ProfilerRecorder rebaseRecorder = ProfilerRecorder.StartNew(
+                ProfilerCategory.Scripts,
+                "Farmware.WorldGeneration.FloatingOriginRebase",
+                LongDistanceProfilerSampleCapacity);
+
+            try
+            {
+                for (int checkpointIndex = 0;
+                     checkpointIndex < expectedAbsolutePositions.Length;
+                     checkpointIndex++)
+                {
+                    int2 previousDisplayOrigin =
+                        cameraPanController.CurrentDisplayOrigin.AbsoluteTileCoordinate;
+                    if (checkpointIndex > 0)
+                    {
+                        cameraPanController.SetWorldPosition(relativeMoves[checkpointIndex - 1]);
+                    }
+
+                    int2 actualDisplayOrigin =
+                        cameraPanController.CurrentDisplayOrigin.AbsoluteTileCoordinate;
+                    double2 actualAbsolutePosition = cameraPanController.GetAbsoluteWorldPosition();
+                    Assert.That(
+                        actualDisplayOrigin,
+                        Is.EqualTo(expectedDisplayOrigins[checkpointIndex]),
+                        $"checkpoint={checkpointIndex}: 表示原点が期待する64タイル境界と一致しません。");
+                    Assert.That(
+                        actualAbsolutePosition.x,
+                        Is.EqualTo(expectedAbsolutePositions[checkpointIndex].x).Within(0.00001d),
+                        $"checkpoint={checkpointIndex}: 原点変更で絶対Camera Xが変化しました。");
+                    Assert.That(
+                        actualAbsolutePosition.y,
+                        Is.EqualTo(expectedAbsolutePositions[checkpointIndex].y).Within(0.00001d),
+                        $"checkpoint={checkpointIndex}: 原点変更で絶対Camera Yが変化しました。");
+
+                    if (!actualDisplayOrigin.Equals(previousDisplayOrigin))
+                    {
+                        Assert.That(
+                            cameraPanController.LastDisplayOriginChangeWasAutomatic,
+                            Is.True,
+                            $"checkpoint={checkpointIndex}: 通常移動による原点変更が明示移動として扱われました。");
+                    }
+
+                    visitedDisplayOrigins.Add(actualDisplayOrigin);
+                    int targetTileX = (int)System.Math.Floor(actualAbsolutePosition.x);
+                    int targetTileY = (int)System.Math.Floor(actualAbsolutePosition.y);
+                    ChunkCoordinate targetChunk = WorldGrid.ToChunkCoordinate(targetTileX, targetTileY);
+                    bool checkpointCompleted = false;
+                    Entity targetChunkEntity = Entity.Null;
+
+                    for (int frame = 0; frame < MaximumWaitFrames; frame++)
+                    {
+                        bool hasSingleObserver = observerQuery.CalculateEntityCount() == 1;
+                        ChunkStreamingObserver observer = hasSingleObserver
+                            ? observerQuery.GetSingleton<ChunkStreamingObserver>()
+                            : default;
+                        bool observerContainsTarget = hasSingleObserver
+                            && observer.MinimumVisibleChunkX <= targetChunk.X
+                            && observer.MaximumVisibleChunkX >= targetChunk.X
+                            && observer.MinimumVisibleChunkY <= targetChunk.Y
+                            && observer.MaximumVisibleChunkY >= targetChunk.Y;
+                        bool targetIsActive = TryGetActiveCompleteChunk(
+                            world.EntityManager,
+                            chunkQuery,
+                            targetChunk.X,
+                            targetChunk.Y,
+                            out targetChunkEntity);
+                        Vector3Int displayCell = ToDisplayCell(
+                            targetTileX,
+                            targetTileY,
+                            cameraPanController.CurrentDisplayOrigin);
+                        bool targetIsDisplayed = GetPresentedTile(
+                                terrainPresenter,
+                                groundTilemap,
+                                displayCell,
+                                cameraPanController.CurrentDisplayOrigin) != null
+                            || GetPresentedTile(
+                                terrainPresenter,
+                                liquidBaseTilemap,
+                                displayCell,
+                                cameraPanController.CurrentDisplayOrigin) != null;
+
+                        if (observerContainsTarget && targetIsActive && targetIsDisplayed)
+                        {
+                            checkpointCompleted = true;
+                            break;
+                        }
+
+                        yield return null;
+                    }
+
+                    Assert.That(
+                        checkpointCompleted,
+                        Is.True,
+                        $"checkpoint={checkpointIndex}, chunk={targetChunk}: {MaximumWaitFrames}フレーム以内に生成・表示が完了しませんでした。");
+                    Assert.That(
+                        CountChunksAt(chunkQuery, targetChunk.X, targetChunk.Y),
+                        Is.EqualTo(1),
+                        $"checkpoint={checkpointIndex}, chunk={targetChunk}: 同じ絶対チャンクが重複しています。");
+                    CaptureOrAssertChunkSamples(
+                        world.EntityManager,
+                        targetChunkEntity,
+                        targetChunk,
+                        lastEntityByCoordinate,
+                        terrainSamplesByCoordinate,
+                        resourceSamplesByCoordinate,
+                        ref revisitedChunkCount);
+
+                    // Floating OriginはPresentationだけの変更なので、生成設定と記録済み初期スポーンを一切書き換えてはいけません。
+                    Assert.That(settingsQuery.GetSingleton<WorldGenerationSettings>(), Is.EqualTo(initialSettings));
+                    Assert.That(locationQuery.GetSingleton<InitialSpawnLocation>(), Is.EqualTo(initialSpawnLocation));
+                }
+
+                Assert.That(visitedDisplayOrigins.Count, Is.GreaterThanOrEqualTo(6));
+                Assert.That(revisitedChunkCount, Is.GreaterThanOrEqualTo(3));
+                Assert.That(streamingRecorder.Valid, Is.True, "ChunkStreaming Markerを記録できませんでした。");
+                Assert.That(presentationRecorder.Valid, Is.True, "TilemapPresentation Markerを記録できませんでした。");
+                Assert.That(rebaseRecorder.Valid, Is.True, "FloatingOriginRebase Markerを記録できませんでした。");
+
+                long streamingMaximumNanoseconds = GetMaximumProfilerValue(streamingRecorder);
+                long presentationMaximumNanoseconds = GetMaximumProfilerValue(presentationRecorder);
+                long rebaseMaximumNanoseconds = GetMaximumProfilerValue(rebaseRecorder);
+                Assert.That(streamingMaximumNanoseconds, Is.GreaterThan(0L));
+                Assert.That(presentationMaximumNanoseconds, Is.GreaterThan(0L));
+                Assert.That(rebaseMaximumNanoseconds, Is.GreaterThan(0L));
+                Debug.Log(
+                    "MAP-02E Profiler記録: "
+                    + $"ChunkStreaming最大={streamingMaximumNanoseconds / 1000000d:F3}ms, "
+                    + $"TilemapPresentation最大={presentationMaximumNanoseconds / 1000000d:F3}ms, "
+                    + $"FloatingOriginRebase最大={rebaseMaximumNanoseconds / 1000000d:F3}ms, "
+                    + $"再訪チャンク数={revisitedChunkCount}, 表示原点数={visitedDisplayOrigins.Count}");
+            }
+            finally
+            {
+                if (queriesCreated && world != null && world.IsCreated)
+                {
+                    settingsQuery.Dispose();
+                    locationQuery.Dispose();
+                    observerQuery.Dispose();
+                    chunkQuery.Dispose();
+                }
+            }
+        }
+
         /// <summary>Sceneを読み込み、指定表示方式で地形・液面・資源・診断表示と再生成を実際に検証します。</summary>
         /// <param name="local">既定のチャンク別方式ならtrue、旧共有方式を検証するときはfalseです。</param>
         /// <returns>SceneロードとECS・表示の完了をフレーム上限付きで待つIEnumeratorです。</returns>
@@ -2530,6 +2809,115 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 locationQuery.Dispose();
                 chunkQuery.Dispose();
             }
+        }
+
+        /// <summary>
+        /// 指定絶対チャンク座標を持つEntity数を数え、ストリーミング往復で同じ座標が二重生成されていないか確認できるようにします。
+        /// </summary>
+        /// <param name="chunkQuery">座標、状態、地形・資源Bufferを持つチャンクQueryです。</param>
+        /// <param name="chunkX">数える水平論理チャンク座標です。</param>
+        /// <param name="chunkY">数える垂直論理チャンク座標です。</param>
+        /// <returns>指定した絶対チャンク座標と一致するEntity数です。</returns>
+        private static int CountChunksAt(EntityQuery chunkQuery, int chunkX, int chunkY)
+        {
+            using NativeArray<ChunkCoordinateComponent> coordinates =
+                chunkQuery.ToComponentDataArray<ChunkCoordinateComponent>(Allocator.Temp);
+            int matchingCount = 0;
+            for (int index = 0; index < coordinates.Length; index++)
+            {
+                if (coordinates[index].X == chunkX && coordinates[index].Y == chunkY)
+                {
+                    matchingCount++;
+                }
+            }
+
+            return matchingCount;
+        }
+
+        /// <summary>
+        /// 初回訪問ではチャンクEntityと代表3セルを保存し、再訪では別Entityへ再生成されても地形・資源が一致することを確認します。
+        /// 全4096セルの決定論はEditModeで保証済みのため、この継続PlayMode回帰では先頭・中央・末尾を比較して実行時間を抑えます。
+        /// </summary>
+        /// <param name="entityManager">生成済みBufferを所有するDefault WorldのEntityManagerです。</param>
+        /// <param name="chunkEntity">今回の訪問でActiveかつ生成完了したチャンクEntityです。</param>
+        /// <param name="coordinate">比較履歴を識別する絶対論理チャンク座標です。</param>
+        /// <param name="lastEntityByCoordinate">座標ごとに直前の訪問で使われたEntityを保持します。</param>
+        /// <param name="terrainSamplesByCoordinate">座標ごとの代表地形3セルを保持します。</param>
+        /// <param name="resourceSamplesByCoordinate">座標ごとの代表資源3セルを保持します。</param>
+        /// <param name="revisitedChunkCount">別Entityで同じ座標を再確認できた回数を加算します。</param>
+        private static void CaptureOrAssertChunkSamples(
+            EntityManager entityManager,
+            Entity chunkEntity,
+            ChunkCoordinate coordinate,
+            Dictionary<ChunkCoordinate, Entity> lastEntityByCoordinate,
+            Dictionary<ChunkCoordinate, GeneratedTile[]> terrainSamplesByCoordinate,
+            Dictionary<ChunkCoordinate, GeneratedResourceTile[]> resourceSamplesByCoordinate,
+            ref int revisitedChunkCount)
+        {
+            DynamicBuffer<GeneratedTile> terrain = entityManager.GetBuffer<GeneratedTile>(chunkEntity, true);
+            DynamicBuffer<GeneratedResourceTile> resources =
+                entityManager.GetBuffer<GeneratedResourceTile>(chunkEntity, true);
+            int[] sampleIndices =
+            {
+                0,
+                WorldGridConstants.TilesPerChunk / 2,
+                WorldGridConstants.TilesPerChunk - 1
+            };
+
+            if (!lastEntityByCoordinate.TryGetValue(coordinate, out Entity previousEntity))
+            {
+                var terrainSamples = new GeneratedTile[sampleIndices.Length];
+                var resourceSamples = new GeneratedResourceTile[sampleIndices.Length];
+                for (int sampleIndex = 0; sampleIndex < sampleIndices.Length; sampleIndex++)
+                {
+                    int tileIndex = sampleIndices[sampleIndex];
+                    terrainSamples[sampleIndex] = terrain[tileIndex];
+                    resourceSamples[sampleIndex] = resources[tileIndex];
+                }
+
+                lastEntityByCoordinate.Add(coordinate, chunkEntity);
+                terrainSamplesByCoordinate.Add(coordinate, terrainSamples);
+                resourceSamplesByCoordinate.Add(coordinate, resourceSamples);
+                return;
+            }
+
+            Assert.That(
+                chunkEntity,
+                Is.Not.EqualTo(previousEntity),
+                $"chunk={coordinate}: 保持範囲外へ移動した後も以前のEntityが残っています。");
+            GeneratedTile[] expectedTerrain = terrainSamplesByCoordinate[coordinate];
+            GeneratedResourceTile[] expectedResources = resourceSamplesByCoordinate[coordinate];
+            for (int sampleIndex = 0; sampleIndex < sampleIndices.Length; sampleIndex++)
+            {
+                int tileIndex = sampleIndices[sampleIndex];
+                AssertTileEquals(expectedTerrain[sampleIndex], terrain[tileIndex], tileIndex);
+                AssertResourceEquals(expectedResources[sampleIndex], resources[tileIndex], tileIndex);
+            }
+
+            lastEntityByCoordinate[coordinate] = chunkEntity;
+            revisitedChunkCount++;
+        }
+
+        /// <summary>
+        /// ProfilerRecorderが保持した各フレームの値を走査し、比較記録へ使う最大値を取得します。
+        /// 合格閾値は未決定なので、このメソッドは値を加工せずナノ秒単位の最大値だけを返します。
+        /// </summary>
+        /// <param name="recorder">継続移動中に有効化した時間MarkerのRecorderです。</param>
+        /// <returns>記録された最大値です。時間Markerでは単位はナノ秒です。</returns>
+        private static long GetMaximumProfilerValue(ProfilerRecorder recorder)
+        {
+            var samples = new List<ProfilerRecorderSample>(recorder.Count);
+            recorder.CopyTo(samples);
+            long maximumValue = 0L;
+            for (int index = 0; index < samples.Count; index++)
+            {
+                if (samples[index].Value > maximumValue)
+                {
+                    maximumValue = samples[index].Value;
+                }
+            }
+
+            return maximumValue;
         }
 
         /// <summary>
