@@ -883,8 +883,8 @@ Unrequested
 - 論理チャンク64×64とは独立して、気温96タイル、湿度80タイルのノイズ格子から初期3バイオームの規模を決定。標高は192タイルを維持して水域を広域化し、岩壁は歪ませた24タイル広域密度、8タイル細部密度、局所平滑化、72タイル通路帯から不規則に生成する。
 - 論理Biome IDと物理的なGroundTypeを単一に保ったまま、境界付近の標準土壌・肥沃土・砂質土を座標ハッシュで約6タイル幅へ段階的に混ぜる決定論的な移行帯。
 - PlayMode中にUnity EditorメニューからBiome、Soil、Elevation、Temperature、Moisture、Weirdness、Water Salinity、Water Body、Biome Transition、Rock Wall、Magma、Resources、Terrain Placementを切り替え、可視タイルの生成値・凡例・中央タイル数値を確認できる開発者専用表示。プレイヤー用キーは消費せず、製品版へ操作UIと描画処理を含めない。
-- 1チャンクEntityにつき4096タイルをDynamic Bufferへ生成するBurst対応IJobEntity System。
-- Enableable Componentによる生成要求の完了管理。生成完了ごとのArchetype変更を避ける。
+- 1チャンク4096タイルと資源をBurst Jobで生成し、完成結果をチャンクEntityのDynamic Bufferへ公開するSystem。現在の非同期公開方式は下記を参照する。
+- Enableable Componentによる生成要求管理。Job開始時に無効化して二重投入を防ぎ、進行段階はChunkGenerationStatusで共有する。
 - Inspector設定を実行時Singleton Componentへ変換するAuthoringとBaker。
 - 負座標境界、安定シード、ノイズ格子境界、生成順非依存、チャンク端、ECS Systemを対象にしたEditModeテスト。
 
@@ -913,6 +913,12 @@ Unrequested
 2026-10-17のEditor一次計測では、原点変更時の可視チャンク全再構築に通常表示で約30〜33ms、広い表示の4チャンクで約42〜44ms、8チャンクで約86〜91msのスパイクを確認した。通常表示の内訳はTilemap書き込み約14〜16ms、分類約7〜9ms、岩壁影約7msだった。影再利用後は、同じ表示済みチャンク数で通常12が30.791msから26.019ms、高速36が29.825／32.960msから22.083／26.739ms、縦横4倍・8チャンクが90.674／85.782msから68.720／66.571msへ低下した。原点変更5回すべてで影再構築は0ms、位置更新は最大0.012292msだった。通常表示でも22〜27ms、縦横4倍で約67〜69msのスパイクが残るため、Tilemap書き込みと分類が次の主対象である。原点変更なしでも通常チャンク完成時の岩壁影を中心とするスパイクが残り、今回の自動原点変更限定の再利用では解消しない。条件、Profiler値、未検証範囲は[MAP-02D 性能計測](../Development/Map02DPerformanceReport.md)を参照する。製品の最大ズームアウトとDevelopment Buildでの確認が残るため、候補値はまだ`MAP-02D`完了値として確定しない。製品用のフレーム時間合格値は未決定のため、この段階では独自の合格値を設定しない。
 
 2026-10-17の追加比較では、`ChunkTilemapPresenter`の`Use Chunk Local Tilemaps`（既定OFF）で、64×64チャンクごとの表示を保持し、自動原点変更時はタイルの再分類・再書き込みを行わず再配置する方式を検証した。World Grid、絶対地形座標、生成規則、速度12／36は変更しない。表示Zだけに小さい相対チャンク行差を付け、現行Orthographic描画の上下チャンク順を保つ。比較計測では原点変更時の表示処理が約0.024〜0.088msまで低下したが、SetPass増加、GPU、個別メモリ、人間の受け入れ確認が残るため、Sceneの既定方式には採用していない。条件と制約は[性能計測レポート](../Development/Map02DPerformanceReport.md)を参照する。
+
+### 2026-10-17: 生成結果の非同期公開（MAP-02D比較実装）
+
+`ChunkGenerationSystem`は生成中の地形・資源を専用のPersistent作業配列へ書くBurst `IJob`へ渡す。JobはECS Component／Bufferへ直接書かず、開始時にメインスレッドで要求を無効化し、状態を`GeneratingData`へ進める。後続更新で`IsCompleted`を確認できたものだけ安全性を確定し、地形・資源の両Bufferをコピーしてから`ReadyToApply`を公開する。新規Jobの同フレーム公開や、通常更新での未完了Job待機は行わない。生成シード、整数座標、GeneratorVersion、地形・資源の計算式と公開後のデータ形式は変更しない。
+
+作業枠は実際の同時生成上限まで確保して再利用する。表示側だけでなくStreaming側の生成待ちも避けるため、保持外へ出た`GeneratingData`のEntityは完成まで予約枠として残し、完成後の次回Streaming更新で破棄する。保持外への一時的な追加保持は生成中の上限件数までで、移動のたびにJobを追加し続けない。外部からEntityが破棄された場合は結果を公開せず捨てる。World／System終了時だけ残ったJobを完了させ、所有配列と枠一覧を解放する。プリロード1、保持余白1、同時生成2、反映予算4、速度12／36、Tilemap比較既定OFFは維持する。性能・表示受け入れは[MAP-02D 性能計測](../Development/Map02DPerformanceReport.md)で別途確認し、実装だけでMAP-02D完了とはしない。
 
 ### 2026-10-16: Floating OriginのScene表示原点接続
 

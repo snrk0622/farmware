@@ -205,6 +205,8 @@ Unity 6.3 LTS（6000.3.8f1）のTest Runnerで`WorldCoordinateConversionTests` 1
 
 `3ea6c19f`後、既存Markerと同一Development PlayerのバイナリProfiler記録を用いて、通常移動中に残る停止を調べた。背景Playerでも表示処理18.180083msを再現し、対応するRawフレームでは表示対象収集13.696541ms、その中のJob完了待ち13.652458msを確認した。WorkerのBurst生成Jobと待機時刻が一致し、`ToComponentDataArray<ChunkGenerationStatus>`が同フレームの生成書き込みを待つ経路へ特定した。別に通常チャンク完成時の影構築8.026416msも残る。次は生成中データと確定済みECS結果の公開を分離する比較を行い、PresenterだけでなくStreaming側へ待機を移していないことも確認する。今回は原因特定までで製品実装は変更しておらず、既定OFFとMAP-02D未完了を維持する。条件と制約は[通常移動中に残る停止の原因特定](./Map02DPerformanceReport.md#通常移動中に残る停止の原因特定)を参照する。
 
+`9a1d5112`後、生成Jobを専用のPersistent作業配列へ分離し、後続更新で完了確認した結果だけをECS Bufferへ公開する比較実装を追加した。生成要求は開始時に無効化し、状態をGeneratingDataとして公開する。保持外へ移動した生成中Entityも完成までは予約枠へ数え、完成後にアンロードすることで、Streaming側の未完了Job待ちと移動時の無制限投入を避ける。World終了時に所有Jobを完了して作業配列を解放する。全4096セルの直接計算との一致、枠上限と再利用、破棄済みEntityへの誤公開防止、World破棄、保持外の生成中予約を回帰テストで確認した。関連EditMode 167件とPlayMode 38件が成功した。Development Playerの前面2試行では公開最大0.051／0.174ms、投入最大0.069／0.117ms、Streaming最大0.267／0.176msで、読み込めたTimeline内の収集スパイクに従来の長い生成Job待ちは再現しなかった。ただし旧原因特定記録は背景で、同条件の改善率にはしない。影・分類・書込による表示最大約14〜15msと約33msのフレーム間隔は残る。詳細と制約は[非同期公開の計測](./Map02DPerformanceReport.md#生成結果の非同期公開比較実装)を参照する。人間の表示受け入れ、既定OFFの比較方式の採用、MAP-02D完了はまだ確定しない。
+
 大項目完了条件:
 
 - 原点から遠い絶対座標でも、Tilemap、診断表示、入力対象が同じセルで一致する。

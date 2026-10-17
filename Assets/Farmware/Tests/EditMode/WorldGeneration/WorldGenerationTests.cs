@@ -1698,10 +1698,16 @@ namespace Farmware.WorldGeneration.Tests
             entityManager.AddBuffer<GeneratedTile>(chunkEntity);
             entityManager.AddBuffer<GeneratedResourceTile>(chunkEntity);
 
-            // ISystemを明示的に1回更新し、テスト終了前にJobを完了してからEntityデータを読み取ります。
+            // 初回更新は投入だけです。Workerが早く完成しても、同じ更新で未公開結果を読ませないことを保証します。
             SystemHandle system = world.GetOrCreateSystem<ChunkGenerationSystem>();
             system.Update(world.Unmanaged);
             entityManager.CompleteAllTrackedJobs();
+            Assert.That(entityManager.GetComponentData<ChunkGenerationStatus>(chunkEntity).Phase,
+                Is.EqualTo(ChunkGenerationPhase.GeneratingData));
+            Assert.That(entityManager.GetBuffer<GeneratedTile>(chunkEntity).Length, Is.Zero);
+            Assert.That(entityManager.GetBuffer<GeneratedResourceTile>(chunkEntity).Length, Is.Zero);
+            Assert.That(entityManager.IsComponentEnabled<ChunkGenerationRequest>(chunkEntity), Is.False);
+            WaitForChunkGeneration(world, system, chunkEntity);
 
             ChunkGenerationStatus status = entityManager.GetComponentData<ChunkGenerationStatus>(chunkEntity);
             DynamicBuffer<GeneratedTile> tiles = entityManager.GetBuffer<GeneratedTile>(chunkEntity);
@@ -1724,6 +1730,131 @@ namespace Farmware.WorldGeneration.Tests
                     64,
                     -64);
             AssertResourceEqual(expectedFirstResource, resources[0], 64, -64);
+
+            // 先頭だけでなく全セルを直接計算と比較し、作業配列への切替で地形・資源が変わらないことを保証します。
+            for (int index = 0; index < WorldGridConstants.TilesPerChunk; index++)
+            {
+                int x = 64 + index % WorldGridConstants.LogicalChunkSize;
+                int y = -64 + index / WorldGridConstants.LogicalChunkSize;
+                GeneratedTile expected = DeterministicChunkGenerator.GenerateTile(settings, x, y);
+                AssertTileEqual(expected, tiles[index]);
+                AssertResourceEqual(DeterministicResourceGenerator.GenerateResource(
+                    settings, resourceSettings, expected, x, y), resources[index], x, y);
+            }
+        }
+
+        /// <summary>上限1と2件の要求を準備し、Job開始と後続公開を経ても同時に2件を投入しないことを保証します。</summary>
+        [Test]
+        public void ChunkGenerationSystem_RespectsConcurrentLimitAndReusesSlot()
+        {
+            using World world = new World("ChunkGenerationSlotLimitTests");
+            EntityManager manager = world.EntityManager;
+            ChunkStreamingSettings streaming = ChunkStreamingSettings.CreateDefault();
+            streaming.MaximumConcurrentGenerations = 1;
+            CreateStreamingSingletons(manager, default, streaming);
+            Entity first = CreateChunkEntity(manager, -2, 3, ChunkGenerationPhase.Queued, true);
+            Entity second = CreateChunkEntity(manager, 4, -5, ChunkGenerationPhase.Queued, true);
+            SystemHandle system = world.GetOrCreateSystem<ChunkGenerationSystem>();
+            system.Update(world.Unmanaged);
+            ChunkGenerationPhase firstPhase = manager.GetComponentData<ChunkGenerationStatus>(first).Phase;
+            ChunkGenerationPhase secondPhase = manager.GetComponentData<ChunkGenerationStatus>(second).Phase;
+            Assert.That((firstPhase == ChunkGenerationPhase.GeneratingData ? 1 : 0)
+                + (secondPhase == ChunkGenerationPhase.GeneratingData ? 1 : 0), Is.EqualTo(1));
+            Assert.That((firstPhase == ChunkGenerationPhase.Queued ? 1 : 0)
+                + (secondPhase == ChunkGenerationPhase.Queued ? 1 : 0), Is.EqualTo(1));
+
+            // EntityのQuery順には依存せず、どちらも同じ1枠を順に使って完成することを確認します。
+            WaitForChunkGeneration(world, system, first);
+            WaitForChunkGeneration(world, system, second);
+            Assert.That(manager.GetBuffer<GeneratedTile>(first).Length, Is.EqualTo(WorldGridConstants.TilesPerChunk));
+            Assert.That(manager.GetBuffer<GeneratedTile>(second).Length, Is.EqualTo(WorldGridConstants.TilesPerChunk));
+            using EntityQuery settingsQuery = manager.CreateEntityQuery(ComponentType.ReadOnly<WorldGenerationSettings>());
+            WorldGenerationSettings settings = settingsQuery.GetSingleton<WorldGenerationSettings>();
+            AssertTileEqual(DeterministicChunkGenerator.GenerateTile(settings, 256, -320),
+                manager.GetBuffer<GeneratedTile>(second)[0]);
+        }
+
+        /// <summary>投入先Entityを破棄して別Entityを作り、古い結果を誤公開せず次の要求を処理できることを保証します。</summary>
+        [Test]
+        public void ChunkGenerationSystem_DestroyedTargetDoesNotPublishToReplacement()
+        {
+            using World world = new World("ChunkGenerationDiscardTests");
+            EntityManager manager = world.EntityManager;
+            ChunkStreamingSettings streaming = ChunkStreamingSettings.CreateDefault();
+            streaming.MaximumConcurrentGenerations = 1;
+            CreateStreamingSingletons(manager, default, streaming);
+            Entity old = CreateChunkEntity(manager, -2, -3, ChunkGenerationPhase.Queued, true);
+            SystemHandle system = world.GetOrCreateSystem<ChunkGenerationSystem>();
+            system.Update(world.Unmanaged);
+            manager.DestroyEntity(old);
+            Entity replacement = CreateChunkEntity(manager, 4, 5, ChunkGenerationPhase.Queued, true);
+            WaitForChunkGeneration(world, system, replacement);
+            Assert.That(manager.Exists(old), Is.False);
+            using EntityQuery settingsQuery = manager.CreateEntityQuery(ComponentType.ReadOnly<WorldGenerationSettings>());
+            WorldGenerationSettings settings = settingsQuery.GetSingleton<WorldGenerationSettings>();
+            AssertTileEqual(DeterministicChunkGenerator.GenerateTile(settings, 256, 320),
+                manager.GetBuffer<GeneratedTile>(replacement)[0]);
+        }
+
+        /// <summary>Job投入直後にWorldを破棄し、未完成Jobの完了とNative配列の解放が安全に行えることを保証します。</summary>
+        [Test]
+        public void ChunkGenerationSystem_WorldDisposeCompletesOwnedJobs()
+        {
+            World world = new World("ChunkGenerationDisposeTests");
+            try
+            {
+                CreateStreamingSingletons(world.EntityManager, default, ChunkStreamingSettings.CreateDefault());
+                CreateChunkEntity(world.EntityManager, -1, 0, ChunkGenerationPhase.Queued, true);
+                SystemHandle system = world.GetOrCreateSystem<ChunkGenerationSystem>();
+                system.Update(world.Unmanaged);
+                Assert.DoesNotThrow(() => world.Dispose());
+                Assert.That(world.IsCreated, Is.False);
+            }
+            finally
+            {
+                // Assert途中で失敗しても、テスト自身がWorldや所有Native配列を残さないようにします。
+                if (world.IsCreated) world.Dispose();
+            }
+        }
+
+        /// <summary>保持外へ出た生成中Entityを準備し、完了までは枠を予約し、完了後にアンロードすることを保証します。</summary>
+        [Test]
+        public void ChunkStreamingSystem_RetainsRunningGenerationUntilCompletion()
+        {
+            using World world = new World("ChunkStreamingRunningRetentionTests");
+            EntityManager manager = world.EntityManager;
+            ChunkStreamingSettings settings = ChunkStreamingSettings.CreateDefault();
+            settings.MaximumConcurrentGenerations = 1;
+            CreateStreamingSingletons(manager, default, settings);
+            Entity outside = CreateChunkEntity(manager, 100, -100, ChunkGenerationPhase.GeneratingData, false);
+            SystemHandle streaming = world.GetOrCreateSystem<ChunkStreamingSystem>();
+            streaming.Update(world.Unmanaged);
+            using EntityQuery query = manager.CreateEntityQuery(ComponentType.ReadOnly<ChunkGenerationStatus>());
+            Assert.That(manager.Exists(outside), Is.True);
+            Assert.That(query.CalculateEntityCount(), Is.EqualTo(1), "未完成の枠を予約し、新しい要求を増やさない必要があります。");
+
+            // 生成Systemによる完成公開を模擬し、次回の寿命更新では旧Entityが消え、現在地の要求へ枠を渡します。
+            manager.SetComponentData(outside, new ChunkGenerationStatus { Phase = ChunkGenerationPhase.ReadyToApply });
+            streaming.Update(world.Unmanaged);
+            Assert.That(manager.Exists(outside), Is.False);
+            Assert.That(query.CalculateEntityCount(), Is.EqualTo(1));
+            Assert.That(query.GetSingleton<ChunkGenerationStatus>().Phase, Is.EqualTo(ChunkGenerationPhase.Queued));
+        }
+
+        /// <summary>テストだけで後続更新を進め、Workerの完成結果がECSへ公開されるまで有限時間待ちます。</summary>
+        /// <param name="world">対象のテスト用Worldです。</param>
+        /// <param name="system">公開と投入を担当する生成Systemです。</param>
+        /// <param name="entity">ReadyToApplyになることを期待するEntityです。</param>
+        private static void WaitForChunkGeneration(World world, SystemHandle system, Entity entity)
+        {
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+            while (world.EntityManager.GetComponentData<ChunkGenerationStatus>(entity).Phase != ChunkGenerationPhase.ReadyToApply)
+            {
+                Assert.That(timer.Elapsed.TotalSeconds, Is.LessThan(30), "生成結果が後続更新で公開されませんでした。");
+                system.Update(world.Unmanaged);
+                // 実製品では描画フレームがWorkerへ時間を渡します。同期テストではCPU占有を避けて明示的に譲ります。
+                System.Threading.Thread.Yield();
+            }
         }
 
         /// <summary>

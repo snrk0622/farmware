@@ -186,6 +186,12 @@ Command検証
 Presentation
 ```
 
+### チャンク生成の作業データと確定結果
+
+`MAP-02D`の非同期公開比較では、`ChunkGenerationSystem`が上限付きの作業枠とJobHandleをWorld寿命中に所有する。各枠のBurst `IJob`は設定・絶対座標の値コピーと専用Native配列だけへアクセスし、ECSへ書き込まないため、ECS Component依存へHandleを登録しない。代わりにSystemが後続更新で`IsCompleted`を確認してから安全性を確定し、地形と資源の両Bufferを公開して`ReadyToApply`へ進める。未完成作業配列はSimulationの確定結果やPresentationの読み取り対象にしない。
+
+Streamingは生成中の保持外Entityも完成まで予算に含め、完成後の次回更新でアンロードする。破棄済みEntityへ古い結果を公開せず、World／System破棄時には全Handleを完了してからPersistent配列を解放する。これはMonoBehaviourへチャンク状態を移す変更ではなく、要求と生成段階は引き続きECSを正とする。作業枠は通常フレームごとに再確保せず、使用した同時生成上限まで再利用する。計測条件と残るリスクは[性能計測](./Map02DPerformanceReport.md)を参照する。
+
 ## 9. エンドレス座標とFloating Origin
 
 - Simulationの絶対位置は整数のワールドタイル座標で保持する。Transformのfloat座標を生成、占有、接続、セーブの判定に使用しない。

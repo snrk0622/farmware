@@ -66,10 +66,8 @@ namespace Farmware.WorldGeneration
                     .Expanded(retentionMargin)
                     .ClampedToWorldTileDomain();
 
-                // 前フレームの生成Jobが状態を書き終えるまで待ちます。ここはチャンク寿命を変更する境界であり、
-                // 書き込み中のEntityを破棄しないために必要な明示的同期点です。
-                state.Dependency.Complete();
-
+                // 生成Jobは専用配列だけへ書くため、ここでは未完成生成を待たず確定済みECS状態を読みます。
+                // 他のECS処理との通常の依存解決はQuery APIへ委ね、生成JobのHandleは生成Systemだけが管理します。
                 NativeArray<Entity> entities = chunkQuery.ToEntityArray(Allocator.Temp);
                 NativeArray<ChunkCoordinateComponent> coordinates =
                     chunkQuery.ToComponentDataArray<ChunkCoordinateComponent>(Allocator.Temp);
@@ -95,6 +93,15 @@ namespace Farmware.WorldGeneration
 
                     if (!retentionBounds.Contains(coordinate))
                     {
+                        // 生成中の枠を解放扱いにすると、移動のたびに未完成Jobが上限を超えて積み上がります。
+                        // 完成まではEntityと予約枠だけ保持し、完成後の次回更新で通常どおり破棄します。
+                        // Jobは専用配列へ書くため、この判定で完了を待つ必要はありません。
+                        if (status.Phase == ChunkGenerationPhase.GeneratingData)
+                        {
+                            pendingGenerationCount++;
+                            continue;
+                        }
+
                         commandBuffer.DestroyEntity(entity);
                         continue;
                     }
