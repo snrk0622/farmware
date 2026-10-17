@@ -132,6 +132,59 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// 4羽を先に置くと1羽不足する5タイル＋3タイルの分断地形で、
+        /// 後続配置まで確認して5羽＋3羽へ戻り、目標8羽をすべて配置することを保証します。
+        /// </summary>
+        [Test]
+        public void SpeciesPopulation_BacktracksToHerdSplitThatFillsTarget()
+        {
+            AnimalSpeciesDefinitionBlob chicken = CreateChickenBlob(new DefinitionRuntimeId(1));
+            using NativeArray<int> eligibleLocalTileIndices = new NativeArray<int>(
+                new[]
+                {
+                    0,
+                    1,
+                    2,
+                    WorldGridConstants.LogicalChunkSize,
+                    1 + WorldGridConstants.LogicalChunkSize,
+                    32 + (32 * WorldGridConstants.LogicalChunkSize),
+                    33 + (32 * WorldGridConstants.LogicalChunkSize),
+                    32 + (33 * WorldGridConstants.LogicalChunkSize)
+                },
+                Allocator.Temp);
+            using NativeList<int> occupiedLocalTileIndices =
+                new NativeList<int>(8, Allocator.Temp);
+            using NativeList<AnimalSpawnCandidate> candidates =
+                new NativeList<AnimalSpawnCandidate>(8, Allocator.Temp);
+
+            // Seed 1は最初に4羽を抽選します。4羽＋3羽では1羽不足するため、5羽＋3羽への戻り探索が必要です。
+            AnimalPopulationRegionState regionState = CreateRegionState(1UL, 0, 0);
+            bool succeeded = AnimalPopulationGenerator.TryAppendSpeciesPopulation(
+                chicken,
+                8,
+                eligibleLocalTileIndices,
+                occupiedLocalTileIndices,
+                ref regionState,
+                candidates);
+
+            Assert.That(succeeded, Is.True);
+            Assert.That(candidates.Length, Is.EqualTo(8));
+            Assert.That(occupiedLocalTileIndices.Length, Is.EqualTo(8));
+            Assert.That(regionState.NextSpawnSequence, Is.EqualTo(9ul));
+
+            Dictionary<int, int> herdSizes = new Dictionary<int, int>();
+            for (int index = 0; index < candidates.Length; index++)
+            {
+                int herdLeaderCandidateIndex = candidates[index].HerdLeaderCandidateIndex;
+                herdSizes.TryGetValue(herdLeaderCandidateIndex, out int herdSize);
+                herdSizes[herdLeaderCandidateIndex] = herdSize + 1;
+            }
+
+            Assert.That(herdSizes.Count, Is.EqualTo(2));
+            CollectionAssert.AreEquivalent(new[] { 5, 3 }, herdSizes.Values);
+        }
+
+        /// <summary>
         /// 同じ地形と個体群Seedは同じ候補を返し、個体群Seedだけを変えると初期配置が変わることを保証します。
         /// </summary>
         [Test]

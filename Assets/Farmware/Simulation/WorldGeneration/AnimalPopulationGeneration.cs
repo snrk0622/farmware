@@ -50,6 +50,18 @@ namespace Farmware.WorldGeneration.Animals
         private const int DensityReferenceTileCount = WorldGridConstants.TilesPerChunk;
 
         /// <summary>
+        /// 群れ分割の完全配置探索を行う最大個体数です。
+        /// 現在の鶏は地域当たり8羽ですが、将来極端に高密度な定義が追加されても再帰が深くなり過ぎないよう上限を設けます。
+        /// </summary>
+        private const int MaximumPopulationForCompleteLayoutSearch = 64;
+
+        /// <summary>
+        /// 完全配置探索で試す群れ中心の上限です。
+        /// 配置問題は組み合わせが増え得るため、固定Tickを長時間占有せず従来の部分補充へ戻れる有限値にします。
+        /// </summary>
+        private const int MaximumCompleteLayoutSearchAttempts = 4096;
+
+        /// <summary>
         /// ワールド固有Seedと地域座標から、保存可能な初回抽選状態を作ります。
         /// </summary>
         /// <param name="populationSeed">地形Seedとは独立した、新規ワールド固有のSeedです。</param>
@@ -196,25 +208,207 @@ namespace Farmware.WorldGeneration.Animals
             AnimalPopulationRegionState stagedState = regionState;
             int originalCandidateCount = candidates.Length;
             int originalOccupiedCount = occupiedLocalTileIndices.Length;
-            int remaining = populationToCreate;
+            int remainingSearchAttempts = MaximumCompleteLayoutSearchAttempts;
 
+            // 先に全体を満たす群れ分割を探索します。今回置ける群れだけを即座に確定すると、
+            // 5タイル領域と3タイル領域へ8羽を置けるのに4羽を先に選んで1羽を残す、といった不足が起きるためです。
+            if (populationToCreate <= MaximumPopulationForCompleteLayoutSearch
+                && TryAppendCompletePopulationLayout(
+                    species,
+                    populationToCreate,
+                    eligibleLocalTileIndices,
+                    occupiedLocalTileIndices,
+                    ref stagedState,
+                    candidates,
+                    ref remainingSearchAttempts))
+            {
+                regionState = stagedState;
+                return true;
+            }
+
+            // 全数を満たせない地形や探索上限到達時も、作れる有効な群れまで失わないよう探索中の変更を全て戻します。
+            candidates.ResizeUninitialized(originalCandidateCount);
+            occupiedLocalTileIndices.ResizeUninitialized(originalOccupiedCount);
+            stagedState = regionState;
+
+            if (!TryAppendGreedyPopulation(
+                    species,
+                    populationToCreate,
+                    eligibleLocalTileIndices,
+                    occupiedLocalTileIndices,
+                    ref stagedState,
+                    candidates))
+            {
+                candidates.ResizeUninitialized(originalCandidateCount);
+                occupiedLocalTileIndices.ResizeUninitialized(originalOccupiedCount);
+                return false;
+            }
+
+            regionState = stagedState;
+            return true;
+        }
+
+        /// <summary>
+        /// 残数をすべて有効な群れへ分割できる配置を、抽選した大きさから有限回のバックトラックで探します。
+        /// </summary>
+        /// <param name="species">生成対象の動物種定義です。</param>
+        /// <param name="remaining">まだ配置していない個体数です。</param>
+        /// <param name="eligibleTiles">対象種が利用できる地域内タイル添字です。</param>
+        /// <param name="occupiedTiles">先行種と探索中の群れが使用済みの地域内タイル添字です。</param>
+        /// <param name="regionState">成功経路だけを反映する乱数状態と受付順です。</param>
+        /// <param name="candidates">成功経路の候補追加先です。</param>
+        /// <param name="remainingSearchAttempts">固定Tickを守るために残っている中心試行回数です。</param>
+        /// <returns>残数をすべて配置できた場合はtrueです。</returns>
+        private static bool TryAppendCompletePopulationLayout(
+            AnimalSpeciesDefinitionBlob species,
+            int remaining,
+            NativeArray<int> eligibleTiles,
+            NativeList<int> occupiedTiles,
+            ref AnimalPopulationRegionState regionState,
+            NativeList<AnimalSpawnCandidate> candidates,
+            ref int remainingSearchAttempts)
+        {
+            if (remaining == 0)
+            {
+                return true;
+            }
+
+            if (remaining < species.MinimumHerdSize || remainingSearchAttempts <= 0)
+            {
+                return false;
+            }
+
+            AnimalPopulationRegionState sizeSelectionState = regionState;
+            int preferredHerdSize = SelectHerdSize(
+                ref sizeSelectionState.RandomState,
+                remaining,
+                species.MinimumHerdSize,
+                species.MaximumHerdSize);
+            int maximumForCurrentHerd = GetMaximumHerdSizeForRemaining(
+                remaining,
+                species.MinimumHerdSize,
+                species.MaximumHerdSize);
+            int herdSizeOptionCount =
+                maximumForCurrentHerd - species.MinimumHerdSize + 1;
+
+            for (int optionIndex = 0; optionIndex < herdSizeOptionCount; optionIndex++)
+            {
+                // 抽選値、より小さい値、より大きい値の順で試し、通常地形の抽選結果を最優先で維持します。
+                int herdSize = GetHerdSizeForOption(
+                    preferredHerdSize,
+                    species.MinimumHerdSize,
+                    maximumForCurrentHerd,
+                    optionIndex);
+                int remainingAfterHerd = remaining - herdSize;
+                if (!CanSplitPopulationIntoHerds(
+                        remainingAfterHerd,
+                        species.MinimumHerdSize,
+                        species.MaximumHerdSize))
+                {
+                    continue;
+                }
+
+                AnimalPopulationRegionState anchorSelectionState = sizeSelectionState;
+                int startIndex = NextInt(
+                    ref anchorSelectionState.RandomState,
+                    eligibleTiles.Length);
+                for (int offset = 0; offset < eligibleTiles.Length; offset++)
+                {
+                    int anchorLocalTileIndex =
+                        eligibleTiles[(startIndex + offset) % eligibleTiles.Length];
+                    if (Contains(occupiedTiles, anchorLocalTileIndex)
+                        || CountNearbyAvailableTiles(
+                            eligibleTiles,
+                            occupiedTiles,
+                            anchorLocalTileIndex,
+                            species.MaximumWanderDistanceInTiles) < herdSize)
+                    {
+                        continue;
+                    }
+
+                    remainingSearchAttempts--;
+                    if (remainingSearchAttempts < 0)
+                    {
+                        return false;
+                    }
+
+                    int candidateCountBeforeHerd = candidates.Length;
+                    int occupiedCountBeforeHerd = occupiedTiles.Length;
+                    AnimalPopulationRegionState branchState = anchorSelectionState;
+                    int herdLeaderCandidateIndex = candidates.Length;
+                    AppendCandidate(
+                        species,
+                        anchorLocalTileIndex,
+                        herdLeaderCandidateIndex,
+                        ref branchState,
+                        candidates);
+                    occupiedTiles.Add(anchorLocalTileIndex);
+
+                    bool herdCompleted = TryAppendHerdMembers(
+                        species,
+                        herdSize,
+                        anchorLocalTileIndex,
+                        eligibleTiles,
+                        occupiedTiles,
+                        ref branchState,
+                        candidates,
+                        herdLeaderCandidateIndex);
+                    if (herdCompleted
+                        && TryAppendCompletePopulationLayout(
+                            species,
+                            remainingAfterHerd,
+                            eligibleTiles,
+                            occupiedTiles,
+                            ref branchState,
+                            candidates,
+                            ref remainingSearchAttempts))
+                    {
+                        regionState = branchState;
+                        return true;
+                    }
+
+                    // この中心または群れサイズでは後続まで満たせないため、候補・占有・乱数状態を分岐前へ戻します。
+                    candidates.ResizeUninitialized(candidateCountBeforeHerd);
+                    occupiedTiles.ResizeUninitialized(occupiedCountBeforeHerd);
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// 完全配置が不可能な場合に、従来どおり抽選サイズを縮めながら配置可能な群れだけを追加します。
+        /// </summary>
+        /// <param name="species">生成対象の動物種定義です。</param>
+        /// <param name="populationToCreate">今回配置を試みる総個体数です。</param>
+        /// <param name="eligibleTiles">対象種が利用できる地域内タイル添字です。</param>
+        /// <param name="occupiedTiles">先行種とこの処理で使用済みの地域内タイル添字です。</param>
+        /// <param name="regionState">配置で進める乱数状態と受付順です。</param>
+        /// <param name="candidates">生成候補の追加先です。</param>
+        /// <returns>作成途中の群れを残さず処理できた場合はtrueです。地形都合の未補充はtrueに含みます。</returns>
+        private static bool TryAppendGreedyPopulation(
+            AnimalSpeciesDefinitionBlob species,
+            int populationToCreate,
+            NativeArray<int> eligibleTiles,
+            NativeList<int> occupiedTiles,
+            ref AnimalPopulationRegionState regionState,
+            NativeList<AnimalSpawnCandidate> candidates)
+        {
+            int remaining = populationToCreate;
             while (remaining >= species.MinimumHerdSize)
             {
                 int herdSize = SelectHerdSize(
-                    ref stagedState.RandomState,
+                    ref regionState.RandomState,
                     remaining,
                     species.MinimumHerdSize,
                     species.MaximumHerdSize);
-
-                // 適格タイルが複数の小さな領域へ分かれていると、抽選した大きさだけが置けない場合があります。
-                // そのまま終了すると、小さい有効な群れを複数作れる地域まで空になるため、最小群れ数まで縮めて再探索します。
                 int anchorLocalTileIndex;
                 while (!TryFindHerdAnchor(
-                           eligibleLocalTileIndices,
-                           occupiedLocalTileIndices,
+                           eligibleTiles,
+                           occupiedTiles,
                            herdSize,
                            species.MaximumWanderDistanceInTiles,
-                           ref stagedState.RandomState,
+                           ref regionState.RandomState,
                            out anchorLocalTileIndex))
                 {
                     herdSize--;
@@ -226,7 +420,7 @@ namespace Farmware.WorldGeneration.Animals
 
                 if (herdSize < species.MinimumHerdSize)
                 {
-                    // 最小群れさえ置けない残数は、無理に徘徊距離契約を破らず未補充とします。
+                    // 最小群れさえ置けない残数は、徘徊距離契約を破らず未補充とします。
                     break;
                 }
 
@@ -235,40 +429,132 @@ namespace Farmware.WorldGeneration.Animals
                     species,
                     anchorLocalTileIndex,
                     herdLeaderCandidateIndex,
-                    ref stagedState,
+                    ref regionState,
                     candidates);
-                occupiedLocalTileIndices.Add(anchorLocalTileIndex);
-
-                for (int memberIndex = 1; memberIndex < herdSize; memberIndex++)
-                {
-                    if (!TryFindHerdMember(
-                            eligibleLocalTileIndices,
-                            occupiedLocalTileIndices,
-                            anchorLocalTileIndex,
-                            species.MaximumWanderDistanceInTiles,
-                            ref stagedState.RandomState,
-                            out int memberLocalTileIndex))
-                    {
-                        // 事前に必要数を数えているため通常は到達しません。到達時は部分群れと乱数消費を全て戻します。
-                        candidates.ResizeUninitialized(originalCandidateCount);
-                        occupiedLocalTileIndices.ResizeUninitialized(originalOccupiedCount);
-                        return false;
-                    }
-
-                    AppendCandidate(
+                occupiedTiles.Add(anchorLocalTileIndex);
+                if (!TryAppendHerdMembers(
                         species,
-                        memberLocalTileIndex,
-                        herdLeaderCandidateIndex,
-                        ref stagedState,
-                        candidates);
-                    occupiedLocalTileIndices.Add(memberLocalTileIndex);
+                        herdSize,
+                        anchorLocalTileIndex,
+                        eligibleTiles,
+                        occupiedTiles,
+                        ref regionState,
+                        candidates,
+                        herdLeaderCandidateIndex))
+                {
+                    return false;
                 }
 
                 remaining -= herdSize;
             }
 
-            regionState = stagedState;
             return true;
+        }
+
+        /// <summary>先頭以外の群れ個体を、同じ中心から許可距離内の未使用タイルへ追加します。</summary>
+        /// <param name="species">徘徊距離と外見差分数を持つ動物種定義です。</param>
+        /// <param name="herdSize">先頭を含む今回の群れ総数です。</param>
+        /// <param name="anchorLocalTileIndex">すでに追加済みの群れ先頭タイルです。</param>
+        /// <param name="eligibleTiles">対象種が利用できる地域内タイル添字です。</param>
+        /// <param name="occupiedTiles">先頭と追加済み個体を含む使用済みタイル添字です。</param>
+        /// <param name="regionState">外見差分抽選と受付順を進める地域状態です。</param>
+        /// <param name="candidates">群れ個体候補の追加先です。</param>
+        /// <param name="herdLeaderCandidateIndex">各個体へ記録する候補配列内の群れ先頭位置です。</param>
+        /// <returns>必要な全メンバーを追加できた場合はtrueです。</returns>
+        private static bool TryAppendHerdMembers(
+            AnimalSpeciesDefinitionBlob species,
+            int herdSize,
+            int anchorLocalTileIndex,
+            NativeArray<int> eligibleTiles,
+            NativeList<int> occupiedTiles,
+            ref AnimalPopulationRegionState regionState,
+            NativeList<AnimalSpawnCandidate> candidates,
+            int herdLeaderCandidateIndex)
+        {
+            for (int memberIndex = 1; memberIndex < herdSize; memberIndex++)
+            {
+                if (!TryFindHerdMember(
+                        eligibleTiles,
+                        occupiedTiles,
+                        anchorLocalTileIndex,
+                        species.MaximumWanderDistanceInTiles,
+                        ref regionState.RandomState,
+                        out int memberLocalTileIndex))
+                {
+                    return false;
+                }
+
+                AppendCandidate(
+                    species,
+                    memberLocalTileIndex,
+                    herdLeaderCandidateIndex,
+                    ref regionState,
+                    candidates);
+                occupiedTiles.Add(memberLocalTileIndex);
+            }
+
+            return true;
+        }
+
+        /// <summary>現在の群れを置いた後の残数を、最小〜最大群れの合計へ分割できるか判定します。</summary>
+        /// <param name="population">分割可能性を調べる残個体数です。</param>
+        /// <param name="minimumHerdSize">1群れに必要な最小個体数です。</param>
+        /// <param name="maximumHerdSize">1群れへ入れられる最大個体数です。</param>
+        /// <returns>0群れ以上の有効な群れ数の合計で個体数を表せる場合はtrueです。</returns>
+        private static bool CanSplitPopulationIntoHerds(
+            int population,
+            int minimumHerdSize,
+            int maximumHerdSize)
+        {
+            if (population == 0)
+            {
+                return true;
+            }
+
+            int minimumHerdCount = (population + maximumHerdSize - 1) / maximumHerdSize;
+            int maximumHerdCount = population / minimumHerdSize;
+            return minimumHerdCount <= maximumHerdCount;
+        }
+
+        /// <summary>残数を最小未満で残さない、今回選択可能な最大群れ数を返します。</summary>
+        /// <param name="remaining">今回を含めてまだ配置していない個体数です。</param>
+        /// <param name="minimumHerdSize">後続群れにも必要な最小個体数です。</param>
+        /// <param name="maximumHerdSize">種定義が許可する1群れの最大個体数です。</param>
+        /// <returns>今回の群れへ割り当てられる最大個体数です。</returns>
+        private static int GetMaximumHerdSizeForRemaining(
+            int remaining,
+            int minimumHerdSize,
+            int maximumHerdSize)
+        {
+            return remaining <= maximumHerdSize
+                ? remaining
+                : math.min(maximumHerdSize, remaining - minimumHerdSize);
+        }
+
+        /// <summary>抽選値を最初に、次に小さい値、最後に大きい値となる試行順から群れ数を返します。</summary>
+        /// <param name="preferredHerdSize">乱数から最初に選ばれた群れ個体数です。</param>
+        /// <param name="minimumHerdSize">今回選択できる最小個体数です。</param>
+        /// <param name="maximumHerdSize">今回選択できる最大個体数です。</param>
+        /// <param name="optionIndex">0始まりの代替案番号です。</param>
+        /// <returns>この代替案で試す群れ個体数です。</returns>
+        private static int GetHerdSizeForOption(
+            int preferredHerdSize,
+            int minimumHerdSize,
+            int maximumHerdSize,
+            int optionIndex)
+        {
+            int smallerOptionCount = preferredHerdSize - minimumHerdSize;
+            if (optionIndex == 0)
+            {
+                return preferredHerdSize;
+            }
+
+            if (optionIndex <= smallerOptionCount)
+            {
+                return preferredHerdSize - optionIndex;
+            }
+
+            return preferredHerdSize + (optionIndex - smallerOptionCount);
         }
 
         /// <summary>
