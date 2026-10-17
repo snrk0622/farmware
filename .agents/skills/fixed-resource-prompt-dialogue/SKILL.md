@@ -107,7 +107,7 @@ Farmwareの静止した固定資源について、初心者でも答えやすい
 
 すべての値が揃ったら、次を日本語で簡潔に出力する。
 
-1. `設定`: Resource、Resource ID、Placement Class、PixelLab tool、Output size、最大辺、総フレーム数、Resource States、Environment Versions、1基本バリエーション当たりの出力数、基本バリエーション数、未使用フレーム数、論理占有、アウトライン規則。
+1. `設定`: Resource、Resource ID、Placement Class、PixelLab tool、Output size、`No Background: enabled`、最大辺、総フレーム数、Resource States、Environment Versions、1基本バリエーション当たりの出力数、基本バリエーション数、未使用フレーム数、論理占有、アウトライン規則。
 2. `PixelLab Prompt`: 選択した分類に対応する英語の完成Promptを、一つの`text`コードブロックで出す。
 
 完成Promptでは次を必ず満たす。

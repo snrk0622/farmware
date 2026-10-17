@@ -76,7 +76,7 @@ Farmwareの動物スプライト用テンプレートを、初心者でも答え
 
 すべての値が揃ったら、次を日本語で簡潔に出力する。
 
-1. `設定`: 動物、Output size、最大辺、総フレーム数、ポーズ、基本バリエーション数、未使用フレーム数。
+1. `設定`: 動物、PixelLab tool、Output size、`No Background: enabled`、最大辺、総フレーム数、ポーズ、基本バリエーション数、未使用フレーム数。
 2. `PixelLab Prompt`: 英語の完成Promptを1つの`text`コードブロックで出す。
 
 完成Promptでは次を必ず満たす。

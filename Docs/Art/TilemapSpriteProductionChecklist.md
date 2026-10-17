@@ -269,6 +269,7 @@ Match the approved grassland reference in canvas size, top-and-face layout, outl
 
 - 固定資源は、採取や除去を終えるまで施設配置を妨げる`blocking_resource`と、施設配置時に自動除去される非機能の景観要素`auto_clear_scenery`へ分ける。床、道、舗装、耕地、地形Base、動物は含めない。
 - PixelLabツールは`Create S-XL Image (Pro)`とする。`Output size`の最大辺が16～42 pxなら64 frames、43～85 pxなら16 frames、86～170 pxなら4 frames、171 px以上なら1 frameとして総フレーム数を決める。上限はPixelLabが各アスペクト比で許可する最大寸法に従う。`256 ÷ Output Width`や`256 ÷ Output Height`では計算しない。
+- PixelLabの`No Background`を有効にする。Prompt本文の透明背景指定だけに依存せず、生成設定でも背景を無効化する。
 - `Outputs per Base Variation = State Count × 2`、`Base Variation Count = floor(Total Frames ÷ Outputs per Base Variation)`、`Unused Frames = Total Frames - Base Variation Count × Outputs per Base Variation`とする。完全な基本バリエーションを1組も作れない組み合わせは使用しない。
 - 完成Prompt本文には`Output size`、1 Spriteの寸法、出力シートのgrid寸法、総フレーム数、基本バリエーション数、出力シート上の行列配置を書かない。画角を示す`orthogonal square grid`と、基本バリエーション内の状態・環境版の順序は書く。
 - 全基本バリエーションと全状態に`standard`と`snow-covered`を一対で用意する。積雪には明部`#EDF3F2`と影色`#C5D6DE`だけを使い、上向きの面へ薄く載せる。対応する通常版から、雪以外の形、状態、材質、配色、接地点、縮尺、画角、輪郭を変えない。
@@ -283,6 +284,7 @@ Match the approved grassland reference in canvas size, top-and-face layout, outl
 `animal-prompt-dialogue`スキルを使用して、牛などの動物について全基本バリエーションと全ポーズをPixelLab Create S-XL Image (Pro)で一度に生成する場合は、本節を正とする。画像生成、UnityへのImport、アニメーション制作は同スキルの対象外とする。
 
 - PixelLabツールは`Create S-XL Image (Pro)`とする。`Output size`の最大辺が16～42 pxなら64 frames、43～85 pxなら16 frames、86～170 pxなら4 frames、171 px以上なら1 frameとして総フレーム数を決める。上限はPixelLabが各アスペクト比で許可する最大寸法に従い、`256 ÷ Output Width`や`256 ÷ Output Height`では計算しない。
+- PixelLabの`No Background`を有効にする。Prompt本文の透明背景指定だけに依存せず、生成設定でも背景を無効化する。
 - 必須ポーズは`idle`、`move`、`eat`、`sleep`とする。種固有ポーズは、共通ポーズと重複せず、小物なしでシルエットから読め、ゲーム仕様に存在するものだけを0～3件追加する。
 - `Pose Count = 4 + Species-specific Pose Count`、`Base Variation Count = floor(Total Frames ÷ Pose Count)`、`Unused Frames = Total Frames - Base Variation Count × Pose Count`とする。全必須ポーズを持つ基本バリエーションを1組も作れない組み合わせは使用しない。
 - 各基本バリエーションでは、全ポーズを`idle, move, eat, sleep, 種固有ポーズ...`の順で一まとまりにする。余りフレームが出る場合は末尾だけを透明な未使用フレームとし、ポーズ種類ごとに全基本バリエーションをまとめない。
