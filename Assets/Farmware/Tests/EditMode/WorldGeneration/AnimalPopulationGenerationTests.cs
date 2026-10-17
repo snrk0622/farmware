@@ -185,6 +185,139 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// 先行群れのメンバー選択が後続群れの必須タイルを塞ぐ地形を準備し、
+        /// Seed 1でもメンバーの組合せへ戻って全8羽を配置し、再実行結果も一致することを保証します。
+        /// </summary>
+        [Test]
+        public void SpeciesPopulation_BacktracksMembersWithoutBlockingLaterHerds()
+        {
+            AnimalSpeciesDefinitionBlob chicken = CreateChickenBlob(new DefinitionRuntimeId(1));
+            using NativeArray<int> eligibleTiles = new NativeArray<int>(
+                new[]
+                {
+                    4 + (4 * WorldGridConstants.LogicalChunkSize),
+                    8 + (10 * WorldGridConstants.LogicalChunkSize),
+                    18 + (14 * WorldGridConstants.LogicalChunkSize),
+                    22 + (14 * WorldGridConstants.LogicalChunkSize),
+                    18 + (16 * WorldGridConstants.LogicalChunkSize),
+                    14 + (18 * WorldGridConstants.LogicalChunkSize),
+                    16 + (18 * WorldGridConstants.LogicalChunkSize),
+                    6 + (22 * WorldGridConstants.LogicalChunkSize)
+                },
+                Allocator.Temp);
+            using NativeList<int> occupiedTiles = new NativeList<int>(8, Allocator.Temp);
+            using NativeList<int> repeatedOccupiedTiles = new NativeList<int>(8, Allocator.Temp);
+            using NativeList<AnimalSpawnCandidate> candidates =
+                new NativeList<AnimalSpawnCandidate>(8, Allocator.Temp);
+            using NativeList<AnimalSpawnCandidate> repeatedCandidates =
+                new NativeList<AnimalSpawnCandidate>(8, Allocator.Temp);
+            AnimalPopulationRegionState regionState = CreateRegionState(1UL, 0, 0);
+            AnimalPopulationRegionState repeatedState = regionState;
+
+            // 中心(8,10)の3羽と中心(14,18)の5羽が成立しますが、先行群れが後続の中心を使うと全数を配置できません。
+            Assert.That(AnimalPopulationGenerator.TryAppendSpeciesPopulation(
+                chicken, 8, eligibleTiles, occupiedTiles, ref regionState, candidates), Is.True);
+            Assert.That(AnimalPopulationGenerator.TryAppendSpeciesPopulation(
+                chicken, 8, eligibleTiles, repeatedOccupiedTiles, ref repeatedState, repeatedCandidates), Is.True);
+
+            Assert.That(candidates.Length, Is.EqualTo(8),
+                "中心とサイズだけでなくメンバーを選び直し、配置可能な8羽をすべて補充する必要があります。");
+            Assert.That(occupiedTiles.Length, Is.EqualTo(8));
+            Assert.That(regionState.NextSpawnSequence, Is.EqualTo(9ul),
+                "失敗した探索分岐が受付順を消費してはいけません。");
+            Assert.That(repeatedState.RandomState, Is.EqualTo(regionState.RandomState));
+            Assert.That(repeatedState.NextSpawnSequence, Is.EqualTo(regionState.NextSpawnSequence));
+            AssertCandidatesEqual(candidates, repeatedCandidates);
+
+            HashSet<(int X, int Y)> uniquePositions = new HashSet<(int X, int Y)>();
+            Dictionary<int, int> herdSizes = new Dictionary<int, int>();
+            for (int index = 0; index < candidates.Length; index++)
+            {
+                AnimalSpawnCandidate candidate = candidates[index];
+                Assert.That(uniquePositions.Add((candidate.TileX, candidate.TileY)), Is.True);
+                Assert.That(candidate.SpawnSequence, Is.EqualTo((ulong)index + 1ul));
+                Assert.That(candidate.AppearanceVariant, Is.InRange((byte)0, (byte)2));
+                Assert.That(candidate.HerdLeaderCandidateIndex, Is.InRange(0, index));
+                AnimalSpawnCandidate leader = candidates[candidate.HerdLeaderCandidateIndex];
+                int distance = System.Math.Max(
+                    System.Math.Abs(candidate.TileX - leader.TileX),
+                    System.Math.Abs(candidate.TileY - leader.TileY));
+                Assert.That(distance, Is.LessThanOrEqualTo(8));
+                herdSizes.TryGetValue(candidate.HerdLeaderCandidateIndex, out int herdSize);
+                herdSizes[candidate.HerdLeaderCandidateIndex] = herdSize + 1;
+            }
+
+            foreach (KeyValuePair<int, int> herd in herdSizes)
+            {
+                Assert.That(herd.Value, Is.InRange(3, 6));
+            }
+        }
+
+        /// <summary>
+        /// 最小群れを作れない2タイルを含む地域で完全配置探索を打ち切り、部分補充へ戻っても、
+        /// 呼び出し前の候補と占有タイルを保持し、不成立分岐の個体や受付順が漏れないことを保証します。
+        /// </summary>
+        [Test]
+        public void SpeciesPopulation_PartialFallbackPreservesExistingCandidatesAndOccupancy()
+        {
+            AnimalSpeciesDefinitionBlob chicken = CreateChickenBlob(new DefinitionRuntimeId(1));
+            using NativeArray<int> eligibleTiles = new NativeArray<int>(
+                new[]
+                {
+                    0, 1, 2, 3, 4, 5, 6, 7,
+                    40 + (40 * WorldGridConstants.LogicalChunkSize),
+                    41 + (40 * WorldGridConstants.LogicalChunkSize)
+                },
+                Allocator.Temp);
+            using NativeList<int> occupiedTiles = new NativeList<int>(16, Allocator.Temp);
+            using NativeList<AnimalSpawnCandidate> candidates =
+                new NativeList<AnimalSpawnCandidate>(16, Allocator.Temp);
+
+            // 前地域の候補と、別種が使用済みの適格範囲外タイルを残したまま共通関数を呼び出します。
+            AnimalSpawnCandidate existingCandidate = new AnimalSpawnCandidate
+            {
+                TileX = -1,
+                TileY = -2,
+                SpawnSequence = 42
+            };
+            candidates.Add(existingCandidate);
+            int existingOccupiedTile = WorldGridConstants.TilesPerChunk - 1;
+            occupiedTiles.Add(existingOccupiedTile);
+            AnimalPopulationRegionState regionState = CreateRegionState(1UL, 0, 0);
+            regionState.NextSpawnSequence = 43;
+
+            Assert.That(AnimalPopulationGenerator.TryAppendSpeciesPopulation(
+                chicken, 10, eligibleTiles, occupiedTiles, ref regionState, candidates), Is.True);
+
+            int createdCount = candidates.Length - 1;
+            Assert.That(createdCount, Is.InRange(3, 8),
+                "離れた2タイルには最小群れを置けないため、作れる群れだけを確定する必要があります。");
+            Assert.That(candidates[0], Is.EqualTo(existingCandidate));
+            Assert.That(occupiedTiles[0], Is.EqualTo(existingOccupiedTile));
+            Assert.That(occupiedTiles.Length, Is.EqualTo(1 + createdCount));
+            Assert.That(regionState.NextSpawnSequence, Is.EqualTo(43ul + (ulong)createdCount));
+
+            HashSet<int> uniqueTiles = new HashSet<int>();
+            Dictionary<int, int> herdSizes = new Dictionary<int, int>();
+            for (int index = 1; index < candidates.Length; index++)
+            {
+                AnimalSpawnCandidate candidate = candidates[index];
+                Assert.That(candidate.TileX, Is.InRange(0, 7));
+                Assert.That(candidate.TileY, Is.Zero);
+                Assert.That(uniqueTiles.Add(candidate.TileX), Is.True);
+                Assert.That(candidate.SpawnSequence, Is.EqualTo(42ul + (ulong)index));
+                Assert.That(candidate.HerdLeaderCandidateIndex, Is.InRange(1, index));
+                herdSizes.TryGetValue(candidate.HerdLeaderCandidateIndex, out int herdSize);
+                herdSizes[candidate.HerdLeaderCandidateIndex] = herdSize + 1;
+            }
+
+            foreach (KeyValuePair<int, int> herd in herdSizes)
+            {
+                Assert.That(herd.Value, Is.InRange(3, 6));
+            }
+        }
+
+        /// <summary>
         /// 同じ地形と個体群Seedは同じ候補を返し、個体群Seedだけを変えると初期配置が変わることを保証します。
         /// </summary>
         [Test]

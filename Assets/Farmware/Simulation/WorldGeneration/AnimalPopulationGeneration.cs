@@ -56,7 +56,7 @@ namespace Farmware.WorldGeneration.Animals
         private const int MaximumPopulationForCompleteLayoutSearch = 64;
 
         /// <summary>
-        /// 完全配置探索で試す群れ中心の上限です。
+        /// 完全配置探索で試す、群れ中心とメンバーのタイル選択の合計上限です。
         /// 配置問題は組み合わせが増え得るため、固定Tickを長時間占有せず従来の部分補充へ戻れる有限値にします。
         /// </summary>
         private const int MaximumCompleteLayoutSearchAttempts = 4096;
@@ -257,7 +257,7 @@ namespace Farmware.WorldGeneration.Animals
         /// <param name="occupiedTiles">先行種と探索中の群れが使用済みの地域内タイル添字です。</param>
         /// <param name="regionState">成功経路だけを反映する乱数状態と受付順です。</param>
         /// <param name="candidates">成功経路の候補追加先です。</param>
-        /// <param name="remainingSearchAttempts">固定Tickを守るために残っている中心試行回数です。</param>
+        /// <param name="remainingSearchAttempts">中心とメンバーの探索全体で共有する残りタイル選択回数です。</param>
         /// <returns>残数をすべて配置できた場合はtrueです。</returns>
         private static bool TryAppendCompletePopulationLayout(
             AnimalSpeciesDefinitionBlob species,
@@ -314,6 +314,11 @@ namespace Farmware.WorldGeneration.Animals
                     eligibleTiles.Length);
                 for (int offset = 0; offset < eligibleTiles.Length; offset++)
                 {
+                    if (remainingSearchAttempts <= 0)
+                    {
+                        return false;
+                    }
+
                     int anchorLocalTileIndex =
                         eligibleTiles[(startIndex + offset) % eligibleTiles.Length];
                     if (Contains(occupiedTiles, anchorLocalTileIndex)
@@ -327,10 +332,6 @@ namespace Farmware.WorldGeneration.Animals
                     }
 
                     remainingSearchAttempts--;
-                    if (remainingSearchAttempts < 0)
-                    {
-                        return false;
-                    }
 
                     int candidateCountBeforeHerd = candidates.Length;
                     int occupiedCountBeforeHerd = occupiedTiles.Length;
@@ -344,24 +345,17 @@ namespace Farmware.WorldGeneration.Animals
                         candidates);
                     occupiedTiles.Add(anchorLocalTileIndex);
 
-                    bool herdCompleted = TryAppendHerdMembers(
+                    if (TryAppendCompleteHerdMembers(
                         species,
-                        herdSize,
+                        herdSize - 1,
+                        remainingAfterHerd,
                         anchorLocalTileIndex,
                         eligibleTiles,
                         occupiedTiles,
                         ref branchState,
                         candidates,
-                        herdLeaderCandidateIndex);
-                    if (herdCompleted
-                        && TryAppendCompletePopulationLayout(
-                            species,
-                            remainingAfterHerd,
-                            eligibleTiles,
-                            occupiedTiles,
-                            ref branchState,
-                            candidates,
-                            ref remainingSearchAttempts))
+                        herdLeaderCandidateIndex,
+                        ref remainingSearchAttempts))
                     {
                         regionState = branchState;
                         return true;
@@ -371,6 +365,93 @@ namespace Farmware.WorldGeneration.Animals
                     candidates.ResizeUninitialized(candidateCountBeforeHerd);
                     occupiedTiles.ResizeUninitialized(occupiedCountBeforeHerd);
                 }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// 群れのメンバーを1羽ずつ選び、後続群れまで配置できない場合は別のメンバーへ戻って再探索します。
+        /// 最初の経路は従来と同じ抽選順にし、変更不要な通常配置の乱数消費を維持します。
+        /// </summary>
+        /// <param name="species">徘徊距離と外見差分数を持つ動物種定義です。</param>
+        /// <param name="remainingMembers">現在の群れでまだ追加していない個体数です。</param>
+        /// <param name="populationAfterHerd">この群れの完成後に別の群れへ配置する個体数です。</param>
+        /// <param name="anchorLocalTileIndex">現在の群れ先頭が使う地域内タイル添字です。</param>
+        /// <param name="eligibleTiles">対象種が利用できる地域内タイル添字です。</param>
+        /// <param name="occupiedTiles">先行個体と探索中の個体が使うタイル一覧です。失敗分岐の追加分は戻します。</param>
+        /// <param name="regionState">成功経路だけを反映する乱数状態と受付順です。</param>
+        /// <param name="candidates">成功経路の候補追加先です。既存候補は変更しません。</param>
+        /// <param name="herdLeaderCandidateIndex">現在の群れの先頭候補がある添字です。</param>
+        /// <param name="remainingSearchAttempts">中心とメンバーで共有し、失敗しても消費を戻さない残り探索回数です。</param>
+        /// <returns>現在の群れと後続群れの全個体を配置できた場合はtrueです。</returns>
+        private static bool TryAppendCompleteHerdMembers(
+            AnimalSpeciesDefinitionBlob species,
+            int remainingMembers,
+            int populationAfterHerd,
+            int anchorLocalTileIndex,
+            NativeArray<int> eligibleTiles,
+            NativeList<int> occupiedTiles,
+            ref AnimalPopulationRegionState regionState,
+            NativeList<AnimalSpawnCandidate> candidates,
+            int herdLeaderCandidateIndex,
+            ref int remainingSearchAttempts)
+        {
+            if (remainingMembers == 0)
+            {
+                // 群れ単体の完成では確定せず、後続が使う中心やメンバーを塞いでいないかも確認します。
+                return TryAppendCompletePopulationLayout(
+                    species, populationAfterHerd, eligibleTiles, occupiedTiles,
+                    ref regionState, candidates, ref remainingSearchAttempts);
+            }
+
+            if (remainingSearchAttempts <= 0
+                || CountNearbyAvailableTiles(
+                    eligibleTiles, occupiedTiles, anchorLocalTileIndex,
+                    species.MaximumWanderDistanceInTiles) < remainingMembers)
+            {
+                // 現在の群れさえ完成できない分岐は、組合せを増やす前に打ち切ります。
+                return false;
+            }
+
+            AnimalPopulationRegionState memberSelectionState = regionState;
+            int startIndex = NextInt(ref memberSelectionState.RandomState, eligibleTiles.Length);
+            for (int offset = 0; offset < eligibleTiles.Length; offset++)
+            {
+                if (remainingSearchAttempts <= 0)
+                {
+                    return false;
+                }
+
+                int memberTileIndex = eligibleTiles[(startIndex + offset) % eligibleTiles.Length];
+                if (Contains(occupiedTiles, memberTileIndex)
+                    || !IsWithinWanderDistance(
+                        memberTileIndex, anchorLocalTileIndex, species.MaximumWanderDistanceInTiles))
+                {
+                    continue;
+                }
+
+                remainingSearchAttempts--;
+                int candidateCountBeforeMember = candidates.Length;
+                int occupiedCountBeforeMember = occupiedTiles.Length;
+                AnimalPopulationRegionState branchState = memberSelectionState;
+                AppendCandidate(species, memberTileIndex, herdLeaderCandidateIndex,
+                    ref branchState, candidates);
+                occupiedTiles.Add(memberTileIndex);
+
+                if (TryAppendCompleteHerdMembers(
+                    species, remainingMembers - 1, populationAfterHerd, anchorLocalTileIndex,
+                    eligibleTiles, occupiedTiles, ref branchState, candidates,
+                    herdLeaderCandidateIndex, ref remainingSearchAttempts))
+                {
+                    regionState = branchState;
+                    return true;
+                }
+
+                // 不成立のメンバーだけでなく、その先で試した群れも戻した状態から別タイルを試します。
+                // 乱数と受付順はbranchStateへ分離しているため、失敗した分岐が次の候補へ漏れません。
+                candidates.ResizeUninitialized(candidateCountBeforeMember);
+                occupiedTiles.ResizeUninitialized(occupiedCountBeforeMember);
             }
 
             return false;
