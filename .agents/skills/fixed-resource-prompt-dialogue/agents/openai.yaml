@@ -1,0 +1,4 @@
+interface:
+  display_name: "固定資源Prompt対話作成"
+  short_description: "木・岩・草などの固定資源スプライトPromptを対話で作成"
+  default_prompt: "Use $fixed-resource-prompt-dialogue to create a PixelLab prompt for a Farmware fixed resource sprite."

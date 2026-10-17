@@ -16,6 +16,7 @@
 
 - [実装ロードマップ](./Development/ImplementationRoadmap.md)
 - [シミュレーション技術仕様](./Development/SimulationArchitectureSpecification.md)
+- [Codexスキル](./Development/CodexSkills.md)
 - [Unity Editorツール](./Development/EditorTools.md)
 - [テスト](./Development/Testing.md)
 - [MAP-02D 性能計測](./Development/Map02DPerformanceReport.md)

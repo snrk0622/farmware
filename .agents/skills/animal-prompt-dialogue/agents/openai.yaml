@@ -1,0 +1,4 @@
+interface:
+  display_name: "動物Prompt対話作成"
+  short_description: "PixelLab用の動物Promptを対話形式で完成させます"
+  default_prompt: "$animal-prompt-dialogue を使って、PixelLab用の動物スプライトPromptを対話形式で完成させてください。"
