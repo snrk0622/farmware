@@ -568,6 +568,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Farmware.WorldGeneration.Presentation::Farmware.WorldGeneration.Presentation.CameraPanController
   movementSpeedInTilesPerSecond: 12
   fastMovementMultiplier: 3
+  automaticRebaseThresholdInTiles: 512
   pixelsPerUnit: 16
 --- !u!114 &519420036
 MonoBehaviour:

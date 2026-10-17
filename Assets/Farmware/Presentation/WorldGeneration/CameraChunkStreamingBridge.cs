@@ -219,10 +219,16 @@ namespace Farmware.WorldGeneration.Presentation
 
         /// <summary>
         /// Viewportの左下と右上をワールドへ変換し、少しでも画面へ含まれるチャンクの包含矩形を求めます。
+        /// Transformに追従するCamera行列へ戻してから変換し、前フレームの描画用行列を新しい表示原点と混ぜません。
         /// </summary>
         /// <returns>負座標でも床方向除算された可視論理チャンク範囲です。</returns>
         private ChunkStreamingObserver CalculateVisibleChunkBounds()
         {
+            // URPのPixel Perfect Cameraは描画直前にworldToCameraMatrixを設定し、描画後もその値を保持します。
+            // 原点更新はUpdate中にTransformを移すため、古い行列のままだと新原点を加えた可視要求が512タイルずれます。
+            // このBridgeは現在のTransformを読み込み範囲の基準とし、描画時のピクセル整列はURPが再設定します。
+            targetCamera.ResetWorldToCameraMatrix();
+
             float distanceToGridPlane = targetGrid == null
                 ? Mathf.Abs(targetCamera.transform.position.z)
                 : Mathf.Abs(targetCamera.transform.position.z - targetGrid.transform.position.z);

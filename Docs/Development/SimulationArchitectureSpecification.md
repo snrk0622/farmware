@@ -1,7 +1,7 @@
 # Farmware シミュレーション技術仕様 v0.1
 
 - 作成日: 2026-10-14
-- 最終更新日: 2026-10-16
+- 最終更新日: 2026-10-17
 - 状態: 設備・物流・施設実装前の基盤仕様
 - 対象環境: Unity 6000.3.8f1、Entities 1.5.0
 - 関連仕様: [ゲームコンセプト](../GameSpecification/2026-10-11_casual_factory_concept_v0.1.md)
@@ -196,15 +196,17 @@ Presentation
 - 画面入力は相対表示座標から整数の絶対タイル座標へ変換してCommandを作る。
 - Floating Originの変更によってワールド生成、施設領域、物流、生産、セーブ結果を変化させない。
 
-`MAP-02B`では通常移動中の表示原点変更を行わない。自動Floating Originを開始する距離、TilemapRendererの描画を途切れさせない再配置方式、原点変更フレームの反映予算は、最大ズームアウト、高速パン、遠距離座標のfloat精度を扱う`MAP-02D`で計測して決定する。
+`MAP-02D`では、通常移動の相対Camera座標が現在の表示原点から8論理チャンク、512タイルへ達した軸がある場合、絶対Camera位置を保ったまま所属する64×64論理チャンク境界へ表示原点を更新する。原点変更フレームは、新原点側の可視チャンクを先に再構築して空白を防ぎ、旧原点側の画面外セルは通常のサブチャンク予算で後から消去する。明示テレポートでは旧表示が新Viewportへ重なる可能性があるため、従来どおり即時消去する。512タイル、プリロード1チャンク、保持余白1チャンク、最大同時生成2チャンク、最大4サブチャンク/フレームは実装候補値であり、最大ズームアウト、高速パン、原点変更フレームをUnity Profilerで確認してから`MAP-02D`完了値として確定する。
 
 `MAP-02A`では、表示空間のローカルセル`(0, 0)`に対応する絶対タイル座標を`DisplayOrigin`として表す。`WorldCoordinateConversion`は、Simulationが保持する`int2`の絶対タイル座標と、表示原点からの2軸64bit`RelativeCellCoordinate`、1タイルを1ワールド単位とする`double2`相対ワールド座標を相互変換する。セル左下は整数座標、セル中心は各軸へ0.5を加えた位置とし、相対ワールド座標から所属セルへ戻す場合は正負とも床方向へ丸める。
 
 絶対座標同士の差は`int`のまま減算せず、`long`へ広げてから計算する。逆変換では表示原点を加えた結果が`int`範囲内であることを先に検証し、NaN、無限大、範囲外を失敗として拒否する。このAPIはCamera、Transform、GridLayout、Tilemapへ依存しない純粋計算とし、表示原点の変更がSimulationの絶対座標、地形生成、初期スポーン、状態ハッシュを変更する経路を持たせない。
 
-`MAP-02B`では`CameraPanController`がPresentation寿命中の`DisplayOrigin`を所有する。World GridのTransformは原点へ固定し、Camera、9枚のTilemap、岩壁内部影Meshは表示原点からの相対座標だけを使用する。初期スポーンと明示的な絶対座標移動は所属チャンク境界を表示原点へ選び、Camera Transformへ0〜64付近の値を渡す。通常のWASD／矢印キー入力はCameraの相対座標だけを更新し、表示原点やWorld Gridを移動しない。Viewportを読む`CameraChunkStreamingBridge`は相対範囲へ現在の表示原点を加算し、ECSの`ChunkStreamingObserver`を絶対チャンク座標に保つ。明示的な絶対座標移動で表示原点が変わった場合、`ChunkTilemapPresenter`は旧相対セルを即時消去し、新しい表示原点で可視チャンクを再構築する。F4のタイル・サブチャンク・チャンク境界は、`int`最大タイルの外周となる最大値+1を含めて64bitで列挙し、座標周回や終了しない描画ループを起こさない。通常移動中の自動Floating Origin、継ぎ目を見せない再配置方式、再配置量の分割やカメラ速度抑制は`MAP-02D`で計測して決める。
+`MAP-02B`では`CameraPanController`がPresentation寿命中の`DisplayOrigin`を所有する。World GridのTransformは原点へ固定し、Camera、9枚のTilemap、岩壁内部影Meshは表示原点からの相対座標だけを使用する。初期スポーンと明示的な絶対座標移動は所属チャンク境界を表示原点へ選び、Camera Transformへ0〜64付近の値を渡す。Viewportを読む`CameraChunkStreamingBridge`は相対範囲へ現在の表示原点を加算し、ECSの`ChunkStreamingObserver`を絶対チャンク座標に保つ。明示的な絶対座標移動で表示原点が変わった場合、`ChunkTilemapPresenter`は旧相対セルを即時消去し、新しい表示原点で可視チャンクを再構築する。F4のタイル・サブチャンク・チャンク境界は、`int`最大タイルの外周となる最大値+1を含めて64bitで列挙し、座標周回や終了しない描画ループを起こさない。`MAP-02D`では通常移動にも上記の512タイル閾値を接続し、World Gridを動かさず、絶対Observer範囲とSimulation状態を維持したままCameraと全Presentationを新しい相対座標へ再配置する。自動変更の旧Tilemapセルは表示原点を添えて待ち行列へ移し、新原点側を同じフレームに反映した後、通常の4サブチャンク/フレーム予算で消去する。
 
 `MAP-02C`では、F3／F4に加えて開発者用Gameビュー可視化も`CameraPanController`の`DisplayOrigin`へ接続する。CameraとGridから得た相対セルへ表示原点を加えた絶対タイル座標でECSを検索し、検索結果の絶対タイルから表示原点を引いた相対セルへ色面を投影する。正負の遠方表示原点でもViewport範囲、中央タイル、Tilemap、色面が同じ絶対セルを参照する。Map Viewerは独立したEditorWindowで絶対座標を直接扱い、変換対象に含めない。現時点のGameビューには選択・建築ポインター入力が存在しないため、将来の入力はTransformやGridの相対値をSimulationへ直接渡さず、同じ表示原点境界で絶対タイル座標へ戻してからCommandを作る。
+
+Cameraの可視範囲計算は現在のTransformを基準とする。`CameraChunkStreamingBridge`は`ViewportToWorldPoint`の前に`ResetWorldToCameraMatrix()`を呼び、URP Pixel Perfect Cameraが保持する前フレームの描画行列を解除する。原点変更フレームでも、現在の相対Camera座標と同じ表示原点を組み合わせる。描画直前のピクセル整列行列の設定はURPへ委ねる。任意の独自ビュー行列を読み込み範囲の正として扱うCameraは、このBridgeの対象外とする。
 
 ## 10. 実装前後の検証要件
 

@@ -28,6 +28,13 @@ namespace Farmware.WorldGeneration.Presentation
         /// </summary>
         public const float DefaultFastMovementMultiplier = 3f;
 
+        /// <summary>
+        /// 通常移動中に表示原点を自動更新する、現在の表示原点からの距離です。
+        /// 64タイルの論理チャンク8個分を使い、Camera Transformを十分小さいfloat座標へ保ちます。
+        /// </summary>
+        public const int DefaultAutomaticRebaseThresholdInTiles =
+            WorldGridConstants.LogicalChunkSize * 8;
+
         // 通常移動時の速度です。1タイルを1 Unity unitとして、Inspectorから体感を調整します。
         [Tooltip("WASDまたは矢印キーで移動する速さです。単位はタイル/秒で、1タイルを1 Unity unitとして扱います。")]
         [Min(0f)]
@@ -37,6 +44,12 @@ namespace Farmware.WorldGeneration.Presentation
         [Tooltip("左右どちらかのShiftキーを押している間の速度倍率です。大きくすると地形生成が追いつかない場合があります。")]
         [Min(1f)]
         [SerializeField] private float fastMovementMultiplier = DefaultFastMovementMultiplier;
+
+        // Cameraが表示原点から離れ過ぎる前に、Presentationだけを現在チャンク境界へ戻す距離です。
+        [Tooltip("自動Floating Originを実行する距離です。単位はタイルです。旧表示を最大ズーム範囲外へ出すため512以上を指定し、大きくすると遠方でfloat精度が低下する点に注意してください。")]
+        [Min(DefaultAutomaticRebaseThresholdInTiles)]
+        [SerializeField] private int automaticRebaseThresholdInTiles =
+            DefaultAutomaticRebaseThresholdInTiles;
 
         // 1 Unity unitに含めるピクセル数です。フォールバックTileとPixel Perfect CameraのPPUへ合わせます。
         [Tooltip("1 Unity unitあたりのピクセル数です。SpriteとPixel Perfect CameraのAssets PPUと同じ値にしてください。")]
@@ -48,6 +61,9 @@ namespace Farmware.WorldGeneration.Presentation
 
         // 表示空間のローカルセル(0, 0)に対応する絶対タイル座標です。Presentationだけが変更します。
         private DisplayOrigin currentDisplayOrigin;
+
+        // Presenterが自動移動と明示テレポートで旧Tilemapの片付け方を分けるため、直近の変更理由を保持します。
+        private bool lastDisplayOriginChangeWasAutomatic;
 
         /// <summary>
         /// 現在の表示空間セル(0, 0)へ対応する絶対タイル座標です。
@@ -63,12 +79,20 @@ namespace Farmware.WorldGeneration.Presentation
             desiredRelativeWorldPosition.y);
 
         /// <summary>
+        /// 直近の表示原点変更が通常カメラ移動による自動Floating Originだったかを返します。
+        /// ChunkTilemapPresenterが旧表示を画面外で分割消去できるか判断するときに使用します。
+        /// </summary>
+        public bool LastDisplayOriginChangeWasAutomatic =>
+            lastDisplayOriginChangeWasAutomatic;
+
+        /// <summary>
         /// Component読み込み直後にUnityから呼ばれ、Sceneへ保存された初期座標を未丸めの移動開始位置にします。
         /// </summary>
         private void Awake()
         {
             desiredRelativeWorldPosition = transform.position;
             currentDisplayOrigin = new DisplayOrigin(int2.zero);
+            lastDisplayOriginChangeWasAutomatic = false;
         }
 
         /// <summary>
@@ -109,6 +133,7 @@ namespace Farmware.WorldGeneration.Presentation
             desiredRelativeWorldPosition.x += movementDirection.x * travelDistance;
             desiredRelativeWorldPosition.y += movementDirection.y * travelDistance;
 
+            TryAutomaticallyRebaseDisplayOrigin();
             ApplyPixelSnappedPosition();
         }
 
@@ -122,13 +147,15 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// テレポートやテストから、表示原点基準の相対XY座標を指定して同じフレームにピクセル整列済み位置へ反映します。
+        /// テストや通常移動の再現から、表示原点基準の相対XY座標を指定して同じフレームに反映します。
+        /// 自動更新距離を越えた場合は、実際のキーボード移動と同じFloating Origin処理も実行します。
         /// </summary>
         /// <param name="worldPosition">移動先の表示用相対ワールドXY座標です。カメラのZ座標は変更しません。</param>
         public void SetWorldPosition(Vector2 worldPosition)
         {
             desiredRelativeWorldPosition.x = worldPosition.x;
             desiredRelativeWorldPosition.y = worldPosition.y;
+            TryAutomaticallyRebaseDisplayOrigin();
             ApplyPixelSnappedPosition();
         }
 
@@ -152,6 +179,25 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="absoluteWorldY">移動先の絶対垂直座標です。1タイルを1ワールド単位とします。</param>
         /// <returns>所属タイルがint範囲内で有限値ならtrue、無効な座標なら何も変更せずfalseです。</returns>
         public bool SetAbsoluteWorldPosition(double absoluteWorldX, double absoluteWorldY)
+        {
+            return SetAbsoluteWorldPosition(
+                absoluteWorldX,
+                absoluteWorldY,
+                false);
+        }
+
+        /// <summary>
+        /// 絶対Camera座標を現在チャンク境界基準の小さな相対座標へ変換します。
+        /// 自動移動と明示テレポートで共通計算を使いながら、Presenterへ変更理由を伝えるため内部で分離しています。
+        /// </summary>
+        /// <param name="absoluteWorldX">移動先の絶対水平座標です。1タイルを1ワールド単位とします。</param>
+        /// <param name="absoluteWorldY">移動先の絶対垂直座標です。1タイルを1ワールド単位とします。</param>
+        /// <param name="isAutomaticRebase">通常移動の距離閾値による原点変更ならtrue、明示移動ならfalseです。</param>
+        /// <returns>所属タイルがint範囲内で有限値ならtrue、無効な座標なら何も変更せずfalseです。</returns>
+        private bool SetAbsoluteWorldPosition(
+            double absoluteWorldX,
+            double absoluteWorldY,
+            bool isAutomaticRebase)
         {
             if (double.IsNaN(absoluteWorldX)
                 || double.IsInfinity(absoluteWorldX)
@@ -182,10 +228,38 @@ namespace Farmware.WorldGeneration.Presentation
 
             // 原点を先にチャンク境界へそろえ、CameraのTransformへは0〜64付近の相対値だけを渡します。
             currentDisplayOrigin = new DisplayOrigin(new int2(alignedOriginX, alignedOriginY));
+            lastDisplayOriginChangeWasAutomatic = isAutomaticRebase;
             desiredRelativeWorldPosition.x = (float)(absoluteWorldX - alignedOriginX);
             desiredRelativeWorldPosition.y = (float)(absoluteWorldY - alignedOriginY);
             ApplyPixelSnappedPosition();
             return true;
+        }
+
+        /// <summary>
+        /// 未丸めCamera座標が閾値へ達したとき、絶対位置を変えずに表示原点だけを現在チャンク境界へ移します。
+        /// Update回数やSimulation Tickには影響せず、Presentationのfloat座標を小さく保つためだけに実行します。
+        /// </summary>
+        /// <returns>表示原点を更新した場合はtrue、閾値未満またはワールド範囲外ならfalseです。</returns>
+        private bool TryAutomaticallyRebaseDisplayOrigin()
+        {
+            int safeThreshold = Mathf.Max(
+                DefaultAutomaticRebaseThresholdInTiles,
+                automaticRebaseThresholdInTiles);
+            if (Mathf.Abs(desiredRelativeWorldPosition.x) < safeThreshold
+                && Mathf.Abs(desiredRelativeWorldPosition.y) < safeThreshold)
+            {
+                return false;
+            }
+
+            // float同士を先に加算すると遠方で桁落ちするため、整数の表示原点をdoubleへ広げてから相対値を加えます。
+            double absoluteWorldX = currentDisplayOrigin.AbsoluteTileCoordinate.x
+                + (double)desiredRelativeWorldPosition.x;
+            double absoluteWorldY = currentDisplayOrigin.AbsoluteTileCoordinate.y
+                + (double)desiredRelativeWorldPosition.y;
+            return SetAbsoluteWorldPosition(
+                absoluteWorldX,
+                absoluteWorldY,
+                true);
         }
 
         /// <summary>

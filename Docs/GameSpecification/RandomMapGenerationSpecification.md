@@ -1,7 +1,7 @@
 # Farmware ランダムマップ生成仕様 v0.1
 
 - 作成日: 2026-10-11
-- 最終更新日: 2026-10-16
+- 最終更新日: 2026-10-17
 - 状態: 初期実装仕様。橋の地形配置・耐熱契約は2026-10-16に確定済みで、設備・ベルト・施設の残りの接続条件は実装前レビューを前提とする仮仕様
 - 関連仕様: [2026-10-11_casual_factory_concept_v0.1.md](./2026-10-11_casual_factory_concept_v0.1.md)
 - 関連開発資料: [シミュレーション技術仕様](../Development/SimulationArchitectureSpecification.md)
@@ -905,10 +905,10 @@ Unrequested
 - URP用Pixel Perfect CameraをPPU 16、基準解像度480×270、Pixel Snapping、Windowboxへ設定し、CameraのHDR・MSAA・動的解像度を無効化。
 - WASDまたは矢印キーで通常12タイル/秒、Shift併用時36タイル/秒で移動し、LateUpdateで1/16ワールド単位へ整列するカメラ操作。MAP-02Dのストリーミング負荷試験は、このプレイヤー向け速度とは分離したテスト用の高速移動と座標ジャンプでも実施する。
 - プレイヤー向け診断表示としてF3を押すとカメラ中心と初期スポーンのワールド・タイル・チャンク・チャンク内座標に加え、サブチャンク座標、生成済みBiome、GeneratorVersion、ワールドシードを表示する。F4を押すと各グリッド境界、論理チャンク座標、初期スポーンタイルと所属チャンクの赤系マーカーを表示するオーバーレイ。
-- Profilerでストリーミング寿命管理とTilemap反映を個別確認できる `Farmware.WorldGeneration.ChunkStreaming`、`Farmware.WorldGeneration.TilemapPresentation` の計測区間。
+- Profilerでストリーミング寿命管理、通常のTilemap反映、自動Floating Originの再配置フレームを個別確認できる `Farmware.WorldGeneration.ChunkStreaming`、`Farmware.WorldGeneration.TilemapPresentation`、`Farmware.WorldGeneration.FloatingOriginRebase` の計測区間。
 - SampleSceneを実際に起動し、設定Singleton、4096タイルのActiveチャンク、Tilemap表示、遠方移動時のアンロード、原点帰還時の決定論的再生成まで確認するPlayModeテスト。
 
-現在の初期値は、プリロード1チャンク、保持余白1チャンク、最大同時生成2チャンク、通常フレームは最大4サブチャンク反映である。`MAP-02B`では通常移動中に表示原点を変更しない。自動Floating Originの開始距離、TilemapRendererの描画を途切れさせない再配置方式、原点変更フレームの予算は`MAP-02D`で計測して決定する。ストリーミングの各初期値も最終性能値ではなく、接続済みのSampleSceneをUnity Profilerで計測し、「1フレーム2ms以下」を目安に調整する。
+現在の実装候補値は、プリロード1チャンク、保持余白1チャンク、最大同時生成2チャンク、通常フレームは最大4サブチャンク反映、自動Floating Origin距離は8論理チャンク、512タイルである。通常移動が閾値へ達すると、絶対Camera位置を保ったまま所属する64×64論理チャンク境界へ表示原点を更新する。新原点側の可視チャンクは同じフレームに再構築し、旧原点側の画面外セルは通常の4サブチャンク/フレーム予算で後から消去する。これらはUnity Profiler未計測の候補値であり、最大ズームアウト、通常12タイル/秒、Shift併用36タイル/秒、テスト用高速パンを同一条件で比較してから`MAP-02D`完了値として確定する。製品用のフレーム時間合格値は未決定のため、この段階では独自の合格値を設定しない。
 
 ### 2026-10-16: Floating OriginのScene表示原点接続
 
@@ -916,12 +916,13 @@ Unrequested
 
 - `CameraPanController`が、表示空間セル`(0, 0)`へ対応する絶対タイル座標を共通`DisplayOrigin`として保持する。
 - 初期スポーンと絶対座標テレポートでは、所属する64×64論理チャンク境界を表示原点に選び、Camera Transformへ小さな相対座標だけを書き込む。
-- 通常のWASD／矢印キー移動では表示原点を自動変更せず、Cameraの相対座標だけを更新する。自動Floating Originを開始する距離は`MAP-02D`で計測して決める。
+- 通常のWASD／矢印キー移動では、現在の表示原点から各軸512タイル未満の間はCameraの相対座標だけを更新する。いずれかの軸が閾値へ達した場合は、絶対Camera位置を保ったまま所属する64×64論理チャンク境界へ表示原点を自動更新する。
 - 原点へ固定するWorld Grid、Ground・液面・境界・岩壁・資源を含む9枚のTilemap、岩壁内部影Meshを同じ表示原点へ接続する。
 - CameraのViewportから得た相対セルへ表示原点を加え、ECSの`ChunkStreamingObserver`には従来どおり絶対チャンク範囲を渡す。
-- 初期スポーンまたは明示的な絶対座標移動で表示原点が変わった場合、`ChunkTilemapPresenter`は旧相対セルを即時消去し、新しい表示原点で可視チャンクを再構築する。通常移動中の自動Floating Origin、TilemapRendererの描画を途切れさせない再配置方式、最終的な分割予算は`MAP-02D`のProfiler計測で決める。
+- 可視範囲を求める前に`Camera.ResetWorldToCameraMatrix()`で現在のTransformに追従する行列へ戻す。URP Pixel Perfect Cameraが保持する前回描画の行列を新しい表示原点へ加算し、可視要求が8チャンク先へ飛ぶことを防ぐ。描画直前のピクセル整列行列はURPが再設定する。
+- 初期スポーンまたは明示的な絶対座標移動で表示原点が変わった場合、`ChunkTilemapPresenter`は旧相対セルを即時消去し、新しい表示原点で可視チャンクを再構築する。通常移動による自動変更では、新原点側の可視チャンクを同じフレームに先行再構築し、表示原点を添えて退避した旧セルを通常のサブチャンク予算で後から消去する。原点変更フレームは専用Profiler Markerで計測し、スパイクが許容できない場合は再配置方式または予算を再調整する。
 - F3の座標HUDとF4のグリッド・初期スポーンマーカーは、表示用相対座標を絶対タイル座標へ戻して表示する。開発者可視化も同じ表示原点を使い、可視範囲と中央タイルをECSから検索するときはGridの相対セルへ表示原点を加算し、絶対タイルの色面をGameビューへ投影するときは表示原点を減算する。独立したEditorWindowであるMap Viewerは絶対座標を直接扱う。
-- 初期スポーンと明示的な絶対移動の表示原点、絶対Camera位置、絶対可視チャンク範囲、負座標初期スポーン、遠方Tilemap表示、通常移動相当の大きな相対座標でも表示原点を自動変更しないことに加え、正負の遠方表示原点で開発者可視化のViewport範囲、中央タイル、Tilemap、色面が同じ絶対セルを示すことをPlayModeテストで保証する。
+- 初期スポーンと明示的な絶対移動の表示原点、絶対Camera位置、絶対可視チャンク範囲、負座標初期スポーン、遠方Tilemap表示に加え、通常移動が512タイル閾値へ達したときの正負の自動原点変更、絶対位置とObserver範囲の維持、旧原点セルだけを消す分割掃除をPlayModeテストで保証する。正負の遠方表示原点では、開発者可視化のViewport範囲、中央タイル、Tilemap、色面が同じ絶対セルを示すことも維持する。
 - 現時点のGameビューには選択・建築ポインター入力が存在しない。将来追加するときはGridまたはTransformの相対座標をSimulationへ直接渡さず、`CameraPanController`の表示原点を使って絶対タイル座標へ戻してからCommandを作る。
 
 ### 2026-10-11: マップ共通の設備建築可能領域探索

@@ -24,6 +24,10 @@ namespace Farmware.WorldGeneration.Presentation
         private static readonly ProfilerMarker PresentationProfilerMarker =
             new ProfilerMarker("Farmware.WorldGeneration.TilemapPresentation");
 
+        // 自動Floating Originの再描画だけを通常のTilemap反映から分離し、Profilerで原点変更フレームの負荷を確認します。
+        private static readonly ProfilerMarker FloatingOriginRebaseProfilerMarker =
+            new ProfilerMarker("Farmware.WorldGeneration.FloatingOriginRebase");
+
         // URP 2D Rendererで頂点色と透明度を扱えるShader名です。利用できない環境では標準Sprite Shaderへフォールバックします。
         private const string PrimaryRockWallShadowShaderName =
             "Universal Render Pipeline/2D/Sprite-Unlit-Default";
@@ -187,6 +191,10 @@ namespace Farmware.WorldGeneration.Presentation
 
         // 消去を要求した順番と途中位置を保持し、フレーム予算を超えないよう分割処理します。
         private readonly Queue<ChunkClearProgress> clearQueue = new Queue<ChunkClearProgress>();
+
+        // 自動原点変更前の相対セルを画面外で分割消去し、新原点側の表示を先に完成させるための待ち行列です。
+        private readonly Queue<StaleOriginClearProgress> staleOriginClearQueue =
+            new Queue<StaleOriginClearProgress>();
 
         // DictionaryとHashSetを走査中に変更しないため、削除対象を一時退避する再利用Listです。
         private readonly List<ChunkCoordinate> coordinateScratch = new List<ChunkCoordinate>();
@@ -583,25 +591,37 @@ namespace Farmware.WorldGeneration.Presentation
                     return;
                 }
 
-                bool displayOriginChanged = SynchronizeDisplayOrigin();
+                DisplayOriginChangeKind displayOriginChange = SynchronizeDisplayOrigin();
                 ChunkStreamingObserver observer = observerQuery.GetSingleton<ChunkStreamingObserver>();
                 CollectPresentationWork(observer);
 
-                // 初期スポーンや明示的な絶対移動で原点が変わった場合は、旧相対セルを残さないよう全反映します。
-                // 通常移動はMAP-02Bで原点を変更しないため、この無制限予算は明示的な位置変更時だけ使用します。
-                int remainingBudget = displayOriginChanged
-                    ? int.MaxValue
-                    : GetSubChunkBudget();
+                if (displayOriginChange != DisplayOriginChangeKind.None)
+                {
+                    using (FloatingOriginRebaseProfilerMarker.Auto())
+                    {
+                        // 原点変更直後は新しいCamera周辺を同じフレームに完成させ、空白フレームを見せません。
+                        // 自動変更の旧セルは設定閾値以上離れた画面外にあるため、通常予算で後から消去します。
+                        int unlimitedVisibleBudget = ProcessClearQueue(int.MaxValue);
+                        ProcessApplyQueue(unlimitedVisibleBudget);
+                        ProcessStaleOriginClearQueue(GetSubChunkBudget());
+                    }
+
+                    return;
+                }
+
+                int remainingBudget = GetSubChunkBudget();
                 remainingBudget = ProcessClearQueue(remainingBudget);
-                ProcessApplyQueue(remainingBudget);
+                remainingBudget = ProcessApplyQueue(remainingBudget);
+                ProcessStaleOriginClearQueue(remainingBudget);
             }
         }
 
         /// <summary>
-        /// Camera側の表示原点変更を検出し、旧相対セルを消去して新しい原点で再収集できる状態へ戻します。
+        /// Camera側の表示原点変更を検出し、旧相対セルを片付けて新しい原点で再収集できる状態へ戻します。
+        /// 自動変更では画面外になった旧セルを分割消去へ移し、明示テレポートでは重なりを避けるため即時消去します。
         /// </summary>
-        /// <returns>表示済み内容を伴う原点変更があり、即時消去を行った場合はtrueです。</returns>
-        private bool SynchronizeDisplayOrigin()
+        /// <returns>変更なし、自動変更、明示変更のいずれかです。</returns>
+        private DisplayOriginChangeKind SynchronizeDisplayOrigin()
         {
             DisplayOrigin currentOrigin = cameraPanController == null
                 ? new DisplayOrigin(int2.zero)
@@ -610,12 +630,12 @@ namespace Farmware.WorldGeneration.Presentation
             {
                 presentedDisplayOrigin = currentOrigin;
                 hasPresentedDisplayOrigin = true;
-                return false;
+                return DisplayOriginChangeKind.None;
             }
 
             if (DisplayOriginsAreEqual(presentedDisplayOrigin, currentOrigin))
             {
-                return false;
+                return DisplayOriginChangeKind.None;
             }
 
             bool hadPresentedContent = displayedCoordinates.Count > 0
@@ -624,12 +644,74 @@ namespace Farmware.WorldGeneration.Presentation
                 || rockWallShadowByCoordinate.Count > 0;
             if (hadPresentedContent)
             {
-                // 明示的なテレポートでは旧原点のセルを残さず、同じUpdate内で新原点側を再構築します。
-                ClearAllPresentedChunksImmediately();
+                bool isAutomaticRebase = cameraPanController != null
+                    && cameraPanController.LastDisplayOriginChangeWasAutomatic;
+                if (isAutomaticRebase)
+                {
+                    MoveCurrentPresentationToStaleClearQueue(presentedDisplayOrigin);
+                }
+                else
+                {
+                    // 明示テレポートは移動距離が短い場合もあり、旧セルが新Viewportへ重なるため即時消去します。
+                    ClearAllPresentedChunksImmediately();
+                }
             }
 
             presentedDisplayOrigin = currentOrigin;
-            return hadPresentedContent;
+            return cameraPanController != null
+                    && cameraPanController.LastDisplayOriginChangeWasAutomatic
+                ? DisplayOriginChangeKind.Automatic
+                : DisplayOriginChangeKind.Explicit;
+        }
+
+        /// <summary>
+        /// 現在の原点でTilemapへ書いた可能性があるチャンクを、旧原点付きの分割消去Queueへ移します。
+        /// 新しい可視チャンクと同じ論理座標でも別の相対セルへ書けるよう、通常の表示管理キャッシュは直ちに空にします。
+        /// </summary>
+        /// <param name="staleOrigin">旧Tilemapセルの計算に使用した表示原点です。</param>
+        private void MoveCurrentPresentationToStaleClearQueue(DisplayOrigin staleOrigin)
+        {
+            coordinateScratch.Clear();
+            foreach (ChunkCoordinate coordinate in displayedCoordinates)
+            {
+                coordinateScratch.Add(coordinate);
+            }
+
+            foreach (ChunkCoordinate coordinate in applyProgressByCoordinate.Keys)
+            {
+                if (!coordinateScratch.Contains(coordinate))
+                {
+                    coordinateScratch.Add(coordinate);
+                }
+            }
+
+            foreach (ChunkCoordinate coordinate in pendingClearCoordinates)
+            {
+                if (!coordinateScratch.Contains(coordinate))
+                {
+                    coordinateScratch.Add(coordinate);
+                }
+            }
+
+            // 影MeshはTilemapより少数で、同じ論理座標の新しい影とDictionaryキーが競合するため先に破棄します。
+            // 旧Tileは自動原点変更後に設定閾値以上画面外へ移るので、以下のQueueで予算分割しても表示欠けになりません。
+            DestroyAllRockWallShadows();
+            applyProgressByCoordinate.Clear();
+            applyQueue.Clear();
+            displayedCoordinates.Clear();
+            pendingClearCoordinates.Clear();
+            seenCoordinates.Clear();
+            clearQueue.Clear();
+
+            for (int index = 0; index < coordinateScratch.Count; index++)
+            {
+                staleOriginClearQueue.Enqueue(
+                    new StaleOriginClearProgress(
+                        coordinateScratch[index],
+                        staleOrigin));
+            }
+
+            coordinateScratch.Clear();
         }
 
         /// <summary>
@@ -850,12 +932,13 @@ namespace Farmware.WorldGeneration.Presentation
         /// 反映待ちを16×16単位で処理し、1チャンク完了時だけECS状態をActiveへ進めます。
         /// </summary>
         /// <param name="remainingBudget">このフレームで処理できる残りサブチャンク数です。</param>
-        private void ProcessApplyQueue(int remainingBudget)
+        /// <returns>反映後に旧原点セルの消去へ渡せる残り予算です。</returns>
+        private int ProcessApplyQueue(int remainingBudget)
         {
             if (generationSettingsQuery.CalculateEntityCount() != 1)
             {
                 // 境界の隣接地形をSimulationと同じ設定で判定できない間は、誤った影を確定せず次フレームへ待ちます。
-                return;
+                return remainingBudget;
             }
 
             WorldGenerationSettings generationSettings =
@@ -887,7 +970,7 @@ namespace Farmware.WorldGeneration.Presentation
                     || resources.Length != WorldGridConstants.TilesPerChunk)
                 {
                     // Job完了前または不正バッファは描画せず、次フレームに再確認します。
-                    return;
+                    return remainingBudget;
                 }
 
                 ApplySubChunk(
@@ -915,6 +998,36 @@ namespace Farmware.WorldGeneration.Presentation
                     }
                 }
             }
+
+            return remainingBudget;
+        }
+
+        /// <summary>
+        /// 自動Floating Origin前の画面外セルを、通常のサブチャンク予算内で古い表示原点から消去します。
+        /// 新しい可視セルの反映を先に行うことで、掃除のために現在画面へ空白を作らないようにします。
+        /// </summary>
+        /// <param name="remainingBudget">このフレームで処理できる残りサブチャンク数です。</param>
+        /// <returns>消去後の残り予算です。</returns>
+        private int ProcessStaleOriginClearQueue(int remainingBudget)
+        {
+            while (remainingBudget > 0 && staleOriginClearQueue.Count > 0)
+            {
+                StaleOriginClearProgress progress = staleOriginClearQueue.Peek();
+                ClearSubChunk(
+                    progress.Coordinate,
+                    progress.NextSubChunkIndex,
+                    progress.DisplayOrigin,
+                    false);
+                progress.NextSubChunkIndex++;
+                remainingBudget--;
+
+                if (progress.NextSubChunkIndex >= WorldGridConstants.SubChunksPerChunk)
+                {
+                    staleOriginClearQueue.Dequeue();
+                }
+            }
+
+            return remainingBudget;
         }
 
         /// <summary>
@@ -1075,13 +1188,37 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="subChunkIndex">行優先の0〜15サブチャンク番号です。</param>
         private void ClearSubChunk(ChunkCoordinate coordinate, int subChunkIndex)
         {
-            if (subChunkIndex == 0)
+            ClearSubChunk(
+                coordinate,
+                subChunkIndex,
+                presentedDisplayOrigin,
+                true);
+        }
+
+        /// <summary>
+        /// 指定した表示原点で配置した16×16サブチャンクをnull配列で上書きします。
+        /// 自動Floating Origin後の旧セルは現在の岩壁影Dictionaryと別寿命なので、影破棄を無効にして使用します。
+        /// </summary>
+        /// <param name="coordinate">対象の論理チャンク座標です。</param>
+        /// <param name="subChunkIndex">行優先の0〜15サブチャンク番号です。</param>
+        /// <param name="cellDisplayOrigin">対象セルを書き込んだ時点の表示原点です。</param>
+        /// <param name="destroyCurrentShadow">現在の論理座標に対応する岩壁影も破棄する場合はtrueです。</param>
+        private void ClearSubChunk(
+            ChunkCoordinate coordinate,
+            int subChunkIndex,
+            DisplayOrigin cellDisplayOrigin,
+            bool destroyCurrentShadow)
+        {
+            if (subChunkIndex == 0 && destroyCurrentShadow)
             {
                 // Tilemap消去を分割している間に古い影だけが残らないよう、チャンク影は消去開始時にまとめて外します。
                 DestroyRockWallShadow(coordinate);
             }
 
-            BoundsInt bounds = CreateSubChunkBounds(coordinate, subChunkIndex);
+            BoundsInt bounds = CreateSubChunkBounds(
+                coordinate,
+                subChunkIndex,
+                cellDisplayOrigin);
             if (targetTilemap != null)
             {
                 targetTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
@@ -1134,11 +1271,33 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="coordinate">消去する論理チャンク座標です。</param>
         private void ClearWholeChunkImmediately(ChunkCoordinate coordinate)
         {
+            ClearWholeChunkImmediately(
+                coordinate,
+                presentedDisplayOrigin,
+                true);
+        }
+
+        /// <summary>
+        /// 指定表示原点で配置した1チャンク分を即時消去します。
+        /// World切替時には、分割消去途中の旧原点セルも残さず片付けるために使用します。
+        /// </summary>
+        /// <param name="coordinate">消去する論理チャンク座標です。</param>
+        /// <param name="cellDisplayOrigin">対象セルを書き込んだ時点の表示原点です。</param>
+        /// <param name="destroyCurrentShadow">現在の論理座標に対応する岩壁影も破棄する場合はtrueです。</param>
+        private void ClearWholeChunkImmediately(
+            ChunkCoordinate coordinate,
+            DisplayOrigin cellDisplayOrigin,
+            bool destroyCurrentShadow)
+        {
             for (int subChunkIndex = 0;
                  subChunkIndex < WorldGridConstants.SubChunksPerChunk;
                  subChunkIndex++)
             {
-                ClearSubChunk(coordinate, subChunkIndex);
+                ClearSubChunk(
+                    coordinate,
+                    subChunkIndex,
+                    cellDisplayOrigin,
+                    destroyCurrentShadow);
             }
         }
 
@@ -1177,6 +1336,16 @@ namespace Farmware.WorldGeneration.Presentation
                 ClearWholeChunkImmediately(coordinateScratch[index]);
             }
 
+            // 自動原点変更後の分割消去が残っていても、Component無効化やWorld切替では全旧セルを即時消去します。
+            while (staleOriginClearQueue.Count > 0)
+            {
+                StaleOriginClearProgress staleProgress = staleOriginClearQueue.Dequeue();
+                ClearWholeChunkImmediately(
+                    staleProgress.Coordinate,
+                    staleProgress.DisplayOrigin,
+                    false);
+            }
+
             DestroyAllRockWallShadows();
             ResetPresentationCaches();
         }
@@ -1188,6 +1357,25 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="subChunkIndex">行優先の0〜15サブチャンク番号です。</param>
         /// <returns>Z=0平面にある16×16×1セルの範囲です。</returns>
         private BoundsInt CreateSubChunkBounds(ChunkCoordinate coordinate, int subChunkIndex)
+        {
+            return CreateSubChunkBounds(
+                coordinate,
+                subChunkIndex,
+                presentedDisplayOrigin);
+        }
+
+        /// <summary>
+        /// 論理チャンク座標、サブチャンク番号、書き込み時の表示原点からTilemapセル範囲を作ります。
+        /// 自動原点変更後も旧セルだけを正しい相対位置から消去できるよう、原点を引数で受け取ります。
+        /// </summary>
+        /// <param name="coordinate">親となる論理チャンク座標です。</param>
+        /// <param name="subChunkIndex">行優先の0〜15サブチャンク番号です。</param>
+        /// <param name="cellDisplayOrigin">Tilemapセル位置の基準とする表示原点です。</param>
+        /// <returns>Z=0平面にある16×16×1セルの範囲です。</returns>
+        private static BoundsInt CreateSubChunkBounds(
+            ChunkCoordinate coordinate,
+            int subChunkIndex,
+            DisplayOrigin cellDisplayOrigin)
         {
             int subChunkX = subChunkIndex % WorldGridConstants.SubChunksPerAxis;
             int subChunkY = subChunkIndex / WorldGridConstants.SubChunksPerAxis;
@@ -1201,7 +1389,7 @@ namespace Farmware.WorldGeneration.Presentation
             RelativeCellCoordinate relativeCell =
                 WorldCoordinateConversion.ToRelativeCellCoordinate(
                     new int2(worldTileX, worldTileY),
-                    presentedDisplayOrigin);
+                    cellDisplayOrigin);
             if (relativeCell.X < int.MinValue
                 || relativeCell.X > int.MaxValue
                 || relativeCell.Y < int.MinValue
@@ -1929,7 +2117,24 @@ namespace Farmware.WorldGeneration.Presentation
             pendingClearCoordinates.Clear();
             seenCoordinates.Clear();
             clearQueue.Clear();
+            staleOriginClearQueue.Clear();
             coordinateScratch.Clear();
+        }
+
+        /// <summary>
+        /// Camera側で検出した表示原点変更の種類です。
+        /// 変更理由により、旧セルを画面外で分割消去できるか、即時消去が必要かを区別します。
+        /// </summary>
+        private enum DisplayOriginChangeKind : byte
+        {
+            /// <summary>表示原点は変化していません。</summary>
+            None = 0,
+
+            /// <summary>通常カメラ移動が設定閾値へ達した自動変更です。</summary>
+            Automatic = 1,
+
+            /// <summary>初期配置、ロード、テストなどから要求された明示変更です。</summary>
+            Explicit = 2
         }
 
         /// <summary>
@@ -2007,6 +2212,36 @@ namespace Farmware.WorldGeneration.Presentation
             public ChunkClearProgress(ChunkCoordinate coordinate)
             {
                 Coordinate = coordinate;
+                NextSubChunkIndex = 0;
+            }
+        }
+
+        /// <summary>
+        /// 自動Floating Origin前の相対セルと消去途中位置を保持するPresentation専用の参照型です。
+        /// 論理チャンクが新原点側へ再表示されても、旧原点を使って古い画面外セルだけを消去します。
+        /// </summary>
+        private sealed class StaleOriginClearProgress
+        {
+            /// <summary>消去対象の論理チャンク座標です。</summary>
+            public readonly ChunkCoordinate Coordinate;
+
+            /// <summary>対象セルを書き込んだ時点の表示原点です。</summary>
+            public readonly DisplayOrigin DisplayOrigin;
+
+            /// <summary>次に消去する行優先のサブチャンク番号です。範囲は0〜16です。</summary>
+            public int NextSubChunkIndex;
+
+            /// <summary>
+            /// 旧原点に残った1チャンクの消去を、先頭サブチャンクから開始します。
+            /// </summary>
+            /// <param name="coordinate">消去対象の論理チャンク座標です。</param>
+            /// <param name="displayOrigin">対象セルを書き込んだ時点の表示原点です。</param>
+            public StaleOriginClearProgress(
+                ChunkCoordinate coordinate,
+                DisplayOrigin displayOrigin)
+            {
+                Coordinate = coordinate;
+                DisplayOrigin = displayOrigin;
                 NextSubChunkIndex = 0;
             }
         }
