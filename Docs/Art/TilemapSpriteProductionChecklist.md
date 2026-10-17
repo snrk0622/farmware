@@ -270,7 +270,7 @@ Match the approved grassland reference in canvas size, top-and-face layout, outl
 - 固定資源は、採取や除去を終えるまで施設配置を妨げる`blocking_resource`と、施設配置時に自動除去される非機能の景観要素`auto_clear_scenery`へ分ける。床、道、舗装、耕地、地形Base、動物は含めない。
 - PixelLabツールは`Create S-XL Image (Pro)`とする。`Output size`の最大辺が16～42 pxなら64 frames、43～85 pxなら16 frames、86～170 pxなら4 frames、171 px以上なら1 frameとして総フレーム数を決める。上限はPixelLabが各アスペクト比で許可する最大寸法に従う。`256 ÷ Output Width`や`256 ÷ Output Height`では計算しない。
 - `Outputs per Base Variation = State Count × 2`、`Base Variation Count = floor(Total Frames ÷ Outputs per Base Variation)`、`Unused Frames = Total Frames - Base Variation Count × Outputs per Base Variation`とする。完全な基本バリエーションを1組も作れない組み合わせは使用しない。
-- 完成Prompt本文には`Output size`、1 Spriteの寸法、grid、総フレーム数、基本バリエーション数、grid上の行列配置を書かない。基本バリエーション内の状態と環境版の順序は書く。
+- 完成Prompt本文には`Output size`、1 Spriteの寸法、出力シートのgrid寸法、総フレーム数、基本バリエーション数、出力シート上の行列配置を書かない。画角を示す`orthogonal square grid`と、基本バリエーション内の状態・環境版の順序は書く。
 - 全基本バリエーションと全状態に`standard`と`snow-covered`を一対で用意する。積雪には明部`#EDF3F2`と影色`#C5D6DE`だけを使い、上向きの面へ薄く載せる。対応する通常版から、雪以外の形、状態、材質、配色、接地点、縮尺、画角、輪郭を変えない。
 - `blocking_resource`は、地面から露出する外周だけを不透明な`#333333`で囲み、地面との接地点には輪郭、黒い横線、台座を付けない。通常状態に加えて伐採後や枯渇後の静止状態がゲーム仕様上必要かを確認し、必要な状態だけを同じ生成へ含める。
 - `auto_clear_scenery`は通常状態だけとし、外周、内部、接地点のいずれにも輪郭を付けない。採取資源より控えめなシルエットとコントラストにする。

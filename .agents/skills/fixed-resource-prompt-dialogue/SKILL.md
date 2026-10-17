@@ -32,7 +32,7 @@ Farmwareの静止した固定資源について、初心者でも答えやすい
 5. `Resource Features`。材質、色、形、構成要素など、対象を判別するために必要な特徴だけを扱う。
 6. `State Requirements`。採用した各状態を、アニメーション途中ではなく一枚で読める完成した静止状態として記述する。
 7. `Variation Rules`。論理占有、接地点、主要配色を保ったまま、基本バリエーション間で変えてよい形状、傾き、色幅などを決める。
-8. `Resource-specific Prohibitions`。誤生成されやすい物、地面、容器、文字などを追加する。
+8. `Resource-specific Prohibitions`。誤生成されやすい物、地面、容器、文字などを追加する。対象固有の禁止事項がない場合は空とし、完成時にテンプレートの角括弧プレースホルダーだけを削除する。直前の共通禁止文は削除しない。
 
 ## 分類とアウトライン
 
@@ -71,7 +71,7 @@ Farmwareの静止した固定資源について、初心者でも答えやすい
   - `43～85 px`: 16 frames。
   - `86～170 px`: 4 frames。
   - `171 px以上`: 1 frame。上限はPixelLabが各アスペクト比で許可する最大寸法に従う。
-- `256 ÷ Output Width`や`256 ÷ Output Height`では計算しない。表示上のgridと非正方形の配置はPixelLab出力に従う。
+- `256 ÷ Output Width`や`256 ÷ Output Height`では計算しない。出力シートのgrid寸法と非正方形の配置はPixelLab出力に従う。
 - 全固定資源で`Environment Versions = standard, snow-covered`の2種類を必須とする。
 - `Outputs per Base Variation = State Count × 2`。
 - `Base Variation Count = floor(Total Frames ÷ Outputs per Base Variation)`。
@@ -79,7 +79,7 @@ Farmwareの静止した固定資源について、初心者でも答えやすい
 - `Total Frames < Outputs per Base Variation`の場合は、一度の生成で完全な基本バリエーションを作れない。完成Promptを出さず、より小さい`Output size`または状態数の削減をユーザーへ提案する。
 - 各基本バリエーション内では、`state 1 standard, state 1 snow-covered, state 2 standard, state 2 snow-covered...`の順で一まとまりにする。状態別や積雪有無別に全基本バリエーションをまとめない。
 - 余りフレームがある場合は末尾だけを透明な未使用フレームにする。採用する全状態と積雪有無の枚数比率は均等にする。
-- `Output size`、1Spriteの画像寸法、grid、総フレーム数、基本バリエーション数、grid上の行列配置はPrompt本文へ書かない。基本バリエーション内の状態と環境版の順序は書く。
+- `Output size`、1Spriteの画像寸法、出力シートのgrid寸法、総フレーム数、基本バリエーション数、出力シート上の行列配置はPrompt本文へ書かない。画角を示す`orthogonal square grid`と、基本バリエーション内の状態・環境版の順序は書く。
 
 例として`Output size: 32×32`は最大辺32 pxなので総出力64 framesとなる。木で`normal`と`after_harvest`の2状態を採用すると、1基本バリエーション当たり`2状態 × 2環境版 = 4 frames`、16基本バリエーション、未使用0 framesとなる。これは寸法や状態数の固定規則ではない。
 
@@ -116,7 +116,8 @@ Farmwareの静止した固定資源について、初心者でも答えやすい
 - 一度の生成で、全基本バリエーション、採用した全状態、それぞれの通常環境版と積雪版を作るよう明記する。
 - 各基本バリエーションの全状態と積雪有無を一まとまりにし、種類ごとに全基本バリエーションをまとめない。
 - バリエーションや状態をアニメーションフレームとして扱わない。
-- `Output size`、1Spriteの画像寸法、grid、総フレーム数、基本バリエーション数、grid上の行列配置をPrompt本文へ書かない。基本バリエーション内の状態と環境版の順序は含める。
+- `Output size`、1Spriteの画像寸法、出力シートのgrid寸法、総フレーム数、基本バリエーション数、出力シート上の行列配置をPrompt本文へ書かない。画角を示す`orthogonal square grid`と、基本バリエーション内の状態・環境版の順序は含める。
+- 対象固有の禁止事項が空の場合は`[RESOURCE-SPECIFIC PROHIBITIONS]`だけを削除し、同じ段落の共通禁止文を残す。
 - 積雪版へ固定色`#EDF3F2`と`#C5D6DE`を使用し、対応する通常環境版から積雪以外を変えないよう明記する。
 - `blocking_resource`には、露出外周の`#333333`アウトラインと、地面との接地点にアウトラインを付けない指示を含める。
 - `auto_clear_scenery`には、どの部分にもアウトラインを付けない指示を含める。

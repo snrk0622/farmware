@@ -8,9 +8,9 @@
 - `[RESOURCE FEATURES]`: 材質、配色、形など、対象を判別する特徴。
 - `[STATE REQUIREMENTS]`: 採用した状態それぞれの静止画としての見た目。
 - `[VARIATION RULES]`: 基本バリエーション間で変えてよい内容と維持する内容。
-- `[RESOURCE-SPECIFIC PROHIBITIONS]`: 対象固有の禁止事項。不要なら文ごと削除する。
+- `[RESOURCE-SPECIFIC PROHIBITIONS]`: 対象固有の禁止事項。不要なら、この角括弧プレースホルダーだけを削除する。同じ段落にある直前の共通禁止文は必ず残す。
 
-PixelLab Create S-XL Image (Pro)の総フレーム数は、`Output size`の最大辺に応じて64、16、4、1 framesのいずれかになる。`Output size`、1Spriteの寸法、grid、総フレーム数、基本バリエーション数、grid上の行列配置は角括弧にもPrompt本文にも入れない。基本バリエーション内の状態と環境版の順序はPromptへ含める。
+PixelLab Create S-XL Image (Pro)の総フレーム数は、`Output size`の最大辺に応じて64、16、4、1 framesのいずれかになる。`Output size`、1Spriteの寸法、出力シートのgrid寸法、総フレーム数、基本バリエーション数、出力シート上の行列配置は角括弧にもPrompt本文にも入れない。画角を示す`orthogonal square grid`と、基本バリエーション内の状態・環境版の順序はPromptへ含める。
 
 ## 施設配置を妨害する採取資源
 
@@ -54,7 +54,8 @@ Use broad readable color areas, simplified compact forms, crisp native pixels, u
 - 分類が`blocking_resource`または`auto_clear_scenery`の一方だけである。
 - 一度の生成で、全基本バリエーション、全採用状態、各状態の通常環境版と積雪版を生成する。
 - 各基本バリエーションの全出力を一まとまりにし、状態別や積雪有無別にまとめていない。
-- Prompt本文に`Output size`、1Spriteの寸法、grid、総フレーム数、基本バリエーション数、grid上の行列配置がない。基本バリエーション内の状態と環境版の順序は含まれている。
+- Prompt本文に`Output size`、1Spriteの寸法、出力シートのgrid寸法、総フレーム数、基本バリエーション数、出力シート上の行列配置がない。画角を示す`orthogonal square grid`と、基本バリエーション内の状態・環境版の順序は含まれている。
+- 対象固有の禁止事項がない場合も、共通禁止文が残っている。
 - 積雪版が通常環境版と対になり、積雪以外の形、状態、材質、色、構成要素、接地点、縮尺、画角、輪郭が一致する。
 - 雪は`#EDF3F2`と`#C5D6DE`だけを使い、上向きの面へ薄く載っている。
 - `blocking_resource`では露出外周だけが`#333333`で、地面との接地点にアウトラインがない。
