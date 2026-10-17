@@ -125,6 +125,7 @@ Gameビューでは`CameraPanController`の表示原点を使い、CameraとGrid
 | `Magma` | マグマ本体と淡水を抑制する火山影響域 |
 | `Resources` | 配置なし、木、石、砂の最終配置 |
 | `Terrain Placement` | 共通配置APIで通常設備＋通常ベルト、耐熱性を問わない橋、耐熱橋だけ、全対象の配置不可となる地形を色分けし、中央HUDへ4要求の判定結果と耐熱不足理由を表示 |
+| `Animal Population` | 全動物種のBiome・Ground条件を満たす候補タイル、候補外、初期補充で確定した個体位置を色分け |
 
 #### 次の修正をしたら確認する
 
@@ -133,6 +134,7 @@ Gameビューでは`CameraPanController`の表示原点を使い、CameraとGrid
 - `GeneratedTile`、ECS Buffer、Presentationへ渡すデータを変更した。
 - 可視化の色、凡例、HUD、Tilemap、Camera、黒帯、表示範囲を変更した。
 - `CameraPanController`、`DisplayOrigin`、Gridと絶対タイル座標の変換境界を変更した。
+- 動物種の対応バイオーム・有効地形、地域生成、個体位置を変更した。
 - 新しい生成要素を追加し、通常表示だけでは内部判定を確認できなくなった。
 
 #### 確認内容
@@ -142,7 +144,8 @@ Gameビューでは`CameraPanController`の表示原点を使い、CameraとGrid
 3. 黒帯へ着色や凡例がはみ出さない。
 4. チャンク境界をまたいでも分類やグラデーションが不自然に途切れず、`Terrain Placement`で陸地・水・マグマ・岩壁の契約を判別できる。中央HUDでは陸地が設備・ベルトだけ、水が非耐熱・耐熱の両橋、マグマが耐熱橋だけを`Allowed`とし、マグマの非耐熱橋を`Heat Required`と表示する。
 5. 正負の遠方へ明示的にCameraを移した場合も、色面が表示中のTilemapと同じ絶対セルへ重なり、中央HUDがCamera中央の絶対タイル情報を示す。
-6. `Off`へ戻すと通常表示へ完全に戻る。
+6. `Animal Population`で候補外、候補タイル、確定個体が凡例どおりの3色になり、確定個体色が候補色より優先される。
+7. `Off`へ戻すと通常表示へ完全に戻る。
 
 ### 2.4 Analyze Distribution
 
@@ -182,7 +185,26 @@ Consoleレポートには、次の比較材料を出力する。
 4. 同一コード・同一条件で再実行した署名が一致する。
 5. 大きな比率変化がある場合は、ランダムマップ生成仕様の調整値と説明も更新する。
 
-### 2.5 Map Viewer
+### 2.5 Analyze Animal Population
+
+- メニュー: `Farmware > World Generation > Analyze Animal Population`
+- 実装: `AnimalPopulationDistributionAuditMenu`、`AnimalPopulationDistributionAnalyzer`
+- PlayMode: 不要。既定ではバックグラウンドで実行する。
+
+#### 用途
+
+固定した3組の地形Seed・個体群Seedについて、原点周囲9×9地域、合計243地域と約100万タイルを調べる。実際の地形生成器と`AnimalPopulationGenerator.TryAppendSpeciesPopulation`を使用し、鶏の有効タイル数、面積比例の目標数、生成候補数、未充足地域、群れサイズ・徘徊距離違反、位置重複、比較署名をConsoleへ出力する。
+
+この監査は密度8を最終的な合格値とは扱わない。調整前後の同一条件比較と、Gameビューの`Animal Population`表示を組み合わせて判断する。動物種の初期値を変更した場合は、監査が使う定義値も同じ変更で更新する。
+
+#### 確認内容
+
+1. Consoleへ開始ログと完了レポートが1回ずつ出る。
+2. 不正群れと重複位置が0件である。
+3. 同一コード・同一条件で再実行した署名と集計値が一致する。
+4. 抽選した群れを先に置くと後続の残数を有効な群れへ分割できない場合は、有限バックトラックで別の群れサイズ・中心・メンバーの組合せが再探索される。中心とメンバーのタイル選択は合計4,096回までに制限される。完全配置が不可能または探索上限へ達した後も残る目標個体数と確定候補数の差、および未充足地域数が地形分断と群れ最小数の方針に合う。
+
+### 2.6 Map Viewer
 
 - メニュー: `Farmware > World Generation > Map Viewer`
 - 実装: `WorldGenerationMapViewerWindow`、`WorldGenerationMapSampler`
@@ -246,6 +268,7 @@ Farmwareのワールドは無限なので「全体」を有限画像へ収める
 | Authoring、Scene、Tileアセット、Camera、Tilemapレイヤー | Build Fallback Map Prototype |
 | 個別タイルの分類、色、境界、凡例 | Debug Visualization |
 | バイオームや地形の広域分布、隣接関係、決定性 | Analyze Distribution |
+| 動物の候補地形、確定位置、群れ・密度・重複 | Animal Population表示、Analyze Animal Population |
 | 広域形状、特定Seed・遠距離座標の探索 | Map Viewer |
 | 生成規則と表示の両方 | Analyze Distribution、Map Viewer、Debug Visualization |
 
