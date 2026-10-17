@@ -1,5 +1,5 @@
 // このファイルは、ワールド固有の動物個体群Seed、地域抽選状態、全野生個体を共通状態ハッシュへ追加します。
-// Entity格納順を永続IDと地域座標で正規化し、同じ論理状態ならロード順やチャンク生成順に関係なく同じ値を返します。
+// Entity格納順を正規化し、個体の種と外見を静的カタログへ照合してから、同じ論理状態へ同じ値を返します。
 
 using System;
 using Unity.Collections;
@@ -50,8 +50,8 @@ namespace Farmware.Simulation.Animals
     }
 
     /// <summary>
-    /// ECS Worldの動物個体群を地域座標と永続IDで正規化し、機能固有セクションへ追加します。
-    /// AnimalSpeciesStateHasherの後に呼び、最後のCompleteは呼び出し側が一度だけ行います。
+    /// ECS Worldの動物個体群を静的な種定義へ照合し、地域座標と永続IDで正規化して機能固有セクションへ追加します。
+    /// AnimalSpeciesStateHasherの成功後に呼び、最後のCompleteは呼び出し側が一度だけ行います。
     /// </summary>
     public static class AnimalPopulationStateHasher
     {
@@ -60,7 +60,7 @@ namespace Farmware.Simulation.Animals
             AnimalSpeciesStateHasher.SpeciesDefinitionSectionId + 1;
 
         /// <summary>
-        /// Seed Singleton、全地域状態、全野生個体を検証し、順序を正規化してBuilderへ追加します。
+        /// 動物種カタログ、Seed Singleton、全地域状態、全野生個体を検証し、順序を正規化してBuilderへ追加します。
         /// </summary>
         /// <param name="entityManager">固定Tick完了境界のECS Worldを読み取るEntityManagerです。</param>
         /// <param name="builder">共通状態と動物種定義を追加済みの状態ハッシュBuilderです。</param>
@@ -71,6 +71,8 @@ namespace Farmware.Simulation.Animals
             ref SimulationStateHashBuilder builder,
             out AnimalPopulationStateHashError error)
         {
+            EntityQuery animalCatalogQuery = entityManager.CreateEntityQuery(
+                ComponentType.ReadOnly<AnimalSpeciesCatalog>());
             EntityQuery seedQuery = entityManager.CreateEntityQuery(
                 ComponentType.ReadOnly<AnimalPopulationSeed>());
             EntityQuery regionQuery = entityManager.CreateEntityQuery(
@@ -94,6 +96,24 @@ namespace Farmware.Simulation.Animals
             NativeArray<AnimalPopulationHashRecord> animalRecords = default;
             try
             {
+                int animalCatalogCount = animalCatalogQuery.CalculateEntityCount();
+                if (animalCatalogCount != 1)
+                {
+                    // 種定義が一意でなければ個体の種IDと外見番号を検証できないため、比較可能な状態として扱いません。
+                    error = new AnimalPopulationStateHashError(
+                        AnimalPopulationStateHashErrorCode.AnimalStateIsInvalid);
+                    return false;
+                }
+
+                AnimalSpeciesCatalog animalCatalog =
+                    animalCatalogQuery.GetSingleton<AnimalSpeciesCatalog>();
+                if (!animalCatalog.Value.IsCreated)
+                {
+                    error = new AnimalPopulationStateHashError(
+                        AnimalPopulationStateHashErrorCode.AnimalStateIsInvalid);
+                    return false;
+                }
+
                 int seedCount = seedQuery.CalculateEntityCount();
                 if (seedCount != 1)
                 {
@@ -157,7 +177,7 @@ namespace Farmware.Simulation.Animals
                 }
 
                 animalRecords.Sort();
-                if (!ValidateAnimals(animalRecords))
+                if (!ValidateAnimals(animalRecords, animalCatalog.Value))
                 {
                     error = new AnimalPopulationStateHashError(
                         AnimalPopulationStateHashErrorCode.AnimalStateIsInvalid);
@@ -212,6 +232,7 @@ namespace Farmware.Simulation.Animals
                     animalRecords.Dispose();
                 }
 
+                animalCatalogQuery.Dispose();
                 seedQuery.Dispose();
                 regionQuery.Dispose();
                 wildAnimalQuery.Dispose();
@@ -237,17 +258,29 @@ namespace Farmware.Simulation.Animals
             return true;
         }
 
-        /// <summary>個体IDの0・重複と、別個体を参照できない群れID、無効な種IDを拒否します。</summary>
-        private static bool ValidateAnimals(NativeArray<AnimalPopulationHashRecord> records)
+        /// <summary>
+        /// 個体IDと群れ参照に加え、種IDの存在と外見番号が静的な動物種定義の範囲内であることを確認します。
+        /// </summary>
+        /// <param name="records">永続ID順へ整列済みの個体状態です。</param>
+        /// <param name="animalCatalog">種IDと外見差分数を照合する検証済み動物種カタログです。</param>
+        /// <returns>全個体が保存契約と現在の種定義を満たす場合はtrueです。</returns>
+        private static bool ValidateAnimals(
+            NativeArray<AnimalPopulationHashRecord> records,
+            BlobAssetReference<AnimalSpeciesCatalogBlob> animalCatalog)
         {
             for (int index = 0; index < records.Length; index++)
             {
                 AnimalPopulationHashRecord current = records[index];
                 bool idIsDuplicated = index > 0
                     && records[index - 1].PersistentId == current.PersistentId;
+                bool speciesWasFound = AnimalSpeciesCatalogLookup.TryGetDefinition(
+                    animalCatalog,
+                    new DefinitionRuntimeId(current.SpeciesRuntimeId),
+                    out AnimalSpeciesDefinitionBlob speciesDefinition);
                 if (current.PersistentId == PersistentObjectId.InvalidValue
                     || idIsDuplicated
-                    || current.SpeciesRuntimeId <= DefinitionRuntimeId.InvalidValue
+                    || !speciesWasFound
+                    || current.AppearanceVariant >= speciesDefinition.AppearanceVariantCount
                     || current.HerdId == PersistentObjectId.InvalidValue
                     || !ContainsPersistentId(records, current.HerdId))
                 {

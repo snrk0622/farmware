@@ -4,6 +4,7 @@
 using Farmware.Simulation;
 using Farmware.Simulation.Animals;
 using NUnit.Framework;
+using Unity.Collections;
 using Unity.Entities;
 
 namespace Farmware.Tests
@@ -13,6 +14,26 @@ namespace Farmware.Tests
     /// </summary>
     public sealed class AnimalPopulationStateHashTests
     {
+        /// <summary>各テストWorldが参照し、TearDownで破棄する鶏1種の静的カタログです。</summary>
+        private BlobAssetReference<AnimalSpeciesCatalogBlob> animalCatalog;
+
+        /// <summary>各テストの前に、有効な種ID1と外見差分3種類を持つカタログを準備します。</summary>
+        [SetUp]
+        public void SetUp()
+        {
+            animalCatalog = CreateAnimalCatalog();
+        }
+
+        /// <summary>各テスト後に、永続Allocatorで確保したBlob Assetを必ず破棄します。</summary>
+        [TearDown]
+        public void TearDown()
+        {
+            if (animalCatalog.IsCreated)
+            {
+                animalCatalog.Dispose();
+            }
+        }
+
         /// <summary>
         /// 同じ地域と個体を逆順で作り、Entity格納順が違っても同じ状態ハッシュになることを保証します。
         /// </summary>
@@ -108,14 +129,62 @@ namespace Farmware.Tests
         }
 
         /// <summary>
+        /// 正数でも動物種カタログに存在しないRuntime IDを持つ個体を、正式な状態として受理しないことを保証します。
+        /// </summary>
+        [Test]
+        public void TryAppendTo_RejectsUnknownSpeciesRuntimeId()
+        {
+            using World world = CreateWorld(reverseCreationOrder: false);
+            Entity animal = GetFirstAnimal(world.EntityManager);
+            world.EntityManager.SetComponentData(
+                animal,
+                new AnimalSpecies { RuntimeId = new DefinitionRuntimeId(99) });
+
+            SimulationStateHashBuilder builder = CreateBuilderAfterSpeciesSection();
+            bool succeeded = AnimalPopulationStateHasher.TryAppendTo(
+                world.EntityManager,
+                ref builder,
+                out AnimalPopulationStateHashError error);
+
+            Assert.That(succeeded, Is.False);
+            Assert.That(error.Code, Is.EqualTo(AnimalPopulationStateHashErrorCode.AnimalStateIsInvalid));
+        }
+
+        /// <summary>
+        /// 種定義の外見差分数と同じ番号は0始まりの範囲外となるため、状態ハッシュが拒否することを保証します。
+        /// </summary>
+        [Test]
+        public void TryAppendTo_RejectsAppearanceVariantOutsideSpeciesRange()
+        {
+            using World world = CreateWorld(reverseCreationOrder: false);
+            Entity animal = GetFirstAnimal(world.EntityManager);
+            world.EntityManager.SetComponentData(
+                animal,
+                new AnimalAppearanceVariant { Value = 3 });
+
+            SimulationStateHashBuilder builder = CreateBuilderAfterSpeciesSection();
+            bool succeeded = AnimalPopulationStateHasher.TryAppendTo(
+                world.EntityManager,
+                ref builder,
+                out AnimalPopulationStateHashError error);
+
+            Assert.That(succeeded, Is.False);
+            Assert.That(error.Code, Is.EqualTo(AnimalPopulationStateHashErrorCode.AnimalStateIsInvalid));
+        }
+
+        /// <summary>
         /// 指定順序でSeed、1地域、同じ群れの2個体を作る、各テスト専用のECS Worldを返します。
         /// </summary>
         /// <param name="reverseCreationOrder">trueなら地域と個体、および個体同士のEntity作成順を逆転します。</param>
         /// <returns>呼び出し側がusingで破棄するテストWorldです。</returns>
-        private static World CreateWorld(bool reverseCreationOrder)
+        private World CreateWorld(bool reverseCreationOrder)
         {
             World world = new World("Animal population state hash test");
             EntityManager entityManager = world.EntityManager;
+            Entity catalogEntity = entityManager.CreateEntity(typeof(AnimalSpeciesCatalog));
+            entityManager.SetComponentData(
+                catalogEntity,
+                new AnimalSpeciesCatalog { Value = animalCatalog });
             Entity seedEntity = entityManager.CreateEntity(typeof(AnimalPopulationSeed));
             entityManager.SetComponentData(
                 seedEntity,
@@ -135,6 +204,52 @@ namespace Farmware.Tests
             }
 
             return world;
+        }
+
+        /// <summary>野生動物Queryの先頭Entityを取得し、不正値を設定する回帰テストへ返します。</summary>
+        /// <param name="entityManager">対象のテストWorldを所有するEntityManagerです。</param>
+        /// <returns>状態ハッシュ対象となる野生動物Entityの1体です。</returns>
+        private static Entity GetFirstAnimal(EntityManager entityManager)
+        {
+            EntityQuery animalQuery = entityManager.CreateEntityQuery(
+                ComponentType.ReadOnly<WildAnimal>());
+            try
+            {
+                using NativeArray<Entity> animals =
+                    animalQuery.ToEntityArray(Allocator.Temp);
+                return animals[0];
+            }
+            finally
+            {
+                animalQuery.Dispose();
+            }
+        }
+
+        /// <summary>Runtime ID 1と外見差分3種類を持つ、テスト用の鶏カタログを作ります。</summary>
+        /// <returns>TearDownで破棄する永続AllocatorのBlob Assetです。</returns>
+        private static BlobAssetReference<AnimalSpeciesCatalogBlob> CreateAnimalCatalog()
+        {
+            using BlobBuilder builder = new BlobBuilder(Allocator.Temp);
+            ref AnimalSpeciesCatalogBlob root =
+                ref builder.ConstructRoot<AnimalSpeciesCatalogBlob>();
+            BlobBuilderArray<AnimalSpeciesDefinitionBlob> species =
+                builder.Allocate(ref root.Species, 1);
+            species[0] = new AnimalSpeciesDefinitionBlob
+            {
+                SpeciesRuntimeId = new DefinitionRuntimeId(1),
+                AllowedBiomes = AnimalBiomeMask.Grassland,
+                AllowedGrounds = AnimalGroundMask.Land,
+                MinimumHerdSize = 3,
+                MaximumHerdSize = 6,
+                TargetPopulationPer4096EligibleTiles = 8,
+                MinimumIdleTicks = 20,
+                MaximumIdleTicks = 80,
+                MovementStepIntervalTicks = 5,
+                MaximumWanderDistanceInTiles = 8,
+                AppearanceVariantCount = 3
+            };
+            return builder.CreateBlobAssetReference<AnimalSpeciesCatalogBlob>(
+                Allocator.Persistent);
         }
 
         /// <summary>保存対象となる1地域の抽選状態をテストWorldへ作ります。</summary>
