@@ -1,6 +1,7 @@
 # MAP-02D 性能計測
 
 - 計測日: 2026-10-17
+- 追補日: 2026-10-19（ANIMAL-01Bの決定論修正に伴う生成公開境界の比較。末尾参照）
 - 基準実装commit: `d283abaa`（自動Floating Originとちらつき修正）。内訳計測用Profiler Markerは本書と同じ変更に含める。
 - 状態: `1d05dd3f`の先行表示・既定ONを最終採用し、人間の通常・拡大表示確認と、追加の負方向・遠方・有限往復8,877前面フレーム（可視未完成0）を確認した。MAP-02Dの方式・予算決定と今回範囲の検証は完了と判断する。既存12条件・21,918フレームと先行表示後の通常・拡大ON3,799フレームも履歴として保持する。製品最大Viewport・Windows・8GB／16GB機での性能合格は意味しない。
 - 表示受け入れ: 影再利用後の黒いちらつき再報告は、下記の連続記録とユーザーによる再確認では再現していない。一方、原点変更時の一瞬の引っかかりは双方で確認した。黒抜けが恒久的に解消したとは断定せず、現在は再構築スパイクの改善を優先する。
@@ -928,3 +929,30 @@ MAP-02Dで採用したチャンク別Tilemap方式を対象に、`WorldGeneratio
 実行順、JIT、Editor負荷を固定した性能ベンチマークではないため、2行の差を改善率や回帰率として扱わない。時間値はEditor Test Runner内の比較記録であり、Development Player、製品最大Viewport、Windows、最低8GB・推奨16GB機、長時間の正式性能合格へ外挿しない。
 
 EditMode全243件も19.73秒で成功し、失敗・Skip・Inconclusiveは0だった。最終ConsoleのGround Truthはコンパイル失敗なし、エラー0・警告0である。製品コード、Scene、Prefab、パッケージ、生成規則、採用済みの距離・速度・予算は変更していない。今回の変更は既存PlayModeテストAssembly内の継続回帰と5文書だけである。EditorToolsの操作、アート仕様、ゲームルール、開発ルール、スキル、文書構成は変わらないため、`EditorTools.md`、`Docs/Art/`、ゲームコンセプト、`AGENTS.md`、`CodexSkills.md`、`Docs/README.md`は確認したが更新不要とした。未解決P0／P1はなく、MAP-02Eと大項目MAP-02を完了と判断する。commitとpushは別途明示的な依頼時だけ行う。
+
+## 2026-10-19 ANIMAL-01B: 個体群Worldの固定Tick公開境界
+
+上記MAP-02D／MAP-02Eの記録は当時の比較履歴として保持する。今回、完成したJobだけを任意のフレームで公開すると、Workerの速度によって個体群の確定バッチが分かれ、永続ID・群れID・初期化Tick・状態ハッシュが変わることを修正した。個体群Worldでは全実行中Jobを固定Tick入口で待って一括公開し、通常フレームで完成枠だけを解放しない。一時停止中は前フレームまでのバッチを全件待って公開し、地形の表示更新を維持する。地形単独Worldは従来の非同期経路を維持する。
+
+これは性能改善ではなく、決定論を保証するための明示的な同期点追加である。表示QueryへECS依存を戻す方式、永続IDや初期化Tickをハッシュから隠す方式は採用しない。IDの予約だけでは初期化Tickを揃えられないため、今回の最小単位では有限バッチの公開境界を揃える。固定Tickで要求を採番して別の非同期キューへ保持する方式は、キャンセル、Snapshot、保存対象の追加が必要となる代替案であり、今回追加しない。
+
+### 局所比較条件
+
+- Apple M3・8コア・24GB、Unity 6000.3.8f1 Editor、Entities 1.5.0、Burst有効。
+- 実物の`ChunkGenerationSystem`をテストWorldへ作成し、地形Seed `123456789`、GeneratorVersion 1、既定資源設定、座標`(-4,-4)`からX方向の1件／2件を生成する。1件は4096セル、2件は8192セル。
+- 各条件で3回ウォームアップ後、24バッチを計測。World作成・要求作成・Job投入は計測区間外とし、メインスレッドの公開呼出し区間をStopwatchで比較する。Job投入直後と、Handleを事前完了した状態を分ける。
+- 比較元は今回も地形単独Worldに残した旧非同期公開経路である。未完了時の最初の確認と、Jobを計測外で待った後の公開呼出しの合計を計測する。新境界側は実際の`CompleteAndPublishBatch`の待ち＋公開を計測する。このため未完了条件の差は、従来フレーム間へ逃がしていた待ちを境界で引き受ける費用であり、生成計算量の増加率ではない。
+- managed allocationは`GC.GetAllocatedBytesForCurrentThread`の呼出し区間の差分。全フレームのProfiler GC AllocやNativeメモリ総量ではない。シーン描画・個体群候補計算・Development Player・製品最大Viewportはこの局所比較に含めない。
+
+| チャンク数 | 公開呼出し前のJob | 旧非同期 平均 ms | 新境界 平均 ms | 新境界 P95 ms | 新境界 最大 ms |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 1 | 投入直後 | 0.0062 | 3.2566 | 3.4264 | 3.5564 |
+| 1 | 完了済み | 0.0053 | 0.0043 | 0.0045 | 0.0059 |
+| 2 | 投入直後 | 0.0085 | 3.4558 | 3.5732 | 3.6017 |
+| 2 | 完了済み | 0.0080 | 0.0067 | 0.0079 | 0.0085 |
+
+全8条件で、managed allocationの中央値は0 byteだった。生成JobのPersistent作業配列は従来と同じで、GeneratedTile 18 byte＋GeneratedResourceTile 2 byte×4096セル、1枠81,920 byte／2枠163,840 byte（コンテナ管理領域・ECS Buffer・アロケーターの余白を除く）である。新しいSystemは所有配列を増やさず、既存SystemのJobHandleを一時的に結合して待つ。全8条件の公開後Buffer件数も確認した。
+
+稼働中の新規公開は1 Tick当たり投入済みの同時生成上限までで、既定2件・10 Tick/秒なら最大20チャンク/秒となる。Job待ち時間は`Farmware.WorldGeneration.ChunkGenerationBoundaryWait`、コピーは`ChunkGenerationPublish`、投入は`ChunkGenerationSchedule`で分離する。待ちを測定対象から隠したり、旧方式と同じ生成スループットと説明したりしない。開発者からEditorでの軽い確認では問題なさそうとの報告を受けたが、通常／Shift移動・最大ズーム・停止中移動の全手順の正式受け入れや、Development Playerのフレーム時間は未検証である。過去のPlayer測定値を今回の性能合格へ流用しない。
+
+Development Player検証は今回の修正commitには含めず、修正commit後の次の検証作業として、PR #23のマージ前かつ`ANIMAL-01C`着手前に実施する。修正前`b2713628`と修正後の同条件比較、通常／拡大Viewport、初期表示・通常／高速移動・停止／再開、記録項目とマージ前判断は[ロードマップの残検証チェックリスト](./ImplementationRoadmap.md#animal-01b-残検証生成公開境界のdevelopment-player回帰)を正とする。計測結果とCSV・ログの保存先はこの追補へ追加する。製品最大Viewport・長時間評価は`PERF-GATE-B`、大規模動物負荷は`ANIMAL-01E`、Windows・8GB／16GB実機は`PERF-GATE-C`以降とし、今回のPlayer回帰の代わりにはしない。

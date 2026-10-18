@@ -2,12 +2,14 @@
 // 64×64の生成済み地形を準備し、純粋生成パイプラインと固定Tick Systemの両方を実行します。
 
 using System.Collections.Generic;
+using System.Reflection;
 using Farmware.Simulation;
 using Farmware.Simulation.Animals;
 using Farmware.WorldGeneration.Animals;
 using NUnit.Framework;
 using Unity.Collections;
 using Unity.Entities;
+using Unity.Jobs;
 
 namespace Farmware.WorldGeneration.Tests
 {
@@ -490,6 +492,147 @@ namespace Farmware.WorldGeneration.Tests
             {
                 DisposeCatalogs(definitionCatalog, animalCatalog);
             }
+        }
+
+        /// <summary>
+        /// 同時生成Jobの一方だけを先に完了させても、公開バッチ、ID、群れID、初期化Tick、ハッシュが変わらないことを保証します。
+        /// </summary>
+        /// <param name="isPaused">停止中フレームの一括公開と再開後の初期化も確認する場合はtrueです。</param>
+        [TestCase(false)]
+        [TestCase(true)]
+        public void GenerationBoundary_KeepsPopulationIndependentOfWorkerCompletion(bool isPaused)
+        {
+            BlobAssetReference<DefinitionCatalogBlob> definitions = default;
+            BlobAssetReference<AnimalSpeciesCatalogBlob> animals = default;
+            try
+            {
+                CreateCatalogs(out definitions, out animals);
+                SimulationStateHash firstEarly = RunGenerationBoundary(animals, 0, isPaused);
+                SimulationStateHash secondEarly = RunGenerationBoundary(animals, 1, isPaused);
+                SimulationStateHash neitherForced = RunGenerationBoundary(animals, -1, isPaused);
+                Assert.That(secondEarly, Is.EqualTo(firstEarly));
+                Assert.That(neitherForced, Is.EqualTo(firstEarly));
+            }
+            finally
+            {
+                DisposeCatalogs(definitions, animals);
+            }
+        }
+
+        /// <summary>公開境界がTick加算後・Command前に接続され、同TickのGameplayより先に動くことを保証します。</summary>
+        [Test]
+        public void GenerationBoundary_RunsAtFixedTickEntry()
+        {
+            System.Type boundary = typeof(ChunkGenerationFixedTickPublicationSystem);
+            UpdateInGroupAttribute parent = boundary.GetCustomAttribute<UpdateInGroupAttribute>();
+            Assert.That(parent.GroupType, Is.EqualTo(typeof(FarmwareFixedTickSimulationSystemGroup)));
+            Assert.That(parent.OrderFirst, Is.True);
+            Assert.That(boundary.GetCustomAttribute<UpdateAfterAttribute>().SystemType,
+                Is.EqualTo(typeof(SimulationTickAdvanceSystem)));
+            Assert.That(boundary.GetCustomAttribute<UpdateBeforeAttribute>().SystemType,
+                Is.EqualTo(typeof(FarmwareCommandProcessingSystemGroup)));
+        }
+
+        /// <summary>
+        /// 同じ2バッチをTick 12・13で生成し、Worker完了順だけを変えたWorldの保存対象ハッシュを返します。
+        /// 地形Jobは実物を使い、壁時計のsleepではなく指定HandleのCompleteで早期完了条件を作ります。
+        /// </summary>
+        /// <param name="catalog">各Worldで共通の動物種定義です。</param>
+        /// <param name="earlySlot">フレーム公開判定前に完了させる枠です。-1は強制完了しません。</param>
+        /// <param name="isPaused">最初のバッチを停止中の表示更新で公開するかどうかです。</param>
+        /// <returns>地域状態、全個体、次回永続IDを含む比較ハッシュです。</returns>
+        private static SimulationStateHash RunGenerationBoundary(
+            BlobAssetReference<AnimalSpeciesCatalogBlob> catalog, int earlySlot, bool isPaused)
+        {
+            using World world = new World("Animal deterministic generation boundary test");
+            EntityManager manager = world.EntityManager;
+            PrepareWorldSingletons(world, catalog);
+            Entity configuration = manager.CreateEntity();
+            manager.AddComponentData(configuration, WorldGenerationSettings.CreateDefault(123456789UL, 1));
+            manager.AddComponentData(configuration, ResourceGenerationSettings.CreateDefault());
+            manager.AddComponentData(configuration, ChunkStreamingSettings.CreateDefault());
+            manager.AddComponentData(configuration, new SimulationPauseState { Value = isPaused ? (byte)1 : (byte)0 });
+            SystemHandle generation = world.GetOrCreateSystem<ChunkGenerationSystem>();
+            SystemHandle boundary = world.GetOrCreateSystem<ChunkGenerationFixedTickPublicationSystem>();
+            SystemHandle population = world.GetOrCreateSystem<AnimalPopulationInitializationSystem>();
+            // この固定Seedで目標が3羽以上になる草原を含む4地域です。2回のTickへ分けて地域間の順序も確認します。
+            (int X, int Y)[] coordinates = { (-4, -4), (-3, -4), (1, -4), (2, -4) };
+            for (int batchIndex = 0; batchIndex < 2; batchIndex++)
+            {
+                (int X, int Y) firstCoordinate = coordinates[batchIndex * 2];
+                (int X, int Y) secondCoordinate = coordinates[batchIndex * 2 + 1];
+                Entity first = CreateReadyChunk(manager, firstCoordinate.X, firstCoordinate.Y);
+                Entity second = CreateReadyChunk(manager, secondCoordinate.X, secondCoordinate.Y);
+                foreach (Entity chunk in new[] { first, second })
+                {
+                    manager.SetComponentData(chunk, new ChunkGenerationStatus { Phase = ChunkGenerationPhase.Queued });
+                    manager.AddComponent<ChunkGenerationRequest>(chunk);
+                    manager.GetBuffer<GeneratedTile>(chunk).Clear();
+                    manager.GetBuffer<GeneratedResourceTile>(chunk).Clear();
+                }
+
+                generation.Update(world.Unmanaged);
+                ulong nextIdBeforePublication = GetAllocatorState(manager).NextId;
+                if (earlySlot >= 0)
+                {
+                    CompleteGenerationSlot(world, generation, earlySlot);
+                }
+
+                // 固定Tickへ入る前に通常の描画フレーム更新があっても、一方だけが公開されてはいけません。
+                generation.Update(world.Unmanaged);
+                ChunkGenerationPhase expectedPhase = isPaused
+                    ? ChunkGenerationPhase.ReadyToApply : ChunkGenerationPhase.GeneratingData;
+                Assert.That(manager.GetComponentData<ChunkGenerationStatus>(first).Phase, Is.EqualTo(expectedPhase));
+                Assert.That(manager.GetComponentData<ChunkGenerationStatus>(second).Phase, Is.EqualTo(expectedPhase));
+                Assert.That(CountRegionStates(manager), Is.EqualTo(batchIndex * 2));
+                Assert.That(GetAllocatorState(manager).NextId, Is.EqualTo(nextIdBeforePublication));
+
+                // 停止中の公開自体はTickもIDも進めず、再開した固定Tickから初めて個体群を確定します。
+                manager.SetComponentData(configuration, new SimulationPauseState { Value = 0 });
+                using EntityQuery ticks = manager.CreateEntityQuery(ComponentType.ReadWrite<SimulationTickState>());
+                ticks.SetSingleton(new SimulationTickState { CurrentTick = (ulong)(12 + batchIndex) });
+                boundary.Update(world.Unmanaged);
+                population.Update(world.Unmanaged);
+                using EntityQuery regions = manager.CreateEntityQuery(ComponentType.ReadOnly<AnimalPopulationRegionState>());
+                using NativeArray<AnimalPopulationRegionState> states =
+                    regions.ToComponentDataArray<AnimalPopulationRegionState>(Allocator.Temp);
+                foreach (AnimalPopulationRegionState region in states)
+                {
+                    bool isNew = (region.RegionX == firstCoordinate.X && region.RegionY == firstCoordinate.Y)
+                        || (region.RegionX == secondCoordinate.X && region.RegionY == secondCoordinate.Y);
+                    if (isNew)
+                    {
+                        Assert.That(region.InitializedAtTick, Is.EqualTo((ulong)(12 + batchIndex)));
+                    }
+                }
+
+                manager.SetComponentData(configuration, new SimulationPauseState { Value = isPaused ? (byte)1 : (byte)0 });
+            }
+
+            Assert.That(CountRegionStates(manager), Is.EqualTo(4));
+            Assert.That(CountAnimals(manager), Is.GreaterThan(0), "IDと群れIDも比較できる実際の個体群が必要です。");
+            SimulationStateHashBuilder builder = new SimulationStateHashBuilder(SimulationStateHashSchema.CurrentVersion);
+            builder.BeginSection(AnimalSpeciesStateHasher.SpeciesDefinitionSectionId);
+            builder.WriteUInt64(GetAllocatorState(manager).NextId);
+            Assert.That(AnimalPopulationStateHasher.TryAppendTo(manager, ref builder, out _), Is.True);
+            return builder.Complete();
+        }
+
+        /// <summary>
+        /// テストで指定した実物Jobを先に完了させます。公開や配列内容は変更せず、完了タイミングだけを変えます。
+        /// </summary>
+        /// <param name="world">生成Jobを所有するテストWorldです。</param>
+        /// <param name="generation">このWorldの生成Systemです。</param>
+        /// <param name="slotIndex">先に完了させる同時生成枠の添字です。</param>
+        private static void CompleteGenerationSlot(World world, SystemHandle generation, int slotIndex)
+        {
+            // 本番APIへテスト用待機設定を足さないため、所有情報の読取だけに反射を限定します。
+            object generator = world.Unmanaged.GetUnsafeSystemRef<ChunkGenerationSystem>(generation);
+            object slots = typeof(ChunkGenerationSystem).GetField("slots", BindingFlags.NonPublic | BindingFlags.Instance)
+                .GetValue(generator);
+            object slot = slots.GetType().GetProperty("Item").GetValue(slots, new object[] { slotIndex });
+            JobHandle handle = (JobHandle)slot.GetType().GetField("Handle").GetValue(slot);
+            handle.Complete();
         }
 
         /// <summary>

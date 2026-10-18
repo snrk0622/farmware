@@ -95,6 +95,10 @@ Editorの分布監査と同じAnalyzerを小さな固定サンプルで2回実�
 
 木・石・砂で予約されたセルを避け、有効地形面積から求めた目標数は変えず、空いている8セルへ8羽を配置することをSystemテストで検証する。資源Bufferの欠落・4095件の未完成状態では地域状態・処理済みタグ・個体・IDを確定せず、4096件へ完成した後のTickで補充できることも保証する。
 
+`GenerationBoundary_KeepsPopulationIndependentOfWorkerCompletion`は、実際のBurst地形Jobを2件ずつ2バッチ投入し、片方を先に完了・もう片方を先に完了・強制完了なしの3条件を、通常進行と一時停止で比較する。sleepによるタイミング推測はせず、反射は実物JobのHandle読取に限り、本番の公開経路と固定Tick境界を実行する。通常フレームでは完成枠だけを公開せず、停止中もバッチ全件を公開してから枠を解放すること、IDはその時点で消費されないこと、Tick 12・13の各地域の初期化時刻と、全個体ID・群れID・抽選状態・次回IDを含むハッシュが一致することを保証する。`GenerationBoundary_RunsAtFixedTickEntry`は、公開Systemの所属とTick加算後・Command前の順序属性を確認する。地形単独Worldの既存非同期テストは引き続き通常回帰へ含める。
+
+この自動回帰とEditor局所計測だけでは、固定Tick公開境界のDevelopment Player性能を確認済みにしない。修正commit後・PR #23マージ前・`ANIMAL-01C`着手前の次の検証作業として、修正前後の同条件Player比較と開発者の確認を行う。条件・採取項目・終了条件は[ロードマップのANIMAL-01B残検証](./ImplementationRoadmap.md#animal-01b-残検証生成公開境界のdevelopment-player回帰)、実測結果は[性能計測の追補](./Map02DPerformanceReport.md#2026-10-19-animal-01b-個体群worldの固定tick公開境界)へ記録する。
+
 #### `AnimalPopulationDistributionAuditTests`
 
 Runtimeと同じ資源予約を生成して候補から除外するEditorのAnalyzerを、負座標を含む2組のSeed・18地域で2回実行し、適格タイル・目標数・生成候補が存在すること、群れ契約違反と位置重複が0件であること、署名と集計値が一致することを保証する。約100万タイルの既定監査は通常テストへ含めず、`Farmware > World Generation > Analyze Animal Population`から明示実行する。
