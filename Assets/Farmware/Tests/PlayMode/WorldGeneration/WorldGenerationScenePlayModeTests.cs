@@ -2577,13 +2577,39 @@ namespace Farmware.WorldGeneration.PlayModeTests
                    wildAnimalQuery.ToComponentDataArray<AnimalSpecies>(Allocator.Temp))
             using (NativeArray<AnimalHerdMembership> runtimeHerds =
                    wildAnimalQuery.ToComponentDataArray<AnimalHerdMembership>(Allocator.Temp))
+            using (NativeArray<AnimalTilePosition> runtimePositions =
+                   wildAnimalQuery.ToComponentDataArray<AnimalTilePosition>(Allocator.Temp))
+            using (EntityQuery resourceConfigurationQuery = world.EntityManager.CreateEntityQuery(
+                   ComponentType.ReadOnly<ResourceGenerationSettings>()))
             {
+                WorldGenerationSettings animalWorldSettings = settingsQuery.GetSingleton<WorldGenerationSettings>();
+                ResourceGenerationSettings animalResourceSettings = resourceConfigurationQuery.GetSingleton<ResourceGenerationSettings>();
                 for (int animalIndex = 0; animalIndex < runtimeSpecies.Length; animalIndex++)
                 {
                     Assert.That(runtimeSpecies[animalIndex].RuntimeId, Is.EqualTo(chickenRuntimeId));
                     Assert.That(runtimeHerds[animalIndex].HerdId, Is.GreaterThan(0));
+
+                    // 実際に使用中の設定と絶対座標から優先レイヤーの資源予約を再確認し、Scene上の生成個体との重複を検出します。
+                    AnimalTilePosition animalPosition = runtimePositions[animalIndex];
+                    GeneratedTile animalTerrain = DeterministicChunkGenerator.GenerateTile(
+                        animalWorldSettings, animalPosition.TileX, animalPosition.TileY);
+                    GeneratedResourceTile animalResource = DeterministicResourceGenerator.GenerateResource(
+                        animalWorldSettings, animalResourceSettings, animalTerrain,
+                        animalPosition.TileX, animalPosition.TileY);
+                    Assert.That(animalResource.Type, Is.EqualTo(GeneratedResourceType.None),
+                        "野生動物を地形生成時の資源予約と同じセルへ生成してはいけません。");
                 }
             }
+
+            // 候補表示もRuntimeと同じ資源予約条件を使用することを、実際にBakeされたカタログで確認します。
+            MethodInfo animalCandidateMethod = typeof(WorldGenerationDebugVisualizationOverlay).GetMethod(
+                "IsEligibleForAnyAnimalSpecies", BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.That(animalCandidateMethod, Is.Not.Null);
+            GeneratedTile candidateTerrain = new GeneratedTile { Biome = BiomeId.Grassland, Ground = GroundType.Land };
+            Assert.That(animalCandidateMethod.Invoke(null, new object[]
+                { candidateTerrain, new GeneratedResourceTile { Type = GeneratedResourceType.Tree }, runtimeAnimalCatalog.Value }), Is.False);
+            Assert.That(animalCandidateMethod.Invoke(null, new object[]
+                { candidateTerrain, default(GeneratedResourceTile), runtimeAnimalCatalog.Value }), Is.True);
             int2 initialDisplayOrigin =
                 cameraPanController.CurrentDisplayOrigin.AbsoluteTileCoordinate;
             int originalResourceAbsoluteTileX = initialDisplayOrigin.x + originalResourceCell.x;

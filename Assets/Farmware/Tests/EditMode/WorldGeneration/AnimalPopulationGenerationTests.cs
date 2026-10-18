@@ -30,6 +30,8 @@ namespace Farmware.WorldGeneration.Tests
             using NativeArray<GeneratedTile> tiles = CreateUniformTiles(
                 BiomeId.Grassland,
                 GroundType.Land);
+            using NativeArray<GeneratedResourceTile> resources =
+                new NativeArray<GeneratedResourceTile>(tiles.Length, Allocator.Temp);
             using NativeList<AnimalSpawnCandidate> candidates =
                 new NativeList<AnimalSpawnCandidate>(16, Allocator.Temp);
             try
@@ -44,6 +46,7 @@ namespace Farmware.WorldGeneration.Tests
                 bool succeeded = AnimalPopulationGenerator.TryAppendInitialPopulation(
                     animalCatalog,
                     tiles,
+                    resources,
                     ref regionState,
                     candidates);
 
@@ -328,6 +331,8 @@ namespace Farmware.WorldGeneration.Tests
             using NativeArray<GeneratedTile> tiles = CreateUniformTiles(
                 BiomeId.Grassland,
                 GroundType.Land);
+            using NativeArray<GeneratedResourceTile> resources =
+                new NativeArray<GeneratedResourceTile>(tiles.Length, Allocator.Temp);
             using NativeList<AnimalSpawnCandidate> first =
                 new NativeList<AnimalSpawnCandidate>(16, Allocator.Temp);
             using NativeList<AnimalSpawnCandidate> repeated =
@@ -345,6 +350,7 @@ namespace Farmware.WorldGeneration.Tests
                     AnimalPopulationGenerator.TryAppendInitialPopulation(
                         animalCatalog,
                         tiles,
+                        resources,
                         ref firstState,
                         first),
                     Is.True);
@@ -352,6 +358,7 @@ namespace Farmware.WorldGeneration.Tests
                     AnimalPopulationGenerator.TryAppendInitialPopulation(
                         animalCatalog,
                         tiles,
+                        resources,
                         ref repeatedState,
                         repeated),
                     Is.True);
@@ -359,6 +366,7 @@ namespace Farmware.WorldGeneration.Tests
                     AnimalPopulationGenerator.TryAppendInitialPopulation(
                         animalCatalog,
                         tiles,
+                        resources,
                         ref differentState,
                         differentWorld),
                     Is.True);
@@ -561,6 +569,109 @@ namespace Farmware.WorldGeneration.Tests
             }
         }
 
+        /// <summary>
+        /// 全面が有効地形でも8セル以外を資源で予約し、目標密度を保ちながら空きセルだけへ8羽を生成することを保証します。
+        /// </summary>
+        /// <param name="resourceType">動物より先にセルを予約する基礎資源の種類です。</param>
+        [TestCase(GeneratedResourceType.Tree)]
+        [TestCase(GeneratedResourceType.Stone)]
+        [TestCase(GeneratedResourceType.Sand)]
+        public void InitializationSystem_RespectsResourceReservations(GeneratedResourceType resourceType)
+        {
+            BlobAssetReference<DefinitionCatalogBlob> definitionCatalog = default;
+            BlobAssetReference<AnimalSpeciesCatalogBlob> animalCatalog = default;
+            using World world = new World("Animal resource reservation test");
+            try
+            {
+                CreateCatalogs(out definitionCatalog, out animalCatalog);
+                PrepareWorldSingletons(world, animalCatalog);
+                Entity chunk = CreateReadyChunk(world.EntityManager, 0, 0);
+                DynamicBuffer<GeneratedResourceTile> resources =
+                    world.EntityManager.GetBuffer<GeneratedResourceTile>(chunk);
+                for (int index = 8; index < resources.Length; index++)
+                {
+                    resources[index] = new GeneratedResourceTile { Type = resourceType };
+                }
+
+                SystemHandle system = world.GetOrCreateSystem<AnimalPopulationInitializationSystem>();
+                system.Update(world.Unmanaged);
+
+                Assert.That(CountRegionStates(world.EntityManager), Is.EqualTo(1));
+                Assert.That(CountAnimals(world.EntityManager), Is.EqualTo(8),
+                    "密度の基準は4096セルの地形面積であり、資源を除いた8セルへ全8羽を置く必要があります。");
+                using EntityQuery animalQuery = world.EntityManager.CreateEntityQuery(
+                    ComponentType.ReadOnly<WildAnimal>(), ComponentType.ReadOnly<AnimalTilePosition>());
+                using NativeArray<AnimalTilePosition> positions =
+                    animalQuery.ToComponentDataArray<AnimalTilePosition>(Allocator.Temp);
+                foreach (AnimalTilePosition position in positions)
+                {
+                    Assert.That(position.TileX, Is.InRange(0, 7));
+                    Assert.That(position.TileY, Is.Zero);
+                }
+
+                // Entity作成後はBuffer参照を取り直し、動物生成が優先レイヤーの資源を書き換えていないことも確認します。
+                resources = world.EntityManager.GetBuffer<GeneratedResourceTile>(chunk);
+                Assert.That(resources[8].Type, Is.EqualTo(resourceType));
+            }
+            finally
+            {
+                DisposeCatalogs(definitionCatalog, animalCatalog);
+            }
+        }
+
+        /// <summary>
+        /// 資源Bufferが欠落・未完成なら初期化とID発行を保留し、完成後のTickで初めて生成することを保証します。
+        /// </summary>
+        /// <param name="resourceCount">-1はBufferなし、4095は最後のセルが未完成の状態です。</param>
+        [TestCase(-1)]
+        [TestCase(4095)]
+        public void InitializationSystem_WaitsForCompleteResources(int resourceCount)
+        {
+            BlobAssetReference<DefinitionCatalogBlob> definitionCatalog = default;
+            BlobAssetReference<AnimalSpeciesCatalogBlob> animalCatalog = default;
+            using World world = new World("Animal incomplete resources test");
+            try
+            {
+                CreateCatalogs(out definitionCatalog, out animalCatalog);
+                PrepareWorldSingletons(world, animalCatalog);
+                Entity chunk = CreateReadyChunk(world.EntityManager, 0, 0);
+                world.EntityManager.RemoveComponent<GeneratedResourceTile>(chunk);
+                if (resourceCount >= 0)
+                {
+                    world.EntityManager.AddBuffer<GeneratedResourceTile>(chunk).ResizeUninitialized(resourceCount);
+                }
+
+                PersistentIdAllocatorState allocatorBefore = GetAllocatorState(world.EntityManager);
+                SystemHandle system = world.GetOrCreateSystem<AnimalPopulationInitializationSystem>();
+                system.Update(world.Unmanaged);
+                Assert.That(CountRegionStates(world.EntityManager), Is.Zero);
+                Assert.That(CountAnimals(world.EntityManager), Is.Zero);
+                Assert.That(GetAllocatorState(world.EntityManager).NextId, Is.EqualTo(allocatorBefore.NextId));
+                Assert.That(world.EntityManager.HasComponent<AnimalPopulationRegionProcessed>(chunk), Is.False);
+
+                // 未完成データを全件資源なしへ完成させ、前のTickが初期化済み状態を残していないことを確認します。
+                if (!world.EntityManager.HasBuffer<GeneratedResourceTile>(chunk))
+                {
+                    world.EntityManager.AddBuffer<GeneratedResourceTile>(chunk);
+                }
+
+                DynamicBuffer<GeneratedResourceTile> resources = world.EntityManager.GetBuffer<GeneratedResourceTile>(chunk);
+                resources.ResizeUninitialized(WorldGridConstants.TilesPerChunk);
+                for (int index = 0; index < resources.Length; index++)
+                {
+                    resources[index] = default;
+                }
+
+                system.Update(world.Unmanaged);
+                Assert.That(CountRegionStates(world.EntityManager), Is.EqualTo(1));
+                Assert.That(CountAnimals(world.EntityManager), Is.EqualTo(8));
+            }
+            finally
+            {
+                DisposeCatalogs(definitionCatalog, animalCatalog);
+            }
+        }
+
         /// <summary>指定Seedと地域座標からテスト用初期地域状態を作ります。</summary>
         private static AnimalPopulationRegionState CreateRegionState(
             ulong seed,
@@ -745,8 +856,14 @@ namespace Farmware.WorldGeneration.Tests
                     Phase = ChunkGenerationPhase.ReadyToApply,
                     GeneratedWithVersion = 1
                 });
-            DynamicBuffer<GeneratedTile> tiles = entityManager.AddBuffer<GeneratedTile>(chunkEntity);
+            entityManager.AddBuffer<GeneratedTile>(chunkEntity);
+            entityManager.AddBuffer<GeneratedResourceTile>(chunkEntity);
+            // Buffer追加は構造変更なので、両方を追加した後に参照を取り直してから初期値を書き込みます。
+            DynamicBuffer<GeneratedTile> tiles = entityManager.GetBuffer<GeneratedTile>(chunkEntity);
+            DynamicBuffer<GeneratedResourceTile> resources =
+                entityManager.GetBuffer<GeneratedResourceTile>(chunkEntity);
             tiles.ResizeUninitialized(WorldGridConstants.TilesPerChunk);
+            resources.ResizeUninitialized(WorldGridConstants.TilesPerChunk);
             for (int index = 0; index < tiles.Length; index++)
             {
                 tiles[index] = new GeneratedTile
@@ -754,6 +871,7 @@ namespace Farmware.WorldGeneration.Tests
                     Biome = BiomeId.Grassland,
                     Ground = GroundType.Land
                 };
+                resources[index] = default;
             }
 
             return chunkEntity;

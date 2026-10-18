@@ -68,7 +68,7 @@ namespace Farmware.WorldGeneration.Animals
                      SystemAPI.Query<
                              RefRO<ChunkCoordinateComponent>,
                              RefRO<ChunkGenerationStatus>>()
-                         .WithAll<GeneratedTile>()
+                         .WithAll<GeneratedTile, GeneratedResourceTile>()
                          .WithNone<AnimalPopulationRegionProcessed>()
                          .WithEntityAccess())
             {
@@ -82,7 +82,7 @@ namespace Farmware.WorldGeneration.Animals
 
                 // 一時停止中は固定Tickが止まっていてもPresentationが動き、完成チャンクを
                 // ReadyToApplyからActive、さらに画面外ならInactiveへ進める場合があります。
-                // 3状態はいずれも4096タイルの確定Bufferを保持するため、表示状態にかかわらず
+                // 3状態はいずれも地形と資源の確定Bufferを保持するため、表示状態にかかわらず
                 // 未処理地域を初期化し、再開後も動物が欠落しないようにします。
 
                 pendingRegions.Add(new PendingRegion
@@ -126,6 +126,8 @@ namespace Farmware.WorldGeneration.Animals
 
                 DynamicBuffer<GeneratedTile> tiles =
                     state.EntityManager.GetBuffer<GeneratedTile>(pending.ChunkEntity, true);
+                DynamicBuffer<GeneratedResourceTile> resources =
+                    state.EntityManager.GetBuffer<GeneratedResourceTile>(pending.ChunkEntity, true);
                 AnimalPopulationRegionState regionState =
                     AnimalPopulationGenerator.CreateInitialRegionState(
                         populationSeed,
@@ -136,10 +138,11 @@ namespace Farmware.WorldGeneration.Animals
                     || !AnimalPopulationGenerator.TryAppendInitialPopulation(
                         catalog.Value,
                         tiles.AsNativeArray(),
+                        resources.AsNativeArray(),
                         ref regionState,
                         candidates))
                 {
-                    // 不完全な地形や不正Seedでは地域を初期化済みにせず、入力が正された後の固定Tickで再試行します。
+                    // 不完全な地形・資源や不正Seedでは地域を初期化済みにせず、入力修正後の固定Tickで再試行します。
                     return;
                 }
 

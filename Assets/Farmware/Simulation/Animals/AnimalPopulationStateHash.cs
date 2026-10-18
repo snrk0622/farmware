@@ -282,7 +282,7 @@ namespace Farmware.Simulation.Animals
                     || !speciesWasFound
                     || current.AppearanceVariant >= speciesDefinition.AppearanceVariantCount
                     || current.HerdId == PersistentObjectId.InvalidValue
-                    || !ContainsPersistentId(records, current.HerdId))
+                    || !ReferencesSameSpeciesHerdLeader(records, current))
                 {
                     return false;
                 }
@@ -291,10 +291,16 @@ namespace Farmware.Simulation.Animals
             return true;
         }
 
-        /// <summary>永続ID順の配列を二分探索し、群れ先頭IDが実在する個体を指すか確認します。</summary>
-        private static bool ContainsPersistentId(
+        /// <summary>
+        /// 群れIDを二分探索し、同種かつ自分のIDを群れIDに持つ先頭個体への直接参照か検証します。
+        /// 存在だけを調べると循環参照やメンバーへの参照も通るため、参照先の所属契約まで照合します。
+        /// </summary>
+        /// <param name="records">永続ID順へ整列済みの全個体状態です。</param>
+        /// <param name="animal">所属先を検証する個体です。先頭自身の自己参照は正常です。</param>
+        /// <returns>同種の実在する群れ先頭を直接指す場合はtrueです。</returns>
+        private static bool ReferencesSameSpeciesHerdLeader(
             NativeArray<AnimalPopulationHashRecord> records,
-            ulong persistentId)
+            AnimalPopulationHashRecord animal)
         {
             int minimum = 0;
             int maximum = records.Length - 1;
@@ -302,12 +308,14 @@ namespace Farmware.Simulation.Animals
             {
                 int middle = minimum + ((maximum - minimum) / 2);
                 ulong candidate = records[middle].PersistentId;
-                if (candidate == persistentId)
+                if (candidate == animal.HerdId)
                 {
-                    return true;
+                    AnimalPopulationHashRecord leader = records[middle];
+                    return leader.HerdId == leader.PersistentId
+                        && leader.SpeciesRuntimeId == animal.SpeciesRuntimeId;
                 }
 
-                if (candidate < persistentId)
+                if (candidate < animal.HerdId)
                 {
                     minimum = middle + 1;
                 }

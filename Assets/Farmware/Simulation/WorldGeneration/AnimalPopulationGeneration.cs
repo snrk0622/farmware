@@ -91,18 +91,22 @@ namespace Farmware.WorldGeneration.Animals
         /// </summary>
         /// <param name="catalog">検証済みの動物種カタログです。</param>
         /// <param name="tiles">対象地域の行優先4096タイルです。</param>
+        /// <param name="resources">同じ添字に対応する行優先4096件の資源予約です。非空セルへは動物を生成しません。</param>
         /// <param name="regionState">抽選前の地域状態です。成功時だけ次回状態へ進みます。</param>
         /// <param name="candidates">複数地域をまとめられる候補一覧です。既存要素は保持します。</param>
         /// <returns>入力が有効で、候補をすべて追加できた場合はtrueです。</returns>
         public static bool TryAppendInitialPopulation(
             BlobAssetReference<AnimalSpeciesCatalogBlob> catalog,
             NativeArray<GeneratedTile> tiles,
+            NativeArray<GeneratedResourceTile> resources,
             ref AnimalPopulationRegionState regionState,
             NativeList<AnimalSpawnCandidate> candidates)
         {
             if (!catalog.IsCreated
                 || !tiles.IsCreated
                 || tiles.Length != WorldGridConstants.TilesPerChunk
+                || !resources.IsCreated
+                || resources.Length != tiles.Length
                 || regionState.NextSpawnSequence == 0
                 || !candidates.IsCreated)
             {
@@ -120,18 +124,25 @@ namespace Farmware.WorldGeneration.Animals
                 AnimalSpeciesDefinitionBlob species = root.Species[speciesIndex];
                 using NativeList<int> eligibleLocalTileIndices =
                     new NativeList<int>(64, Allocator.Temp);
+                int eligibleTerrainTileCount = 0;
 
                 for (int tileIndex = 0; tileIndex < tiles.Length; tileIndex++)
                 {
-                    // 候補集合は地形と種定義だけから作り、抽選Seedによって地形そのものを変更しません。
+                    // 地形条件と優先する資源予約から候補集合を作り、動物の抽選で地形や資源を書き換えません。
                     if (IsTileEligible(tiles[tileIndex], species))
                     {
-                        eligibleLocalTileIndices.Add(tileIndex);
+                        // 密度は従来どおり有効地形面積を基準にし、資源予約は実際の配置先だけを制限します。
+                        // 木や石が増えたことを理由に種定義の地域目標密度そのものを変えないためです。
+                        eligibleTerrainTileCount++;
+                        if (IsSpawnTileEligible(tiles[tileIndex], resources[tileIndex], species))
+                        {
+                            eligibleLocalTileIndices.Add(tileIndex);
+                        }
                     }
                 }
 
                 int targetPopulation = CalculateTargetPopulation(
-                    eligibleLocalTileIndices.Length,
+                    eligibleTerrainTileCount,
                     species.TargetPopulationPer4096EligibleTiles);
                 if (targetPopulation < species.MinimumHerdSize)
                 {
@@ -162,7 +173,7 @@ namespace Farmware.WorldGeneration.Animals
         /// </summary>
         /// <param name="species">生成対象の検証済み種定義です。</param>
         /// <param name="requestedPopulation">今回補充したい個体数です。</param>
-        /// <param name="eligibleLocalTileIndices">種のバイオーム・地形条件を満たす地域内添字です。</param>
+        /// <param name="eligibleLocalTileIndices">種のバイオーム・地形条件を満たし、資源予約を除外済みの地域内添字です。</param>
         /// <param name="occupiedLocalTileIndices">この処理を含む既存候補が使用済みの地域内添字です。</param>
         /// <param name="regionState">地域別乱数状態と次回受付順です。成功時だけ進めます。</param>
         /// <param name="candidates">生成候補の追加先です。</param>
@@ -656,6 +667,22 @@ namespace Farmware.WorldGeneration.Animals
                 && AnimalSpeciesCatalogLookup.IsGroundAllowed(
                     species.AllowedGrounds,
                     groundMask);
+        }
+
+        /// <summary>
+        /// 地形条件と、動物より優先される資源予約を合わせて生成候補を判定します。
+        /// 初期生成、後続リスポーン向けの候補抽出、分布監査、開発者表示で同じ条件を共有します。
+        /// </summary>
+        /// <param name="tile">動物種の対応条件を照合する生成済み地形です。</param>
+        /// <param name="resource">同じタイルに予約された資源です。None以外は生成候補にしません。</param>
+        /// <param name="species">生成対象の動物種定義です。</param>
+        /// <returns>資源がなく、種の地形条件も満たす場合はtrueです。</returns>
+        public static bool IsSpawnTileEligible(
+            GeneratedTile tile,
+            GeneratedResourceTile resource,
+            AnimalSpeciesDefinitionBlob species)
+        {
+            return resource.Type == GeneratedResourceType.None && IsTileEligible(tile, species);
         }
 
         /// <summary>

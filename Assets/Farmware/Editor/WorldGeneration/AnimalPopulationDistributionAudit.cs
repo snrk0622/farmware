@@ -274,6 +274,8 @@ namespace Farmware.WorldGeneration.Editor
 
             int minimumTileX = regionX * WorldGridConstants.LogicalChunkSize;
             int minimumTileY = regionY * WorldGridConstants.LogicalChunkSize;
+            ResourceGenerationSettings resourceSettings = ResourceGenerationSettings.CreateDefault();
+            int eligibleTerrainTileCount = 0;
             for (int localY = 0; localY < WorldGridConstants.LogicalChunkSize; localY++)
             {
                 for (int localX = 0; localX < WorldGridConstants.LogicalChunkSize; localX++)
@@ -285,13 +287,21 @@ namespace Farmware.WorldGeneration.Editor
                         minimumTileY + localY);
                     if (AnimalPopulationGenerator.IsTileEligible(tile, species))
                     {
-                        eligibleTiles.Add(tileIndex);
+                        eligibleTerrainTileCount++;
+                        // Runtimeと同じ資源予約を生成してから動物候補を抽出し、監査だけが木や石へ重なる配置を許さないようにします。
+                        GeneratedResourceTile resource = DeterministicResourceGenerator.GenerateResource(
+                            terrainSettings, resourceSettings, tile,
+                            minimumTileX + localX, minimumTileY + localY);
+                        if (AnimalPopulationGenerator.IsSpawnTileEligible(tile, resource, species))
+                        {
+                            eligibleTiles.Add(tileIndex);
+                        }
                     }
                 }
             }
 
             int target = AnimalPopulationGenerator.CalculateTargetPopulation(
-                eligibleTiles.Length,
+                eligibleTerrainTileCount,
                 species.TargetPopulationPer4096EligibleTiles);
             AnimalPopulationRegionState regionState =
                 AnimalPopulationGenerator.CreateInitialRegionState(
@@ -310,7 +320,7 @@ namespace Farmware.WorldGeneration.Editor
                 throw new InvalidOperationException($"動物候補生成に失敗しました。region=({regionX},{regionY})");
             }
 
-            totalEligibleTileCount += eligibleTiles.Length;
+            totalEligibleTileCount += eligibleTerrainTileCount;
             totalTargetPopulation += target;
             totalSpawnedPopulation += candidates.Length;
             if (candidates.Length < target)

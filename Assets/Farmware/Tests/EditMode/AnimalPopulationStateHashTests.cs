@@ -14,10 +14,10 @@ namespace Farmware.Tests
     /// </summary>
     public sealed class AnimalPopulationStateHashTests
     {
-        /// <summary>各テストWorldが参照し、TearDownで破棄する鶏1種の静的カタログです。</summary>
+        /// <summary>各テストWorldが参照し、TearDownで破棄する、鶏と別種の2種を含む静的カタログです。</summary>
         private BlobAssetReference<AnimalSpeciesCatalogBlob> animalCatalog;
 
-        /// <summary>各テストの前に、有効な種ID1と外見差分3種類を持つカタログを準備します。</summary>
+        /// <summary>各テスト前に、有効な種ID1・2と外見差分3種類を持つカタログを準備します。</summary>
         [SetUp]
         public void SetUp()
         {
@@ -173,6 +173,62 @@ namespace Farmware.Tests
         }
 
         /// <summary>
+        /// 存在するIDでも、循環参照、別群れのメンバー、別種の先頭への所属を正式な状態として受理しないことを保証します。
+        /// </summary>
+        /// <param name="invalidCase">0は循環、1はメンバーへの間接参照、2は異種の群れ先頭への参照です。</param>
+        [TestCase(0)]
+        [TestCase(1)]
+        [TestCase(2)]
+        public void TryAppendTo_RejectsInvalidHerdLeaderRelationship(int invalidCase)
+        {
+            using World world = CreateWorld(reverseCreationOrder: false);
+            EntityManager entityManager = world.EntityManager;
+            if (invalidCase == 0)
+            {
+                // 既存の11→10に対して10→11を設定し、IDの存在だけでは判別できない循環を作ります。
+                entityManager.SetComponentData(FindAnimal(entityManager, 10), new AnimalHerdMembership { HerdId = 11 });
+            }
+            else if (invalidCase == 1)
+            {
+                CreateAnimal(entityManager, 12, 12, 4, -4, 0);
+                CreateAnimal(entityManager, 13, 12, 5, -4, 0);
+                entityManager.SetComponentData(FindAnimal(entityManager, 11), new AnimalHerdMembership { HerdId = 13 });
+            }
+            else
+            {
+                CreateAnimal(entityManager, 12, 12, 4, -4, 0);
+                entityManager.SetComponentData(FindAnimal(entityManager, 12),
+                    new AnimalSpecies { RuntimeId = new DefinitionRuntimeId(2) });
+                entityManager.SetComponentData(FindAnimal(entityManager, 11), new AnimalHerdMembership { HerdId = 12 });
+            }
+
+            SimulationStateHashBuilder builder = CreateBuilderAfterSpeciesSection();
+            Assert.That(AnimalPopulationStateHasher.TryAppendTo(entityManager, ref builder,
+                out AnimalPopulationStateHashError error), Is.False);
+            Assert.That(error.Code, Is.EqualTo(AnimalPopulationStateHashErrorCode.AnimalStateIsInvalid));
+        }
+
+        /// <summary>不正所属を作るテスト準備時に、生成順に依存せず指定永続IDの個体Entityを探します。</summary>
+        /// <param name="entityManager">テストWorldのEntityManagerです。</param>
+        /// <param name="persistentId">取得する個体の永続IDです。</param>
+        /// <returns>指定IDの個体Entityです。見つからない場合はテスト準備失敗として例外にします。</returns>
+        private static Entity FindAnimal(EntityManager entityManager, ulong persistentId)
+        {
+            using EntityQuery query = entityManager.CreateEntityQuery(
+                ComponentType.ReadOnly<WildAnimal>(), ComponentType.ReadOnly<PersistentObjectId>());
+            using NativeArray<Entity> animals = query.ToEntityArray(Allocator.Temp);
+            foreach (Entity animal in animals)
+            {
+                if (entityManager.GetComponentData<PersistentObjectId>(animal).Value == persistentId)
+                {
+                    return animal;
+                }
+            }
+
+            throw new System.InvalidOperationException("テスト対象の動物IDがありません。");
+        }
+
+        /// <summary>
         /// 指定順序でSeed、1地域、同じ群れの2個体を作る、各テスト専用のECS Worldを返します。
         /// </summary>
         /// <param name="reverseCreationOrder">trueなら地域と個体、および個体同士のEntity作成順を逆転します。</param>
@@ -225,7 +281,7 @@ namespace Farmware.Tests
             }
         }
 
-        /// <summary>Runtime ID 1と外見差分3種類を持つ、テスト用の鶏カタログを作ります。</summary>
+        /// <summary>鶏のRuntime ID 1と別種ID 2を含み、各種が外見差分3種類を持つカタログを作ります。</summary>
         /// <returns>TearDownで破棄する永続AllocatorのBlob Assetです。</returns>
         private static BlobAssetReference<AnimalSpeciesCatalogBlob> CreateAnimalCatalog()
         {
@@ -233,7 +289,7 @@ namespace Farmware.Tests
             ref AnimalSpeciesCatalogBlob root =
                 ref builder.ConstructRoot<AnimalSpeciesCatalogBlob>();
             BlobBuilderArray<AnimalSpeciesDefinitionBlob> species =
-                builder.Allocate(ref root.Species, 1);
+                builder.Allocate(ref root.Species, 2);
             species[0] = new AnimalSpeciesDefinitionBlob
             {
                 SpeciesRuntimeId = new DefinitionRuntimeId(1),
@@ -248,6 +304,8 @@ namespace Farmware.Tests
                 MaximumWanderDistanceInTiles = 8,
                 AppearanceVariantCount = 3
             };
+            species[1] = species[0];
+            species[1].SpeciesRuntimeId = new DefinitionRuntimeId(2);
             return builder.CreateBlobAssetReference<AnimalSpeciesCatalogBlob>(
                 Allocator.Persistent);
         }

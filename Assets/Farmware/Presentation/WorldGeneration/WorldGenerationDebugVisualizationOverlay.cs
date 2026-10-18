@@ -754,7 +754,7 @@ namespace Farmware.WorldGeneration.Presentation
                             isMagmaInfluenceArea = magmaInfo.IsInfluenceArea;
                         }
                         bool isAnimalCandidate = hasAnimalCatalog
-                            && IsEligibleForAnyAnimalSpecies(tile, animalCatalog);
+                            && IsEligibleForAnyAnimalSpecies(tile, resource, animalCatalog);
                         bool hasConfirmedAnimal = currentMode
                                 == WorldGenerationDebugVisualizationMode.AnimalPopulation
                             && animalPositionCache.Contains(EncodeTileCoordinate(tileX, tileY));
@@ -811,19 +811,21 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// 1タイルが現在登録されているいずれかの動物種のBiome・Ground条件を満たすか確認します。
+        /// 1タイルが資源に予約されておらず、いずれかの動物種のBiome・Ground条件を満たすか確認します。
         /// </summary>
         /// <param name="tile">生成済みの地形分類です。</param>
+        /// <param name="resource">同じタイルの資源予約です。動物より優先するため非空セルを候補表示しません。</param>
         /// <param name="catalog">Bakerが検証した動物種定義Blobです。</param>
         /// <returns>少なくとも1種の配置候補ならtrueです。</returns>
         private static bool IsEligibleForAnyAnimalSpecies(
             GeneratedTile tile,
+            GeneratedResourceTile resource,
             BlobAssetReference<AnimalSpeciesCatalogBlob> catalog)
         {
             ref AnimalSpeciesCatalogBlob root = ref catalog.Value;
             for (int speciesIndex = 0; speciesIndex < root.Species.Length; speciesIndex++)
             {
-                if (AnimalPopulationGenerator.IsTileEligible(tile, root.Species[speciesIndex]))
+                if (AnimalPopulationGenerator.IsSpawnTileEligible(tile, resource, root.Species[speciesIndex]))
                 {
                     return true;
                 }
