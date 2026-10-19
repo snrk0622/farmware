@@ -213,6 +213,32 @@ namespace Farmware.WorldGeneration.PlayModeTests
         }
 
         /// <summary>
+        /// Surfaceのチャンク表示と反映途中キャッシュを準備してUnderwaterへ切り替え、通常の4サブチャンク予算を待たず、
+        /// 同じ呼び出し内ですべての旧表示・Queue・貸出Tilemapを破棄することを保証します。
+        /// </summary>
+        [Test]
+        public void LayerChanged_ClearsPreviousLayerPresentationImmediately()
+        {
+            Invoke("SynchronizeDisplayOrigin");
+            Assert.That(Invoke("SynchronizePresentedLayer", WorldLayer.Surface), Is.False);
+
+            ChunkCoordinate coordinate = new ChunkCoordinate(WorldLayer.Surface, 0, 0);
+            Tilemap oldTilemap = GetTilemap(coordinate, true);
+            oldTilemap.SetTile(Vector3Int.zero, tile);
+            ((HashSet<ChunkCoordinate>)Field("displayedCoordinates").GetValue(presenter)).Add(coordinate);
+
+            Assert.That(Invoke("SynchronizePresentedLayer", WorldLayer.Underwater), Is.True);
+            Assert.That(oldTilemap.gameObject.activeInHierarchy, Is.False,
+                "レイヤー変更フレーム内に旧Surface表示を無効化する必要があります。");
+            Assert.That(((IDictionary)Field("chunkLocalPresentations").GetValue(presenter)).Count, Is.Zero);
+            Assert.That(
+                ((HashSet<ChunkCoordinate>)Field("displayedCoordinates").GetValue(presenter)).Count,
+                Is.Zero);
+            Assert.That(((ICollection)Field("applyQueue").GetValue(presenter)).Count, Is.Zero);
+            Assert.That(((ICollection)Field("clearQueue").GetValue(presenter)).Count, Is.Zero);
+        }
+
+        /// <summary>
         /// 異なるECS Worldへ切り替えたとき、表示中と空きプールを両方破棄し、同座標の古い地形を再利用しないことを保証します。
         /// </summary>
         [Test]

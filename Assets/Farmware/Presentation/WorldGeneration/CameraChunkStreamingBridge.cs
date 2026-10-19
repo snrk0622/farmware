@@ -68,6 +68,9 @@ namespace Farmware.WorldGeneration.Presentation
         // lastObserverへ有効な値を送信済みかを示し、初回だけ必ずComponentを書き込めるようにします。
         private bool hasLastObserver;
 
+        // 現在カメラが追従する論理レイヤーです。Observerの外部更新を毎フレーム取り込み、可視矩形の再計算で保持します。
+        private WorldLayer currentLayer = WorldLayer.Surface;
+
         /// <summary>
         /// Component読み込み直後にUnityから呼ばれ、未指定のCamera参照を同じGameObjectから補います。
         /// </summary>
@@ -104,6 +107,13 @@ namespace Farmware.WorldGeneration.Presentation
             {
                 return;
             }
+
+            // 潜水など別の入力境界がこのBridge所有ObserverのLayerを変更した場合、その値を先に取り込みます。
+            // カメラ移動でX/Y範囲を更新しても4引数互換APIのSurfaceへ戻さず、選択中レイヤーを維持します。
+            ChunkStreamingObserver ownedObserver = observerWorld.EntityManager
+                .GetComponentData<ChunkStreamingObserver>(observerEntity)
+                .Normalized();
+            currentLayer = ownedObserver.Layer;
 
             ChunkStreamingObserver currentObserver = CalculateVisibleChunkBounds();
             if (hasLastObserver && ObserversAreEqual(lastObserver, currentObserver))
@@ -216,6 +226,7 @@ namespace Farmware.WorldGeneration.Presentation
             observerWorld = null;
             reportedDuplicateObserver = false;
             hasLastObserver = false;
+            currentLayer = WorldLayer.Surface;
         }
 
         /// <summary>
@@ -279,6 +290,7 @@ namespace Farmware.WorldGeneration.Presentation
                 ? new DisplayOrigin(Unity.Mathematics.int2.zero)
                 : cameraPanController.CurrentDisplayOrigin;
             return CalculateChunkBoundsFromVisibleTileBounds(
+                currentLayer,
                 AddDisplayOriginSaturated(
                     minimumTileX,
                     displayOrigin.AbsoluteTileCoordinate.x),

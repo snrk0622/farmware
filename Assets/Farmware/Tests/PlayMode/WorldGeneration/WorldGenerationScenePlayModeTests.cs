@@ -194,6 +194,65 @@ namespace Farmware.WorldGeneration.PlayModeTests
         }
 
         /// <summary>
+        /// Bridgeが所有するObserverを海中へ切り替えてからカメラを移動し、可視矩形の再計算後もUnderwaterを保持することを保証します。
+        /// カメラ更新が互換用4引数APIのSurfaceを上書きする退行を防ぐPlayModeテストです。
+        /// </summary>
+        [Test]
+        public void CameraChunkStreamingBridge_CameraUpdatePreservesSelectedObserverLayer()
+        {
+            World previousWorld = World.DefaultGameObjectInjectionWorld;
+            using World world = new World("Camera layer preservation test");
+            GameObject cameraObject = null;
+
+            try
+            {
+                World.DefaultGameObjectInjectionWorld = world;
+                cameraObject = new GameObject("Layer-aware streaming camera");
+                cameraObject.transform.position = new Vector3(0f, 0f, -10f);
+                Camera camera = cameraObject.AddComponent<Camera>();
+                camera.orthographic = true;
+                camera.orthographicSize = 16f;
+                CameraChunkStreamingBridge bridge =
+                    cameraObject.AddComponent<CameraChunkStreamingBridge>();
+                MethodInfo streamingUpdate = typeof(CameraChunkStreamingBridge).GetMethod(
+                    "Update",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.That(streamingUpdate, Is.Not.Null);
+
+                streamingUpdate.Invoke(bridge, null);
+                using EntityQuery observerQuery = world.EntityManager.CreateEntityQuery(
+                    ComponentType.ReadOnly<ChunkStreamingObserver>());
+                Assert.That(observerQuery.CalculateEntityCount(), Is.EqualTo(1));
+                Entity observerEntity = observerQuery.GetSingletonEntity();
+                ChunkStreamingObserver selectedObserver =
+                    world.EntityManager.GetComponentData<ChunkStreamingObserver>(observerEntity);
+                selectedObserver.Layer = WorldLayer.Underwater;
+                world.EntityManager.SetComponentData(observerEntity, selectedObserver);
+
+                // 別チャンクへ動かしてX/Y再計算を必ず発生させ、Layerだけが以前のSurfaceへ戻らないことを確認します。
+                cameraObject.transform.position = new Vector3(
+                    WorldGridConstants.LogicalChunkSize * 2,
+                    0f,
+                    -10f);
+                streamingUpdate.Invoke(bridge, null);
+
+                ChunkStreamingObserver actual =
+                    world.EntityManager.GetComponentData<ChunkStreamingObserver>(observerEntity);
+                Assert.That(actual.Layer, Is.EqualTo(WorldLayer.Underwater));
+                Assert.That(actual.MinimumVisibleChunkX, Is.GreaterThanOrEqualTo(1));
+            }
+            finally
+            {
+                if (cameraObject != null)
+                {
+                    Object.DestroyImmediate(cameraObject);
+                }
+
+                World.DefaultGameObjectInjectionWorld = previousWorld;
+            }
+        }
+
+        /// <summary>
         /// 通常移動で512タイル閾値を越え、表示原点をチャンク境界へ自動更新しても絶対Camera位置とObserver範囲が変わらないことを保証します。
         /// 正負の両方向を通し、C#の0方向丸めではなく床方向のチャンク境界が選ばれることも確認します。
         /// </summary>

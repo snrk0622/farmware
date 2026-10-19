@@ -16,8 +16,10 @@
 - `WorldTileCoordinate`は`(WorldLayer, TileX, TileY)`を保持し、等価比較と実行時ハッシュへLayerを含める。
 - `ChunkCoordinate`は`(WorldLayer, ChunkX, ChunkY)`を保持する。既存の2引数コンストラクターと`WorldGrid.ToChunkCoordinate(x, y)`は互換入口として`Surface`を返す。
 - `ChunkStreamingObserver`、`ChunkCoordinateComponent`、`InitialSpawnLocation`へLayerを追加した。未設定の旧Observerは共有処理で`Surface`へ正規化し、ECS Singletonへ書き戻してSimulationとPresentationの検索キーを一致させる。
+- Camera Bridgeは所有中Observerの現在Layerを可視矩形の再計算前に取り込み、カメラ移動やFloating Origin更新でSurfaceへ戻さない。
 - チャンク要求、生成結果の公開、Tilemap Presenterの可視判定はLayerを含む。異なるLayerの同X/Y Entityを既存要求として再利用しない。
 - `Underwater`または`DeepSea`へ切り替えた場合も旧Surfaceチャンクの寿命処理を続ける。実行中Jobは完了まで所有Entityを保持し、公開後の次回更新で解放する。自然生成が未接続のレイヤーへ新規要求は作らない。
+- Tilemap PresenterはObserverのLayer変更を検出したフレームで旧レイヤーの表示、途中Queue、岩壁影を即時消去する。通常のサブチャンク予算へ残像の消去を委ねず、異なるレイヤーを同時表示しない。
 - `AnimalPopulationRegionState`、`AnimalSpawnCandidate`、`AnimalTilePosition`へLayerを追加した。地域索引は`(Layer, RegionX, RegionY)`、位置キャッシュは選択LayerとX/Yで絞り込む。
 - 永続IDの安定順キーへ`ScopeOrder`を追加し、動物候補ではLayerを最優先キーにする。既存利用側の既定値0は従来順を維持する。
 
