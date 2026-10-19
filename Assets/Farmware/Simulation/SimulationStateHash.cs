@@ -15,10 +15,12 @@ namespace Farmware.Simulation
     public static class SimulationStateHashSchema
     {
         /// <summary>
-        /// WORLD-01Cで動物地域・個体位置へWorldLayerを書き込むよう更新した状態ハッシュ形式です。
-        /// Version 1とは入力フィールド順が異なるため、古い結果との誤比較を避けて2へ増やしています。
+        /// 初回リリース前の状態ハッシュ形式です。
+        /// 現段階では永続化した比較基準がないため、ハッシュ対象の追加はVersion 1を更新して扱います。
+        /// 初回リリース後、または異なるビルド間で保存済みハッシュを比較する運用を始めた後は、
+        /// 入力形式を変更するたびに値を増やして古い結果との誤比較を防ぎます。
         /// </summary>
-        public const uint CurrentVersion = 2;
+        public const uint CurrentVersion = 1;
 
         /// <summary>
         /// 機能固有セクションへ割り当てられる最初のIDです。

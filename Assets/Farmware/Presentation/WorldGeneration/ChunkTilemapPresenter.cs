@@ -709,7 +709,11 @@ namespace Farmware.WorldGeneration.Presentation
                     displayOriginChange = SynchronizeDisplayOrigin();
                 }
 
-                ChunkStreamingObserver observer = observerQuery.GetSingleton<ChunkStreamingObserver>();
+                // Streaming Systemより先にPresenterだけが更新される経路でも、旧SceneのNoneをSurfaceとして扱います。
+                // 正規化本体をComponentと共有し、生成側と表示側で異なる検索キーを作らないようにします。
+                ChunkStreamingObserver observer = observerQuery
+                    .GetSingleton<ChunkStreamingObserver>()
+                    .Normalized();
                 bool requiresImmediateVisibleRebuild = displayOriginChange != DisplayOriginChangeKind.None
                     && !(chunkLocalTilemapsAreActive && displayOriginChange == DisplayOriginChangeKind.Automatic);
                 using (PresentationWorkCollectionProfilerMarker.Auto())

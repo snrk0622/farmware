@@ -9,14 +9,15 @@
 
 固定保存IDを持つ`WorldLayer`を、既存のセル・チャンク・生成要求・動物地域・個体位置・表示索引・診断へ接続した。同じX/YでもLayerが異なれば別の論理位置として比較、ハッシュ、検索する。
 
-既存の自然地形生成は`Surface`だけで従来結果を維持する。`Underwater`と`DeepSea`へ地上Generatorを流用せず、Map Viewerと開発者可視化では選択・座標表示だけを可能にし、自然生成未接続または空表示とする。3層の自然地形、Block、Liquidの生成はTERRAIN-01A/Bで実装する。
+既存の自然地形生成は`Surface`だけで従来結果を維持する。ここで`Surface`は陸地だけではなく地上と水面の最上層を意味するため、現在の海・川・池もSurfaceの水域セルとして正しい。同じX/Yの水面下は別の`Underwater`セルであり、`Underwater`と`DeepSea`へ地上Generatorを流用せず、Map Viewerと開発者可視化では選択・座標表示だけを可能にし、自然生成未接続または空表示とする。3層の自然地形、Block、Liquidの生成はTERRAIN-01A/Bで実装する。
 
 ## 2. 座標とECSデータ
 
 - `WorldTileCoordinate`は`(WorldLayer, TileX, TileY)`を保持し、等価比較と実行時ハッシュへLayerを含める。
 - `ChunkCoordinate`は`(WorldLayer, ChunkX, ChunkY)`を保持する。既存の2引数コンストラクターと`WorldGrid.ToChunkCoordinate(x, y)`は互換入口として`Surface`を返す。
-- `ChunkStreamingObserver`、`ChunkCoordinateComponent`、`InitialSpawnLocation`へLayerを追加した。未設定の旧Observerはストリーミング境界で`Surface`へ正規化する。
+- `ChunkStreamingObserver`、`ChunkCoordinateComponent`、`InitialSpawnLocation`へLayerを追加した。未設定の旧Observerは共有処理で`Surface`へ正規化し、ECS Singletonへ書き戻してSimulationとPresentationの検索キーを一致させる。
 - チャンク要求、生成結果の公開、Tilemap Presenterの可視判定はLayerを含む。異なるLayerの同X/Y Entityを既存要求として再利用しない。
+- `Underwater`または`DeepSea`へ切り替えた場合も旧Surfaceチャンクの寿命処理を続ける。実行中Jobは完了まで所有Entityを保持し、公開後の次回更新で解放する。自然生成が未接続のレイヤーへ新規要求は作らない。
 - `AnimalPopulationRegionState`、`AnimalSpawnCandidate`、`AnimalTilePosition`へLayerを追加した。地域索引は`(Layer, RegionX, RegionY)`、位置キャッシュは選択LayerとX/Yで絞り込む。
 - 永続IDの安定順キーへ`ScopeOrder`を追加し、動物候補ではLayerを最優先キーにする。既存利用側の既定値0は従来順を維持する。
 
@@ -24,7 +25,7 @@
 
 Surfaceの地域乱数初期化はWORLD-01C以前と同じ入力列を維持する。別LayerだけがLayer値を混ぜた独立系列を使うため、既存地上個体群の初期配置を変更しない。
 
-動物個体群の状態ハッシュは地域と個体位置へLayerを追加した。入力フィールド順が変わるため、`SimulationStateHashSchema.CurrentVersion`を2へ更新した。Schema Version 1の結果とVersion 2の結果は比較対象にしない。
+動物個体群の状態ハッシュは地域と個体位置へLayerを追加した。現在は初回リリース前で永続化した比較基準がないため、`SimulationStateHashSchema.CurrentVersion`は1のまま定義を更新する。初回リリース後、または保存済みハッシュを異なるビルド間で比較する運用を始めた後は、入力形式を変更するたびにVersionを増やし、異なるVersionの結果を比較しない。
 
 ## 4. 診断とEditorツール
 

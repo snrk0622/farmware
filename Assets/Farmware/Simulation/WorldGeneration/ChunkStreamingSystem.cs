@@ -49,17 +49,26 @@ namespace Farmware.WorldGeneration
             using (StreamingProfilerMarker.Auto())
             {
                 ChunkStreamingSettings settings = SystemAPI.GetSingleton<ChunkStreamingSettings>();
-                ChunkStreamingObserver observer = NormalizeObserver(SystemAPI.GetSingleton<ChunkStreamingObserver>());
+                ChunkStreamingObserver storedObserver = SystemAPI.GetSingleton<ChunkStreamingObserver>();
+                ChunkStreamingObserver observer = storedObserver.Normalized();
                 int preloadMargin = math.max(1, settings.PreloadMarginInChunks);
                 int retentionMargin = math.max(0, settings.RetentionMarginInChunks);
                 int maximumConcurrentGenerations = math.max(1, settings.MaximumConcurrentGenerations);
 
-                // UnderwaterとDeepSeaの自然地形はTERRAIN-01Bで接続します。
-                // それまでは地上生成器を別層へ流用して同じ地形を複製せず、Layer付き要求だけを受け取れる境界に留めます。
-                if (observer.Layer != WorldLayer.Surface)
+                // ローカルコピーだけを補正するとPresenterが未設定Layerを読み続け、生成済みSurfaceを画面外扱いします。
+                // 値が変わった場合だけ正規化結果を書き戻し、SimulationとPresentationの検索キーを一致させます。
+                if (storedObserver.Layer != observer.Layer
+                    || storedObserver.MinimumVisibleChunkX != observer.MinimumVisibleChunkX
+                    || storedObserver.MaximumVisibleChunkX != observer.MaximumVisibleChunkX
+                    || storedObserver.MinimumVisibleChunkY != observer.MinimumVisibleChunkY
+                    || storedObserver.MaximumVisibleChunkY != observer.MaximumVisibleChunkY)
                 {
-                    return;
+                    SystemAPI.SetSingleton(observer);
                 }
+
+                // UnderwaterとDeepSeaの自然地形はTERRAIN-01Bで接続します。
+                // falseの間も既存Surfaceチャンクの寿命処理は続け、レイヤー切替後に旧Bufferを残しません。
+                bool canGenerateSelectedLayer = observer.Layer == WorldLayer.Surface;
 
                 // Observerを直接書き込む別Presentationが将来増えても、生成Systemへ不正なチャンク座標を渡さないよう、
                 // Camera側ではなくストリーミング境界で可視・先読み・保持の全範囲を有効なタイル座標域へ収めます。
@@ -101,9 +110,10 @@ namespace Farmware.WorldGeneration
                         coordinates[index].Y);
                     ChunkGenerationStatus status = statuses[index];
 
-                    // WORLD-01Cでは現在表示中のレイヤーだけをストリーミング対象にします。
-                    // 同じX/Yの別レイヤーを矩形だけで一致扱いすると、要求再利用と破棄判定が別層へ誤接続されるため先に分離します。
-                    if (coordinate.Layer != observer.Layer)
+                    // WORLD-01Cでは現在表示中かつ生成器が接続済みのレイヤーだけを保持します。
+                    // 同じX/Yの別レイヤーを矩形だけで一致扱いすると要求を誤接続し、未生成レイヤーで既存Surfaceを
+                    // 保持するとECS状態と現在表示が食い違うため、どちらも同じ寿命処理で解放します。
+                    if (!canGenerateSelectedLayer || coordinate.Layer != observer.Layer)
                     {
                         if (status.Phase == ChunkGenerationPhase.GeneratingData)
                         {
@@ -170,16 +180,20 @@ namespace Farmware.WorldGeneration
                     }
                 }
 
-                int requestBudget = math.max(0, maximumConcurrentGenerations - pendingGenerationCount);
-                QueueMissingChunksNearFirst(
-                    observer.Layer,
-                    preloadBounds,
-                    visibleBounds.CenterX,
-                    visibleBounds.CenterY,
-                    requestBudget,
-                    ref knownCoordinates,
-                    ref reactivatableRequests,
-                    ref commandBuffer);
+                // 未生成レイヤーでは既存チャンクの解放だけを行い、Surface生成器を流用した新規要求は作りません。
+                if (canGenerateSelectedLayer)
+                {
+                    int requestBudget = math.max(0, maximumConcurrentGenerations - pendingGenerationCount);
+                    QueueMissingChunksNearFirst(
+                        observer.Layer,
+                        preloadBounds,
+                        visibleBounds.CenterX,
+                        visibleBounds.CenterY,
+                        requestBudget,
+                        ref knownCoordinates,
+                        ref reactivatableRequests,
+                        ref commandBuffer);
+                }
 
                 // 構造変更を1回へまとめ、Query走査中にEntity配置が変わることを防ぎます。
                 commandBuffer.Playback(state.EntityManager);
@@ -191,37 +205,6 @@ namespace Farmware.WorldGeneration
                 coordinates.Dispose();
                 entities.Dispose();
             }
-        }
-
-        /// <summary>
-        /// 最小値と最大値が逆転した入力を並べ替え、安全な包含矩形へ正規化します。
-        /// </summary>
-        /// <param name="observer">Presentationから受け取った可視チャンク矩形です。</param>
-        /// <returns>各軸で最小値が最大値以下になった入力です。</returns>
-        private static ChunkStreamingObserver NormalizeObserver(ChunkStreamingObserver observer)
-        {
-            // 未設定値のままEntityを作るとNoneレイヤーのチャンクが通常状態へ混ざります。
-            // 既存Sceneと旧テストの既定値は地上専用だったため、移行期間はここでSurfaceへ明示的に補正します。
-            if (!WorldLayerUtility.IsPlayable(observer.Layer))
-            {
-                observer.Layer = WorldLayer.Surface;
-            }
-
-            if (observer.MinimumVisibleChunkX > observer.MaximumVisibleChunkX)
-            {
-                int temporary = observer.MinimumVisibleChunkX;
-                observer.MinimumVisibleChunkX = observer.MaximumVisibleChunkX;
-                observer.MaximumVisibleChunkX = temporary;
-            }
-
-            if (observer.MinimumVisibleChunkY > observer.MaximumVisibleChunkY)
-            {
-                int temporary = observer.MinimumVisibleChunkY;
-                observer.MinimumVisibleChunkY = observer.MaximumVisibleChunkY;
-                observer.MaximumVisibleChunkY = temporary;
-            }
-
-            return observer;
         }
 
         /// <summary>

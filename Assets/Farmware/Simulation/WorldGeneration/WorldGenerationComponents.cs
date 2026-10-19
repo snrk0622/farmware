@@ -769,6 +769,39 @@ namespace Farmware.WorldGeneration
 
         /// <summary>画面に少しでも含まれる最大の垂直論理チャンク座標です。</summary>
         public int MaximumVisibleChunkY;
+
+        /// <summary>
+        /// 旧Scene由来の未設定LayerをSurfaceへ補い、各軸の最小値と最大値を包含矩形として正しい順序へ並べます。
+        /// SimulationとPresentationが同じ補正結果を使うための互換境界であり、元のComponent値は変更しません。
+        /// </summary>
+        /// <returns>有効な固定レイヤーと昇順の包含矩形を持つObserverのコピーです。</returns>
+        public readonly ChunkStreamingObserver Normalized()
+        {
+            ChunkStreamingObserver normalized = this;
+
+            // WORLD-01Cより前のObserverにはLayerフィールドがなく、追加後の既定値Noneとして読み込まれます。
+            // 旧Sceneは地上専用だったため、互換入口では推測可能なSurfaceへ一度だけ置き換えます。
+            if (!WorldLayerUtility.IsPlayable(normalized.Layer))
+            {
+                normalized.Layer = WorldLayer.Surface;
+            }
+
+            if (normalized.MinimumVisibleChunkX > normalized.MaximumVisibleChunkX)
+            {
+                int temporary = normalized.MinimumVisibleChunkX;
+                normalized.MinimumVisibleChunkX = normalized.MaximumVisibleChunkX;
+                normalized.MaximumVisibleChunkX = temporary;
+            }
+
+            if (normalized.MinimumVisibleChunkY > normalized.MaximumVisibleChunkY)
+            {
+                int temporary = normalized.MinimumVisibleChunkY;
+                normalized.MinimumVisibleChunkY = normalized.MaximumVisibleChunkY;
+                normalized.MaximumVisibleChunkY = temporary;
+            }
+
+            return normalized;
+        }
     }
 
     /// <summary>
