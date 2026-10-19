@@ -17,7 +17,7 @@ WORLD-01Aで合意した固定3層、地形由来の上下遮断、施設単位�
 - 同一レイヤーの乾燥室入退室と、上下の潜水・浮上の分離。
 - 未ロード先の準備と再判定に必要な結果。
 
-既存の地形Component、座標、チャンクキー、生成Job、Scene、Prefab、Tilemap、保存ファイル形式は変更しない。Layer付き座標への移行はWORLD-01C、ブロックと有効セルはTERRAIN-01A、自然3層生成の接続はTERRAIN-01B、液体伝播キューはTERRAIN-02、プレイヤーの潜水CommandはDIVE-01で実装する。
+既存の地形Component、座標、チャンクキー、生成Job、Scene、Prefab、Tilemap、保存ファイル形式は変更しない。Layer付き座標への移行はWORLD-01C、ブロックと有効セルはTERRAIN-01A、自然3層生成の接続はTERRAIN-01C、液体伝播キューはTERRAIN-02、プレイヤーの潜水CommandはDIVE-01で実装する。
 
 ## 2. 固定レイヤーID
 

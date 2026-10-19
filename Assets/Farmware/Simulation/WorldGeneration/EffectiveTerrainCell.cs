@@ -35,7 +35,7 @@ namespace Farmware.WorldGeneration
 
     /// <summary>
     /// 既存GeneratedTileをBlock参照へ変換した、変更不可の自然地形セルです。
-    /// TERRAIN-01Bで生成器がBlockを直接出力するまで互換境界として使用します。
+    /// TERRAIN-01Cで生成器がBlockを直接出力するまで互換境界として使用します。
     /// </summary>
     public struct BaseTerrainCell
     {

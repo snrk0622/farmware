@@ -225,7 +225,7 @@ namespace Farmware.WorldGeneration.Editor
 
         /// <summary>
         /// 指定レイヤーの広域代表座標を走査します。WORLD-01CではSurfaceだけを実Generatorへ渡し、
-        /// UnderwaterとDeepSeaはTERRAIN-01B前に地上を複製しないよう未接続色を返します。
+        /// UnderwaterとDeepSeaはTERRAIN-01C前に地上を複製しないよう未接続色を返します。
         /// </summary>
         /// <param name="settings">実際のBakerと同じ変換から得た地形生成設定です。</param>
         /// <param name="layer">サンプリング対象の固定ワールドレイヤーです。</param>

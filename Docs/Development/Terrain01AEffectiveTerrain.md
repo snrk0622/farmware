@@ -4,7 +4,7 @@
 - ブランチ: `feature/terrain-01a-effective-cells`
 - 状態: 実装・AI検証・人間確認完了
 - 依存: WORLD-01C、WORLD-01D
-- 後続: TERRAIN-01B、TERRAIN-01C、SAVE-01、PLAYER-01、GATHER-01、BUILD-01
+- 後続: TERRAIN-01B、TERRAIN-01C、TERRAIN-01D、SAVE-01、UI-01、PLAYER-01、GATHER-01、BUILD-01
 
 ## 1. 目的
 
@@ -33,7 +33,7 @@
 | 海水 | Liquid | 橋を許可 |
 | マグマ | Liquid | 橋を許可し耐熱を要求 |
 
-各定義は変更禁止GUID、共通RuntimeId、硬度、回収Item参照、ルール属性を持つ。硬度と回収ItemはGATHER-01、表示参照と追加パレットはTERRAIN-01Bまで未接続であり、現在の0／Invalidをゲームバランスへ流用しない。
+各定義は変更禁止GUID、共通RuntimeId、硬度、回収Item参照、ルール属性を持つ。硬度と回収ItemはGATHER-01、表示参照と追加パレットはTERRAIN-01Cまで未接続であり、現在の0／Invalidをゲームバランスへ流用しない。
 
 ## 3. 現行生成からの互換変換
 
@@ -47,7 +47,7 @@ TERRAIN-01Aでは既存Surfaceの地形生成結果と署名を変えない。`E
 | Water＋SaltWater | なし | なし | 海水 |
 | Magma | なし | なし | マグマ |
 
-RockWallを地面＋壁に分けることで、後続の採掘で壁だけを除去し、Biomeと歩行可能な地面を残せる。TERRAIN-01Bで生成器がBlockを直接選ぶまで、旧`GroundType`を解釈するのはこの互換境界だけとする。
+RockWallを地面＋壁に分けることで、後続の採掘で壁だけを除去し、Biomeと歩行可能な地面を残せる。TERRAIN-01Cで生成器がBlockを直接選ぶまで、旧`GroundType`を解釈するのはこの互換境界だけとする。
 
 ## 4. 疎な変更差分
 
@@ -73,7 +73,7 @@ Biomeは差分へ含めず、人工地形へ置換しても座標由来の地域
 
 ## 6. 表示・Editorツールへの影響
 
-地形生成アルゴリズム、閾値、既存`GeneratedTile` Buffer、Tilemap参照は変更しない。Gameビュー、Map Viewer、分布監査、岩壁影、Haloは従来のSurface結果を引き続き表示する。変更差分をTilemap、Map Viewer、凡例へ反映する処理はTERRAIN-01Bの責務である。
+地形生成アルゴリズム、閾値、既存`GeneratedTile` Buffer、Tilemap参照は変更しない。Gameビュー、Map Viewer、分布監査、岩壁影、Haloは従来のSurface結果を引き続き表示する。変更差分をTilemap、Map Viewer、凡例へ反映する処理はTERRAIN-01Cの責務である。
 
 Editorメニューやキー割り当ては追加・変更しない。`Terrain Placement`は探索・建築に必要な通常設備、橋、耐熱橋の判定へ絞り、補助物流であるベルト固有のHUD項目と凡例は表示しない。設定SubSceneのBaker結果には、既存の共通定義・動物定義に加えて`TerrainBlockCatalog`が存在する。
 
@@ -94,13 +94,14 @@ AI確認結果:
 
 ## 8. 人間確認
 
-人間確認完了。SampleSceneでSurface地形、資源、鶏、F3／F4、開発者可視化、Consoleに問題がないことを確認した。`Terrain Placement`は中央HUDに`Belt`がなく、凡例が`Equipment`、`Any Bridge`、`Heat Only`、`Blocked`の4分類であることも確認済み。変更差分の画面表示はTERRAIN-01Bまで未実装であり、今回の確認対象には含めていない。
+人間確認完了。SampleSceneでSurface地形、資源、鶏、F3／F4、開発者可視化、Consoleに問題がないことを確認した。`Terrain Placement`は中央HUDに`Belt`がなく、凡例が`Equipment`、`Any Bridge`、`Heat Only`、`Blocked`の4分類であることも確認済み。変更差分の画面表示はTERRAIN-01Cまで未実装であり、今回の確認対象には含めていない。
 
 ## 9. 未実装・残る境界
 
-- Underwater／DeepSeaの自然Block生成と表示はTERRAIN-01B。
-- Biome別の複数Ground／Wallパレットと表示参照はTERRAIN-01B。
-- 新初期スポーン規則はTERRAIN-01C。
+- バイオーム構成、安定ID、分類境界の再検討はTERRAIN-01B。
+- Underwater／DeepSeaの自然Block生成と表示はTERRAIN-01C。
+- Biome別の複数Ground／Wallパレットと表示参照はTERRAIN-01C。
+- 新初期スポーン規則はTERRAIN-01D。
 - 地形差分のファイル保存・復元はSAVE-01。
 - プレイヤー移動への接続はPLAYER-01。
 - 採掘、硬度、回収Item、道具耐久はGATHER-01。

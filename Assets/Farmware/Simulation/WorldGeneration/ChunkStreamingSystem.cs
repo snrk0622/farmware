@@ -66,7 +66,7 @@ namespace Farmware.WorldGeneration
                     SystemAPI.SetSingleton(observer);
                 }
 
-                // UnderwaterとDeepSeaの自然地形はTERRAIN-01Bで接続します。
+                // UnderwaterとDeepSeaの自然地形はTERRAIN-01Cで接続します。
                 // falseの間も既存Surfaceチャンクの寿命処理は続け、レイヤー切替後に旧Bufferを残しません。
                 bool canGenerateSelectedLayer = observer.Layer == WorldLayer.Surface;
 

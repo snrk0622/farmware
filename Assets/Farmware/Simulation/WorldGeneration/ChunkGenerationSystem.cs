@@ -225,7 +225,7 @@ namespace Farmware.WorldGeneration
                 if (manager.GetComponentData<ChunkGenerationStatus>(entity).Phase == ChunkGenerationPhase.Queued
                     && coordinate.Layer == WorldLayer.Surface)
                 {
-                    // WORLD-01Cでは既存地上結果だけを接続します。別層の自然生成はTERRAIN-01Bが
+                    // WORLD-01Cでは既存地上結果だけを接続します。別層の自然生成はTERRAIN-01Cが
                     // 専用規則を追加するまでQueuedのまま残し、地上データの複製を公開しません。
                     ordered.Add(new OrderedRequest { Entity = entity, Coordinate = coordinate });
                 }

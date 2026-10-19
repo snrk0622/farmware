@@ -284,7 +284,7 @@ WORLD-01Cでセル・チャンク座標、ストリーミング要求、動物�
 
 不変の基礎生成、可変セル差分、現在の有効セル、表示キャッシュを分離する。地形型は固定Biome、GroundBlock、WallBlock、Liquid、Surfaceを混同しない。データの正はECS／保存差分にあり、TilemapやHaloへ変更内容を逆流させない。
 
-TERRAIN-01Aでは共通`DefinitionCatalog`へ`GroundBlock`、`WallBlock`、`Liquid`、`TerrainSurface`分類を追加し、通常地面、自然岩壁、淡水、海水、マグマの変更禁止GUIDを全Worldへ登録する。`TerrainBlockCatalogBlob`は共通RuntimeId、硬度、回収Item参照、移動・設置・水密・施設境界属性をRuntimeId順で保持する。現行`GeneratedTile`は互換変換で、Landを地面、RockWallを地面＋壁、Waterを地面なし＋水種別Liquid、Magmaを地面なし＋Magmaへ分解する。生成器がBlockを直接選ぶことと表示参照はTERRAIN-01Bへ残す。
+TERRAIN-01Aでは共通`DefinitionCatalog`へ`GroundBlock`、`WallBlock`、`Liquid`、`TerrainSurface`分類を追加し、通常地面、自然岩壁、淡水、海水、マグマの変更禁止GUIDを全Worldへ登録する。`TerrainBlockCatalogBlob`は共通RuntimeId、硬度、回収Item参照、移動・設置・水密・施設境界属性をRuntimeId順で保持する。現行`GeneratedTile`は互換変換で、Landを地面、RockWallを地面＋壁、Waterを地面なし＋水種別Liquid、Magmaを地面なし＋Magmaへ分解する。生成器がBlockを直接選ぶことと表示参照は、TERRAIN-01Bのバイオーム構成合意後にTERRAIN-01Cで接続する。
 
 可変状態は、ストリーミング対象の生成チャンクEntityとは別の`TerrainChunkDeltaOwner`と`TerrainCellDelta` Bufferが所有する。所有キーは`WorldLayer＋論理チャンクX/Y`、Bufferは0〜4095の`LocalTileIndex`昇順・重複なしとし、変更Maskによって未変更と明示除去を区別する。自然状態へ戻った要素は削除し、空の所有者は正規状態にしない。`EffectiveTerrainResolver`は基礎セルへGround、Wall、Liquid、TerrainSurfaceの順で差分を適用し、分類違い、地面と液体の重複、地面のないSurfaceを拒否する。有効セルは再構築値であり保存しない。
 
@@ -312,6 +312,14 @@ WORLD-01Dで、128bitの`WorldId`、ワールド内`ulong`の`PlayerId`、現在
 ItemStackは品目と数量だけでなくスタック互換性を検証する。耐久品、個体参照、可変データがある品の分割・結合・物流転送で情報を失わない。捕獲時には同じ生物を地上個体・持ち物・水槽で二重計上しない所有権遷移を行う。
 
 停止と再開は`SimulationPauseControl`へ集約し、Queueが停止している間も再開できるようQueue外で主体を検証して即時反映する。通常のゲーム状態変更Commandは停止中に受け付けない。睡眠はTIME-01でWorldClockだけを変更する主体付きCommandとして接続する。Simulation関心範囲はPLAYER-01以降でPlayerId、Layer、論理位置から供給し、カメラ用`ChunkStreamingObserver`と分離する。ロビー、通信同期、予測補正、ホスト移行の実装は今回含めない。固定TickやIDの存在だけでマルチプレイ容易性を保証しない。詳細は[WORLD-01D実装記録](./World01DWorldPlayerBoundary.md)を参照する。
+
+### 12.5 多言語表示とSimulation境界
+
+UI-01AでUnity Localizationを用いたLocale、String Table、Asset Table、Locale別TMPフォントの共通基盤を作る。対応Locale、原文言語、キー命名、文脈、Smart String、フォールバックは同PRで合意し、製品UIは翻訳済み文字列をコードやPrefabの識別子として使用しない。
+
+Simulation Component、Command、Definition Catalog、状態ハッシュ、ワールドセーブは安定ID、数値、状態コードを保持し、翻訳済み表示名を状態の正にしない。PresentationはそれらのIDと結果コードをLocalizationキーへ対応付けて表示する。言語設定はワールド共有状態ではなく端末／ユーザー設定として保存し、実行中のLocale切替はPresentationの再描画だけを発生させる。
+
+全Localeについて空のTable Entry、未登録キー、欠落グリフ、主要画面の文字切れを検査する。項目名と値、数量、時刻、単位、複数形を単純な文字列連結で組み立てず、Localeごとの語順と表記規則を適用できる形式を使う。Editor専用診断文は製品UIと分離してよいが、F3／F4など製品版へ含めるプレイヤー向け表示は翻訳対象とする。
 
 ## 13. 生態、研究、死亡ドロップ（未実装）
 

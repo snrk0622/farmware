@@ -95,7 +95,7 @@ namespace Farmware.Simulation
 
     /// <summary>
     /// 現在の互換生成器が出力する地形分類を、新しいブロック定義へ変換するための解決済みID一式です。
-    /// TERRAIN-01Bで生成器がBlockを直接出力するまでの境界として使用します。
+    /// TERRAIN-01Cで生成器がBlockを直接出力するまでの境界として使用します。
     /// </summary>
     public struct BuiltInTerrainBlockRuntimeIds
     {
