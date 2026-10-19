@@ -1,6 +1,7 @@
 // このファイルは、PlayMode中の地形・資源・動物個体群の開発者用可視化をUnity Editorメニューから切り替えます。
 // Editor Assemblyだけに属し、プレイヤー用入力や製品版ビルドへ開発者専用の操作UIを追加しません。
 
+using Farmware.Simulation;
 using Farmware.WorldGeneration.Presentation;
 using UnityEditor;
 using UnityEngine;
@@ -65,6 +66,18 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>動物の配置候補と確定個体位置の表示へ切り替えるメニューパスです。</summary>
         private const string AnimalPopulationMenuPath =
             "Farmware/World Generation/Debug Visualization/Animal Population";
+
+        /// <summary>地上レイヤーを診断対象にするメニューパスです。</summary>
+        private const string SurfaceLayerMenuPath =
+            "Farmware/World Generation/Debug Visualization/Layer/Surface";
+
+        /// <summary>海中レイヤーを診断対象にするメニューパスです。</summary>
+        private const string UnderwaterLayerMenuPath =
+            "Farmware/World Generation/Debug Visualization/Layer/Underwater";
+
+        /// <summary>深海レイヤーを診断対象にするメニューパスです。</summary>
+        private const string DeepSeaLayerMenuPath =
+            "Farmware/World Generation/Debug Visualization/Layer/Deep Sea";
 
         /// <summary>PlayMode中の開発者用可視化を通常表示へ戻します。</summary>
         [MenuItem(OffMenuPath, false, 200)]
@@ -169,6 +182,27 @@ namespace Farmware.WorldGeneration.Editor
         private static void SelectAnimalPopulation()
         {
             SelectMode(WorldGenerationDebugVisualizationMode.AnimalPopulation);
+        }
+
+        /// <summary>PlayMode中の診断検索を地上レイヤーへ切り替えます。</summary>
+        [MenuItem(SurfaceLayerMenuPath, false, 230)]
+        private static void SelectSurfaceLayer()
+        {
+            SelectLayer(WorldLayer.Surface);
+        }
+
+        /// <summary>PlayMode中の診断検索を海中レイヤーへ切り替えます。未生成なら空表示になります。</summary>
+        [MenuItem(UnderwaterLayerMenuPath, false, 231)]
+        private static void SelectUnderwaterLayer()
+        {
+            SelectLayer(WorldLayer.Underwater);
+        }
+
+        /// <summary>PlayMode中の診断検索を深海レイヤーへ切り替えます。未生成なら空表示になります。</summary>
+        [MenuItem(DeepSeaLayerMenuPath, false, 232)]
+        private static void SelectDeepSeaLayer()
+        {
+            SelectLayer(WorldLayer.DeepSea);
         }
 
         /// <summary>Off項目の有効状態とチェック表示を更新します。</summary>
@@ -299,6 +333,30 @@ namespace Farmware.WorldGeneration.Editor
                 WorldGenerationDebugVisualizationMode.AnimalPopulation);
         }
 
+        /// <summary>Surfaceレイヤー項目の有効状態とチェック表示を更新します。</summary>
+        /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
+        [MenuItem(SurfaceLayerMenuPath, true)]
+        private static bool ValidateSurfaceLayer()
+        {
+            return ValidateLayer(SurfaceLayerMenuPath, WorldLayer.Surface);
+        }
+
+        /// <summary>Underwaterレイヤー項目の有効状態とチェック表示を更新します。</summary>
+        /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
+        [MenuItem(UnderwaterLayerMenuPath, true)]
+        private static bool ValidateUnderwaterLayer()
+        {
+            return ValidateLayer(UnderwaterLayerMenuPath, WorldLayer.Underwater);
+        }
+
+        /// <summary>DeepSeaレイヤー項目の有効状態とチェック表示を更新します。</summary>
+        /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
+        [MenuItem(DeepSeaLayerMenuPath, true)]
+        private static bool ValidateDeepSeaLayer()
+        {
+            return ValidateLayer(DeepSeaLayerMenuPath, WorldLayer.DeepSea);
+        }
+
         /// <summary>
         /// 実行中のOverlayを検索し、選択されたモードを設定してGameビューの再描画を要求します。
         /// </summary>
@@ -320,6 +378,24 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>
+        /// 実行中のOverlayを検索し、診断対象の固定ワールドレイヤーを設定してGameビューの再描画を要求します。
+        /// </summary>
+        /// <param name="layer">Editorメニューで選択された固定ワールドレイヤーです。</param>
+        private static void SelectLayer(WorldLayer layer)
+        {
+            WorldGenerationDebugVisualizationOverlay overlay = FindOverlay();
+            if (!EditorApplication.isPlaying || overlay == null)
+            {
+                Debug.LogWarning("ワールド生成デバッグレイヤーはSampleSceneのPlayMode中だけ切り替えられます。");
+                return;
+            }
+
+            overlay.SetLayer(layer);
+            EditorApplication.QueuePlayerLoopUpdate();
+            UnityEditorInternal.InternalEditorUtility.RepaintAllViews();
+        }
+
+        /// <summary>
         /// メニューを開いたときに現在モードへチェックを付け、PlayMode外の項目を無効化します。
         /// </summary>
         /// <param name="menuPath">チェック状態を更新する完全なメニューパスです。</param>
@@ -330,6 +406,20 @@ namespace Farmware.WorldGeneration.Editor
             WorldGenerationDebugVisualizationOverlay overlay = FindOverlay();
             bool isAvailable = EditorApplication.isPlaying && overlay != null;
             Menu.SetChecked(menuPath, isAvailable && overlay.CurrentMode == mode);
+            return isAvailable;
+        }
+
+        /// <summary>
+        /// メニューを開いたときに現在の診断対象レイヤーへチェックを付け、PlayMode外の項目を無効化します。
+        /// </summary>
+        /// <param name="menuPath">チェック状態を更新する完全なメニューパスです。</param>
+        /// <param name="layer">この項目が表す固定ワールドレイヤーです。</param>
+        /// <returns>PlayMode中にOverlayが見つかり、選択可能な場合はtrueです。</returns>
+        private static bool ValidateLayer(string menuPath, WorldLayer layer)
+        {
+            WorldGenerationDebugVisualizationOverlay overlay = FindOverlay();
+            bool isAvailable = EditorApplication.isPlaying && overlay != null;
+            Menu.SetChecked(menuPath, isAvailable && overlay.CurrentLayer == layer);
             return isAvailable;
         }
 

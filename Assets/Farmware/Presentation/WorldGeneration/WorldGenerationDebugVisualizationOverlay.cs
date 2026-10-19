@@ -2,6 +2,7 @@
 // 操作入口はEditor AssemblyのWorldGenerationDebugVisualizationMenuに置き、Simulationとプレイヤー用F3/F4入力から分離します。
 
 using System.Collections.Generic;
+using Farmware.Simulation;
 using Farmware.Simulation.Animals;
 using Farmware.WorldGeneration.Animals;
 using Unity.Collections;
@@ -93,6 +94,9 @@ namespace Farmware.WorldGeneration.Presentation
         // Editorメニューが実行中だけ変更する現在の可視化モードです。Sceneやセーブデータへは保存しません。
         private WorldGenerationDebugVisualizationMode currentMode;
 
+        // Editorメニューが選択する診断対象レイヤーです。Transform Zには依存せず、Sceneやセーブへ保存しません。
+        private WorldLayer currentLayer = WorldLayer.Surface;
+
         // PlayMode終了やDefault World再作成を検知してEntityQueryを作り直すために保持するWorldです。
         private World presentationWorld;
 
@@ -129,6 +133,9 @@ namespace Farmware.WorldGeneration.Presentation
 
         /// <summary>Editorメニューが選択中として表示する、現在の開発者用可視化モードです。</summary>
         public WorldGenerationDebugVisualizationMode CurrentMode => currentMode;
+
+        /// <summary>Editorメニューが選択中として表示する、現在の診断対象ワールドレイヤーです。</summary>
+        public WorldLayer CurrentLayer => currentLayer;
 
         /// <summary>
         /// Editor構築ツールまたはテストから、投影Camera、タイル座標用Grid、表示原点の所有者をまとめて設定します。
@@ -322,6 +329,22 @@ namespace Farmware.WorldGeneration.Presentation
 #else
             // 製品版には操作UIを含めないため、誤って呼ばれても可視化を有効にしません。
             currentMode = WorldGenerationDebugVisualizationMode.None;
+#endif
+        }
+
+        /// <summary>
+        /// Editorメニューから診断対象の固定ワールドレイヤーを変更します。
+        /// WORLD-01CではSurfaceだけに生成済みBufferがあるため、別層は「生成待ち」として空表示になります。
+        /// </summary>
+        /// <param name="layer">次のIMGUI Repaintから検索キーへ含める固定ワールドレイヤーです。</param>
+        public void SetLayer(WorldLayer layer)
+        {
+#if UNITY_EDITOR
+            currentLayer = WorldLayerUtility.IsPlayable(layer) ? layer : WorldLayer.Surface;
+            animalPositionCache.Clear();
+#else
+            // 製品版には開発者用レイヤー操作UIを含めず、地上表示だけを維持します。
+            currentLayer = WorldLayer.Surface;
 #endif
         }
 
@@ -689,6 +712,11 @@ namespace Farmware.WorldGeneration.Presentation
                 }
 
                 ChunkCoordinateComponent coordinate = coordinates[entityIndex];
+                if (coordinate.Layer != currentLayer)
+                {
+                    continue;
+                }
+
                 int chunkMinimumX = coordinate.X * WorldGridConstants.LogicalChunkSize;
                 int chunkMinimumY = coordinate.Y * WorldGridConstants.LogicalChunkSize;
                 int minimumTileX = Mathf.Max(bounds.MinimumTileX, chunkMinimumX);
@@ -757,7 +785,7 @@ namespace Farmware.WorldGeneration.Presentation
                             && IsEligibleForAnyAnimalSpecies(tile, resource, animalCatalog);
                         bool hasConfirmedAnimal = currentMode
                                 == WorldGenerationDebugVisualizationMode.AnimalPopulation
-                            && animalPositionCache.Contains(tileX, tileY);
+                            && animalPositionCache.Contains(currentLayer, tileX, tileY);
                         GUI.color = GetVisualizationColor(
                             currentMode,
                             tile,
@@ -801,7 +829,7 @@ namespace Farmware.WorldGeneration.Presentation
                 animalPositionCache.Clear();
                 return;
             }
-            animalPositionCache.Update(presentationWorld.EntityManager, animalPositionQuery,
+            animalPositionCache.Update(presentationWorld.EntityManager, animalPositionQuery, currentLayer,
                 bounds.MinimumTileX, bounds.MinimumTileY, bounds.MaximumTileX, bounds.MaximumTileY);
         }
 
@@ -1206,7 +1234,7 @@ namespace Farmware.WorldGeneration.Presentation
                     hasHeatResistance: true);
 
                 // 生密度・平滑化後・通路削り・連続影値を同時に表示し、生成規則変更時の食い違いをGameビューだけで診断できます。
-                centerInformation = $"Tile ({centerCoordinate.x}, {centerCoordinate.y})  "
+                centerInformation = $"Layer={currentLayer}  Tile ({centerCoordinate.x}, {centerCoordinate.y})  "
                     + $"Biome={centerTile.Biome}  Ground={centerTile.Ground}  Soil={centerTile.Soil}\n"
                     + $"Water={centerTile.WaterSalinity} / {centerTile.WaterBodyType}\n"
                     + $"Placement: Equipment={GetPlacementResultState(equipmentPlacementResult)}  "
@@ -1274,7 +1302,7 @@ namespace Farmware.WorldGeneration.Presentation
             // タイトル・色見本・詳細情報を別々に描くことで、凡例の色を文字名ではなく実際のRGBA値で示します。
             GUI.Label(
                 new Rect(panelRect.x + 8f, panelRect.y + 6f, panelRect.width - 16f, 18f),
-                $"Developer Visualization: {GetModeDisplayName(currentMode)}",
+                $"Developer Visualization: {GetModeDisplayName(currentMode)} / {currentLayer}",
                 informationStyle);
             DrawLegend(currentMode, panelRect.x + 8f, panelRect.y + 27f);
             GUI.Label(

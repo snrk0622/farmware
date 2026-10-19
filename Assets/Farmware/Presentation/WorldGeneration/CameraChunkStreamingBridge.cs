@@ -1,6 +1,7 @@
 // このファイルは、表示原点基準の2Dカメラ範囲を絶対論理チャンク矩形へ戻し、ECSへ入力Commandとして渡します。
 // カメラやTransformをゲーム状態の正にはせず、ChunkStreamingSystemが参照するObserver Entityだけを更新します。
 
+using Farmware.Simulation;
 using Unity.Entities;
 using UnityEngine;
 
@@ -67,6 +68,9 @@ namespace Farmware.WorldGeneration.Presentation
         // lastObserverへ有効な値を送信済みかを示し、初回だけ必ずComponentを書き込めるようにします。
         private bool hasLastObserver;
 
+        // 現在カメラが追従する論理レイヤーです。Observerの外部更新を毎フレーム取り込み、可視矩形の再計算で保持します。
+        private WorldLayer currentLayer = WorldLayer.Surface;
+
         /// <summary>
         /// Component読み込み直後にUnityから呼ばれ、未指定のCamera参照を同じGameObjectから補います。
         /// </summary>
@@ -103,6 +107,13 @@ namespace Farmware.WorldGeneration.Presentation
             {
                 return;
             }
+
+            // 潜水など別の入力境界がこのBridge所有ObserverのLayerを変更した場合、その値を先に取り込みます。
+            // カメラ移動でX/Y範囲を更新しても4引数互換APIのSurfaceへ戻さず、選択中レイヤーを維持します。
+            ChunkStreamingObserver ownedObserver = observerWorld.EntityManager
+                .GetComponentData<ChunkStreamingObserver>(observerEntity)
+                .Normalized();
+            currentLayer = ownedObserver.Layer;
 
             ChunkStreamingObserver currentObserver = CalculateVisibleChunkBounds();
             if (hasLastObserver && ObserversAreEqual(lastObserver, currentObserver))
@@ -215,6 +226,7 @@ namespace Farmware.WorldGeneration.Presentation
             observerWorld = null;
             reportedDuplicateObserver = false;
             hasLastObserver = false;
+            currentLayer = WorldLayer.Surface;
         }
 
         /// <summary>
@@ -278,6 +290,7 @@ namespace Farmware.WorldGeneration.Presentation
                 ? new DisplayOrigin(Unity.Mathematics.int2.zero)
                 : cameraPanController.CurrentDisplayOrigin;
             return CalculateChunkBoundsFromVisibleTileBounds(
+                currentLayer,
                 AddDisplayOriginSaturated(
                     minimumTileX,
                     displayOrigin.AbsoluteTileCoordinate.x),
@@ -349,6 +362,30 @@ namespace Farmware.WorldGeneration.Presentation
             int minimumTileY,
             int maximumTileY)
         {
+            return CalculateChunkBoundsFromVisibleTileBounds(
+                WorldLayer.Surface,
+                minimumTileX,
+                maximumTileX,
+                minimumTileY,
+                maximumTileY);
+        }
+
+        /// <summary>
+        /// 指定レイヤーの可視タイル矩形へSpriteの上下はみ出し量を足し、レイヤー付きチャンク包含矩形へ変換します。
+        /// </summary>
+        /// <param name="layer">カメラが論理的に表示している固定ワールドレイヤーです。</param>
+        /// <param name="minimumTileX">画面へ入る最小の水平ワールドタイル座標です。</param>
+        /// <param name="maximumTileX">画面へ入る最大の水平ワールドタイル座標です。</param>
+        /// <param name="minimumTileY">画面へ入る最小の垂直ワールドタイル座標です。</param>
+        /// <param name="maximumTileY">画面へ入る最大の垂直ワールドタイル座標です。</param>
+        /// <returns>レイヤーとSpriteの最大上下はみ出しを含めた論理チャンク包含矩形です。</returns>
+        public static ChunkStreamingObserver CalculateChunkBoundsFromVisibleTileBounds(
+            WorldLayer layer,
+            int minimumTileX,
+            int maximumTileX,
+            int minimumTileY,
+            int maximumTileY)
+        {
             // 呼び出し側の2端点順に依存しないよう、先に各軸を最小・最大へ正規化します。
             int normalizedMinimumTileX = Mathf.Min(minimumTileX, maximumTileX);
             int normalizedMaximumTileX = Mathf.Max(minimumTileX, maximumTileX);
@@ -367,13 +404,16 @@ namespace Farmware.WorldGeneration.Presentation
                     : normalizedMaximumTileY + UpperViewportSpriteOverhangInTiles;
 
             ChunkCoordinate minimumChunk = WorldGrid.ToChunkCoordinate(
+                layer,
                 normalizedMinimumTileX,
                 expandedMinimumTileY);
             ChunkCoordinate maximumChunk = WorldGrid.ToChunkCoordinate(
+                layer,
                 normalizedMaximumTileX,
                 expandedMaximumTileY);
             return new ChunkStreamingObserver
             {
+                Layer = layer,
                 MinimumVisibleChunkX = minimumChunk.X,
                 MaximumVisibleChunkX = maximumChunk.X,
                 MinimumVisibleChunkY = minimumChunk.Y,
@@ -389,7 +429,8 @@ namespace Farmware.WorldGeneration.Presentation
         /// <returns>4辺がすべて一致する場合はtrueです。</returns>
         private static bool ObserversAreEqual(ChunkStreamingObserver left, ChunkStreamingObserver right)
         {
-            return left.MinimumVisibleChunkX == right.MinimumVisibleChunkX
+            return left.Layer == right.Layer
+                && left.MinimumVisibleChunkX == right.MinimumVisibleChunkX
                 && left.MaximumVisibleChunkX == right.MaximumVisibleChunkX
                 && left.MinimumVisibleChunkY == right.MinimumVisibleChunkY
                 && left.MaximumVisibleChunkY == right.MaximumVisibleChunkY;

@@ -286,7 +286,7 @@ Editorツールだけで検証を完了しない。対応する自動テスト�
 
 ### 仕様転換に伴う実装時の更新予定
 
-- WORLD-01C: Layerキーをビューア・中央情報・可視化の検索へ接続する。
+- WORLD-01CでLayerキーをビューア・中央情報・可視化の検索へ接続済み。Map Viewerの`Layer`欄、または`Farmware > World Generation > Debug Visualization > Layer`からSurface／Underwater／Deep Seaを選ぶ。Surface以外の自然生成はTERRAIN-01Bまで未接続のため、Map Viewerは暗色と未接続メッセージ、Gameビュー可視化は空表示を返す。
 - TERRAIN-01: Block定義、変更後地形、スポーン許可・探索失敗理由を追加する。Map Viewerは自然生成と実ワールド差分込みを明示する。
 - GATHER-01／TERRAIN-02: 編集後の隣接差分、穴・液体、反応・保留キューを表示し、元生成を現在地形と誤表示しない。
 - ECO-01／JOURNAL-01: 永続／匿名、地域会計、収容数・回復、証拠判定を確認可能にする。

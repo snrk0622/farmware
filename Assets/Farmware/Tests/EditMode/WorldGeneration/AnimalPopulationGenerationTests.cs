@@ -23,6 +23,33 @@ namespace Farmware.WorldGeneration.Tests
         private static readonly DefinitionGuid ChickenGuid = new DefinitionGuid(0, 0xC1);
 
         /// <summary>
+        /// 同じSeed・地域X/Yを異なるWorldLayerで初期化し、地域キーと乱数系列が互いに衝突しないことを保証します。
+        /// </summary>
+        [Test]
+        public void InitialRegionState_SameXyDifferentLayers_UsesIndependentRandomState()
+        {
+            AnimalPopulationSeed seed = new AnimalPopulationSeed { Value = 0x123456789ABCDEF0UL };
+            AnimalPopulationRegionState surface =
+                AnimalPopulationGenerator.CreateInitialRegionState(
+                    seed,
+                    WorldLayer.Surface,
+                    -3,
+                    7);
+            AnimalPopulationRegionState underwater =
+                AnimalPopulationGenerator.CreateInitialRegionState(
+                    seed,
+                    WorldLayer.Underwater,
+                    -3,
+                    7);
+
+            Assert.That(surface.Layer, Is.EqualTo(WorldLayer.Surface));
+            Assert.That(underwater.Layer, Is.EqualTo(WorldLayer.Underwater));
+            Assert.That(surface.RegionX, Is.EqualTo(underwater.RegionX));
+            Assert.That(surface.RegionY, Is.EqualTo(underwater.RegionY));
+            Assert.That(surface.RandomState, Is.Not.EqualTo(underwater.RandomState));
+        }
+
+        /// <summary>
         /// 全面が草原陸地の地域へ、定義どおり8羽を3〜6羽の群れとして重複なしで配置することを保証します。
         /// </summary>
         [Test]
@@ -62,6 +89,7 @@ namespace Farmware.WorldGeneration.Tests
                 for (int index = 0; index < candidates.Length; index++)
                 {
                     AnimalSpawnCandidate candidate = candidates[index];
+                    Assert.That(candidate.Layer, Is.EqualTo(WorldLayer.Surface));
                     Assert.That(uniquePositions.Add((candidate.TileX, candidate.TileY)), Is.True);
                     Assert.That(candidate.AppearanceVariant, Is.InRange((byte)0, (byte)2));
                     Assert.That(candidate.SpawnSequence, Is.EqualTo((ulong)index + 1ul));
@@ -282,6 +310,7 @@ namespace Farmware.WorldGeneration.Tests
             // 前地域の候補と、別種が使用済みの適格範囲外タイルを残したまま共通関数を呼び出します。
             AnimalSpawnCandidate existingCandidate = new AnimalSpawnCandidate
             {
+                Layer = WorldLayer.Surface,
                 TileX = -1,
                 TileY = -2,
                 SpawnSequence = 42
@@ -965,6 +994,7 @@ namespace Farmware.WorldGeneration.Tests
             {
                 AnimalSpawnCandidate expectedCandidate = expected[index];
                 AnimalSpawnCandidate actualCandidate = actual[index];
+                Assert.That(actualCandidate.Layer, Is.EqualTo(expectedCandidate.Layer));
                 Assert.That(actualCandidate.RegionX, Is.EqualTo(expectedCandidate.RegionX));
                 Assert.That(actualCandidate.RegionY, Is.EqualTo(expectedCandidate.RegionY));
                 Assert.That(actualCandidate.SpeciesRuntimeId, Is.EqualTo(expectedCandidate.SpeciesRuntimeId));
@@ -1079,7 +1109,12 @@ namespace Farmware.WorldGeneration.Tests
             Entity chunkEntity = entityManager.CreateEntity();
             entityManager.AddComponentData(
                 chunkEntity,
-                new ChunkCoordinateComponent { X = chunkX, Y = chunkY });
+                new ChunkCoordinateComponent
+                {
+                    Layer = WorldLayer.Surface,
+                    X = chunkX,
+                    Y = chunkY
+                });
             entityManager.AddComponentData(
                 chunkEntity,
                 new ChunkGenerationStatus

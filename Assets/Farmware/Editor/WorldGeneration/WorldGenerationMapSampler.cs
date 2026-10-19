@@ -3,6 +3,7 @@
 
 using System;
 using System.Threading;
+using Farmware.Simulation;
 using UnityEngine;
 
 namespace Farmware.WorldGeneration.Editor
@@ -38,6 +39,12 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>結果画像中央に対応するワールド垂直タイル座標です。</summary>
         public int CenterTileY { get; }
 
+        /// <summary>結果画像が表す固定ワールドレイヤーです。</summary>
+        public WorldLayer Layer { get; }
+
+        /// <summary>選択レイヤーへ製品用の自然生成が接続済みならtrueです。WORLD-01CではSurfaceだけがtrueです。</summary>
+        public bool HasGeneratedData { get; }
+
         /// <summary>画像1ピクセルが代表するワールドタイル幅です。</summary>
         public int TilesPerPixel { get; }
 
@@ -49,6 +56,8 @@ namespace Farmware.WorldGeneration.Editor
         /// </summary>
         /// <param name="width">画像の横ピクセル数です。</param>
         /// <param name="height">画像の縦ピクセル数です。</param>
+        /// <param name="layer">結果が表す固定ワールドレイヤーです。</param>
+        /// <param name="hasGeneratedData">選択レイヤーに製品用自然生成結果がある場合はtrueです。</param>
         /// <param name="centerTileX">中央の水平タイル座標です。</param>
         /// <param name="centerTileY">中央の垂直タイル座標です。</param>
         /// <param name="tilesPerPixel">画像1ピクセルあたりのタイル幅です。</param>
@@ -56,6 +65,8 @@ namespace Farmware.WorldGeneration.Editor
         internal WorldGenerationMapSampleResult(
             int width,
             int height,
+            WorldLayer layer,
+            bool hasGeneratedData,
             int centerTileX,
             int centerTileY,
             int tilesPerPixel,
@@ -63,6 +74,8 @@ namespace Farmware.WorldGeneration.Editor
         {
             Width = width;
             Height = height;
+            Layer = layer;
+            HasGeneratedData = hasGeneratedData;
             CenterTileX = centerTileX;
             CenterTileY = centerTileY;
             TilesPerPixel = tilesPerPixel;
@@ -198,6 +211,48 @@ namespace Farmware.WorldGeneration.Editor
             WorldGenerationMapViewMode viewMode,
             CancellationToken cancellationToken)
         {
+            return Sample(
+                settings,
+                WorldLayer.Surface,
+                centerTileX,
+                centerTileY,
+                width,
+                height,
+                tilesPerPixel,
+                viewMode,
+                cancellationToken);
+        }
+
+        /// <summary>
+        /// 指定レイヤーの広域代表座標を走査します。WORLD-01CではSurfaceだけを実Generatorへ渡し、
+        /// UnderwaterとDeepSeaはTERRAIN-01B前に地上を複製しないよう未接続色を返します。
+        /// </summary>
+        /// <param name="settings">実際のBakerと同じ変換から得た地形生成設定です。</param>
+        /// <param name="layer">サンプリング対象の固定ワールドレイヤーです。</param>
+        /// <param name="centerTileX">画像中央の水平タイル座標です。</param>
+        /// <param name="centerTileY">画像中央の垂直タイル座標です。</param>
+        /// <param name="width">画像の横ピクセル数です。</param>
+        /// <param name="height">画像の縦ピクセル数です。</param>
+        /// <param name="tilesPerPixel">1ピクセルごとに進めるワールドタイル数です。</param>
+        /// <param name="viewMode">最終地形または論理バイオームの表示モードです。</param>
+        /// <param name="cancellationToken">新しい操作で不要になった走査を中止するためのTokenです。</param>
+        /// <returns>Texture2Dへ適用できる色配列、レイヤー、座標情報です。</returns>
+        public static WorldGenerationMapSampleResult Sample(
+            in WorldGenerationSettings settings,
+            WorldLayer layer,
+            int centerTileX,
+            int centerTileY,
+            int width,
+            int height,
+            int tilesPerPixel,
+            WorldGenerationMapViewMode viewMode,
+            CancellationToken cancellationToken)
+        {
+            if (!WorldLayerUtility.IsPlayable(layer))
+            {
+                throw new ArgumentOutOfRangeException(nameof(layer));
+            }
+
             if (width <= 0 || width > MaximumResolution)
             {
                 throw new ArgumentOutOfRangeException(nameof(width));
@@ -214,6 +269,7 @@ namespace Farmware.WorldGeneration.Editor
             }
 
             Color32[] pixelColors = new Color32[width * height];
+            bool hasGeneratedData = layer == WorldLayer.Surface;
 
             // Texture2Dの配列は下端行から始まるため、pixelYの増加をワールドYの増加へそのまま対応させます。
             for (int pixelY = 0; pixelY < height; pixelY++)
@@ -238,19 +294,30 @@ namespace Farmware.WorldGeneration.Editor
                         pixelX,
                         width,
                         tilesPerPixel);
-                    GeneratedTile generatedTile = DeterministicChunkGenerator.GenerateTile(
-                        settings,
-                        worldTileX,
-                        worldTileY);
-                    pixelColors[(pixelY * width) + pixelX] = GetDisplayColor(
-                        viewMode,
-                        generatedTile);
+                    if (hasGeneratedData)
+                    {
+                        GeneratedTile generatedTile = DeterministicChunkGenerator.GenerateTile(
+                            settings,
+                            worldTileX,
+                            worldTileY);
+                        pixelColors[(pixelY * width) + pixelX] = GetDisplayColor(
+                            viewMode,
+                            generatedTile);
+                    }
+                    else
+                    {
+                        // 未接続層へ地上Generatorを流用すると、別層が正しく生成されたように見えてしまいます。
+                        // 暗い透明度なしの固定色で「データなし」を示し、座標操作自体は検証できるようにします。
+                        pixelColors[(pixelY * width) + pixelX] = new Color32(24, 28, 36, 255);
+                    }
                 }
             }
 
             return new WorldGenerationMapSampleResult(
                 width,
                 height,
+                layer,
+                hasGeneratedData,
                 centerTileX,
                 centerTileY,
                 tilesPerPixel,

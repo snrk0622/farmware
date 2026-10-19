@@ -1,6 +1,8 @@
 // このファイルは、MAP-02Aの絶対タイル座標・表示原点・相対表示座標の相互変換をEditModeで検証します。
 // SceneやTransformを使わず、負座標、int両端、セル境界、無効入力でも同じ純粋計算結果になることを保証します。
 
+using System.Collections.Generic;
+using Farmware.Simulation;
 using NUnit.Framework;
 using Unity.Mathematics;
 
@@ -12,6 +14,45 @@ namespace Farmware.WorldGeneration.Tests
     /// </summary>
     public sealed class WorldCoordinateConversionTests
     {
+        /// <summary>
+        /// 同じ絶対X/Yへ3レイヤーのセル座標を準備し、EqualsとHashSetが別の場所として保持することを保証します。
+        /// </summary>
+        [Test]
+        public void WorldTileCoordinate_SameXyDifferentLayers_DoNotCollide()
+        {
+            WorldTileCoordinate surface = new WorldTileCoordinate(WorldLayer.Surface, -65, 128);
+            WorldTileCoordinate underwater = new WorldTileCoordinate(WorldLayer.Underwater, -65, 128);
+            WorldTileCoordinate deepSea = new WorldTileCoordinate(WorldLayer.DeepSea, -65, 128);
+            var coordinates = new HashSet<WorldTileCoordinate>
+            {
+                surface,
+                underwater,
+                deepSea
+            };
+
+            Assert.That(surface, Is.Not.EqualTo(underwater));
+            Assert.That(underwater, Is.Not.EqualTo(deepSea));
+            Assert.That(coordinates.Count, Is.EqualTo(3));
+            Assert.That(surface.ToString(), Is.EqualTo("Surface:(-65, 128)"));
+        }
+
+        /// <summary>
+        /// 同じ絶対タイルを各レイヤーからチャンクへ変換し、負座標の床方向除算を保ったままLayerだけを分離することを保証します。
+        /// </summary>
+        [Test]
+        public void LayeredTileToChunk_PreservesLayerAndNegativeFloorDivision()
+        {
+            ChunkCoordinate surface = WorldGrid.ToChunkCoordinate(WorldLayer.Surface, -65, 64);
+            ChunkCoordinate underwater = WorldGrid.ToChunkCoordinate(WorldLayer.Underwater, -65, 64);
+
+            Assert.That(surface.Layer, Is.EqualTo(WorldLayer.Surface));
+            Assert.That(underwater.Layer, Is.EqualTo(WorldLayer.Underwater));
+            Assert.That(surface.X, Is.EqualTo(-2));
+            Assert.That(surface.Y, Is.EqualTo(1));
+            Assert.That(surface, Is.Not.EqualTo(underwater));
+            Assert.That(WorldGrid.ToChunkCoordinate(-65, 64), Is.EqualTo(surface));
+        }
+
         /// <summary>
         /// 表示原点と同じ絶対タイルを準備し、相対セル0と、そのセルの左下・中心座標へ変換されることを保証します。
         /// </summary>

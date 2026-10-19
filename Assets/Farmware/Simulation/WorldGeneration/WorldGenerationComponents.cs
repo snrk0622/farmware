@@ -2,6 +2,7 @@
 // ゲーム状態の正をEntity側へ置き、後続のPresentationは生成済みバッファを読み取るだけにする境界です。
 
 using System;
+using Farmware.Simulation;
 using Unity.Entities;
 
 namespace Farmware.WorldGeneration
@@ -629,13 +630,16 @@ namespace Farmware.WorldGeneration
 
     /// <summary>
     /// 新規ワールド開始時に決定した初期スポーン地点と、その根拠になった建設可能領域を保持します。
-    /// Simulationが一度だけ作成し、カメラ、将来のドローン生成、セーブ処理、F3表示が同じ座標を参照します。
+    /// Simulationが一度だけ作成し、カメラ、将来のプレイヤー開始位置、セーブ処理、F3表示が同じ座標を参照します。
     /// </summary>
     public struct InitialSpawnLocation : IComponentData
     {
+        /// <summary>初期スポーンが属する固定ワールドレイヤーです。現在の開始地点探索はSurfaceだけを選びます。</summary>
+        public WorldLayer Layer;
+
         /// <summary>
-        /// 中央コアが縦横に占有するタイル数です。
-        /// 初期位置探索と後続の中央コア固定配置が同じ3×3寸法を参照するための共通値です。
+        /// 旧MAP-01初期探索が建築可能性を確認する正方形の一辺です。
+        /// 中央コアは現行仕様では採用せず、この互換条件自体をTERRAIN-01Cの新スポーン規則で置き換えます。
         /// </summary>
         public const int CentralCoreSizeInTiles = 3;
 
@@ -658,7 +662,7 @@ namespace Farmware.WorldGeneration
         public int RegionHeightInTiles;
 
         /// <summary>
-        /// 発見済みの建設可能矩形から、3×3中央コアの中心として利用できる中央寄りの1タイルを選びます。
+        /// 発見済みの建設可能矩形から、旧3×3互換条件を満たす中央寄りの開始タイルを選びます。
         /// 偶数幅では中央2タイルのうち右・上側を選び、常に整数タイル座標として記録します。
         /// </summary>
         /// <param name="region">全セルが建設可能と確認済みの矩形です。</param>
@@ -667,6 +671,7 @@ namespace Farmware.WorldGeneration
         {
             return new InitialSpawnLocation
             {
+                Layer = WorldLayer.Surface,
                 TileX = region.MinimumTileX + (region.WidthInTiles / 2),
                 TileY = region.MinimumTileY + (region.HeightInTiles / 2),
                 RegionMinimumTileX = region.MinimumTileX,
@@ -747,6 +752,12 @@ namespace Farmware.WorldGeneration
     /// </summary>
     public struct ChunkStreamingObserver : IComponentData
     {
+        /// <summary>
+        /// 表示・先読み対象の固定ワールドレイヤーです。
+        /// カメラのTransform Zから推測せず、Presentationが現在の論理レイヤーを明示的に書き込みます。
+        /// </summary>
+        public WorldLayer Layer;
+
         /// <summary>画面に少しでも含まれる最小の水平論理チャンク座標です。</summary>
         public int MinimumVisibleChunkX;
 
@@ -758,6 +769,39 @@ namespace Farmware.WorldGeneration
 
         /// <summary>画面に少しでも含まれる最大の垂直論理チャンク座標です。</summary>
         public int MaximumVisibleChunkY;
+
+        /// <summary>
+        /// 旧Scene由来の未設定LayerをSurfaceへ補い、各軸の最小値と最大値を包含矩形として正しい順序へ並べます。
+        /// SimulationとPresentationが同じ補正結果を使うための互換境界であり、元のComponent値は変更しません。
+        /// </summary>
+        /// <returns>有効な固定レイヤーと昇順の包含矩形を持つObserverのコピーです。</returns>
+        public readonly ChunkStreamingObserver Normalized()
+        {
+            ChunkStreamingObserver normalized = this;
+
+            // WORLD-01Cより前のObserverにはLayerフィールドがなく、追加後の既定値Noneとして読み込まれます。
+            // 旧Sceneは地上専用だったため、互換入口では推測可能なSurfaceへ一度だけ置き換えます。
+            if (!WorldLayerUtility.IsPlayable(normalized.Layer))
+            {
+                normalized.Layer = WorldLayer.Surface;
+            }
+
+            if (normalized.MinimumVisibleChunkX > normalized.MaximumVisibleChunkX)
+            {
+                int temporary = normalized.MinimumVisibleChunkX;
+                normalized.MinimumVisibleChunkX = normalized.MaximumVisibleChunkX;
+                normalized.MaximumVisibleChunkX = temporary;
+            }
+
+            if (normalized.MinimumVisibleChunkY > normalized.MaximumVisibleChunkY)
+            {
+                int temporary = normalized.MinimumVisibleChunkY;
+                normalized.MinimumVisibleChunkY = normalized.MaximumVisibleChunkY;
+                normalized.MaximumVisibleChunkY = temporary;
+            }
+
+            return normalized;
+        }
     }
 
     /// <summary>
@@ -766,6 +810,9 @@ namespace Farmware.WorldGeneration
     /// </summary>
     public struct ChunkCoordinateComponent : IComponentData
     {
+        /// <summary>論理チャンクが属する固定ワールドレイヤーです。Entityの寿命中は変更しません。</summary>
+        public WorldLayer Layer;
+
         /// <summary>論理チャンクの水平座標です。</summary>
         public int X;
 

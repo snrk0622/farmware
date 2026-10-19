@@ -8,10 +8,16 @@ namespace Farmware.Simulation
 {
     /// <summary>
     /// 同一Tickの複数生成要求を、Jobの完了順に依存しない順序へ並べるための共通キーです。
-    /// 呼び出し側は地域座標、Command受付番号などをMajor、Minor、Sequenceへ割り当て、3値の組を重複させないでください。
+    /// 呼び出し側はWorldLayer等の領域、地域座標、Command受付番号をScope、Major、Minor、Sequenceへ割り当て、4値の組を重複させないでください。
     /// </summary>
     public struct PersistentIdAllocationRequest : IComparable<PersistentIdAllocationRequest>
     {
+        /// <summary>
+        /// 最上位に比較する符号付きキーです。WorldLayerやワールド内の生成領域など、座標の意味を分ける値を設定します。
+        /// 単一領域の既存呼び出しは0のままで従来と同じ並びになります。
+        /// </summary>
+        public long ScopeOrder;
+
         /// <summary>
         /// 最初に比較する符号付きキーです。地域XやCommand分類など、最上位の安定した並びを呼び出し側が設定します。
         /// </summary>
@@ -28,13 +34,19 @@ namespace Farmware.Simulation
         public ulong Sequence;
 
         /// <summary>
-        /// 2つの要求をMajorOrder、MinorOrder、Sequenceの順に比較します。
+        /// 2つの要求をScopeOrder、MajorOrder、MinorOrder、Sequenceの順に比較します。
         /// NativeArray.Sortがこの比較を使い、入力配列の書き込み順が違っても同じ割り当て順を作ります。
         /// </summary>
         /// <param name="other">並び順を比較するもう一方の生成要求です。</param>
         /// <returns>この要求が前なら負、同じキーなら0、後なら正の値です。</returns>
         public readonly int CompareTo(PersistentIdAllocationRequest other)
         {
+            int scopeComparison = ScopeOrder.CompareTo(other.ScopeOrder);
+            if (scopeComparison != 0)
+            {
+                return scopeComparison;
+            }
+
             int majorComparison = MajorOrder.CompareTo(other.MajorOrder);
             if (majorComparison != 0)
             {

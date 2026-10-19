@@ -4,6 +4,7 @@
 // 分類用の外周1セルは反映バッチごとに同期Burstでまとめ、同じ隣接地形の重複生成を減らします。
 
 using System.Collections.Generic;
+using Farmware.Simulation;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
@@ -250,6 +251,12 @@ namespace Farmware.WorldGeneration.Presentation
 
         // Queryを現在のWorld向けに作成済みかを示し、未初期化のEntityQueryを使用しないために保持します。
         private bool queriesAreCreated;
+
+        // 現在Tilemapへ反映している固定ワールドレイヤーです。別層へ切り替わったフレームで旧表示を即時消去するために保持します。
+        private WorldLayer presentedLayer = WorldLayer.Surface;
+
+        // presentedLayerへObserverの有効値を一度でも記録したかを示し、初回表示で不要な全消去を避けます。
+        private bool hasPresentedLayer;
 
         // 反映途中チャンクのEntityと次のサブチャンク番号を座標別に保持するPresentation専用キャッシュです。
         private readonly Dictionary<ChunkCoordinate, ChunkApplyProgress> applyProgressByCoordinate =
@@ -709,7 +716,15 @@ namespace Farmware.WorldGeneration.Presentation
                     displayOriginChange = SynchronizeDisplayOrigin();
                 }
 
-                ChunkStreamingObserver observer = observerQuery.GetSingleton<ChunkStreamingObserver>();
+                // Streaming Systemより先にPresenterだけが更新される経路でも、旧SceneのNoneをSurfaceとして扱います。
+                // 正規化本体をComponentと共有し、生成側と表示側で異なる検索キーを作らないようにします。
+                ChunkStreamingObserver observer = observerQuery
+                    .GetSingleton<ChunkStreamingObserver>()
+                    .Normalized();
+
+                // 異なるLayerは同じX/Yでも別の論理場所です。通常の消去予算へ回すと旧地形が数フレーム残るため、
+                // レイヤー変更フレームだけ全表示を同期消去してから新しいLayerを収集します。
+                SynchronizePresentedLayer(observer.Layer);
                 bool requiresImmediateVisibleRebuild = displayOriginChange != DisplayOriginChangeKind.None
                     && !(chunkLocalTilemapsAreActive && displayOriginChange == DisplayOriginChangeKind.Automatic);
                 using (PresentationWorkCollectionProfilerMarker.Auto())
@@ -811,6 +826,32 @@ namespace Farmware.WorldGeneration.Presentation
                     && cameraPanController.LastDisplayOriginChangeWasAutomatic
                 ? DisplayOriginChangeKind.Automatic
                 : DisplayOriginChangeKind.Explicit;
+        }
+
+        /// <summary>
+        /// Observerの論理レイヤー変更を検出し、旧レイヤーから反映したTilemap、途中Queue、岩壁影を同じフレームで消去します。
+        /// </summary>
+        /// <param name="currentLayer">正規化済みObserverが現在要求している固定ワールドレイヤーです。</param>
+        /// <returns>初回記録ではなく、以前と異なるレイヤーへ切り替わった場合はtrueです。</returns>
+        private bool SynchronizePresentedLayer(WorldLayer currentLayer)
+        {
+            if (!hasPresentedLayer)
+            {
+                presentedLayer = currentLayer;
+                hasPresentedLayer = true;
+                return false;
+            }
+
+            if (presentedLayer == currentLayer)
+            {
+                return false;
+            }
+
+            // レイヤーは重ねて表示する背景ではなく、同じX/Yを別の場所として扱う排他的な表示対象です。
+            // 旧表示を1サブチャンクずつ消すとSimulation切替後も残像するため、稀な層移動では原子的な切替を優先します。
+            ClearAllPresentedChunksImmediately();
+            presentedLayer = currentLayer;
+            return true;
         }
 
         /// <summary>
@@ -990,7 +1031,10 @@ namespace Farmware.WorldGeneration.Presentation
             {
                 for (int index = 0; index < entities.Length; index++)
                 {
-                    ChunkCoordinate coordinate = new ChunkCoordinate(coordinates[index].X, coordinates[index].Y);
+                    ChunkCoordinate coordinate = new ChunkCoordinate(
+                        coordinates[index].Layer,
+                        coordinates[index].X,
+                        coordinates[index].Y);
                     bool isVisible = Contains(observer, coordinate, 0);
                     if (isVisible != (pass == 0))
                     {
@@ -2371,7 +2415,8 @@ namespace Farmware.WorldGeneration.Presentation
             long maximumX = (long)Mathf.Max(observer.MinimumVisibleChunkX, observer.MaximumVisibleChunkX) + margin;
             long minimumY = (long)Mathf.Min(observer.MinimumVisibleChunkY, observer.MaximumVisibleChunkY) - margin;
             long maximumY = (long)Mathf.Max(observer.MinimumVisibleChunkY, observer.MaximumVisibleChunkY) + margin;
-            return coordinate.X >= minimumX
+            return coordinate.Layer == observer.Layer
+                && coordinate.X >= minimumX
                 && coordinate.X <= maximumX
                 && coordinate.Y >= minimumY
                 && coordinate.Y <= maximumY;

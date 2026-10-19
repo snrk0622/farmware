@@ -7,7 +7,7 @@ namespace Farmware.Simulation.Animals
 {
     /// <summary>
     /// 地形Seedとは独立して、新規ワールドごとの野生動物配置を決めるSingleton Componentです。
-    /// 新規ワールドではAnimalPopulationSeedInitializationSystemが一度だけ作り、MAP-03B以降は保存値を先に復元します。
+    /// 新規ワールドではAnimalPopulationSeedInitializationSystemが一度だけ作り、SAVE-01B以降は保存値を先に復元します。
     /// </summary>
     public struct AnimalPopulationSeed : IComponentData
     {
@@ -27,6 +27,9 @@ namespace Farmware.Simulation.Animals
     /// </summary>
     public struct AnimalPopulationRegionState : IComponentData
     {
+        /// <summary>地域が属する固定ワールドレイヤーです。同じX/Yの別層は独立した個体群として扱います。</summary>
+        public WorldLayer Layer;
+
         /// <summary>地域を識別する論理チャンクの水平座標です。負座標を含みます。</summary>
         public int RegionX;
 
@@ -71,10 +74,13 @@ namespace Farmware.Simulation.Animals
 
     /// <summary>
     /// 動物のSimulation上の整数タイル座標です。
-    /// Transformや表示補間値をゲーム状態の正にせず、ANIMAL-01Cの移動Systemが固定Tick境界で更新します。
+    /// Transformや表示補間値をゲーム状態の正にせず、ECO-01の移動Systemが固定Tick境界で更新します。
     /// </summary>
     public struct AnimalTilePosition : IComponentData
     {
+        /// <summary>個体が存在する固定ワールドレイヤーです。移動Systemだけが固定Tick境界で変更します。</summary>
+        public WorldLayer Layer;
+
         /// <summary>絶対ワールド水平タイル座標です。単位はタイルです。</summary>
         public int TileX;
 
@@ -94,7 +100,7 @@ namespace Farmware.Simulation.Animals
 
     /// <summary>
     /// 同じ動物種内の外見差分番号を保持します。
-    /// ANIMAL-01CのPresentationはこの値から仮Spriteを選び、再表示のたびに見た目を再抽選しません。
+    /// ECO-01のPresentationはこの値からSpriteを選び、再表示のたびに見た目を再抽選しません。
     /// </summary>
     public struct AnimalAppearanceVariant : IComponentData
     {

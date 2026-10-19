@@ -76,6 +76,66 @@ namespace Farmware.Tests
         }
 
         /// <summary>
+        /// 同じ地域X/Yへ海中地域を追加し、地上地域との重複として拒否せず、レイヤーを含む別状態としてハッシュへ反映することを保証します。
+        /// </summary>
+        [Test]
+        public void TryAppendTo_SameRegionXyDifferentLayer_DoesNotCollide()
+        {
+            using World baselineWorld = CreateWorld(reverseCreationOrder: false);
+            using World layeredWorld = CreateWorld(reverseCreationOrder: false);
+            Entity underwaterRegion = layeredWorld.EntityManager.CreateEntity(
+                typeof(AnimalPopulationRegionState));
+            layeredWorld.EntityManager.SetComponentData(
+                underwaterRegion,
+                new AnimalPopulationRegionState
+                {
+                    Layer = WorldLayer.Underwater,
+                    RegionX = -1,
+                    RegionY = 2,
+                    RandomState = 98765,
+                    NextSpawnSequence = 1,
+                    InitializedAtTick = 20
+                });
+
+            Assert.That(TryCompute(baselineWorld, out SimulationStateHash baselineHash), Is.True);
+            Assert.That(TryCompute(layeredWorld, out SimulationStateHash layeredHash), Is.True);
+            Assert.That(layeredHash, Is.Not.EqualTo(baselineHash));
+        }
+
+        /// <summary>
+        /// 地域と群れ全体のX/Yを保ったままレイヤーだけを変更し、別のワールド状態としてハッシュが変わることを保証します。
+        /// </summary>
+        [Test]
+        public void TryAppendTo_DetectsLayerChange()
+        {
+            using World surfaceWorld = CreateWorld(reverseCreationOrder: false);
+            using World underwaterWorld = CreateWorld(reverseCreationOrder: false);
+            EntityManager entityManager = underwaterWorld.EntityManager;
+            using EntityQuery regionQuery = entityManager.CreateEntityQuery(
+                ComponentType.ReadWrite<AnimalPopulationRegionState>());
+            AnimalPopulationRegionState region =
+                regionQuery.GetSingleton<AnimalPopulationRegionState>();
+            region.Layer = WorldLayer.Underwater;
+            regionQuery.SetSingleton(region);
+
+            using EntityQuery animalQuery = entityManager.CreateEntityQuery(
+                ComponentType.ReadOnly<WildAnimal>(),
+                ComponentType.ReadWrite<AnimalTilePosition>());
+            using NativeArray<Entity> animals = animalQuery.ToEntityArray(Allocator.Temp);
+            foreach (Entity animal in animals)
+            {
+                AnimalTilePosition position =
+                    entityManager.GetComponentData<AnimalTilePosition>(animal);
+                position.Layer = WorldLayer.Underwater;
+                entityManager.SetComponentData(animal, position);
+            }
+
+            Assert.That(TryCompute(surfaceWorld, out SimulationStateHash surfaceHash), Is.True);
+            Assert.That(TryCompute(underwaterWorld, out SimulationStateHash underwaterHash), Is.True);
+            Assert.That(underwaterHash, Is.Not.EqualTo(surfaceHash));
+        }
+
+        /// <summary>
         /// 群れ先頭IDが存在しない壊れた個体を準備し、復元後の不正参照を正式な状態ハッシュとして受理しないことを保証します。
         /// </summary>
         [Test]
@@ -319,6 +379,7 @@ namespace Farmware.Tests
                 regionEntity,
                 new AnimalPopulationRegionState
                 {
+                    Layer = WorldLayer.Surface,
                     RegionX = -1,
                     RegionY = 2,
                     RandomState = 12345,
@@ -357,7 +418,12 @@ namespace Farmware.Tests
                 new AnimalSpecies { RuntimeId = new DefinitionRuntimeId(1) });
             entityManager.SetComponentData(
                 animal,
-                new AnimalTilePosition { TileX = tileX, TileY = tileY });
+                new AnimalTilePosition
+                {
+                    Layer = WorldLayer.Surface,
+                    TileX = tileX,
+                    TileY = tileY
+                });
             entityManager.SetComponentData(
                 animal,
                 new AnimalHerdMembership { HerdId = herdId });

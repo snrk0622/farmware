@@ -14,7 +14,12 @@ namespace Farmware.Simulation
     /// </summary>
     public static class SimulationStateHashSchema
     {
-        /// <summary>SIM-01Fで導入する最初の状態ハッシュ形式です。</summary>
+        /// <summary>
+        /// 初回リリース前の状態ハッシュ形式です。
+        /// 現段階では永続化した比較基準がないため、ハッシュ対象の追加はVersion 1を更新して扱います。
+        /// 初回リリース後、または異なるビルド間で保存済みハッシュを比較する運用を始めた後は、
+        /// 入力形式を変更するたびに値を増やして古い結果との誤比較を防ぎます。
+        /// </summary>
         public const uint CurrentVersion = 1;
 
         /// <summary>

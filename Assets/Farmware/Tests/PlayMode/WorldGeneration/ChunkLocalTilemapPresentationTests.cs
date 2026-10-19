@@ -5,6 +5,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
+using Farmware.Simulation;
 using Farmware.WorldGeneration.Presentation;
 using NUnit.Framework;
 using Unity.Entities;
@@ -212,6 +213,32 @@ namespace Farmware.WorldGeneration.PlayModeTests
         }
 
         /// <summary>
+        /// Surfaceのチャンク表示と反映途中キャッシュを準備してUnderwaterへ切り替え、通常の4サブチャンク予算を待たず、
+        /// 同じ呼び出し内ですべての旧表示・Queue・貸出Tilemapを破棄することを保証します。
+        /// </summary>
+        [Test]
+        public void LayerChanged_ClearsPreviousLayerPresentationImmediately()
+        {
+            Invoke("SynchronizeDisplayOrigin");
+            Assert.That(Invoke("SynchronizePresentedLayer", WorldLayer.Surface), Is.False);
+
+            ChunkCoordinate coordinate = new ChunkCoordinate(WorldLayer.Surface, 0, 0);
+            Tilemap oldTilemap = GetTilemap(coordinate, true);
+            oldTilemap.SetTile(Vector3Int.zero, tile);
+            ((HashSet<ChunkCoordinate>)Field("displayedCoordinates").GetValue(presenter)).Add(coordinate);
+
+            Assert.That(Invoke("SynchronizePresentedLayer", WorldLayer.Underwater), Is.True);
+            Assert.That(oldTilemap.gameObject.activeInHierarchy, Is.False,
+                "レイヤー変更フレーム内に旧Surface表示を無効化する必要があります。");
+            Assert.That(((IDictionary)Field("chunkLocalPresentations").GetValue(presenter)).Count, Is.Zero);
+            Assert.That(
+                ((HashSet<ChunkCoordinate>)Field("displayedCoordinates").GetValue(presenter)).Count,
+                Is.Zero);
+            Assert.That(((ICollection)Field("applyQueue").GetValue(presenter)).Count, Is.Zero);
+            Assert.That(((ICollection)Field("clearQueue").GetValue(presenter)).Count, Is.Zero);
+        }
+
+        /// <summary>
         /// 異なるECS Worldへ切り替えたとき、表示中と空きプールを両方破棄し、同座標の古い地形を再利用しないことを保証します。
         /// </summary>
         [Test]
@@ -390,6 +417,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Assert.That(Invoke("TryEnsureQueries"), Is.True);
                 ChunkStreamingObserver observer = new ChunkStreamingObserver
                 {
+                    Layer = WorldLayer.Surface,
                     MinimumVisibleChunkX = center, MaximumVisibleChunkX = center,
                     MinimumVisibleChunkY = center, MaximumVisibleChunkY = center
                 };
@@ -442,7 +470,10 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 manager.SetComponentData(settingsEntity, WorldGenerationSettings.CreateDefault(1UL, 1));
                 Assert.That(Invoke("TryEnsureQueries"), Is.True);
                 Invoke("SynchronizeDisplayOrigin");
-                ChunkStreamingObserver observer = new ChunkStreamingObserver();
+                ChunkStreamingObserver observer = new ChunkStreamingObserver
+                {
+                    Layer = WorldLayer.Surface
+                };
                 Invoke("CollectPresentationWork", observer, true);
                 var progress = (IDictionary)Field("applyProgressByCoordinate").GetValue(presenter);
                 Assert.That(progress.Count, Is.EqualTo(1), "原点変更の同期経路へ余白を含めません。");
@@ -469,7 +500,14 @@ namespace Farmware.WorldGeneration.PlayModeTests
         private static void CreateCompletedChunk(EntityManager manager, int x, int y, ChunkGenerationPhase phase)
         {
             Entity entity = manager.CreateEntity(typeof(ChunkCoordinateComponent), typeof(ChunkGenerationStatus));
-            manager.SetComponentData(entity, new ChunkCoordinateComponent { X = x, Y = y });
+            manager.SetComponentData(
+                entity,
+                new ChunkCoordinateComponent
+                {
+                    Layer = WorldLayer.Surface,
+                    X = x,
+                    Y = y
+                });
             manager.SetComponentData(entity, new ChunkGenerationStatus { Phase = phase });
             manager.AddBuffer<GeneratedTile>(entity).ResizeUninitialized(WorldGridConstants.TilesPerChunk);
             manager.AddBuffer<GeneratedResourceTile>(entity).ResizeUninitialized(WorldGridConstants.TilesPerChunk);
