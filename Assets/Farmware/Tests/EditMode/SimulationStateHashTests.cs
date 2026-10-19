@@ -386,6 +386,7 @@ namespace Farmware.Tests.EditMode
             using World world = CreateCoreStateWorld();
             bool accepted = SimulationCommandQueue.TryEnqueue(
                 world.EntityManager,
+                CreateActor(),
                 new StateHashTestCreateCommand
                 {
                     PersistentId = 1,
@@ -466,6 +467,120 @@ namespace Farmware.Tests.EditMode
                     secondCatalog.Dispose();
                 }
             }
+        }
+
+        /// <summary>
+        /// Player Entityの作成順が異なってもPlayerId昇順へ正規化し、同じWorld状態なら同じハッシュになることを保証します。
+        /// </summary>
+        [Test]
+        public void CoreHasher_PlayerCreationOrderDoesNotChangeHash()
+        {
+            using World firstWorld = CreateCoreStateWorld();
+            using World secondWorld = CreateCoreStateWorld();
+            AddPlayer(firstWorld, 2);
+            AddPlayer(firstWorld, 3);
+            AddPlayer(secondWorld, 3);
+            AddPlayer(secondWorld, 2);
+
+            Assert.That(
+                SimulationCoreStateHasher.TryCompute(
+                    firstWorld.EntityManager,
+                    out SimulationStateHash firstHash,
+                    out _),
+                Is.True);
+            Assert.That(
+                SimulationCoreStateHasher.TryCompute(
+                    secondWorld.EntityManager,
+                    out SimulationStateHash secondHash,
+                    out _),
+                Is.True);
+            Assert.That(firstHash, Is.EqualTo(secondHash));
+        }
+
+        /// <summary>
+        /// WorldIdまたはPlayerIdを変更すると共通状態ハッシュが変わり、PlayerId重複は正式状態として拒否されることを保証します。
+        /// </summary>
+        [Test]
+        public void CoreHasher_WorldAndPlayerIdentityAffectHashAndRejectDuplicates()
+        {
+            using World baselineWorld = CreateCoreStateWorld();
+            using World changedWorld = CreateCoreStateWorld();
+            EntityQuery worldIdentityQuery = changedWorld.EntityManager.CreateEntityQuery(
+                ComponentType.ReadWrite<WorldSessionIdentity>());
+            try
+            {
+                Entity worldIdentityEntity = worldIdentityQuery.GetSingletonEntity();
+                changedWorld.EntityManager.SetComponentData(
+                    worldIdentityEntity,
+                    new WorldSessionIdentity
+                    {
+                        Id = new WorldId(100, 201)
+                    });
+            }
+            finally
+            {
+                worldIdentityQuery.Dispose();
+            }
+
+            Assert.That(
+                SimulationCoreStateHasher.TryCompute(
+                    baselineWorld.EntityManager,
+                    out SimulationStateHash baselineHash,
+                    out _),
+                Is.True);
+            Assert.That(
+                SimulationCoreStateHasher.TryCompute(
+                    changedWorld.EntityManager,
+                    out SimulationStateHash changedHash,
+                    out _),
+                Is.True);
+            Assert.That(changedHash, Is.Not.EqualTo(baselineHash));
+
+            AddPlayer(baselineWorld, 1);
+            Assert.That(
+                SimulationCoreStateHasher.TryCompute(
+                    baselineWorld.EntityManager,
+                    out _,
+                    out SimulationStateHashError duplicateError),
+                Is.False);
+            Assert.That(
+                duplicateError.Code,
+                Is.EqualTo(SimulationStateHashErrorCode.WorldSessionStateIsInvalid));
+        }
+
+        /// <summary>
+        /// 全0のWorldIdを正式状態としてハッシュ化せず、時間設定とは別のセッション不整合として報告することを保証します。
+        /// </summary>
+        [Test]
+        public void CoreHasher_RejectsInvalidWorldIdentity()
+        {
+            using World world = CreateCoreStateWorld();
+            EntityQuery worldIdentityQuery = world.EntityManager.CreateEntityQuery(
+                ComponentType.ReadWrite<WorldSessionIdentity>());
+            try
+            {
+                Entity worldIdentityEntity = worldIdentityQuery.GetSingletonEntity();
+                world.EntityManager.SetComponentData(
+                    worldIdentityEntity,
+                    new WorldSessionIdentity
+                    {
+                        Id = WorldId.Invalid
+                    });
+            }
+            finally
+            {
+                worldIdentityQuery.Dispose();
+            }
+
+            Assert.That(
+                SimulationCoreStateHasher.TryCompute(
+                    world.EntityManager,
+                    out _,
+                    out SimulationStateHashError error),
+                Is.False);
+            Assert.That(
+                error.Code,
+                Is.EqualTo(SimulationStateHashErrorCode.WorldSessionStateIsInvalid));
         }
 
         /// <summary>
@@ -603,6 +718,22 @@ namespace Farmware.Tests.EditMode
                     ExhaustedValue = 0
                 });
 
+            WorldCommandActor actor = CreateActor();
+            Entity worldIdentityEntity = world.EntityManager.CreateEntity();
+            world.EntityManager.AddComponentData(
+                worldIdentityEntity,
+                new WorldSessionIdentity
+                {
+                    Id = actor.WorldId
+                });
+            Entity playerIdentityEntity = world.EntityManager.CreateEntity();
+            world.EntityManager.AddComponentData(
+                playerIdentityEntity,
+                new PlayerIdentity
+                {
+                    Id = actor.PlayerId
+                });
+
             SystemHandle queueInitializationSystem =
                 world.GetOrCreateSystem<SimulationCommandQueueInitializationSystem>();
             queueInitializationSystem.Update(world.Unmanaged);
@@ -645,6 +776,22 @@ namespace Farmware.Tests.EditMode
                 ReferenceStartIndex = 0,
                 ReferenceCount = 0
             };
+        }
+
+        /// <summary>
+        /// 状態ハッシュのPlayerId一覧へ、指定したワールド内IDを持つPlayer Entityを追加します。
+        /// </summary>
+        /// <param name="world">Player Entityを所有するテストWorldです。</param>
+        /// <param name="playerId">追加する1以上のワールド内プレイヤーIDです。</param>
+        private static void AddPlayer(World world, ulong playerId)
+        {
+            Entity playerEntity = world.EntityManager.CreateEntity();
+            world.EntityManager.AddComponentData(
+                playerEntity,
+                new PlayerIdentity
+                {
+                    Id = new PlayerId(playerId)
+                });
         }
 
         /// <summary>
@@ -755,12 +902,24 @@ namespace Farmware.Tests.EditMode
             {
                 bool accepted = SimulationCommandQueue.TryEnqueue(
                     world.EntityManager,
+                    CreateActor(),
                     commands[commandIndex],
                     out _,
                     out ulong receiptNumber);
                 Assert.That(accepted, Is.True);
                 Assert.That(receiptNumber, Is.EqualTo((ulong)commandIndex + 1));
             }
+        }
+
+        /// <summary>
+        /// 状態ハッシュテストで共通使用する固定WorldIdとPlayer 1の操作主体を作成します。
+        /// </summary>
+        /// <returns>共通状態へ登録済みとして使用する操作主体です。</returns>
+        private static WorldCommandActor CreateActor()
+        {
+            return new WorldCommandActor(
+                new WorldId(100, 200),
+                new PlayerId(1));
         }
 
         /// <summary>

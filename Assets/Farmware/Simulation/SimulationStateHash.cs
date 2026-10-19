@@ -309,7 +309,10 @@ namespace Farmware.Simulation
         CoreStateIsInvalid = 4,
 
         /// <summary>定義カタログのBlob、並び、Runtime ID、参照範囲が不正です。</summary>
-        DefinitionCatalogIsInvalid = 5
+        DefinitionCatalogIsInvalid = 5,
+
+        /// <summary>WorldId、PlayerId、またはプレイヤー一覧の一意性が共通契約を満たしません。</summary>
+        WorldSessionStateIsInvalid = 6
     }
 
     /// <summary>
@@ -335,7 +338,7 @@ namespace Farmware.Simulation
     }
 
     /// <summary>
-    /// 固定Tick、永続ID、定義カタログというFarmware共通の論理状態をハッシュへ追加します。
+    /// 固定Tick、永続ID、定義カタログ、World／Player識別というFarmware共通の論理状態をハッシュへ追加します。
     /// 後続機能はこの処理の後に1024以上のセクションIDで設備、物流、動物などを追加します。
     /// </summary>
     public static class SimulationCoreStateHasher
@@ -348,6 +351,9 @@ namespace Farmware.Simulation
 
         /// <summary>静的定義と参照関係を表す予約セクションです。</summary>
         private const uint DefinitionCatalogSectionId = 3;
+
+        /// <summary>現在のWorldIdと登録済みPlayerIdを表す予約セクションです。</summary>
+        private const uint WorldSessionSectionId = 4;
 
         /// <summary>
         /// 共通Simulation状態だけから完成した状態ハッシュを計算します。
@@ -375,7 +381,7 @@ namespace Farmware.Simulation
         }
 
         /// <summary>
-        /// 既存Builderへ共通Simulationの3セクションを追加します。
+        /// 既存Builderへ共通Simulationの4セクションを追加します。
         /// 呼び出し側は成功後に機能固有セクションを追加し、最後にCompleteを1回だけ呼びます。
         /// </summary>
         /// <param name="entityManager">固定Tick完了後のWorldを所有するEntityManagerです。</param>
@@ -403,6 +409,10 @@ namespace Farmware.Simulation
                 || !TryGetRequiredSingleton(
                     entityManager,
                     out PersistentIdAllocatorState allocatorState,
+                    out error)
+                || !TryGetRequiredSingleton(
+                    entityManager,
+                    out WorldSessionIdentity worldIdentity,
                     out error))
             {
                 return false;
@@ -415,6 +425,14 @@ namespace Farmware.Simulation
             {
                 error = new SimulationStateHashError(
                     SimulationStateHashErrorCode.CoreStateIsInvalid);
+                return false;
+            }
+
+            // WorldIdは時間やID採番ではなくセッション境界の契約なので、専用エラーで原因を判別できるようにします。
+            if (!worldIdentity.Id.IsValid)
+            {
+                error = new SimulationStateHashError(
+                    SimulationStateHashErrorCode.WorldSessionStateIsInvalid);
                 return false;
             }
 
@@ -444,12 +462,115 @@ namespace Farmware.Simulation
 
             builder.BeginSection(DefinitionCatalogSectionId);
             builder.WriteByte(hasDefinitionCatalog ? (byte)1 : (byte)0);
-            if (!hasDefinitionCatalog)
+            if (hasDefinitionCatalog
+                && !TryAppendDefinitionCatalog(
+                    definitionCatalog,
+                    ref builder,
+                    out error))
             {
-                return true;
+                return false;
             }
 
-            return TryAppendDefinitionCatalog(definitionCatalog, ref builder, out error);
+            return TryAppendWorldSession(
+                entityManager,
+                worldIdentity,
+                ref builder,
+                out error);
+        }
+
+        /// <summary>
+        /// WorldIdとPlayerId一覧を固定順で状態ハッシュへ追加します。
+        /// Entity作成順に依存しないようPlayerIdを昇順へ並べ、0件、無効値、重複を正式状態として受理しません。
+        /// </summary>
+        /// <param name="entityManager">PlayerIdentity Entityを所有するWorldのEntityManagerです。</param>
+        /// <param name="worldIdentity">必須Singletonとして取得済みの現在World識別です。</param>
+        /// <param name="builder">先行する共通セクションを保持する状態ハッシュBuilderです。</param>
+        /// <param name="error">プレイヤー一覧が不正な場合の共通エラーです。</param>
+        /// <returns>有効で一意なPlayerIdをすべて追加できた場合はtrueです。</returns>
+        private static bool TryAppendWorldSession(
+            EntityManager entityManager,
+            WorldSessionIdentity worldIdentity,
+            ref SimulationStateHashBuilder builder,
+            out SimulationStateHashError error)
+        {
+            EntityQuery playerQuery = entityManager.CreateEntityQuery(
+                ComponentType.ReadOnly<PlayerIdentity>());
+            try
+            {
+                int playerCount = playerQuery.CalculateEntityCount();
+                if (playerCount == 0)
+                {
+                    error = new SimulationStateHashError(
+                        SimulationStateHashErrorCode.WorldSessionStateIsInvalid);
+                    return false;
+                }
+
+                NativeArray<PlayerIdentity> players = default;
+                NativeArray<ulong> sortedPlayerIds = default;
+                try
+                {
+                    players = playerQuery.ToComponentDataArray<PlayerIdentity>(
+                        Allocator.Temp);
+                    sortedPlayerIds = new NativeArray<ulong>(
+                        players.Length,
+                        Allocator.Temp);
+                    for (int playerIndex = 0; playerIndex < players.Length; playerIndex++)
+                    {
+                        sortedPlayerIds[playerIndex] = players[playerIndex].Id.Value;
+                    }
+
+                    sortedPlayerIds.Sort();
+                    for (int playerIndex = 0;
+                         playerIndex < sortedPlayerIds.Length;
+                         playerIndex++)
+                    {
+                        bool idIsInvalid = sortedPlayerIds[playerIndex]
+                            == PlayerId.InvalidValue;
+                        bool idIsDuplicated = playerIndex > 0
+                            && sortedPlayerIds[playerIndex - 1]
+                                == sortedPlayerIds[playerIndex];
+                        if (idIsInvalid || idIsDuplicated)
+                        {
+                            error = new SimulationStateHashError(
+                                SimulationStateHashErrorCode.WorldSessionStateIsInvalid);
+                            return false;
+                        }
+                    }
+
+                    builder.BeginSection(WorldSessionSectionId);
+                    builder.WriteUInt64(worldIdentity.Id.High);
+                    builder.WriteUInt64(worldIdentity.Id.Low);
+                    builder.WriteUInt32((uint)sortedPlayerIds.Length);
+                    for (int playerIndex = 0;
+                         playerIndex < sortedPlayerIds.Length;
+                         playerIndex++)
+                    {
+                        builder.WriteUInt64(sortedPlayerIds[playerIndex]);
+                    }
+
+                    error = new SimulationStateHashError(
+                        SimulationStateHashErrorCode.None);
+                    return true;
+                }
+                finally
+                {
+                    // 一時配列は状態ハッシュ計算だけが所有し、成功・失敗の両方で明示的に解放します。
+                    if (sortedPlayerIds.IsCreated)
+                    {
+                        sortedPlayerIds.Dispose();
+                    }
+
+                    if (players.IsCreated)
+                    {
+                        players.Dispose();
+                    }
+                }
+            }
+            finally
+            {
+                // Player一覧の一時Queryはハッシュ計算呼び出しを越えて保持しません。
+                playerQuery.Dispose();
+            }
         }
 
         /// <summary>

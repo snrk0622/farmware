@@ -2,7 +2,7 @@
 
 - 作成日: 2026-10-14
 - 最終更新日: 2026-10-19
-- 状態: 探索ゲームへの移行先仕様と実装済み基盤の記録。第12章以降の追加境界は未実装
+- 状態: 探索ゲームへの移行先仕様と実装済み基盤の記録。第12.1・12.4の共通境界は段階実装済み
 - 対象環境: Unity 6000.3.8f1、Entities 1.5.0
 - 関連仕様: [ゲームコンセプト](../GameSpecification/2026-10-11_casual_factory_concept_v0.1.md)
 - 関連仕様: [ランダムマップ生成仕様](../GameSpecification/RandomMapGenerationSpecification.md)
@@ -75,7 +75,7 @@ ECSの共通ルートGroupは次のとおりとする。
 - 複数EntityやBufferを含める機能は、永続IDや論理座標などの一意で安定したキー順へ並べ、要素数を先に書いてから各値を書く。無効キー、重複キー、Singletonの欠落・重複は任意の1件を選ばず計算失敗にする。
 - Presentation、GameObject、Transform、Tilemap、カメラ、チャンク表示状態、再生成可能な空間索引やキャッシュは含めない。表示状態やJobの実行順を変えても、論理Simulation状態が同じなら同じ値を得るためである。
 
-共通セクションには固定Tick設定、現在Tick、一時停止状態、次回永続IDと上限到達状態、任意の定義カタログを含める。定義カタログはGUID昇順、1始まりのRuntime ID、分類、参照順を検証して論理値だけを含める。未処理CommandがQueueに残るTick途中では計算を拒否し、受付番号状態、処理済みCommand Entity、結果通知は保存対象ではない一時データとして含めない。後続機能は共通セクションの後へ機能固有セクションを追加し、その機能で保存・復元すべき状態の正だけを列挙する。
+共通セクションには固定Tick設定、現在Tick、一時停止状態、次回永続IDと上限到達状態、任意の定義カタログ、WorldId、PlayerId一覧を含める。PlayerIdはEntity作成順ではなく数値昇順へ正規化し、0件、無効値、重複を拒否する。端末固有で保存対象外の`LocalPlayerContext`は含めない。定義カタログはGUID昇順、1始まりのRuntime ID、分類、参照順を検証して論理値だけを含める。未処理CommandがQueueに残るTick途中では計算を拒否し、受付番号状態、処理済みCommand Entity、結果通知は保存対象ではない一時データとして含めない。後続機能は共通セクションの後へ機能固有セクションを追加し、その機能で保存・復元すべき状態の正だけを列挙する。
 
 ## 3. 配置物と搬送アイテムのECS表現
 
@@ -178,7 +178,7 @@ ECSの共通ルートGroupは次のとおりとする。
 - CommitのComponent値更新と構造変更はCommand専用EntityCommandBufferへまとめ、途中状態を他Systemへ公開しない。
 - Undo／RedoはWorld全体のSnapshotではなく、確定済みの建築差分と資材差分に対するCommandとして実行する。
 
-`SIM-01E`では、機能固有のunmanaged Componentを一時Command Entityへ付け、共通の`SimulationCommand`、`SimulationCommandActive`、`SimulationCommandCompleted`と組み合わせる。受付済みEntityは`SimulationCommandQueueElement`のSingleton Dynamic Bufferへ追加し、受付番号はWorld実行中だけ1から単調増加する。0は無効値とし、`ulong.MaxValue`を最後に1回発行した後は周回せず受付を停止する。Commandと受付番号状態は未確定の操作要求なのでセーブせず、ロード後の新しいWorldでは1から開始する。失敗したCommandも番号を再利用しないが、一時停止中、Singleton不整合、番号上限による受付失敗ではEntityも番号も消費しない。
+`SIM-01E`では、機能固有のunmanaged Componentを一時Command Entityへ付け、共通の`SimulationCommand`、`SimulationCommandActive`、`SimulationCommandCompleted`と組み合わせる。WORLD-01D以降の`SimulationCommand`は`WorldId`と`PlayerId`の組である`WorldCommandActor`も保持し、現在Worldと登録Playerへ一致しない要求をCommand Entity作成前に拒否する。受付後にWorld読込やPlayer削除が起きる可能性もあるため、固定TickでQueueから選択してActiveにする直前にも保存済み主体を再検証し、不一致なら機能固有Validationへ渡さず失敗確定する。受付済みEntityは`SimulationCommandQueueElement`のSingleton Dynamic Bufferへ追加し、受付番号はWorld実行中だけ1から単調増加する。0は無効値とし、`ulong.MaxValue`を最後に1回発行した後は周回せず受付を停止する。Commandと受付番号状態は未確定の操作要求なのでセーブせず、ロード後の新しいWorldでは1から開始する。失敗したCommandも番号を再利用しないが、不正主体、一時停止中、Singleton不整合、番号上限による受付失敗ではEntityも番号も消費しない。
 
 `FarmwareCommandProcessingSystemGroup`は、同じ固定Tickに受付済みのCommandを1件ずつ選び、Validation、検証終端、Commit、ECB再生、結果確定までを完了してから次の受付番号へ進む。機能固有Validation Systemは対象Commandに対して1件だけ存在し、ゲーム状態を変更せず全条件を確認する。成功した場合だけ機能固有Commit SystemがComponent値更新を含む全変更を`SimulationCommandEntityCommandBufferSystem`へ記録し、成功状態まで完了したCommandのECBだけを再生する。Commandごとに直後の再生または破棄を確定するため、Validation／Commit Systemはメインスレッドで完結させ、Command専用ECBへ書くJobをスケジュールしない。担当Validation／Commit Systemの不足、複数Validation担当、不正状態、未完了Commitは共通失敗として拒否する。未完了CommitのECBは`ShouldPlayback`を無効にして再生だけを抑止し、成功時と同じ`EntityCommandBufferSystem`標準処理へ渡してBufferの破棄と専用Allocatorの巻き戻しを必ず行う。前の成功CommandのECBを次のValidation前に再生するため、同一Tick内の競合Commandも直前の確定結果を参照できる。
 
@@ -299,11 +299,13 @@ WORLD-01Cでセル・チャンク座標、ストリーミング要求、動物�
 
 ### 12.4 操作主体と持ち物
 
-初回は単独プレイだが、Inputは明示的なPlayerIdからCommandを作り、Simulationは主体・所有・到達範囲を検証する。`Player.Instance`のような暗黙の全局1人参照を生態や保存へ埋め込まない。PlayerId別状態とワールド共有状態を保存上も分ける。
+WORLD-01Dで、128bitの`WorldId`、ワールド内`ulong`の`PlayerId`、現在Worldの`WorldSessionIdentity` Singleton、Player別状態の所有者となる`PlayerIdentity` Entityを追加した。0は無効値とする。Inputが参照する`LocalPlayerContext`は保存対象外のセッション状態であり、Player進行の正にはしない。保存基盤前の既存Sceneでは`WorldSessionInitializationSystem`が固定の開発用WorldIdとPlayer 1を作るが、外部から一部でも状態が供給されていれば推測で補修・上書きしない。SAVE-01で製品WorldIdの発行と復元を接続する。
+
+初回は単独プレイだが、Inputは`LocalPlayerContext`から明示的な`WorldCommandActor`を作り、Simulationは現在WorldId、Player登録、重複を状態変更前に検証する。`Player.Instance`のような暗黙の全局1人参照を生態や保存へ埋め込まない。PlayerId別状態は`PlayerIdentity` Entityへ追加し、ワールド共有状態と保存上も分ける。到達範囲、所有、所持品、地形等は機能固有CommandのValidationで同じ主体を起点に検証する。
 
 ItemStackは品目と数量だけでなくスタック互換性を検証する。耐久品、個体参照、可変データがある品の分割・結合・物流転送で情報を失わない。捕獲時には同じ生物を地上個体・持ち物・水槽で二重計上しない所有権遷移を行う。
 
-睡眠・ポーズ・関心範囲は集約した境界へ置く。ロビー、通信同期、予測補正、ホスト移行の実装は今回含めない。固定TickやIDの存在だけでマルチプレイ容易性を保証しない。
+停止と再開は`SimulationPauseControl`へ集約し、Queueが停止している間も再開できるようQueue外で主体を検証して即時反映する。通常のゲーム状態変更Commandは停止中に受け付けない。睡眠はTIME-01でWorldClockだけを変更する主体付きCommandとして接続する。Simulation関心範囲はPLAYER-01以降でPlayerId、Layer、論理位置から供給し、カメラ用`ChunkStreamingObserver`と分離する。ロビー、通信同期、予測補正、ホスト移行の実装は今回含めない。固定TickやIDの存在だけでマルチプレイ容易性を保証しない。詳細は[WORLD-01D実装記録](./World01DWorldPlayerBoundary.md)を参照する。
 
 ## 13. 生態、研究、死亡ドロップ（未実装）
 

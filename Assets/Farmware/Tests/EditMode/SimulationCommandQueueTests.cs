@@ -295,18 +295,21 @@ namespace Farmware.Tests.EditMode
 
             bool firstAccepted = SimulationCommandQueue.TryEnqueue(
                 world.EntityManager,
+                CreateActor(),
                 CreatePayload(expectedMarkerCount: 0),
                 out Entity firstCommand,
                 out ulong firstReceipt);
             SetPaused(world, true);
             bool pausedAccepted = SimulationCommandQueue.TryEnqueue(
                 world.EntityManager,
+                CreateActor(),
                 CreatePayload(expectedMarkerCount: 0),
                 out Entity pausedCommand,
                 out ulong pausedReceipt);
             SetPaused(world, false);
             bool secondAccepted = SimulationCommandQueue.TryEnqueue(
                 world.EntityManager,
+                CreateActor(),
                 CreatePayload(expectedMarkerCount: 0),
                 out Entity secondCommand,
                 out ulong secondReceipt);
@@ -321,6 +324,55 @@ namespace Farmware.Tests.EditMode
             Assert.That(secondReceipt, Is.EqualTo(2ul));
             Assert.That(world.EntityManager.Exists(secondCommand), Is.True);
             Assert.That(GetQueue(world).Length, Is.EqualTo(2));
+        }
+
+        /// <summary>
+        /// 別WorldIdと未登録PlayerIdのCommandをEntity作成前に拒否し、次の正常受付が番号1を使用することを保証します。
+        /// </summary>
+        [Test]
+        public void TryEnqueue_RejectsInvalidAuthorityWithoutConsumingReceipt()
+        {
+            using World world = CreateQueueOnlyWorld();
+            WorldCommandActor validActor = CreateActor();
+            WorldCommandActor wrongWorldActor = new WorldCommandActor(
+                new WorldId(validActor.WorldId.High, validActor.WorldId.Low + 1),
+                validActor.PlayerId);
+            WorldCommandActor unknownPlayerActor = new WorldCommandActor(
+                validActor.WorldId,
+                new PlayerId(validActor.PlayerId.Value + 1));
+
+            bool wrongWorldAccepted = SimulationCommandQueue.TryEnqueue(
+                world.EntityManager,
+                wrongWorldActor,
+                CreatePayload(expectedMarkerCount: 0),
+                out Entity wrongWorldCommand,
+                out ulong wrongWorldReceipt);
+            bool unknownPlayerAccepted = SimulationCommandQueue.TryEnqueue(
+                world.EntityManager,
+                unknownPlayerActor,
+                CreatePayload(expectedMarkerCount: 0),
+                out Entity unknownPlayerCommand,
+                out ulong unknownPlayerReceipt);
+            bool validAccepted = SimulationCommandQueue.TryEnqueue(
+                world.EntityManager,
+                validActor,
+                CreatePayload(expectedMarkerCount: 0),
+                out Entity validCommand,
+                out ulong validReceipt);
+
+            Assert.That(wrongWorldAccepted, Is.False);
+            Assert.That(wrongWorldCommand, Is.EqualTo(Entity.Null));
+            Assert.That(wrongWorldReceipt, Is.Zero);
+            Assert.That(unknownPlayerAccepted, Is.False);
+            Assert.That(unknownPlayerCommand, Is.EqualTo(Entity.Null));
+            Assert.That(unknownPlayerReceipt, Is.Zero);
+            Assert.That(validAccepted, Is.True);
+            Assert.That(validReceipt, Is.EqualTo(1ul));
+            Assert.That(
+                world.EntityManager.GetComponentData<SimulationCommand>(validCommand)
+                    .Actor.PlayerId.Equals(validActor.PlayerId),
+                Is.True);
+            Assert.That(GetQueue(world).Length, Is.EqualTo(1));
         }
 
         /// <summary>
@@ -341,11 +393,13 @@ namespace Farmware.Tests.EditMode
 
             bool lastAccepted = SimulationCommandQueue.TryEnqueue(
                 world.EntityManager,
+                CreateActor(),
                 CreatePayload(expectedMarkerCount: 0),
                 out Entity lastCommand,
                 out ulong lastReceipt);
             bool overflowAccepted = SimulationCommandQueue.TryEnqueue(
                 world.EntityManager,
+                CreateActor(),
                 CreatePayload(expectedMarkerCount: 0),
                 out Entity overflowCommand,
                 out ulong overflowReceipt);
@@ -374,16 +428,19 @@ namespace Farmware.Tests.EditMode
 
             SimulationCommandQueue.TryEnqueue(
                 world.EntityManager,
+                CreateActor(),
                 CreatePayload(expectedMarkerCount: 0),
                 out Entity firstCommand,
                 out ulong firstReceipt);
             SimulationCommandQueue.TryEnqueue(
                 world.EntityManager,
+                CreateActor(),
                 CreatePayload(expectedMarkerCount: 0),
                 out Entity conflictingCommand,
                 out ulong conflictingReceipt);
             SimulationCommandQueue.TryEnqueue(
                 world.EntityManager,
+                CreateActor(),
                 CreatePayload(expectedMarkerCount: 1),
                 out Entity thirdCommand,
                 out ulong thirdReceipt);
@@ -418,6 +475,50 @@ namespace Farmware.Tests.EditMode
         }
 
         /// <summary>
+        /// 受付後から固定Tick開始前にWorldIdが変わったCommandを再検証で拒否し、新しいWorldへ状態変更を適用しないことを保証します。
+        /// </summary>
+        [Test]
+        public void ProcessingGroup_RejectsActorThatBecameStaleAfterEnqueue()
+        {
+            using World world = CreateProcessingWorld(
+                out FarmwareFixedTickSimulationSystemGroup fixedTickGroup);
+            SimulationCommandQueue.TryEnqueue(
+                world.EntityManager,
+                CreateActor(),
+                CreatePayload(expectedMarkerCount: 0),
+                out Entity staleCommand,
+                out ulong staleReceipt);
+
+            EntityQuery worldIdentityQuery = world.EntityManager.CreateEntityQuery(
+                ComponentType.ReadWrite<WorldSessionIdentity>());
+            try
+            {
+                Entity worldIdentityEntity = worldIdentityQuery.GetSingletonEntity();
+                world.EntityManager.SetComponentData(
+                    worldIdentityEntity,
+                    new WorldSessionIdentity
+                    {
+                        Id = new WorldId(300, 400)
+                    });
+            }
+            finally
+            {
+                worldIdentityQuery.Dispose();
+            }
+
+            UpdateFixedTickGroup(world, fixedTickGroup, 0.1f);
+
+            Assert.That(CountComponents<CommandQueueTestMarker>(world), Is.Zero);
+            AssertCommandResult(
+                world,
+                staleCommand,
+                staleReceipt,
+                SimulationCommandStatus.Rejected,
+                (int)SimulationCommandFailureCode.ActorIsNoLongerAuthorized);
+            Assert.That(GetQueue(world).Length, Is.Zero);
+        }
+
+        /// <summary>
         /// 担当Validation SystemがないCommandを共通基盤が拒否し、Commitや状態変更へ進めないことを保証します。
         /// </summary>
         [Test]
@@ -428,6 +529,7 @@ namespace Farmware.Tests.EditMode
                 includeValidationHandler: false);
             SimulationCommandQueue.TryEnqueue(
                 world.EntityManager,
+                CreateActor(),
                 CreatePayload(expectedMarkerCount: 0),
                 out Entity commandEntity,
                 out ulong receiptNumber);
@@ -454,6 +556,7 @@ namespace Farmware.Tests.EditMode
                 includeCommitHandler: false);
             SimulationCommandQueue.TryEnqueue(
                 world.EntityManager,
+                CreateActor(),
                 CreatePayload(expectedMarkerCount: 0),
                 out Entity commandEntity,
                 out ulong receiptNumber);
@@ -480,6 +583,7 @@ namespace Farmware.Tests.EditMode
                 includeDuplicateValidationHandler: true);
             SimulationCommandQueue.TryEnqueue(
                 world.EntityManager,
+                CreateActor(),
                 CreatePayload(expectedMarkerCount: 0),
                 out Entity commandEntity,
                 out ulong receiptNumber);
@@ -505,6 +609,7 @@ namespace Farmware.Tests.EditMode
                 out FarmwareFixedTickSimulationSystemGroup fixedTickGroup);
             SimulationCommandQueue.TryEnqueue(
                 world.EntityManager,
+                CreateActor(),
                 CreatePayload(expectedMarkerCount: 0, leaveCommitIncomplete: true),
                 out Entity commandEntity,
                 out ulong receiptNumber);
@@ -538,6 +643,7 @@ namespace Farmware.Tests.EditMode
             {
                 SimulationCommandQueue.TryEnqueue(
                     world.EntityManager,
+                    CreateActor(),
                     CreatePayload(expectedMarkerCount: 0, leaveCommitIncomplete: true),
                     out incompleteCommands[index],
                     out incompleteReceipts[index]);
@@ -545,6 +651,7 @@ namespace Farmware.Tests.EditMode
 
             SimulationCommandQueue.TryEnqueue(
                 world.EntityManager,
+                CreateActor(),
                 CreatePayload(expectedMarkerCount: 0),
                 out Entity successfulCommand,
                 out ulong successfulReceipt);
@@ -581,6 +688,7 @@ namespace Farmware.Tests.EditMode
                 out FarmwareFixedTickSimulationSystemGroup fixedTickGroup);
             SimulationCommandQueue.TryEnqueue(
                 world.EntityManager,
+                CreateActor(),
                 CreatePayload(expectedMarkerCount: 0),
                 out Entity commandEntity,
                 out ulong receiptNumber);
@@ -608,6 +716,28 @@ namespace Farmware.Tests.EditMode
         private static World CreateQueueOnlyWorld()
         {
             World world = new World("Command Queue Test");
+            WorldCommandActor actor = CreateActor();
+            Entity worldIdentityEntity = world.EntityManager.CreateEntity();
+            world.EntityManager.AddComponentData(
+                worldIdentityEntity,
+                new WorldSessionIdentity
+                {
+                    Id = actor.WorldId
+                });
+            Entity playerIdentityEntity = world.EntityManager.CreateEntity();
+            world.EntityManager.AddComponentData(
+                playerIdentityEntity,
+                new PlayerIdentity
+                {
+                    Id = actor.PlayerId
+                });
+            Entity localPlayerContextEntity = world.EntityManager.CreateEntity();
+            world.EntityManager.AddComponentData(
+                localPlayerContextEntity,
+                new LocalPlayerContext
+                {
+                    PlayerId = actor.PlayerId
+                });
             Entity controlEntity = world.EntityManager.CreateEntity();
             world.EntityManager.AddComponentData(
                 controlEntity,
@@ -620,6 +750,17 @@ namespace Farmware.Tests.EditMode
                 world.GetOrCreateSystem<SimulationCommandQueueInitializationSystem>();
             initializationSystem.Update(world.Unmanaged);
             return world;
+        }
+
+        /// <summary>
+        /// Command Queueテストで共通使用する現在WorldとPlayer 1の操作主体を作成します。
+        /// </summary>
+        /// <returns>Queue受付前の主体検証を通過するWorldIdとPlayerIdです。</returns>
+        private static WorldCommandActor CreateActor()
+        {
+            return new WorldCommandActor(
+                new WorldId(100, 200),
+                new PlayerId(1));
         }
 
         /// <summary>
@@ -772,6 +913,8 @@ namespace Farmware.Tests.EditMode
         {
             SimulationCommand command =
                 world.EntityManager.GetComponentData<SimulationCommand>(commandEntity);
+            Assert.That(command.Actor.WorldId.Equals(CreateActor().WorldId), Is.True);
+            Assert.That(command.Actor.PlayerId.Equals(CreateActor().PlayerId), Is.True);
             Assert.That(command.ReceiptNumber, Is.EqualTo(expectedReceipt));
             Assert.That(command.Status, Is.EqualTo(expectedStatus));
             Assert.That(command.FailureCode, Is.EqualTo(expectedFailureCode));
