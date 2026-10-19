@@ -23,7 +23,7 @@
 | 8 | `Liquid` | 淡水、海水、マグマ等 |
 | 9 | `TerrainSurface` | 床、舗装、耕地等 |
 
-既存値1〜5は変更・再利用しない。`DefinitionCatalogAuthoring`のBakerは、既存Sceneの鶏定義へ次の組み込み定義を自動追加する。既存Scene YAMLへ手作業でGUIDを追加せず、全Worldで同じ境界を使用する。
+既存値1〜5は変更・再利用しない。`DefinitionCatalogAuthoring`のBakerは、既存Sceneの鶏定義へ次の組み込み定義を自動追加する。既存Scene YAMLへ手作業でGUIDを追加せず、全Worldで同じ境界を使用する。TERRAIN-01Aでは地形固有の硬度・回収物・通行属性をInspectorから入力する契約をまだ設けないため、`definitions`配列へ地形4分類を手動追加した場合は、地形Blobの件数不一致へ進む前に具体的なBakeエラーとして拒否する。追加BlockのAuthoringはTERRAIN-01Cで共通定義と地形固有値を一対一に入力できる形へ拡張する。
 
 | 組み込み定義 | 分類 | TERRAIN-01Aで確定する属性 |
 | --- | --- | --- |
@@ -69,7 +69,7 @@ Biomeは差分へ含めず、人工地形へ置換しても座標由来の地域
 
 `TerrainTraversalRules`は壁、穴、液体、耐熱能力を評価する。`TerrainPlacementRules`の有効セル版は通常設備、通常ベルト、橋の地形条件だけを評価する。例えば水域は泳げる主体なら移動可能だが、通常設備は置けず橋を置ける。自然資源、配置物、所持品、到達距離は後続Commandが別途検証する。
 
-`TerrainStateHasher`は、地形定義属性をRuntimeId順、差分所有者をLayer・チャンクX・チャンクY順、各BufferをLocalTileIndex順で追加する。Blobアドレス、Entity作成順、チャンク読込順、表示キャッシュは含めない。同じ差分集合はEntity作成順が異なっても一致し、同じX/YでもLayerが異なれば別の状態になる。
+`TerrainStateHasher`は、地形定義属性をRuntimeId順、差分所有者をLayer・チャンクX・チャンクY順、各BufferをLocalTileIndex順で追加する。Blobアドレス、Entity作成順、チャンク読込順、表示キャッシュは含めない。同じ差分集合はEntity作成順が異なっても一致し、同じX/YでもLayerが異なれば別の状態になる。`TerrainChunkDeltaOwner`と`TerrainCellDelta` Bufferは独立したQueryで件数と対応Entityを確認し、どちらか片方だけが残った不完全な永続状態を「差分なし」として見逃さず拒否する。
 
 ## 6. 表示・Editorツールへの影響
 
@@ -82,13 +82,14 @@ Editorメニューやキー割り当ては追加・変更しない。`Terrain Pl
 AI確認結果:
 
 - Unity 6000.3.8f1、Entities 1.5.0でスクリプトコンパイル成功。
-- `EffectiveTerrainCellTests`: 11件成功。
-- 組み込み定義、岩壁除去、淡水変換、矛盾拒否、疎な差分の整列・削除、Layer分離、移動・建築の独立、耐熱条件、状態ハッシュの作成順非依存・Layer差・組み込みID対応破損の拒否を確認。
-- 全EditMode: 384件中382件成功、2件スキップ、失敗0件。
-- 全PlayMode: 56件成功、失敗・スキップ0件。
+- `EffectiveTerrainCellTests`: 13件成功。
+- 組み込み定義、岩壁除去、淡水変換、矛盾拒否、疎な差分の整列・削除、Layer分離、移動・建築の独立、耐熱条件、状態ハッシュの作成順非依存・Layer差・組み込みID対応破損の拒否、差分Owner／Bufferの片方だけが残る不完全状態の拒否を確認。
+- Inspector由来の地形4分類をTERRAIN-01Cまで拒否するBakerテスト: 4ケース成功。
+- 全EditMode: 390件中388件成功、2件スキップ、失敗0件。
+- 全PlayMode: 直前の全体確認で56件成功、失敗・スキップ0件。今回のレビュー修正はBakerと状態ハッシュのEditMode対象であり、修正後の全PlayModeは未実施。
 - `git diff --check`: エラーなし。
 
-スキップされた2件は通常実行から明示的に分離された既存の負荷テストであり、本変更による失敗ではない。Unity Pipelineによる接続中Editor操作は利用できなかったため、バッチテストでコンパイル、Baker、SampleScene連携を検証した。
+スキップされた2件は通常実行から明示的に分離された既存の負荷テストであり、本変更による失敗ではない。Unity Pipelineによる接続中Editor操作は利用できなかったため、起動中Unity EditorのTest Runnerで全EditModeを実行し、コンパイル、Baker、状態ハッシュを検証した。
 
 人間確認後の指摘により、`Terrain Placement`からベルト固有の色判定、中央HUD、凡例を除去した。起動中EditorのTundra再コンパイルとAssembly Reloadは成功し、今回変更したスクリプトのコンパイルエラーはない。修正後の表示も人間確認済み。Editorがプロジェクトを開いておりPipeline接続も到達不能だったため、この表示調整後の全PlayMode再実行はできていない。
 

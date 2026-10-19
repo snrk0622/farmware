@@ -286,7 +286,7 @@ WORLD-01Cでセル・チャンク座標、ストリーミング要求、動物�
 
 TERRAIN-01Aでは共通`DefinitionCatalog`へ`GroundBlock`、`WallBlock`、`Liquid`、`TerrainSurface`分類を追加し、通常地面、自然岩壁、淡水、海水、マグマの変更禁止GUIDを全Worldへ登録する。`TerrainBlockCatalogBlob`は共通RuntimeId、硬度、回収Item参照、移動・設置・水密・施設境界属性をRuntimeId順で保持する。現行`GeneratedTile`は互換変換で、Landを地面、RockWallを地面＋壁、Waterを地面なし＋水種別Liquid、Magmaを地面なし＋Magmaへ分解する。生成器がBlockを直接選ぶことと表示参照は、TERRAIN-01Bのバイオーム構成合意後にTERRAIN-01Cで接続する。
 
-可変状態は、ストリーミング対象の生成チャンクEntityとは別の`TerrainChunkDeltaOwner`と`TerrainCellDelta` Bufferが所有する。所有キーは`WorldLayer＋論理チャンクX/Y`、Bufferは0〜4095の`LocalTileIndex`昇順・重複なしとし、変更Maskによって未変更と明示除去を区別する。自然状態へ戻った要素は削除し、空の所有者は正規状態にしない。`EffectiveTerrainResolver`は基礎セルへGround、Wall、Liquid、TerrainSurfaceの順で差分を適用し、分類違い、地面と液体の重複、地面のないSurfaceを拒否する。有効セルは再構築値であり保存しない。
+可変状態は、ストリーミング対象の生成チャンクEntityとは別の`TerrainChunkDeltaOwner`と`TerrainCellDelta` Bufferが所有する。所有キーは`WorldLayer＋論理チャンクX/Y`、Bufferは0〜4095の`LocalTileIndex`昇順・重複なしとし、変更Maskによって未変更と明示除去を区別する。自然状態へ戻った要素は削除し、空の所有者は正規状態にしない。保存前の状態ハッシュ監査はOwnerとBufferを独立して列挙し、片方だけが残った不完全Entityを差分なしとして無視せず拒否する。`EffectiveTerrainResolver`は基礎セルへGround、Wall、Liquid、TerrainSurfaceの順で差分を適用し、分類違い、地面と液体の重複、地面のないSurfaceを拒否する。有効セルは再構築値であり保存しない。
 
 `TerrainTraversalRules`と有効セル版`TerrainPlacementRules`は独立した純粋APIとする。前者は壁、穴、液体、耐熱能力を評価し、後者は地形だけの設備・ベルト・橋可否を返す。自然資源、植生、配置物、所持品、到達距離はこの結果へ含めず、後続Commandが別検証と合成する。地形定義属性とレイヤー付き差分は固定順で状態ハッシュへ含め、Blobアドレス、表示キャッシュ、Entity作成順、チャンク読込順は含めない。詳細は[TERRAIN-01A実装記録](./Terrain01AEffectiveTerrain.md)を参照する。
 

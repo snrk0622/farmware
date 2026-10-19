@@ -225,7 +225,7 @@ namespace Farmware.WorldGeneration
             return true;
         }
 
-        /// <summary>レイヤー、チャンクX/Y順へ正規化した全差分所有者とBufferを追加します。</summary>
+        /// <summary>所有者とBufferの一対一対応を検証し、レイヤー、チャンクX/Y順へ正規化した全差分を追加します。</summary>
         /// <param name="entityManager">差分所有者とBufferを保持するECS Worldです。</param>
         /// <param name="terrainCatalog">差分RuntimeIdの分類を検証する地形定義Blobです。</param>
         /// <param name="builder">地形差分セクションを書き込む状態ハッシュBuilderです。</param>
@@ -235,14 +235,22 @@ namespace Farmware.WorldGeneration
             BlobAssetReference<TerrainBlockCatalogBlob> terrainCatalog,
             ref SimulationStateHashBuilder builder)
         {
-            EntityQuery query = entityManager.CreateEntityQuery(
-                ComponentType.ReadOnly<TerrainChunkDeltaOwner>(),
+            EntityQuery ownerQuery = entityManager.CreateEntityQuery(
+                ComponentType.ReadOnly<TerrainChunkDeltaOwner>());
+            EntityQuery bufferQuery = entityManager.CreateEntityQuery(
                 ComponentType.ReadOnly<TerrainCellDelta>());
             try
             {
-                NativeArray<Entity> entities = query.ToEntityArray(Allocator.Temp);
+                // AND条件のQueryだけでは片側Componentが欠けた破損Entityを見落とすため、
+                // 両集合の件数と各OwnerのBuffer有無を独立して確認します。
+                if (ownerQuery.CalculateEntityCount() != bufferQuery.CalculateEntityCount())
+                {
+                    return false;
+                }
+
+                NativeArray<Entity> entities = ownerQuery.ToEntityArray(Allocator.Temp);
                 NativeArray<TerrainChunkDeltaOwner> owners =
-                    query.ToComponentDataArray<TerrainChunkDeltaOwner>(Allocator.Temp);
+                    ownerQuery.ToComponentDataArray<TerrainChunkDeltaOwner>(Allocator.Temp);
                 NativeArray<OrderedDeltaOwner> ordered = new NativeArray<OrderedDeltaOwner>(
                     entities.Length,
                     Allocator.Temp);
@@ -250,6 +258,11 @@ namespace Farmware.WorldGeneration
                 {
                     for (int ownerIndex = 0; ownerIndex < owners.Length; ownerIndex++)
                     {
+                        if (!entityManager.HasBuffer<TerrainCellDelta>(entities[ownerIndex]))
+                        {
+                            return false;
+                        }
+
                         ordered[ownerIndex] = new OrderedDeltaOwner
                         {
                             Entity = entities[ownerIndex],
@@ -320,7 +333,8 @@ namespace Farmware.WorldGeneration
             }
             finally
             {
-                query.Dispose();
+                bufferQuery.Dispose();
+                ownerQuery.Dispose();
             }
         }
 

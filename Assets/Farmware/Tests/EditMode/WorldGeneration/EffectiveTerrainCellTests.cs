@@ -404,6 +404,68 @@ namespace Farmware.WorldGeneration.Tests
                 Is.EqualTo(TerrainStateHashErrorCode.TerrainCatalogDataIsInvalid));
         }
 
+        /// <summary>
+        /// 差分所有者だけが残った不完全Entityを拒否し、Buffer欠落を「差分なし」と同じハッシュへ隠さないことを保証します。
+        /// </summary>
+        [Test]
+        public void TerrainStateHash_OwnerWithoutBuffer_IsRejected()
+        {
+            using World world = new World("Terrain Hash Owner Without Buffer");
+            AddCatalogComponents(world.EntityManager);
+            Entity incompleteEntity = world.EntityManager.CreateEntity();
+            world.EntityManager.AddComponentData(
+                incompleteEntity,
+                new TerrainChunkDeltaOwner
+                {
+                    Layer = WorldLayer.Surface,
+                    ChunkX = 0,
+                    ChunkY = 0
+                });
+
+            SimulationStateHashBuilder builder = new SimulationStateHashBuilder(
+                SimulationStateHashSchema.CurrentVersion);
+            Assert.That(
+                TerrainStateHasher.TryAppendTo(
+                    world.EntityManager,
+                    ref builder,
+                    out TerrainStateHashError error),
+                Is.False);
+            Assert.That(
+                error.Code,
+                Is.EqualTo(TerrainStateHashErrorCode.TerrainDeltaDataIsInvalid));
+        }
+
+        /// <summary>
+        /// 差分Bufferだけが残った不完全Entityを拒否し、所有座標を失った永続状態を監査で検出できることを保証します。
+        /// </summary>
+        [Test]
+        public void TerrainStateHash_BufferWithoutOwner_IsRejected()
+        {
+            using World world = new World("Terrain Hash Buffer Without Owner");
+            AddCatalogComponents(world.EntityManager);
+            Entity incompleteEntity = world.EntityManager.CreateEntity();
+            DynamicBuffer<TerrainCellDelta> deltas =
+                world.EntityManager.AddBuffer<TerrainCellDelta>(incompleteEntity);
+            deltas.Add(new TerrainCellDelta
+            {
+                LocalTileIndex = 0,
+                ChangeMask = TerrainCellChangeMask.GroundBlock,
+                GroundBlockRuntimeId = default
+            });
+
+            SimulationStateHashBuilder builder = new SimulationStateHashBuilder(
+                SimulationStateHashSchema.CurrentVersion);
+            Assert.That(
+                TerrainStateHasher.TryAppendTo(
+                    world.EntityManager,
+                    ref builder,
+                    out TerrainStateHashError error),
+                Is.False);
+            Assert.That(
+                error.Code,
+                Is.EqualTo(TerrainStateHashErrorCode.TerrainDeltaDataIsInvalid));
+        }
+
         /// <summary>テスト用の最小GeneratedTileを作ります。</summary>
         /// <param name="biome">編集されない基礎バイオームです。</param>
         /// <param name="ground">互換変換へ入力する旧地形分類です。</param>
