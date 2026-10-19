@@ -1,5 +1,7 @@
 # MAP-02D 性能計測
 
+> 本書は当時の地形・カメラ・個体群実装の測定記録である。2026-10-19の仕様転換後も測定値・受け入れは保持するが、3層、直接操作、車両、可変地形の性能合格へ流用しない。今後のゲートは[現行ロードマップ](./ImplementationRoadmap.md#10-マイルストーンと横断性能ゲート)を参照する。
+
 - 計測日: 2026-10-17
 - 追補日: 2026-10-19（ANIMAL-01Bの決定論修正に伴う生成公開境界の比較。末尾参照）
 - 基準実装commit: `d283abaa`（自動Floating Originとちらつき修正）。内訳計測用Profiler Markerは本書と同じ変更に含める。
@@ -8,7 +10,7 @@
 
 ## 採用した動作環境目標と未確定事項
 
-ユーザーはSteamのWindows／macOS向け配信と、最低搭載RAM 8GB・推奨16GBを開発目標として採用した。8GBで標準設定・通常規模を遊べること、16GBでより広い表示や大きな工場も快適に動くことを目指す。正は[ゲーム仕様の動作環境目標](../GameSpecification/2026-10-11_casual_factory_concept_v0.1.md#11-配信先と動作環境の開発目標)とし、8GB環境を対象外にしない。
+ユーザーはSteamのWindows／macOS向け配信と、最低搭載RAM 8GB・推奨16GBを開発目標として採用した。8GBで標準設定・通常規模を遊べること、16GBでより広い表示や大きな工場も快適に動くことを目指す。正は[ゲーム仕様の動作環境目標](../GameSpecification/2026-10-11_casual_factory_concept_v0.1.md#13-保存単独プレイ性能)とし、8GB環境を対象外にしない。
 
 搭載RAMはゲーム単体のメモリ上限ではなく、CPU・GPU・対応OS／アーキテクチャ、設定・規模、製品の最大Viewport、FPS／遅延の合格値、ゲーム単体のメモリ予算はまだ未確定である。本書のM3／24GBでの結果は比較用で、8GB／16GB機やWindowsでの動作を証明しない。60FPS目標や縦横4倍表示は従来の比較条件であり、今回のRAM目標の採用だけで製品の保証条件へ変更しない。正式なSteam掲載要件は設備・物流を含むWindows／macOSの実測後に確定する。
 
@@ -955,7 +957,7 @@ EditMode全243件も19.73秒で成功し、失敗・Skip・Inconclusiveは0だ�
 
 稼働中の新規公開は1 Tick当たり投入済みの同時生成上限までで、既定2件・10 Tick/秒なら最大20チャンク/秒となる。Job待ち時間は`Farmware.WorldGeneration.ChunkGenerationBoundaryWait`、コピーは`ChunkGenerationPublish`、投入は`ChunkGenerationSchedule`で分離する。待ちを測定対象から隠したり、旧方式と同じ生成スループットと説明したりしない。開発者からEditorでの軽い確認では問題なさそうとの報告を受けたが、修正commit時点では通常／Shift移動・最大ズーム・停止中移動の全手順の正式受け入れや、Development Playerのフレーム時間は未検証だった。修正commit後の追加比較と人間確認の結果は後述する。過去のPlayer測定値を今回の性能合格へ流用しない。
 
-Development Player検証は修正commit`abb0e373`には含めず、その直後の検証作業として、PR #23のマージ前かつ`ANIMAL-01C`着手前に実施する予定とした。2026-10-19に実施した比較結果を以下へ追記する。条件・採取項目・マージ前判断は[ロードマップのチェックリスト](./ImplementationRoadmap.md#animal-01b-残検証生成公開境界のdevelopment-player回帰)を正とする。製品最大Viewport・長時間評価は`PERF-GATE-B`、大規模動物負荷は`ANIMAL-01E`、Windows・8GB／16GB実機は`PERF-GATE-C`以降とし、今回のPlayer回帰の代わりにはしない。
+Development Player検証は修正commit`abb0e373`には含めず、その直後の検証作業として、PR #23のマージ前かつ`ANIMAL-01C`着手前に実施する予定とした。2026-10-19に実施した比較結果を以下へ追記する。条件・採取項目・マージ前判断は[ロードマップのチェックリスト](./ImplementationRoadmap_2026-10-19_Archive.md#animal-01b-残検証生成公開境界のdevelopment-player回帰)を正とする。製品最大Viewport・長時間評価は`PERF-GATE-B`、大規模動物負荷は`ANIMAL-01E`、Windows・8GB／16GB実機は`PERF-GATE-C`以降とし、今回のPlayer回帰の代わりにはしない。
 
 ### 修正commit後のDevelopment Player比較条件
 
@@ -1059,7 +1061,7 @@ AIによるビルド・測定・記録は完了し、今回の範囲で新たな
 
 World Generation EditMode 225件・Common EditMode 76件・PlayMode 53件、上記の明示局所計測1件が成功した。キャッシュ回帰は負座標・包含境界・Camera範囲切替・Systemの位置書込・Entity破棄・索引消去も含む。実行記録は`/private/tmp/farmware-animal01b-tick-cache.nD9c8M/`へ保存する。コード・テストのSHAと結果、計測出力を保持し、上記の以前のPlayer CSVへ混ぜない。
 
-今回の人間によるEditor確認は、2026-10-19に開発者から「問題ありません」とcommit許可を得て完了した。生成同期費用のDevelopment Player再比較と開発者のPlayerの表示・停止感の受け入れは、**今回の修正commit後の最初の作業、PR #23マージ前かつANIMAL-01C着手前**に行う予定とした。比較元は`45401b9e`の製品コードとし、以前と同じSeed・経路・通常／拡大Viewport・12／36タイル/秒・停止10秒／再開20秒でフレーム分位点・境界Marker・欠落・Tick／ID・GC・メモリ・警告を採取する。AI計測の結果と今回Playerの開発者受け入れは次節へ追記する。担当と終了条件は[ロードマップの再レビュー追補](./ImplementationRoadmap.md#animal-01b-再レビュー追補フレーム分割と可視位置キャッシュ)を正とする。今回は製品コードを変更しているため、以前のPlayer受け入れや今回のEditor確認で、今回変更のPlayer性能まで確認済みとはしない。
+今回の人間によるEditor確認は、2026-10-19に開発者から「問題ありません」とcommit許可を得て完了した。生成同期費用のDevelopment Player再比較と開発者のPlayerの表示・停止感の受け入れは、**今回の修正commit後の最初の作業、PR #23マージ前かつANIMAL-01C着手前**に行う予定とした。比較元は`45401b9e`の製品コードとし、以前と同じSeed・経路・通常／拡大Viewport・12／36タイル/秒・停止10秒／再開20秒でフレーム分位点・境界Marker・欠落・Tick／ID・GC・メモリ・警告を採取する。AI計測の結果と今回Playerの開発者受け入れは次節へ追記する。担当と終了条件は[ロードマップの再レビュー追補](./ImplementationRoadmap_2026-10-19_Archive.md#animal-01b-再レビュー追補フレーム分割と可視位置キャッシュ)を正とする。今回は製品コードを変更しているため、以前のPlayer受け入れや今回のEditor確認で、今回変更のPlayer性能まで確認済みとはしない。
 
 ### 固定Tick投入修正後のDevelopment Player再比較
 
@@ -1123,4 +1125,4 @@ M3・24GB、Unity 6000.3.8f1、Entities 1.5.0、Burst 1.8.29有効、MetalのDev
 
 新しいビルド・設定復元・集計・比較元の来歴は`/private/tmp/farmware-animal01b-tick-player.fKAJgU/`、生CSV・条件・画像・Playerログは既存ハーネスの固定保存先`/private/tmp/farmware-animal01b-player.U9DDgu/tick-baseline-*`と`tick-current-*`へ保持する。新ディレクトリの`summary.json`に全Counter分位点、`provenance.md`に来歴を記録する。以前の`baseline-*`・`current-*`・人間向け再生記録は上書きしていない。いずれもローカル一時保存である。
 
-AIによるビルド・自動計測・復元を完了後、2026-10-19に開発者から「問題ないように見えます」と今回Playerの表示・停止感の確認とcommit・push・レビュー返信・スレッド解決の許可を得た。**61.368msの単発間隔と生成待ち最大12.690msの制約を記録したうえで、今回範囲の開発者受け入れは完了**とする。Editor確認や以前のPlayer受け入れで代用したものではない。[ロードマップ](./ImplementationRoadmap.md#animal-01b-再レビュー追補フレーム分割と可視位置キャッシュ)のマージ前判断も完了とするが、性能改善や製品性能合格とは扱わず、FPS合格値は新設しない。製品最大Viewport・長時間・大規模個体群・Windows・8GB／16GB実機の後続ゲートは完了扱いにしない。
+AIによるビルド・自動計測・復元を完了後、2026-10-19に開発者から「問題ないように見えます」と今回Playerの表示・停止感の確認とcommit・push・レビュー返信・スレッド解決の許可を得た。**61.368msの単発間隔と生成待ち最大12.690msの制約を記録したうえで、今回範囲の開発者受け入れは完了**とする。Editor確認や以前のPlayer受け入れで代用したものではない。[ロードマップ](./ImplementationRoadmap_2026-10-19_Archive.md#animal-01b-再レビュー追補フレーム分割と可視位置キャッシュ)のマージ前判断も完了とするが、性能改善や製品性能合格とは扱わず、FPS合格値は新設しない。製品最大Viewport・長時間・大規模個体群・Windows・8GB／16GB実機の後続ゲートは完了扱いにしない。
