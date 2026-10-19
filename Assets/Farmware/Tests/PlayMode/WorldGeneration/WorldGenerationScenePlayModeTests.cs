@@ -1477,8 +1477,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Biome = BiomeId.Forest,
                 Ground = GroundType.Land,
                 Soil = SoilType.Normal,
-                GameplayFlags = TileGameplayFlags.AllowsNormalEquipment
-                    | TileGameplayFlags.AllowsNormalBelt,
+                // Terrain Placement表示は補助物流のベルト可否に依存せず、通常設備可否だけで陸上色を選びます。
+                GameplayFlags = TileGameplayFlags.AllowsNormalEquipment,
                 Elevation = ushort.MaxValue,
                 Temperature = 0,
                 Moisture = ushort.MaxValue,
@@ -1655,7 +1655,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                         GameplayFlags = TileGameplayFlags.None
                     });
 
-            // 共通配置APIが返す4つの結果パターンを別色にし、水とマグマで橋の耐熱要件が異なることを目視でも判別できるようにします。
+            // 設備と橋について4つの結果パターンを別色にし、水とマグマで橋の耐熱要件が異なることを目視でも判別できるようにします。
             Assert.That(normalGroundPlacementColor, Is.Not.EqualTo(waterBridgePlacementColor));
             Assert.That(waterBridgePlacementColor, Is.Not.EqualTo(magmaBridgePlacementColor));
             Assert.That(magmaBridgePlacementColor, Is.Not.EqualTo(blockedPlacementColor));
@@ -2566,7 +2566,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
                         ComponentType.ReadOnly<ChunkStreamingSettings>());
                     animalCatalogQuery = world.EntityManager.CreateEntityQuery(
                         ComponentType.ReadOnly<DefinitionCatalog>(),
-                        ComponentType.ReadOnly<AnimalSpeciesCatalog>());
+                        ComponentType.ReadOnly<AnimalSpeciesCatalog>(),
+                        ComponentType.ReadOnly<TerrainBlockCatalog>());
                     animalPopulationSeedQuery = world.EntityManager.CreateEntityQuery(
                         ComponentType.ReadOnly<AnimalPopulationSeed>());
                     animalRegionQuery = world.EntityManager.CreateEntityQuery(
@@ -2647,6 +2648,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 animalCatalogQuery.GetSingleton<DefinitionCatalog>();
             AnimalSpeciesCatalog runtimeAnimalCatalog =
                 animalCatalogQuery.GetSingleton<AnimalSpeciesCatalog>();
+            TerrainBlockCatalog runtimeTerrainCatalog =
+                animalCatalogQuery.GetSingleton<TerrainBlockCatalog>();
             Assert.That(
                 DefinitionGuid.TryParse(
                     "1728e39573b24efa996020e9493cc742",
@@ -2676,6 +2679,21 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(chickenDefinition.MovementStepIntervalTicks, Is.EqualTo(5));
             Assert.That(chickenDefinition.MaximumWanderDistanceInTiles, Is.EqualTo(8));
             Assert.That(chickenDefinition.AppearanceVariantCount, Is.EqualTo(3));
+
+            // TERRAIN-01Aの組み込み5定義も同じSubSceneからBakeし、旧GroundTypeを有効セルへ変換できることを確認します。
+            Assert.That(runtimeTerrainCatalog.Value.IsCreated, Is.True);
+            Assert.That(runtimeTerrainCatalog.BuiltInRuntimeIds.IsValid, Is.True);
+            Assert.That(
+                TerrainBlockCatalogLookup.TryGetDefinition(
+                    runtimeTerrainCatalog.Value,
+                    runtimeTerrainCatalog.BuiltInRuntimeIds.NaturalRockWall,
+                    out TerrainBlockDefinitionBlob runtimeRockWall),
+                Is.True,
+                "自然岩壁の組み込みBlock定義がBakeされていません。");
+            Assert.That(runtimeRockWall.Kind, Is.EqualTo(DefinitionKind.WallBlock));
+            Assert.That(
+                runtimeRockWall.Flags & TerrainBlockDefinitionFlags.BlocksMovement,
+                Is.Not.EqualTo(TerrainBlockDefinitionFlags.None));
 
             // SampleSceneの実際の固定Tickで独立Seed、地域状態、個体Entityまで作られ、静的定義だけで止まっていないことを確認します。
             AnimalPopulationSeed runtimePopulationSeed =

@@ -639,7 +639,7 @@ namespace Farmware.WorldGeneration
 
         /// <summary>
         /// 旧MAP-01初期探索が建築可能性を確認する正方形の一辺です。
-        /// 中央コアは現行仕様では採用せず、この互換条件自体をTERRAIN-01Cの新スポーン規則で置き換えます。
+        /// 中央コアは現行仕様では採用せず、この互換条件自体をTERRAIN-01Dの新スポーン規則で置き換えます。
         /// </summary>
         public const int CentralCoreSizeInTiles = 3;
 

@@ -22,6 +22,7 @@
 - [WORLD-01B 多層水域の製品契約](./Development/World01BMultiLayerWaterContract.md)
 - [WORLD-01C レイヤー付き座標の実装記録](./Development/World01CLayeredCoordinates.md)
 - [WORLD-01D 操作主体とワールド境界の実装記録](./Development/World01DWorldPlayerBoundary.md)
+- [TERRAIN-01A ブロック定義と有効セルの実装記録](./Development/Terrain01AEffectiveTerrain.md)
 - [Codexスキル](./Development/CodexSkills.md)
 - [Unity Editorツール](./Development/EditorTools.md)
 - [テスト](./Development/Testing.md)

@@ -1,4 +1,4 @@
-// このファイルは、Inspectorで編集する静的定義GUID、参照、動物種固有値をECS用の定義カタログへ変換します。
+// このファイルは、Inspectorの地形以外の静的定義・動物種固有値と組み込み地形定義をECS用カタログへ変換します。
 // MonoBehaviourは入力だけを保持し、Bakerが検証済みの連続IDと用途別Blob AssetをSimulationへ渡します。
 
 using System;
@@ -11,7 +11,7 @@ using UnityEngine;
 namespace Farmware.Authoring
 {
     /// <summary>
-    /// アイテム、設備、施設、レシピ、動物種の共通定義と、動物種固有値を用途別Blob AssetへまとめるAuthoring用MonoBehaviourです。
+    /// アイテム、設備、施設、レシピ、動物種のInspector定義と、組み込み地形4分類を用途別Blob AssetへまとめるAuthoring用MonoBehaviourです。
     /// SceneまたはSubSceneへ1件だけ配置し、実行中のゲーム状態ではなく編集可能な定義表の入力として使用します。
     /// </summary>
     [DisallowMultipleComponent]
@@ -39,7 +39,7 @@ namespace Farmware.Authoring
             [SerializeField] private string displayName = string.Empty;
 
             // 数値はセーブ互換境界になるため、既存分類の値を後から変更しません。
-            [Tooltip("定義の分類です。アイテム、設備、施設、レシピ、動物種から選び、作成後は意味を変更しません。")]
+            [Tooltip("定義の分類です。現在この配列へ追加できるのはアイテム、設備、施設、レシピ、動物種です。地形4分類はTERRAIN-01Cまで組み込み定義だけを使用し、手動追加するとBakeエラーになります。作成後は意味を変更しません。")]
             [SerializeField] private DefinitionKind kind = DefinitionKind.None;
 
             // GUIDは定義の永続キーなので、名前変更や配列並べ替えでも同じ文字列を維持します。
@@ -199,6 +199,10 @@ namespace Farmware.Authoring
                      definitionIndex++)
                 {
                     DefinitionEntry sourceDefinition = sourceDefinitions[definitionIndex];
+                    RejectUnsupportedAuthoredTerrainDefinition(
+                        sourceDefinition?.Kind ?? DefinitionKind.None,
+                        sourceDefinition?.DisplayName,
+                        definitionIndex);
                     DefinitionReference[] sourceReferences =
                         sourceDefinition?.References ?? Array.Empty<DefinitionReference>();
                     int referenceStartIndex = buildReferences.Count;
@@ -232,6 +236,22 @@ namespace Farmware.Authoring
                         ReferenceCount = sourceReferences.Length
                     };
                 }
+
+                // TERRAIN-01Aの最小Blockは既存Sceneへ手作業のGUID追加を要求せず、全Worldで同じ定義を必ず登録します。
+                // 将来の追加パレットは別GUIDで増やし、ここにある5件のGUIDや意味を変更しません。
+                DefinitionBuildEntry[] builtInTerrainDefinitions =
+                    BuiltInTerrainBlockDefinitions.CreateCommonDefinitions(
+                        buildReferences.Count);
+                int authoredDefinitionCount = buildDefinitions.Length;
+                Array.Resize(
+                    ref buildDefinitions,
+                    authoredDefinitionCount + builtInTerrainDefinitions.Length);
+                Array.Copy(
+                    builtInTerrainDefinitions,
+                    0,
+                    buildDefinitions,
+                    authoredDefinitionCount,
+                    builtInTerrainDefinitions.Length);
 
                 if (!DefinitionCatalogBuilder.TryBuild(
                     buildDefinitions,
@@ -290,9 +310,30 @@ namespace Farmware.Authoring
                         CreateAnimalValidationMessage(sourceAnimalSpecies, animalError));
                 }
 
+                if (!TerrainBlockCatalogBuilder.TryBuild(
+                    catalog,
+                    BuiltInTerrainBlockDefinitions.CreateTerrainDefinitions(),
+                    out BlobAssetReference<TerrainBlockCatalogBlob> terrainCatalog)
+                    || !BuiltInTerrainBlockDefinitions.TryResolveRuntimeIds(
+                        catalog,
+                        out BuiltInTerrainBlockRuntimeIds terrainRuntimeIds))
+                {
+                    // どのBlobもまだBakerへ登録していないため、失敗時はこの処理が3件すべての所有権を解放します。
+                    if (terrainCatalog.IsCreated)
+                    {
+                        terrainCatalog.Dispose();
+                    }
+
+                    animalCatalog.Dispose();
+                    catalog.Dispose();
+                    throw new InvalidOperationException(
+                        "組み込み地形定義を共通DefinitionCatalogへ接続できませんでした。");
+                }
+
                 // Bakerへ登録して差分Bake時の参照数を正しく管理し、手動Disposeによる二重解放を避けます。
                 AddBlobAsset(ref catalog, out _);
                 AddBlobAsset(ref animalCatalog, out _);
+                AddBlobAsset(ref terrainCatalog, out _);
                 Entity entity = GetEntity(TransformUsageFlags.None);
                 AddComponent(entity, new DefinitionCatalog
                 {
@@ -302,6 +343,42 @@ namespace Farmware.Authoring
                 {
                     Value = animalCatalog
                 });
+                AddComponent(entity, new TerrainBlockCatalog
+                {
+                    Value = terrainCatalog,
+                    BuiltInRuntimeIds = terrainRuntimeIds
+                });
+            }
+
+            /// <summary>
+            /// TERRAIN-01Cより前に固有属性の入力欄がない地形分類を共通定義へ追加する設定を拒否します。
+            /// Bakerが地形Blobの件数不一致まで進む前に、Inspector上の原因を直接示すために呼び出します。
+            /// </summary>
+            /// <param name="kind">Inspectorで選択された定義分類です。</param>
+            /// <param name="displayName">エラー箇所を識別する編集用表示名です。</param>
+            /// <param name="definitionIndex">definitions配列内の0始まりの位置です。</param>
+            /// <exception cref="InvalidOperationException">組み込み専用の地形4分類が手動追加されている場合に発生します。</exception>
+            private static void RejectUnsupportedAuthoredTerrainDefinition(
+                DefinitionKind kind,
+                string displayName,
+                int definitionIndex)
+            {
+                bool isTerrainKind = kind == DefinitionKind.GroundBlock
+                    || kind == DefinitionKind.WallBlock
+                    || kind == DefinitionKind.Liquid
+                    || kind == DefinitionKind.TerrainSurface;
+                if (!isTerrainKind)
+                {
+                    return;
+                }
+
+                // 現段階は地形固有の硬度・回収物・通行属性をInspectorから入力できないため、
+                // 共通定義だけを受理すると対応するTerrainBlock定義が欠けた破損カタログになります。
+                string definitionLabel = string.IsNullOrWhiteSpace(displayName)
+                    ? $"Definition[{definitionIndex}]"
+                    : $"Definition[{definitionIndex}] ({displayName})";
+                throw new InvalidOperationException(
+                    $"地形分類はTERRAIN-01Cまで組み込み定義だけを使用してください: {definitionLabel}, 分類 {kind}");
             }
 
             /// <summary>

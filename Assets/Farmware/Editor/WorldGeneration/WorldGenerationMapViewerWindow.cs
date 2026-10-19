@@ -478,7 +478,7 @@ namespace Farmware.WorldGeneration.Editor
                 ApplyRenderedMap(result, renderSettings);
                 string completionMessage = result.HasGeneratedData
                     ? $"完了: {result.Width * result.Height:N0} samples / {stopwatch.Elapsed.TotalSeconds:F2}秒"
-                    : $"{result.Layer}: 自然生成はTERRAIN-01Bで接続予定です。座標キーだけを表示しています。";
+                    : $"{result.Layer}: 自然生成はTERRAIN-01Cで接続予定です。座標キーだけを表示しています。";
                 SetStatus(completionMessage, false);
             }
             catch (OperationCanceledException)

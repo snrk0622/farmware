@@ -195,6 +195,43 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// 地形固有値の入力欄が未実装の段階ではInspector由来の地形分類を明示拒否し、件数不一致だけの曖昧なBake失敗にしないことを保証します。
+        /// </summary>
+        /// <param name="terrainKind">TERRAIN-01Cまで組み込み専用とする地形分類です。</param>
+        [TestCase(DefinitionKind.GroundBlock)]
+        [TestCase(DefinitionKind.WallBlock)]
+        [TestCase(DefinitionKind.Liquid)]
+        [TestCase(DefinitionKind.TerrainSurface)]
+        public void RejectUnsupportedAuthoredTerrainDefinition_TerrainKind_Throws(
+            DefinitionKind terrainKind)
+        {
+            Type bakerType = typeof(DefinitionCatalogAuthoring).GetNestedType(
+                "DefinitionCatalogBaker",
+                BindingFlags.NonPublic);
+            Assert.That(bakerType, Is.Not.Null, "DefinitionCatalogのBakerが見つかりません。");
+            MethodInfo validationMethod = bakerType.GetMethod(
+                "RejectUnsupportedAuthoredTerrainDefinition",
+                BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.That(validationMethod, Is.Not.Null, "地形分類の事前検証が見つかりません。");
+
+            // privateのBaker検証を直接呼び、地形Blob構築前に具体的な理由で停止することを確認します。
+            TargetInvocationException invocationException =
+                Assert.Throws<TargetInvocationException>(
+                    () => validationMethod.Invoke(
+                        null,
+                        new object[] { terrainKind, "Custom Terrain", 2 }));
+            Assert.That(
+                invocationException.InnerException,
+                Is.TypeOf<InvalidOperationException>());
+            StringAssert.Contains(
+                "TERRAIN-01Cまで組み込み定義だけ",
+                invocationException.InnerException?.Message);
+            StringAssert.Contains(
+                "Definition[2] (Custom Terrain)",
+                invocationException.InnerException?.Message);
+        }
+
+        /// <summary>
         /// 動物種設定のInspector見出しが、GUIDで対応する共通定義の表示名を使用することを保証します。
         /// </summary>
         [Test]
