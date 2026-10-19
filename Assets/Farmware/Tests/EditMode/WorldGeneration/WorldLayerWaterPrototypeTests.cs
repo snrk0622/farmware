@@ -62,7 +62,7 @@ namespace Farmware.WorldGeneration.Tests
         /// </summary>
         private enum PrototypeTraversalKind
         {
-            /// <summary>同じレイヤー内で隣接セルへ移動する試作です。</summary>
+            /// <summary>同じレイヤー内で、1つの辺を共有する上下左右の隣接セルへ移動する試作です。</summary>
             Horizontal,
 
             /// <summary>同じX/Yの隣接レイヤーへ潜水または浮上する試作です。</summary>
@@ -121,6 +121,9 @@ namespace Farmware.WorldGeneration.Tests
 
             /// <summary>通常の水平移動として指定されましたが、遷移元と遷移先のレイヤーが異なります。</summary>
             BlockedByDifferentLayerForHorizontalTraversal,
+
+            /// <summary>通常の水平移動として指定されましたが、2セルが上下左右の辺を共有していません。</summary>
+            BlockedByNonAdjacentHorizontalCell,
 
             /// <summary>隣接していないレイヤーへの移動で、中間レイヤーを飛ばそうとしています。</summary>
             BlockedByNonAdjacentLayer,
@@ -334,6 +337,20 @@ namespace Farmware.WorldGeneration.Tests
                 if (source.Layer != destination.Layer)
                 {
                     return PrototypeTransitionResult.BlockedByDifferentLayerForHorizontalTraversal;
+                }
+
+                // この試作の境界は2セルが共有する1辺を表すため、同一セル、斜め、遠隔セルを直接つなぎません。
+                // 差分をlongで求め、intの最小値と最大値を受け取っても減算が周回しないようにします。
+                long horizontalDeltaX = (long)destination.X - source.X;
+                long horizontalDeltaY = (long)destination.Y - source.Y;
+                bool sharesHorizontalEdge =
+                    ((horizontalDeltaX == -1 || horizontalDeltaX == 1)
+                        && horizontalDeltaY == 0)
+                    || ((horizontalDeltaY == -1 || horizontalDeltaY == 1)
+                        && horizontalDeltaX == 0);
+                if (!sharesHorizontalEdge)
+                {
+                    return PrototypeTransitionResult.BlockedByNonAdjacentHorizontalCell;
                 }
 
                 // 同じ媒体同士なら、開いた同一レイヤー境界を通常移動できます。
@@ -571,6 +588,51 @@ namespace Farmware.WorldGeneration.Tests
                 actual,
                 Is.EqualTo(
                     PrototypeTransitionResult.BlockedByDifferentLayerForHorizontalTraversal));
+        }
+
+        /// <summary>
+        /// 同一レイヤーの同一セル、斜めセル、遠隔セルを準備し、1辺を共有しないセル間を直接移動できないことを保証します。
+        /// </summary>
+        [Test]
+        public void HorizontalTraversal_RejectsCoordinatesWithoutSharedEdge()
+        {
+            PrototypeCellState source = ReadyWater(PrototypeWorldLayer.Underwater);
+            PrototypeCellState sameCoordinate = ReadyWater(PrototypeWorldLayer.Underwater);
+            PrototypeCellState diagonal = ReadyWater(
+                PrototypeWorldLayer.Underwater,
+                x: 1,
+                y: 1);
+            PrototypeCellState distant = ReadyWater(
+                PrototypeWorldLayer.Underwater,
+                x: 100,
+                y: 100);
+
+            PrototypeTransitionResult sameCoordinateResult =
+                PrototypeTransitionEvaluator.Evaluate(
+                    source,
+                    sameCoordinate,
+                    PrototypeTraversalKind.Horizontal,
+                    PrototypeBoundaryKind.Open);
+            PrototypeTransitionResult diagonalResult = PrototypeTransitionEvaluator.Evaluate(
+                source,
+                diagonal,
+                PrototypeTraversalKind.Horizontal,
+                PrototypeBoundaryKind.Open);
+            PrototypeTransitionResult distantResult = PrototypeTransitionEvaluator.Evaluate(
+                source,
+                distant,
+                PrototypeTraversalKind.Horizontal,
+                PrototypeBoundaryKind.Open);
+
+            Assert.That(
+                sameCoordinateResult,
+                Is.EqualTo(PrototypeTransitionResult.BlockedByNonAdjacentHorizontalCell));
+            Assert.That(
+                diagonalResult,
+                Is.EqualTo(PrototypeTransitionResult.BlockedByNonAdjacentHorizontalCell));
+            Assert.That(
+                distantResult,
+                Is.EqualTo(PrototypeTransitionResult.BlockedByNonAdjacentHorizontalCell));
         }
 
         /// <summary>

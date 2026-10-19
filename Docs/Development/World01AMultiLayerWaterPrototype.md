@@ -38,7 +38,7 @@
 | Layer | Surface / Underwater / DeepSea | 同じX/Yに重なる固定3層。値と保存IDは未確定 |
 | Availability | Unloaded / Ready | 論理的に存在するセルの準備前と判定可能を分離 |
 | Medium | Solid / DryAir / Water | 固体、排水済み空間、開放水域の候補 |
-| Traversal | Horizontal / VerticalLayerChange | 同一層の通常移動と潜水・浮上を分離 |
+| Traversal | Horizontal / VerticalLayerChange | 1辺を共有する同一層セル間の境界比較と潜水・浮上を分離。PLAYER-01の連続8方向移動は確定しない |
 | Boundary | Open / TerrainDerivedGround / ClosedWatertightBarrier | 開口、有効地形から導出した上下遮断、閉鎖水密境界 |
 | Drainage | Unavailable / Operational | 排水施設の未成立・機能喪失と、成立済み稼働状態を分離 |
 
@@ -88,7 +88,7 @@ DeepSea    (Water)
 
 排水施設が成立していれば、外水へ通じる扉を開いても室内は乾燥状態を維持する。排水施設のない浸水済み施設は、水密扉を閉じても自然には乾燥しない。排水機能の成立条件、対象となる施設範囲、成立を失ったときのDirty範囲はWORLD-01B以降で契約化する。
 
-同じDryAir同士、または同じWater同士の開いた水平境界は通常移動を許可できる。DryAirセルへの上下移動は、潜水・浮上の開放水域条件を満たさないため許可しない。
+同じレイヤーで上下左右の1辺を共有するDryAir同士、またはWater同士の開いた水平境界は通常移動を許可できる。同一セル、斜めセル、遠隔セルは1つの境界を共有しないため、この試作では直接遷移を拒否する。これは境界単位の試作条件であり、PLAYER-01で予定する連続8方向移動や角を跨ぐ衝突判定の確定ではない。DryAirセルへの上下移動は、潜水・浮上の開放水域条件を満たさないため許可しない。
 
 ## 5. 保存候補の棚卸し
 
