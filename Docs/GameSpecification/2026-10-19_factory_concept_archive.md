@@ -2,10 +2,12 @@
 
 > 本書は2026-10-19の探索・採集ゲームへの転換前の資料である。[現在のゲーム仕様](./2026-10-11_casual_factory_concept_v0.1.md)を正とし、本書のコア、ドローン、無限資源、内容物消失、固定施設性能などを今後の仕様へ暗黙に引き継がない。未再承認の詳細は現在の仕様とロードマップに記載した実装前設計で判断する。
 
+> 履歴内の関連仕様はArchive文書へ、履歴版がない開発・検証資料は改訂前commit `d8835670`のGitHub表示へ固定している。本文の当時の判断・測定値は変更していない。
+
 - 作成日: 2026-10-11
 - 最終更新日: 2026-10-17
-- 状態: 基礎コンセプト。コア復旧、設備、ベルトコンベア、施設、建築操作は実装前レビューを前提とする仮仕様。実装済みランダムマップの詳細は[ランダムマップ生成仕様](./RandomMapGenerationSpecification.md)を正とする
-- 技術仕様: 固定Tick、ECSデータ、遠距離集計、永続ID、セーブ、建築Command、Floating Originは[シミュレーション技術仕様](../Development/SimulationArchitectureSpecification.md)を正とする
+- 状態: 基礎コンセプト。コア復旧、設備、ベルトコンベア、施設、建築操作は実装前レビューを前提とする仮仕様。実装済みランダムマップの詳細は[ランダムマップ生成仕様](./RandomMapGenerationSpecification_v1_Archive.md)を正とする
+- 技術仕様: 固定Tick、ECSデータ、遠距離集計、永続ID、セーブ、建築Command、Floating Originは[シミュレーション技術仕様](https://github.com/snrk0622/farmware/blob/d8835670b77ec0cc4e00b49e5f2917b893be1582/Docs/Development/SimulationArchitectureSpecification.md)を正とする
 - 対象: SteamでWindows／macOS向けに配信する。PC向けシングルプレイを第一候補とする
 - 参照作品: Forager、Stardew Valley、Core Keeper、Minecraft、F.A.R.M.S.: Chill Factory
 
@@ -144,7 +146,7 @@
 
 ## 7. ワールドとバイオーム
 
-詳細な実装仕様は [RandomMapGenerationSpecification.md](./RandomMapGenerationSpecification.md) を参照する。
+詳細な実装仕様は [RandomMapGenerationSpecification.md](./RandomMapGenerationSpecification_v1_Archive.md) を参照する。
 
 ### 7.1 構造
 
