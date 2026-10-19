@@ -1,5 +1,7 @@
 # PERF-GATE-A 終了時ComputeBuffer警告の切り分け
 
+> 2026-10-19のゲーム方針改訂後も、本書の再現条件・切り分け結果を履歴として維持する。ANIMAL-01Aへの進行判断は当時のもので、現在の着手順は[改訂ロードマップ](./ImplementationRoadmap.md)を正とする。新たなUnity・パッケージ更新や表示寿命の変更時は、必要に応じ再確認する。
+
 - 調査日: 2026-10-17
 - 対象: Development Player終了時の`ComputeBuffer.Release()`／`Dispose()`警告
 - 結論: Farmware所有リソースではなく、`com.unity.2d.animation` 13.0.4の未使用時にも生成されるGPU変形用フォールバックバッファが原因

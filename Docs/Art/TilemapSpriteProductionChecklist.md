@@ -1,13 +1,19 @@
-# Farmware タイルマップ用スプライト制作・導入チェックリスト v0.26
+# Farmware タイルマップ用スプライト制作・導入チェックリスト v0.27
 
 - 作成日: 2026-10-11
-- 最終更新日: 2026-10-17
-- 対象: ランダムマップ生成の地形・資源と、後続のドローン、設備、ベルト、橋、柵、施設表示
+- 最終更新日: 2026-10-19
+- 対象: 地形・資源・生物、直接操作プレイヤー、海中・深海、施設、乗り物、補助物流
 - 関連仕様: [ランダムマップ生成仕様](../GameSpecification/RandomMapGenerationSpecification.md)
 - 関連仕様: [ゲームコンセプト仕様](../GameSpecification/2026-10-11_casual_factory_concept_v0.1.md)
 - 基準解像度: 1タイル = 16×16 px、Gameビュー = 480×270 px
 
 ## 1. この文書の目的
+
+2026-10-19の仕様転換に伴い、ドローン・開始コアの制作計画を撤回し、第7.5・7.6節をプレイヤー・水中・乗り物へ置換した。既存のART-00受け入れ、16pxセル、土地16×24、岩壁16×28、接地点・Atlasの規則は再利用する。
+
+第4章等の7枚のBiome土地と単一岩壁は現行アセットの説明である。今後は固定BiomeとBlock素材を分け、同Biome内にも複数地面・壁を表示する。新しい通常表示はBlock定義を選択キーにし、「Biomeだけで常に同じTile」という現行規則を置換する。意味のないランダム模様を避ける方針は維持するが、異なる材質の識別を禁止しない。
+
+積雪版は雪原バイオームや地域の雪表現の素材であり、四季の追加を意味しない。夜は環境光、海中はLayerと水の表現を使い、夜だけの視界半径制限を画像で付けない。本書の改訂だけでScene・素材・Import設定を変更したとは扱わない。
 
 PixelLabだけで制作する製品用スプライトを漏れなく管理し、画風の固定、生成、Unityへのインポート、表示設定、実機確認を段階別に記録する。
 
@@ -106,10 +112,10 @@ Editorの構築メニューが `Assets/Farmware/Art/WorldGeneration/Fallback/` �
 | 1 | 残りのBase地形 | 森林、砂漠、岩地、湿地、雪原、火山は16×24、淡水、海水、マグマは16×16、岩壁は16×28。各1枚 | 10 Sprite |
 | 2 | 土地・岩壁境界ハイライト | 土地上面と岩壁上面で共有する16×16の透明素材。14形状を90度回転して47接続状態へ展開 | 14 Sprite |
 | 3 | 基礎資源 | 木、石、砂資源を各3基本バリエーション。各基本バリエーションに通常版と積雪版を用意 | 18 Sprite |
-| 5 | ドローン | 8方向×待機4フレーム、8方向×移動4フレーム | 64 Sprite frame |
-| 6 | 開始コア | 待機4フレーム、稼働4フレーム | 8 Sprite frame |
+| 4 | 直接操作プレイヤー | 第7.5節。操作試作後に方向・状態・装備差分を決定 | 未定 |
+| 5 | 穴・追加Block・水中・乗り物 | 第7.6節。機能の縦切りごとに制作 | 未定 |
 
-初期必須合計は、静止Spriteとアニメーションフレームを合わせて115点とする。基礎資源は追加状態を採用しない最小構成で数え、採取後などの状態を一つ追加する資源ごとに、3基本バリエーション×通常版・積雪版の6 Spriteを追加する。水面・マグマの任意アニメーション、後続段階の設備、固有資源、ゲーム上の役割が未定義な純粋装飾はこの合計へ含めない。`ART-00B`の土地・岩壁境界ハイライトは、透明状態をTilemapへ配置せず、方向による色・陰影差を持たない14枚の可視Spriteを土地上面と岩壁上面で共有する。
+現行の静止素材小計はBase11＋境界14＋基礎資源18＝43点とする。プレイヤー、追加Block、水中、乗り物が未確定のため、製品全体の必要合計は算出し直す。基礎資源の状態を一つ増やす場合は3基本バリエーション×通常版・積雪版の6枚を追加する。境界14枚は土地・岩壁で共有し、透明状態は配置しない。
 最初の世界観確認に必要な最小セットは、11地形の代表各1枚と、木・石・砂資源の代表基本バリエーションについて通常版・積雪版を各1組用意した6枚の、合計17点である。
 
 Base地形は合計11種類×1枚の11 Spriteとなる。段階Aの世界観確認では各地形をUnityへ接続し、配色と情報量を確認する。
@@ -780,69 +786,28 @@ Six separate sparse top-down pixel-art freshwater overlays: 1) a tiny circular r
 
 - [ ] 専用スプライト不要であることを実装と確認
 
-### 7.5 ドローン `player_drone`
+### 7.5 直接操作プレイヤー（新規制作）
 
-- 必要数: 8方向の待機画像、待機4フレーム、移動4フレームを初期値とする
-- 用途: 人型キャラクターの代わりとなる視覚的な作業主体。操作範囲はカメラ内全域であり、ドローンの到着をゲーム処理の条件にはしない
-- PixelLabツール: 基準絵は`Create character`、方向差分は同ツールの8方向生成、動きは`Animate with text`
-- 設定: Canvas `24×32`または`32×32`で比較、Top-downの斜め見下ろし、Transparent background、Outline Thin、Shading Medium、Details Medium
-- Base Prompt（全文をそのまま入力）:
+旧ドローンの制作計画を置換する。まだ本番画像・アニメーションを採用済みとは扱わない。
 
-```text
-A small friendly utility drone for a cozy agricultural and industrial automation game, top-down oblique pixel art on an orthogonal square grid, showing its upper surface and short front face. Rounded compact body, two small side thrusters, warm off-white painted metal with muted teal panels and one amber status light, readable mechanical silhouette. Its logical position is one 16 by 16 ground cell, but its body may extend upward into the tile above. Keep its ground projection centered near the lower center of the canvas. No isometric diamond base, humanoid limbs, weapon, text, or background. It must remain clearly readable over green grass, dark forest floor, yellow sand, blue water, and charcoal rock.
-```
+- [ ] 歩行・待機・採掘・攻撃・観察・泳ぎについて必要な方向と状態をPLAYER-01の試作から決める
+- [ ] キャンバス、占有、接地点、頭上へのはみ出し、装備表示の分割を決める
+- [ ] 16pxセルと480×270の画面で対象タイル・移動方向・向きが読める仮絵を確認
+- [ ] 地上、夜間照明、海中・深海で輪郭・装備の可読性を確認
+- [ ] 本番生成・取込・設定・人間確認を個別に記録
 
-- Idle Animation Prompt（全文をそのまま入力）:
+8方向入力は8方向の専用Spriteを必ず量産する意味ではない。左右反転や方向共有の採否を確認し、実際の表示方式が決まってから制作枚数を算出する。画像生成Promptの個別作成はこの文書改訂には含めない。
 
-```text
-Create a subtle seamless four-frame idle hover loop. The drone rises and falls by at most one pixel, with a gentle alternating amber status light. Preserve body shape, direction, palette, center position, and transparent background.
-```
+### 7.6 新地形・水中・乗り物（段階制作）
 
-- Move Animation Prompt（全文をそのまま入力）:
+開始コアの画像は制作しない。新しい対象をロードマップの試作順に追加する。
 
-```text
-Create a seamless four-frame movement loop in the current direction. Show a restrained one-pixel thruster pulse and a slight body tilt without changing the silhouette size, palette, or center alignment. Transparent background, no particles outside the canvas.
-```
-
-- [ ] 基準絵を生成
-- [ ] 8方向を生成
-- [ ] 待機アニメーションを生成
-- [ ] 移動アニメーションを生成
-- [ ] 取込
-- [ ] Animatorまたは表示システムへ設定
-- [ ] 建築、撤去、設定変更、修理、自然資源の手動採取では、共通のライトまたは投影エフェクトを重ね、専用アニメーションを増やさなくても作業対象を判別できる
-- [ ] 連続操作時は最新の対象への追従を優先し、ドローン演出が終わるまで次の操作を待たせない
-- [ ] 全地形とズーム段階で確認
-
-### 7.6 開始コア `equipment_starting_core`
-
-- 必要数: 待機4フレーム、稼働4フレーム。論理占有は3×3タイル、描画枠は48×56または64×64 px
-- PixelLabツール: 基準絵は`Create object` → `1 direction`、動きは`Animate with text`
-- 設定: Top-downの斜め見下ろし、Transparent background、Outline Thin、Shading Medium、Details Medium
-- Base Prompt（全文をそのまま入力）:
-
-```text
-A central core machine for a cozy agricultural and industrial automation game, top-down oblique pixel art on an orthogonal square grid, showing its top surface and readable front face. Its square base logically occupies three by three 16-pixel ground cells while the upper body may extend upward beyond the footprint. Place the ground contact area across the lower part of the canvas. Warm off-white painted metal, muted teal panels, one amber energy window, twelve readable flat connection edges around the four sides for adjacent conveyor belts, friendly dormant technology being restored rather than military machinery, crisp pixel clusters, transparent background. No isometric diamond base, text, logo, weapon, painted ground tile, long shadow, or conveyor attached.
-```
-
-- Idle Animation Prompt（全文をそのまま入力）:
-
-```text
-Create a subtle seamless four-frame powered idle loop. Animate only a soft amber pulse and one small mechanical breathing motion. Keep the machine footprint, connection edges, outline, palette, center, and transparent background perfectly stable.
-```
-
-- Active Animation Prompt（全文をそのまま入力）:
-
-```text
-Create a readable seamless four-frame active production loop with a brighter amber pulse and a small rotating or reciprocating top component. Keep all connection edges, footprint, palette, outline, and center fixed. No sparks, smoke, text, or camera movement.
-```
-
-- [ ] 基準絵を生成
-- [ ] 待機アニメーションを生成
-- [ ] 稼働アニメーションを生成
-- [ ] 取込
-- [ ] Prefabまたは表示定義へ設定
-- [ ] 初期スポーンへの固定配置と、外周へ接続する複数ベルトの搬入方向を読み取れることを確認
+- [ ] 同一バイオーム内の複数地面・壁Blockを見分ける配色と一覧を作る
+- [ ] 空の穴、掘削・設置・採掘進捗、破損道具の表示を決める
+- [ ] 海中・深海の背景、海底、生物、直下プレビューの透過・遮蔽を確認
+- [ ] 水密壁・扉・窓、空気室、浸水・排水・酸素警告の表示を確認
+- [ ] バイク、車、ボート、潜水艇、ヘリについて乗降・占有・接地点・飛行影を試作後に制作
+- [ ] プレイヤー、装備・個体アイコン、図鑑証拠・研究ランク・燃料・耐久・死亡期限の表示を追加
 
 ## 8. Unityインポート設定
 
@@ -933,7 +898,7 @@ Editor構築ツールとPlayerビルド前処理は、`terrain_biomes_base.png`�
 - [ ] 画面下側のセルに接地する物体を手前へ描くYソートが機能する
 - [ ] サブチャンクとカメラのカリング範囲が最大描画はみ出し量を含む
 - [ ] 木、石、砂をECS状態からResource Tilemapへ反映できる
-- [ ] ドローン、開始コアをECS状態からPresentationへ反映できる
+- [ ] プレイヤー、装備、生物、乗り物をECS状態からPresentationへ反映できる
 - [ ] TilemapやGameObjectをゲーム状態の正として使用していない
 
 ## 10. 検品用テストマップ
@@ -960,7 +925,7 @@ Editor構築ツールとPlayerビルド前処理は、`terrain_biomes_base.png`�
 - [ ] 1×1占有物と複数タイル設備を上下に隣接配置し、上方向へのはみ出しとYソートが自然に見えることを確認
 - [ ] 接地点は画面外だが上部だけ画面内に見える物体が、カリングで消えないことを確認
 - [ ] 立体物が16×16サブチャンク境界をまたいでも欠けないことを確認
-- [ ] ドローン、開始コア、配置可能・不可表示を各地形へ重ねて確認
+- [ ] プレイヤー、装備、配置可能・不可表示を各地形・レイヤーへ重ねて確認
 - [x] カメラの最小・標準・最大ズームでピクセルがにじまないことを確認
 - [x] Game Viewの実解像度で細部がちらつかないことを確認
 - [x] 64×64チャンク境界および16×16サブチャンク境界に、透明な隙間や位置ずれによる継ぎ目がないことを確認。岩壁上面の意図した菱形反復は継ぎ目に含めない
@@ -986,7 +951,7 @@ Editor構築ツールとPlayerビルド前処理は、`terrain_biomes_base.png`�
 - [ ] 柵、壁、扉、通常境界から自動変形する搬入口・搬出口
 - [ ] 不定形施設の領域輪郭、成立・条件不足・境界破損の各表示
 - [ ] 稼働、停止、詰まり、破損の各設備状態
-- [ ] 敵オートマトンと防衛設備
+- [ ] 敵対する野生生物、追跡・逃走・威嚇・構造物損傷、任意の防衛設備
 - [ ] バイオーム固有の粒子、環境演出、希少資源変異
 
 ## 13. PixelLab参照資料

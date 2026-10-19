@@ -1,12 +1,14 @@
 # Farmware ドキュメント案内
 
-- 最終更新日: 2026-10-17
+- 最終更新日: 2026-10-19
 - 目的: 仕様、制作資料、開発手順の参照先を一か所にまとめる。
 
 ## ゲーム仕様
 
-- [ゲームコンセプト](./GameSpecification/2026-10-11_casual_factory_concept_v0.1.md)
-- [ランダムマップ生成仕様](./GameSpecification/RandomMapGenerationSpecification.md)
+- [ゲーム仕様 v0.2 — 生物探索・採集サンドボックス](./GameSpecification/2026-10-11_casual_factory_concept_v0.1.md)
+- [ランダムマップ・可変地形仕様 v0.2](./GameSpecification/RandomMapGenerationSpecification.md)
+
+2026-10-19に、直接操作プレイヤー、可変地形、地上・海中・深海、図鑑研究を中心とする方針へ改訂した。記載した仮仕様と現在の実装は区別し、着手順は現行ロードマップを正とする。
 
 ## アート制作
 
@@ -21,6 +23,14 @@
 - [テスト](./Development/Testing.md)
 - [MAP-02D 性能計測](./Development/Map02DPerformanceReport.md)
 - [PERF-GATE-A 終了時ComputeBuffer警告の切り分け](./Development/PerfGateAComputeBufferReport.md)
+
+## 仕様転換前の履歴
+
+以下は過去の判断・実装・検証を残す資料であり、新規実装の要件には使用しない。
+
+- [旧工業ゲーム仕様 v0.1](./GameSpecification/2026-10-19_factory_concept_archive.md)
+- [旧マップ生成基盤 v1・設定・表示の記録](./GameSpecification/RandomMapGenerationSpecification_v1_Archive.md)
+- [旧実装ロードマップ・commit／PR別の実装検証記録](./Development/ImplementationRoadmap_2026-10-19_Archive.md)
 
 ## 更新ルール
 
