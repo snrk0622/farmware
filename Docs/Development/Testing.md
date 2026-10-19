@@ -107,7 +107,9 @@ Editorの分布監査と同じAnalyzerを小さな固定サンプルで2回実�
 
 この自動回帰とEditor局所計測だけでは、固定Tick公開境界のDevelopment Player性能を確認済みにしない。2026-10-19に修正commit`abb0e373`後の次作業として、修正前`b2713628`との同条件Player比較を10ケース・17,915前面フレームで実施した。通常／拡大Viewport、通常／高速移動、停止10秒・再開20秒で可視未完成は0件・0秒、停止中のTick・次回ID・個体群は不変、再開後の追加も確認した。生成境界待ち最大12.656msとフレーム間隔最大約32.0msを含む費用を記録し、性能改善・製品性能合格とは扱わない。製品コードは修正commitと完全一致へ戻したため、同commitで成功したEditMode 296件・PlayMode 53件は再実行せず、比較ビルドと復元後のコンパイル確認を追加検証とした。既知のビルド警告・終了時ComputeBuffer警告は両版で残る。続いて修正後Playerの5ケースを開発者向けに再生し、「問題ないように見えます」との確認とcommit・push許可を得た。今回PRの局所回帰と表示・停止感の受け入れは完了とし、製品最大Viewport・長時間・対象機器の性能合格とは分離する。条件・終了条件は[ロードマップのANIMAL-01B残検証](./ImplementationRoadmap.md#animal-01b-残検証生成公開境界のdevelopment-player回帰)、実測値・成果物・制約は[性能計測の追補](./Map02DPerformanceReport.md#修正commit後のdevelopment-player比較条件)を参照する。
 
-2026-10-19の投入境界・可視キャッシュ修正後は、World Generation EditMode 225件・Common EditMode 76件・PlayMode 53件と、明示局所計測1件が成功した。同日、開発者から「問題ありません」とcommit許可を得て、今回修正のEditorでの人間確認も完了した。上記`abb0e373`のPlayer比較・人間確認は同commitの履歴であり、今回変更のPlayer性能を確認済みとはしない。再計測は今回の修正commit後の最初の検証作業としてPR #23マージ前・ANIMAL-01C着手前に行い、詳しい条件は[ロードマップ](./ImplementationRoadmap.md#animal-01b-再レビュー追補フレーム分割と可視位置キャッシュ)へ記録する。
+2026-10-19の投入境界・可視キャッシュ修正後は、World Generation EditMode 225件・Common EditMode 76件・PlayMode 53件と、明示局所計測1件が成功した。同日、開発者から「問題ありません」とcommit許可を得て、今回修正のEditorでの人間確認も完了した。上記`abb0e373`のPlayer比較・人間確認は同commitの履歴であり、今回変更のPlayer性能を確認済みとはしない。
+
+続いて修正commit`b401ab41`後の最初の検証作業として、比較元`45401b9e`とのPlayer再比較を10ケース・17,879前面フレームで実施した。可視未完成・計測中エラー・警告は全ケース0で、停止中のTick・ID・地域・個体数不変と再開後の初期化を確認した。最大間隔61.368msと境界待ち最大12.690msを記録し、性能合格とはしない。初期地域・個体数と実時間の停止解除Tickには前後差があり、同一Tick入力の決定論試験と混同しない。製品コードとテストは修正commitと一致へ戻したため、上記の自動回帰は再実行せず、ビルド・Player計測・復元後コンパイル確認を追加検証とした。同日、開発者から「問題ないように見えます」と今回Playerの表示・停止感の確認とcommit・push・レビュー返信・スレッド解決の許可を得て、最大間隔・待機費用の制約を残したうえで今回範囲を受け入れた。PR #23マージ前の今回検証は完了とするが、後続ゲートの製品性能合格とは分離する。条件・費用・成果物・制約は[性能レポート](./Map02DPerformanceReport.md#固定tick投入修正後のdevelopment-player再比較)、完了条件は[ロードマップ](./ImplementationRoadmap.md#animal-01b-再レビュー追補フレーム分割と可視位置キャッシュ)を参照する。
 
 #### `AnimalPopulationDistributionAuditTests`
 
