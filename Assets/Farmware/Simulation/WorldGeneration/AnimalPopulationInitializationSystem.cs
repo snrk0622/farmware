@@ -23,7 +23,7 @@ namespace Farmware.WorldGeneration.Animals
         /// <summary>
         /// 地域座標から状態Entityを引く再利用索引です。保存対象ではなく、Query件数が変わったときに再構築できます。
         /// </summary>
-        private NativeParallelHashMap<int2, Entity> regionEntityByCoordinate;
+        private NativeParallelHashMap<int3, Entity> regionEntityByCoordinate;
 
         /// <summary>
         /// 必須Singletonと地域Queryを準備し、地域索引用Persistentメモリの所有権を取得します。
@@ -33,7 +33,7 @@ namespace Farmware.WorldGeneration.Animals
         {
             regionStateQuery = state.GetEntityQuery(
                 ComponentType.ReadOnly<AnimalPopulationRegionState>());
-            regionEntityByCoordinate = new NativeParallelHashMap<int2, Entity>(16, Allocator.Persistent);
+            regionEntityByCoordinate = new NativeParallelHashMap<int3, Entity>(16, Allocator.Persistent);
 
             state.RequireForUpdate<AnimalPopulationSeed>();
             state.RequireForUpdate<AnimalSpeciesCatalog>();
@@ -87,7 +87,8 @@ namespace Farmware.WorldGeneration.Animals
 
                 pendingRegions.Add(new PendingRegion
                 {
-                    Coordinate = new int2(
+                    Coordinate = new int3(
+                        (int)coordinateReference.ValueRO.Layer,
                         coordinateReference.ValueRO.X,
                         coordinateReference.ValueRO.Y),
                     ChunkEntity = chunkEntity
@@ -131,8 +132,9 @@ namespace Farmware.WorldGeneration.Animals
                 AnimalPopulationRegionState regionState =
                     AnimalPopulationGenerator.CreateInitialRegionState(
                         populationSeed,
-                        pending.Coordinate.x,
-                        pending.Coordinate.y);
+                        (WorldLayer)pending.Coordinate.x,
+                        pending.Coordinate.y,
+                        pending.Coordinate.z);
                 int firstCandidateIndex = candidates.Length;
                 if (!populationSeed.IsValid
                     || !AnimalPopulationGenerator.TryAppendInitialPopulation(
@@ -213,6 +215,7 @@ namespace Farmware.WorldGeneration.Animals
                         animalEntity,
                         new AnimalTilePosition
                         {
+                            Layer = candidate.Layer,
                             TileX = candidate.TileX,
                             TileY = candidate.TileY
                         });
@@ -261,7 +264,10 @@ namespace Farmware.WorldGeneration.Animals
             {
                 AnimalPopulationRegionState regionState = states[index];
                 regionEntityByCoordinate.TryAdd(
-                    new int2(regionState.RegionX, regionState.RegionY),
+                    new int3(
+                        (int)regionState.Layer,
+                        regionState.RegionX,
+                        regionState.RegionY),
                     entities[index]);
             }
         }
@@ -289,6 +295,7 @@ namespace Farmware.WorldGeneration.Animals
                     AnimalSpawnCandidate candidate = candidates[candidateIndex];
                     requests[candidateIndex] = new PersistentIdAllocationRequest
                     {
+                        ScopeOrder = (long)candidate.Layer,
                         MajorOrder = candidate.RegionX,
                         MinorOrder = candidate.RegionY,
                         Sequence = candidate.SpawnSequence
@@ -311,20 +318,26 @@ namespace Farmware.WorldGeneration.Animals
         private struct PendingRegion : IComparable<PendingRegion>
         {
             /// <summary>地域を識別する論理チャンク座標です。</summary>
-            public int2 Coordinate;
+            public int3 Coordinate;
 
             /// <summary>生成済み地形Bufferと処理済みタグを所有するストリーミング用Entityです。</summary>
             public Entity ChunkEntity;
 
-            /// <summary>地形Entity生成順を使わず、地域X、地域Yの順に比較します。</summary>
+            /// <summary>地形Entity生成順を使わず、Layer、地域X、地域Yの順に比較します。</summary>
             /// <param name="other">比較する別の処理待ち地域です。</param>
             /// <returns>この地域が先なら負、同じなら0、後なら正です。</returns>
             public readonly int CompareTo(PendingRegion other)
             {
-                int xComparison = Coordinate.x.CompareTo(other.Coordinate.x);
+                int layerComparison = Coordinate.x.CompareTo(other.Coordinate.x);
+                if (layerComparison != 0)
+                {
+                    return layerComparison;
+                }
+
+                int xComparison = Coordinate.y.CompareTo(other.Coordinate.y);
                 return xComparison != 0
                     ? xComparison
-                    : Coordinate.y.CompareTo(other.Coordinate.y);
+                    : Coordinate.z.CompareTo(other.Coordinate.z);
             }
         }
 

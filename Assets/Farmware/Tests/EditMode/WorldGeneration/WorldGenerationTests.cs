@@ -1625,6 +1625,7 @@ namespace Farmware.WorldGeneration.Tests
                 existingLocationEntity,
                 new InitialSpawnLocation
                 {
+                    Layer = WorldLayer.Surface,
                     TileX = 10,
                     TileY = -20,
                     RegionMinimumTileX = 4,
@@ -1664,7 +1665,14 @@ namespace Farmware.WorldGeneration.Tests
             entityManager.AddComponentData(settingsEntity, resourceSettings);
 
             Entity chunkEntity = entityManager.CreateEntity();
-            entityManager.AddComponentData(chunkEntity, new ChunkCoordinateComponent { X = 1, Y = -1 });
+            entityManager.AddComponentData(
+                chunkEntity,
+                new ChunkCoordinateComponent
+                {
+                    Layer = WorldLayer.Surface,
+                    X = 1,
+                    Y = -1
+                });
             entityManager.AddComponentData(chunkEntity, new ChunkGenerationStatus
             {
                 Phase = ChunkGenerationPhase.Queued,
@@ -1845,6 +1853,7 @@ namespace Farmware.WorldGeneration.Tests
                 entityManager,
                 new ChunkStreamingObserver
                 {
+                    Layer = WorldLayer.Surface,
                     MinimumVisibleChunkX = 0,
                     MaximumVisibleChunkX = 0,
                     MinimumVisibleChunkY = 0,
@@ -1889,6 +1898,7 @@ namespace Farmware.WorldGeneration.Tests
                 entityManager,
                 new ChunkStreamingObserver
                 {
+                    Layer = WorldLayer.Surface,
                     MinimumVisibleChunkX = edgeChunkCoordinate,
                     MaximumVisibleChunkX = edgeChunkCoordinate,
                     MinimumVisibleChunkY = edgeChunkCoordinate,
@@ -1943,6 +1953,7 @@ namespace Farmware.WorldGeneration.Tests
                 entityManager,
                 new ChunkStreamingObserver
                 {
+                    Layer = WorldLayer.Surface,
                     MinimumVisibleChunkX = 0,
                     MaximumVisibleChunkX = 0,
                     MinimumVisibleChunkY = 0,
@@ -1984,6 +1995,7 @@ namespace Farmware.WorldGeneration.Tests
                 entityManager,
                 new ChunkStreamingObserver
                 {
+                    Layer = WorldLayer.Surface,
                     MinimumVisibleChunkX = 10,
                     MaximumVisibleChunkX = 10,
                     MinimumVisibleChunkY = -5,
@@ -2026,6 +2038,7 @@ namespace Farmware.WorldGeneration.Tests
                 entityManager,
                 new ChunkStreamingObserver
                 {
+                    Layer = WorldLayer.Surface,
                     MinimumVisibleChunkX = 2,
                     MaximumVisibleChunkX = 2,
                     MinimumVisibleChunkY = 0,
@@ -2066,6 +2079,7 @@ namespace Farmware.WorldGeneration.Tests
                 entityManager,
                 new ChunkStreamingObserver
                 {
+                    Layer = WorldLayer.Surface,
                     MinimumVisibleChunkX = 0,
                     MaximumVisibleChunkX = 0,
                     MinimumVisibleChunkY = 0,
@@ -2105,6 +2119,52 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// 同じX/Yに海中チャンクが存在する状態で地上Observerを更新し、海中を地上の既存要求と誤認せず地上要求へ置き換えることを保証します。
+        /// </summary>
+        [Test]
+        public void ChunkStreamingSystem_SameXyDifferentLayer_DoesNotReuseWrongLayer()
+        {
+            using World world = new World("Layer-aware chunk streaming test");
+            EntityManager entityManager = world.EntityManager;
+            CreateStreamingSingletons(
+                entityManager,
+                new ChunkStreamingObserver
+                {
+                    Layer = WorldLayer.Surface,
+                    MinimumVisibleChunkX = 0,
+                    MaximumVisibleChunkX = 0,
+                    MinimumVisibleChunkY = 0,
+                    MaximumVisibleChunkY = 0
+                },
+                new ChunkStreamingSettings
+                {
+                    PreloadMarginInChunks = 0,
+                    RetentionMarginInChunks = 0,
+                    MaximumConcurrentGenerations = 1,
+                    MaximumSubChunkApplicationsPerFrame = 1
+                });
+            Entity underwater = CreateChunkEntity(
+                entityManager,
+                0,
+                0,
+                ChunkGenerationPhase.Active,
+                requestEnabled: false,
+                layer: WorldLayer.Underwater);
+
+            SystemHandle streamingSystem = world.GetOrCreateSystem<ChunkStreamingSystem>();
+            streamingSystem.Update(world.Unmanaged);
+
+            Assert.That(entityManager.Exists(underwater), Is.False);
+            using EntityQuery chunkQuery = entityManager.CreateEntityQuery(
+                ComponentType.ReadOnly<ChunkCoordinateComponent>());
+            Assert.That(chunkQuery.CalculateEntityCount(), Is.EqualTo(1));
+            ChunkCoordinateComponent actual = chunkQuery.GetSingleton<ChunkCoordinateComponent>();
+            Assert.That(actual.Layer, Is.EqualTo(WorldLayer.Surface));
+            Assert.That(actual.X, Is.Zero);
+            Assert.That(actual.Y, Is.Zero);
+        }
+
+        /// <summary>
         /// テスト用Worldへ生成設定、ストリーミング設定、Observerの3つのSingleton Entityを準備します。
         /// </summary>
         /// <param name="entityManager">テスト用WorldのEntityManagerです。</param>
@@ -2134,16 +2194,25 @@ namespace Farmware.WorldGeneration.Tests
         /// <param name="y">論理チャンクの垂直座標です。</param>
         /// <param name="phase">準備する生成段階です。</param>
         /// <param name="requestEnabled">ChunkGenerationRequestを有効にする場合はtrueです。</param>
+        /// <param name="layer">チャンクが属するワールド層です。省略時は既存地形と同じSurfaceです。</param>
         /// <returns>作成したテスト用チャンクEntityです。</returns>
         private static Entity CreateChunkEntity(
             EntityManager entityManager,
             int x,
             int y,
             ChunkGenerationPhase phase,
-            bool requestEnabled)
+            bool requestEnabled,
+            WorldLayer layer = WorldLayer.Surface)
         {
             Entity entity = entityManager.CreateEntity();
-            entityManager.AddComponentData(entity, new ChunkCoordinateComponent { X = x, Y = y });
+            entityManager.AddComponentData(
+                entity,
+                new ChunkCoordinateComponent
+                {
+                    Layer = layer,
+                    X = x,
+                    Y = y
+                });
             entityManager.AddComponentData(entity, new ChunkGenerationStatus
             {
                 Phase = phase,

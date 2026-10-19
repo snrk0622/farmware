@@ -22,10 +22,10 @@ namespace Farmware.Simulation.Animals
         /// <summary>AnimalPopulationSeed Singletonが複数存在します。</summary>
         PopulationSeedIsDuplicated = 2,
 
-        /// <summary>Seedが0、地域座標が重複、または地域の次回受付順が0です。</summary>
+        /// <summary>Seedが0、地域Layerが不正、Layer付き地域座標が重複、または地域の次回受付順が0です。</summary>
         RegionStateIsInvalid = 3,
 
-        /// <summary>永続ID、種ID、群れID、または外見差分を含む個体状態が不正です。</summary>
+        /// <summary>永続ID、種ID、Layer、群れID、または外見差分を含む個体状態が不正です。</summary>
         AnimalStateIsInvalid = 4
     }
 
@@ -247,9 +247,12 @@ namespace Farmware.Simulation.Animals
             {
                 AnimalPopulationRegionHashRecord current = records[index];
                 bool isDuplicated = index > 0
+                    && records[index - 1].Layer == current.Layer
                     && records[index - 1].RegionX == current.RegionX
                     && records[index - 1].RegionY == current.RegionY;
-                if (current.NextSpawnSequence == 0 || isDuplicated)
+                if (!WorldLayerUtility.IsPlayable(current.Layer)
+                    || current.NextSpawnSequence == 0
+                    || isDuplicated)
                 {
                     return false;
                 }
@@ -279,6 +282,7 @@ namespace Farmware.Simulation.Animals
                     out AnimalSpeciesDefinitionBlob speciesDefinition);
                 if (current.PersistentId == PersistentObjectId.InvalidValue
                     || idIsDuplicated
+                    || !WorldLayerUtility.IsPlayable(current.Layer)
                     || !speciesWasFound
                     || current.AppearanceVariant >= speciesDefinition.AppearanceVariantCount
                     || current.HerdId == PersistentObjectId.InvalidValue
@@ -312,7 +316,8 @@ namespace Farmware.Simulation.Animals
                 {
                     AnimalPopulationHashRecord leader = records[middle];
                     return leader.HerdId == leader.PersistentId
-                        && leader.SpeciesRuntimeId == animal.SpeciesRuntimeId;
+                        && leader.SpeciesRuntimeId == animal.SpeciesRuntimeId
+                        && leader.Layer == animal.Layer;
                 }
 
                 if (candidate < animal.HerdId)
@@ -341,6 +346,7 @@ namespace Farmware.Simulation.Animals
             for (int index = 0; index < regions.Length; index++)
             {
                 AnimalPopulationRegionHashRecord region = regions[index];
+                builder.WriteByte((byte)region.Layer);
                 builder.WriteInt32(region.RegionX);
                 builder.WriteInt32(region.RegionY);
                 builder.WriteUInt64(region.RandomState);
@@ -354,6 +360,7 @@ namespace Farmware.Simulation.Animals
                 AnimalPopulationHashRecord animal = animals[index];
                 builder.WriteUInt64(animal.PersistentId);
                 builder.WriteInt32(animal.SpeciesRuntimeId);
+                builder.WriteByte((byte)animal.Layer);
                 builder.WriteInt32(animal.TileX);
                 builder.WriteInt32(animal.TileY);
                 builder.WriteUInt64(animal.HerdId);
@@ -364,6 +371,9 @@ namespace Farmware.Simulation.Animals
         /// <summary>地域状態を座標順へ並べるための、一時的な固定値レコードです。</summary>
         private readonly struct AnimalPopulationRegionHashRecord : IComparable<AnimalPopulationRegionHashRecord>
         {
+            /// <summary>地域が属する固定ワールドレイヤーです。</summary>
+            public readonly WorldLayer Layer;
+
             /// <summary>地域の水平論理チャンク座標です。</summary>
             public readonly int RegionX;
 
@@ -382,6 +392,7 @@ namespace Farmware.Simulation.Animals
             /// <summary>保存対象Componentから、並べ替え用の値コピーを作ります。</summary>
             public AnimalPopulationRegionHashRecord(AnimalPopulationRegionState state)
             {
+                Layer = state.Layer;
                 RegionX = state.RegionX;
                 RegionY = state.RegionY;
                 RandomState = state.RandomState;
@@ -389,9 +400,15 @@ namespace Farmware.Simulation.Animals
                 InitializedAtTick = state.InitializedAtTick;
             }
 
-            /// <summary>Entity生成順を無視し、地域Xの後に地域Yで昇順比較します。</summary>
+            /// <summary>Entity生成順を無視し、Layer、地域X、地域Yの順で昇順比較します。</summary>
             public int CompareTo(AnimalPopulationRegionHashRecord other)
             {
+                int layerComparison = Layer.CompareTo(other.Layer);
+                if (layerComparison != 0)
+                {
+                    return layerComparison;
+                }
+
                 int xComparison = RegionX.CompareTo(other.RegionX);
                 return xComparison != 0 ? xComparison : RegionY.CompareTo(other.RegionY);
             }
@@ -405,6 +422,9 @@ namespace Farmware.Simulation.Animals
 
             /// <summary>共通定義カタログの動物種Runtime IDです。</summary>
             public readonly int SpeciesRuntimeId;
+
+            /// <summary>個体が存在する固定ワールドレイヤーです。</summary>
+            public readonly WorldLayer Layer;
 
             /// <summary>個体の絶対水平タイル座標です。</summary>
             public readonly int TileX;
@@ -428,6 +448,7 @@ namespace Farmware.Simulation.Animals
             {
                 PersistentId = id.Value;
                 SpeciesRuntimeId = species.RuntimeId.Value;
+                Layer = position.Layer;
                 TileX = position.TileX;
                 TileY = position.TileY;
                 HerdId = herd.HerdId;

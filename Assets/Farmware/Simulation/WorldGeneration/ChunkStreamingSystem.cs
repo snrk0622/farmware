@@ -54,6 +54,13 @@ namespace Farmware.WorldGeneration
                 int retentionMargin = math.max(0, settings.RetentionMarginInChunks);
                 int maximumConcurrentGenerations = math.max(1, settings.MaximumConcurrentGenerations);
 
+                // UnderwaterとDeepSeaの自然地形はTERRAIN-01Bで接続します。
+                // それまでは地上生成器を別層へ流用して同じ地形を複製せず、Layer付き要求だけを受け取れる境界に留めます。
+                if (observer.Layer != WorldLayer.Surface)
+                {
+                    return;
+                }
+
                 // Observerを直接書き込む別Presentationが将来増えても、生成Systemへ不正なチャンク座標を渡さないよう、
                 // Camera側ではなくストリーミング境界で可視・先読み・保持の全範囲を有効なタイル座標域へ収めます。
                 ChunkBounds visibleBounds = ChunkBounds
@@ -88,8 +95,25 @@ namespace Farmware.WorldGeneration
                 for (int index = 0; index < entities.Length; index++)
                 {
                     Entity entity = entities[index];
-                    ChunkCoordinate coordinate = new ChunkCoordinate(coordinates[index].X, coordinates[index].Y);
+                    ChunkCoordinate coordinate = new ChunkCoordinate(
+                        coordinates[index].Layer,
+                        coordinates[index].X,
+                        coordinates[index].Y);
                     ChunkGenerationStatus status = statuses[index];
+
+                    // WORLD-01Cでは現在表示中のレイヤーだけをストリーミング対象にします。
+                    // 同じX/Yの別レイヤーを矩形だけで一致扱いすると、要求再利用と破棄判定が別層へ誤接続されるため先に分離します。
+                    if (coordinate.Layer != observer.Layer)
+                    {
+                        if (status.Phase == ChunkGenerationPhase.GeneratingData)
+                        {
+                            pendingGenerationCount++;
+                            continue;
+                        }
+
+                        commandBuffer.DestroyEntity(entity);
+                        continue;
+                    }
 
                     if (!retentionBounds.Contains(coordinate))
                     {
@@ -148,6 +172,7 @@ namespace Farmware.WorldGeneration
 
                 int requestBudget = math.max(0, maximumConcurrentGenerations - pendingGenerationCount);
                 QueueMissingChunksNearFirst(
+                    observer.Layer,
                     preloadBounds,
                     visibleBounds.CenterX,
                     visibleBounds.CenterY,
@@ -175,6 +200,13 @@ namespace Farmware.WorldGeneration
         /// <returns>各軸で最小値が最大値以下になった入力です。</returns>
         private static ChunkStreamingObserver NormalizeObserver(ChunkStreamingObserver observer)
         {
+            // 未設定値のままEntityを作るとNoneレイヤーのチャンクが通常状態へ混ざります。
+            // 既存Sceneと旧テストの既定値は地上専用だったため、移行期間はここでSurfaceへ明示的に補正します。
+            if (!WorldLayerUtility.IsPlayable(observer.Layer))
+            {
+                observer.Layer = WorldLayer.Surface;
+            }
+
             if (observer.MinimumVisibleChunkX > observer.MaximumVisibleChunkX)
             {
                 int temporary = observer.MinimumVisibleChunkX;
@@ -195,6 +227,7 @@ namespace Farmware.WorldGeneration
         /// <summary>
         /// 指定矩形内の不足チャンクを中心から外側へ向かう四角いリング順で要求します。
         /// </summary>
+        /// <param name="layer">今回作成・再利用するチャンクが属する固定ワールドレイヤーです。</param>
         /// <param name="bounds">生成対象となるプリロード込み矩形です。</param>
         /// <param name="centerX">優先順位の中心となる水平チャンク座標です。</param>
         /// <param name="centerY">優先順位の中心となる垂直チャンク座標です。</param>
@@ -203,6 +236,7 @@ namespace Farmware.WorldGeneration
         /// <param name="reactivatableRequests">保持中のUnrequested Entityを座標から引く再利用候補です。</param>
         /// <param name="commandBuffer">新規Entity作成を遅延適用するCommand Bufferです。</param>
         private static void QueueMissingChunksNearFirst(
+            WorldLayer layer,
             ChunkBounds bounds,
             int centerX,
             int centerY,
@@ -222,6 +256,7 @@ namespace Farmware.WorldGeneration
                 if (ring == 0)
                 {
                     TryQueueChunk(
+                        layer,
                         centerX,
                         centerY,
                         bounds,
@@ -241,6 +276,7 @@ namespace Farmware.WorldGeneration
                 for (int x = left; x <= right && requestBudget > 0; x++)
                 {
                     TryQueueChunk(
+                        layer,
                         x,
                         bottom,
                         bounds,
@@ -249,6 +285,7 @@ namespace Farmware.WorldGeneration
                         ref reactivatableRequests,
                         ref commandBuffer);
                     TryQueueChunk(
+                        layer,
                         x,
                         top,
                         bounds,
@@ -261,6 +298,7 @@ namespace Farmware.WorldGeneration
                 for (int y = bottom + 1; y < top && requestBudget > 0; y++)
                 {
                     TryQueueChunk(
+                        layer,
                         left,
                         y,
                         bounds,
@@ -269,6 +307,7 @@ namespace Farmware.WorldGeneration
                         ref reactivatableRequests,
                         ref commandBuffer);
                     TryQueueChunk(
+                        layer,
                         right,
                         y,
                         bounds,
@@ -283,6 +322,7 @@ namespace Farmware.WorldGeneration
         /// <summary>
         /// 1座標が対象内かつ未要求なら、生成に必要なComponentとBufferを持つEntityを予約します。
         /// </summary>
+        /// <param name="layer">要求候補が属する固定ワールドレイヤーです。</param>
         /// <param name="x">要求候補の水平論理チャンク座標です。</param>
         /// <param name="y">要求候補の垂直論理チャンク座標です。</param>
         /// <param name="bounds">候補を含めてよいプリロード矩形です。</param>
@@ -291,6 +331,7 @@ namespace Farmware.WorldGeneration
         /// <param name="reactivatableRequests">空Entityを再利用できる座標とEntityの対応表です。</param>
         /// <param name="commandBuffer">Entity作成を記録するCommand Bufferです。</param>
         private static void TryQueueChunk(
+            WorldLayer layer,
             int x,
             int y,
             ChunkBounds bounds,
@@ -304,7 +345,7 @@ namespace Farmware.WorldGeneration
                 return;
             }
 
-            ChunkCoordinate coordinate = new ChunkCoordinate(x, y);
+            ChunkCoordinate coordinate = new ChunkCoordinate(layer, x, y);
             if (!bounds.Contains(coordinate))
             {
                 return;
@@ -330,7 +371,12 @@ namespace Farmware.WorldGeneration
             }
 
             Entity entity = commandBuffer.CreateEntity();
-            commandBuffer.AddComponent(entity, new ChunkCoordinateComponent { X = x, Y = y });
+            commandBuffer.AddComponent(entity, new ChunkCoordinateComponent
+            {
+                Layer = layer,
+                X = x,
+                Y = y
+            });
             commandBuffer.AddComponent(entity, new ChunkGenerationStatus
             {
                 Phase = ChunkGenerationPhase.Queued,

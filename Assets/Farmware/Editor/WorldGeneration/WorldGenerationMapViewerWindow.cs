@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
+using Farmware.Simulation;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -38,6 +39,14 @@ namespace Farmware.WorldGeneration.Editor
             "Biome"
         };
 
+        /// <summary>Toolbarの表示名と固定ワールドレイヤーを対応させる選択肢です。</summary>
+        private static readonly List<string> LayerChoices = new List<string>
+        {
+            "Surface",
+            "Underwater",
+            "Deep Sea"
+        };
+
         /// <summary>ドメインリロード後も維持する現在の水平中心タイル座標です。</summary>
         [SerializeField] private int serializedCenterTileX;
 
@@ -51,6 +60,9 @@ namespace Farmware.WorldGeneration.Editor
         [SerializeField] private WorldGenerationMapViewMode serializedViewMode =
             WorldGenerationMapViewMode.Terrain;
 
+        /// <summary>ドメインリロード後も維持する診断対象の固定ワールドレイヤーです。</summary>
+        [SerializeField] private WorldLayer serializedLayer = WorldLayer.Surface;
+
         /// <summary>シード入力欄です。編集されるまでSettings内の実WorldSeedをそのまま使用します。</summary>
         private TextField seedField;
 
@@ -62,6 +74,9 @@ namespace Farmware.WorldGeneration.Editor
 
         /// <summary>TerrainとBiomeを切り替える選択欄です。</summary>
         private DropdownField viewModeField;
+
+        /// <summary>Surface、Underwater、DeepSeaの検索キーを切り替える選択欄です。</summary>
+        private DropdownField layerField;
 
         /// <summary>チャンク・サブチャンク境界を表示するToggleです。</summary>
         private Toggle gridToggle;
@@ -195,6 +210,7 @@ namespace Farmware.WorldGeneration.Editor
             centerXField = RequireElement<IntegerField>("centerXField");
             centerYField = RequireElement<IntegerField>("centerYField");
             viewModeField = RequireElement<DropdownField>("viewModeField");
+            layerField = RequireElement<DropdownField>("layerField");
             gridToggle = RequireElement<Toggle>("gridToggle");
             hoverLabel = RequireElement<Label>("hoverLabel");
             sourceLabel = RequireElement<Label>("sourceLabel");
@@ -216,6 +232,11 @@ namespace Farmware.WorldGeneration.Editor
             centerYField.SetValueWithoutNotify(serializedCenterTileY);
             viewModeField.choices = ViewModeChoices;
             viewModeField.SetValueWithoutNotify(ViewModeChoices[(int)serializedViewMode]);
+            serializedLayer = WorldLayerUtility.IsPlayable(serializedLayer)
+                ? serializedLayer
+                : WorldLayer.Surface;
+            layerField.choices = LayerChoices;
+            layerField.SetValueWithoutNotify(GetLayerDisplayName(serializedLayer));
 
             seedField.tooltip =
                 "編集しなければ実ゲームのWorldSeedをそのまま使用します。編集後は同じAuthoring設定で別シードを比較します。";
@@ -223,10 +244,13 @@ namespace Farmware.WorldGeneration.Editor
             centerYField.tooltip = "移動先の垂直ワールドタイル座標です。負座標も入力できます。";
             viewModeField.tooltip =
                 "Terrainは最終地形、Biomeは水域や障害物の下も含む論理バイオームを表示します。";
+            layerField.tooltip =
+                "診断する固定ワールドレイヤーです。WORLD-01CではSurfaceだけに自然生成が接続され、別層は未接続表示になります。";
             gridToggle.tooltip = "白線は16タイル、青線は64タイル境界です。遠距離では自動的に省略します。";
 
             seedField.RegisterValueChangedCallback(_ => seedWasEdited = true);
             viewModeField.RegisterValueChangedCallback(OnViewModeChanged);
+            layerField.RegisterValueChangedCallback(OnLayerChanged);
             gridToggle.RegisterValueChangedCallback(
                 evt => mapCanvas.SetGridVisible(evt.newValue));
 
@@ -389,6 +413,7 @@ namespace Farmware.WorldGeneration.Editor
             serializedCenterTileX = centerXField.value;
             serializedCenterTileY = centerYField.value;
             serializedViewMode = GetSelectedViewMode();
+            serializedLayer = GetSelectedLayer();
             _ = RenderMapAsync();
         }
 
@@ -413,6 +438,7 @@ namespace Farmware.WorldGeneration.Editor
             int centerTileY = serializedCenterTileY;
             int tilesPerPixel = serializedTilesPerPixel;
             WorldGenerationMapViewMode viewMode = serializedViewMode;
+            WorldLayer layer = serializedLayer;
             WorldGenerationSettings renderSettings = sourceSettings;
             if (seedWasEdited)
             {
@@ -431,6 +457,7 @@ namespace Farmware.WorldGeneration.Editor
                 WorldGenerationMapSampleResult result = await Task.Run(
                     () => WorldGenerationMapSampler.Sample(
                         renderSettings,
+                        layer,
                         centerTileX,
                         centerTileY,
                         width,
@@ -449,9 +476,10 @@ namespace Farmware.WorldGeneration.Editor
 
                 stopwatch.Stop();
                 ApplyRenderedMap(result, renderSettings);
-                SetStatus(
-                    $"完了: {result.Width * result.Height:N0} samples / {stopwatch.Elapsed.TotalSeconds:F2}秒",
-                    false);
+                string completionMessage = result.HasGeneratedData
+                    ? $"完了: {result.Width * result.Height:N0} samples / {stopwatch.Elapsed.TotalSeconds:F2}秒"
+                    : $"{result.Layer}: 自然生成はTERRAIN-01Bで接続予定です。座標キーだけを表示しています。";
+                SetStatus(completionMessage, false);
             }
             catch (OperationCanceledException)
             {
@@ -682,6 +710,19 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>
+        /// レイヤー選択を固定IDへ反映し、同じX/Yの別レイヤーを独立した検索キーとして再生成します。
+        /// </summary>
+        /// <param name="evt">DropdownFieldの変更前後値です。</param>
+        private void OnLayerChanged(ChangeEvent<string> evt)
+        {
+            serializedLayer = GetSelectedLayer();
+            if (hasSourceSettings && mapCanvas.contentRect.width >= 64f)
+            {
+                RequestRenderFromFields();
+            }
+        }
+
+        /// <summary>
         /// DropdownFieldの選択文字列を安定した表示モードenumへ変換します。
         /// ChangeEvent通知中はindexが旧値のままになるUnityバージョンがあるため、確定済みのvalueを使用します。
         /// </summary>
@@ -694,6 +735,36 @@ namespace Farmware.WorldGeneration.Editor
                 StringComparison.Ordinal)
                 ? WorldGenerationMapViewMode.Biome
                 : WorldGenerationMapViewMode.Terrain;
+        }
+
+        /// <summary>レイヤー選択文字列を保存IDへ変換し、未知の表示値はSurfaceへ戻します。</summary>
+        /// <returns>Surface、Underwater、DeepSeaのいずれかです。</returns>
+        private WorldLayer GetSelectedLayer()
+        {
+            if (string.Equals(layerField.value, LayerChoices[1], StringComparison.Ordinal))
+            {
+                return WorldLayer.Underwater;
+            }
+
+            if (string.Equals(layerField.value, LayerChoices[2], StringComparison.Ordinal))
+            {
+                return WorldLayer.DeepSea;
+            }
+
+            return WorldLayer.Surface;
+        }
+
+        /// <summary>固定レイヤーIDをDropdownFieldの表示名へ変換します。</summary>
+        /// <param name="layer">表示する固定ワールドレイヤーです。</param>
+        /// <returns>LayerChoicesに含まれる表示名です。</returns>
+        private static string GetLayerDisplayName(WorldLayer layer)
+        {
+            switch (layer)
+            {
+                case WorldLayer.Underwater: return LayerChoices[1];
+                case WorldLayer.DeepSea: return LayerChoices[2];
+                default: return LayerChoices[0];
+            }
         }
 
         /// <summary>
@@ -737,13 +808,24 @@ namespace Farmware.WorldGeneration.Editor
 
             lastHoveredTileX = worldTileX;
             lastHoveredTileY = worldTileY;
+            ChunkCoordinate chunk = WorldGrid.ToChunkCoordinate(
+                displayedSample.Layer,
+                worldTileX,
+                worldTileY);
+            if (!displayedSample.HasGeneratedData)
+            {
+                hoverLabel.text =
+                    $"{displayedSample.Layer} / Tile ({worldTileX}, {worldTileY}) / "
+                    + $"Chunk ({chunk.X}, {chunk.Y}) / 自然生成未接続";
+                return;
+            }
+
             GeneratedTile tile = DeterministicChunkGenerator.GenerateTile(
                 displayedSettings,
                 worldTileX,
                 worldTileY);
-            ChunkCoordinate chunk = WorldGrid.ToChunkCoordinate(worldTileX, worldTileY);
             hoverLabel.text =
-                $"Tile ({worldTileX}, {worldTileY}) / Chunk ({chunk.X}, {chunk.Y}) / "
+                $"{displayedSample.Layer} / Tile ({worldTileX}, {worldTileY}) / Chunk ({chunk.X}, {chunk.Y}) / "
                 + $"Biome {tile.Biome} / Ground {tile.Ground} / Soil {tile.Soil} / Water {tile.WaterBodyType}";
         }
 
@@ -757,6 +839,7 @@ namespace Farmware.WorldGeneration.Editor
                 : displayedSettings;
             sourceLabel.text =
                 $"設定: {settingsSourceDescription}\n"
+                + $"Layer: {(displayedSample == null ? serializedLayer : displayedSample.Layer)}\n"
                 + $"GeneratorVersion: {settings.GeneratorVersion}\n"
                 + $"WorldSeed: 0x{settings.WorldSeed:X16}";
         }
@@ -773,7 +856,7 @@ namespace Farmware.WorldGeneration.Editor
             }
 
             zoomLabel.text =
-                $"中心: ({displayedSample.CenterTileX}, {displayedSample.CenterTileY})\n"
+                $"中心: {displayedSample.Layer} ({displayedSample.CenterTileX}, {displayedSample.CenterTileY})\n"
                 + $"縮尺: 1px = {displayedSample.TilesPerPixel} tiles\n"
                 + $"範囲: 約{displayedSample.Width * displayedSample.TilesPerPixel:N0}"
                 + $" × {displayedSample.Height * displayedSample.TilesPerPixel:N0} tiles";

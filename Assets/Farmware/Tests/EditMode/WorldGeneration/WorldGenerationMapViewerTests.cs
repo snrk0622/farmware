@@ -3,6 +3,7 @@
 
 using System.Reflection;
 using System.Threading;
+using Farmware.Simulation;
 using Farmware.WorldGeneration.Authoring;
 using Farmware.WorldGeneration.Editor;
 using NUnit.Framework;
@@ -105,6 +106,72 @@ namespace Farmware.WorldGeneration.Tests
                         $"pixel=({pixelX}, {pixelY}), tile=({worldTileX}, {worldTileY})");
                 }
             }
+        }
+
+        /// <summary>
+        /// 未接続の海中レイヤーを要求し、地上Generatorを複製せず、レイヤー付きの未生成結果を返すことを保証します。
+        /// </summary>
+        [Test]
+        public void Sample_Underwater_ReturnsLayeredUnavailableResult()
+        {
+            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.FromString("map-viewer-underwater-placeholder-test"),
+                1);
+            WorldGenerationMapSampleResult result = WorldGenerationMapSampler.Sample(
+                settings,
+                WorldLayer.Underwater,
+                12,
+                -34,
+                3,
+                2,
+                4,
+                WorldGenerationMapViewMode.Terrain,
+                CancellationToken.None);
+
+            Assert.That(result.Layer, Is.EqualTo(WorldLayer.Underwater));
+            Assert.That(result.HasGeneratedData, Is.False);
+            Assert.That(result.PixelColors, Has.Length.EqualTo(6));
+            Assert.That(result.PixelColors[0], Is.EqualTo(new Color32(24, 28, 36, 255)));
+            Assert.That(result.PixelColors[5], Is.EqualTo(result.PixelColors[0]));
+        }
+
+        /// <summary>
+        /// 保存予約値NoneをMap Viewerへ渡し、存在する層のような未接続画像を作らず明示的に拒否することを保証します。
+        /// </summary>
+        [Test]
+        public void Sample_InvalidLayer_IsRejected()
+        {
+            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.FromString("map-viewer-invalid-layer-test"),
+                1);
+
+            Assert.That(
+                () => WorldGenerationMapSampler.Sample(
+                    settings,
+                    WorldLayer.None,
+                    0,
+                    0,
+                    1,
+                    1,
+                    1,
+                    WorldGenerationMapViewMode.Terrain,
+                    CancellationToken.None),
+                Throws.TypeOf<System.ArgumentOutOfRangeException>());
+        }
+
+        /// <summary>
+        /// Map ViewerのUXMLを読み、WORLD-01Cで追加したレイヤー選択欄が名前付き要素として取得できることを保証します。
+        /// </summary>
+        [Test]
+        public void MapViewerUxml_ContainsLayerSelector()
+        {
+            VisualTreeAsset tree = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(
+                "Assets/Farmware/Editor/WorldGeneration/WorldGenerationMapViewerWindow.uxml");
+            Assert.That(tree, Is.Not.Null);
+            VisualElement root = tree.CloneTree();
+            DropdownField layerField = root.Q<DropdownField>("layerField");
+
+            Assert.That(layerField, Is.Not.Null);
         }
 
         /// <summary>
@@ -272,7 +339,7 @@ namespace Farmware.WorldGeneration.Tests
 
                 Assert.That(
                     hoverLabel.text,
-                    Does.StartWith($"Tile ({centerTileX}, {centerTileY}) /"));
+                    Does.StartWith($"Surface / Tile ({centerTileX}, {centerTileY}) /"));
             }
             finally
             {

@@ -174,7 +174,9 @@ namespace Farmware.WorldGeneration
                 {
                     ChunkCoordinateComponent coordinate = manager.GetComponentData<ChunkCoordinateComponent>(slot.Entity);
                     ChunkGenerationStatus status = manager.GetComponentData<ChunkGenerationStatus>(slot.Entity);
-                    if (coordinate.X == slot.Coordinate.X && coordinate.Y == slot.Coordinate.Y
+                    if (coordinate.Layer == slot.Coordinate.Layer
+                        && coordinate.X == slot.Coordinate.X
+                        && coordinate.Y == slot.Coordinate.Y
                         && status.Phase == ChunkGenerationPhase.GeneratingData)
                     {
                         // 両Bufferを確定してからReadyへ進め、半分だけ完成した結果を表示側へ渡さないようにします。
@@ -219,8 +221,14 @@ namespace Farmware.WorldGeneration
             // Entity配列の順番は構造変更・作成順で変わるため、バッチを区切る前に論理座標で整列します。
             foreach (Entity entity in requests)
             {
-                if (manager.GetComponentData<ChunkGenerationStatus>(entity).Phase == ChunkGenerationPhase.Queued)
-                    ordered.Add(new OrderedRequest { Entity = entity, Coordinate = manager.GetComponentData<ChunkCoordinateComponent>(entity) });
+                ChunkCoordinateComponent coordinate = manager.GetComponentData<ChunkCoordinateComponent>(entity);
+                if (manager.GetComponentData<ChunkGenerationStatus>(entity).Phase == ChunkGenerationPhase.Queued
+                    && coordinate.Layer == WorldLayer.Surface)
+                {
+                    // WORLD-01Cでは既存地上結果だけを接続します。別層の自然生成はTERRAIN-01Bが
+                    // 専用規則を追加するまでQueuedのまま残し、地上データの複製を公開しません。
+                    ordered.Add(new OrderedRequest { Entity = entity, Coordinate = coordinate });
+                }
             }
             ordered.AsArray().Sort();
             bool scheduled = false;
@@ -272,11 +280,17 @@ namespace Farmware.WorldGeneration
             public Entity Entity;
             /// <summary>受付順を決める絶対チャンク座標です。Streamingが同座標の重複要求を防ぎます。</summary>
             public ChunkCoordinateComponent Coordinate;
-            /// <summary>X、Yの辞書順で比較し、同じ要求集合から同じ先頭バッチを選びます。</summary>
+            /// <summary>Layer、X、Yの辞書順で比較し、同じ要求集合から同じ先頭バッチを選びます。</summary>
             /// <param name="other">比較対象の要求です。</param>
             /// <returns>この要求が先なら負、同座標なら0、後なら正です。</returns>
             public int CompareTo(OrderedRequest other)
             {
+                int layer = Coordinate.Layer.CompareTo(other.Coordinate.Layer);
+                if (layer != 0)
+                {
+                    return layer;
+                }
+
                 int x = Coordinate.X.CompareTo(other.Coordinate.X);
                 return x != 0 ? x : Coordinate.Y.CompareTo(other.Coordinate.Y);
             }

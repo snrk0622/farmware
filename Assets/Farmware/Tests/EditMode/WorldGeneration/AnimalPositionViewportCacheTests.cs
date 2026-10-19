@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using Farmware.Simulation;
 using Farmware.Simulation.Animals;
 using Farmware.WorldGeneration.Presentation;
 using NUnit.Framework;
@@ -50,14 +51,26 @@ namespace Farmware.WorldGeneration.Tests
             using World world = new World("Animal position cache mutation test");
             EntityManager manager = world.EntityManager;
             Entity entity = manager.CreateEntity(typeof(WildAnimal), typeof(AnimalTilePosition));
-            manager.SetComponentData(entity, new AnimalTilePosition { TileX = 10000, TileY = 10000 });
+            manager.SetComponentData(
+                entity,
+                new AnimalTilePosition
+                {
+                    Layer = WorldLayer.Surface,
+                    TileX = 10000,
+                    TileY = 10000
+                });
             using EntityQuery query = CreateQuery(manager);
             var cache = new AnimalPositionViewportCache();
             cache.Update(manager, query, -1, -1, 1, 1);
             Assert.That(cache.Count, Is.Zero);
             var writer = world.GetOrCreateSystemManaged<PositionWriter>();
             writer.Target = entity;
-            writer.Position = new AnimalTilePosition { TileX = -1, TileY = 1 };
+            writer.Position = new AnimalTilePosition
+            {
+                Layer = WorldLayer.Surface,
+                TileX = -1,
+                TileY = 1
+            };
             writer.Update();
             cache.Update(manager, query, -1, -1, 1, 1);
             Assert.That(cache.BoundsPositionReadCount, Is.EqualTo(1));
@@ -69,6 +82,46 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(cache.TrackedChunkCount, Is.Zero);
             cache.Clear();
             Assert.That(cache.VisiblePositionReadCount, Is.Zero);
+        }
+
+        /// <summary>
+        /// 同じX/Yへ地上と海中の個体を準備し、選択中レイヤーの個体だけを可視キャッシュへ含めることを保証します。
+        /// </summary>
+        [Test]
+        public void VisibleCache_SameXyDifferentLayers_SelectsRequestedLayerOnly()
+        {
+            using World world = new World("Animal layer-aware position cache test");
+            EntityManager manager = world.EntityManager;
+            Entity surfaceAnimal = manager.CreateEntity(typeof(WildAnimal), typeof(AnimalTilePosition));
+            manager.SetComponentData(
+                surfaceAnimal,
+                new AnimalTilePosition
+                {
+                    Layer = WorldLayer.Surface,
+                    TileX = 4,
+                    TileY = -2
+                });
+            Entity underwaterAnimal = manager.CreateEntity(typeof(WildAnimal), typeof(AnimalTilePosition));
+            manager.SetComponentData(
+                underwaterAnimal,
+                new AnimalTilePosition
+                {
+                    Layer = WorldLayer.Underwater,
+                    TileX = 4,
+                    TileY = -2
+                });
+
+            using EntityQuery query = CreateQuery(manager);
+            var cache = new AnimalPositionViewportCache();
+            cache.Update(manager, query, WorldLayer.Surface, 4, -2, 4, -2);
+            Assert.That(cache.Count, Is.EqualTo(1));
+            Assert.That(cache.Contains(WorldLayer.Surface, 4, -2), Is.True);
+            Assert.That(cache.Contains(WorldLayer.Underwater, 4, -2), Is.False);
+
+            cache.Update(manager, query, WorldLayer.Underwater, 4, -2, 4, -2);
+            Assert.That(cache.Count, Is.EqualTo(1));
+            Assert.That(cache.Contains(WorldLayer.Surface, 4, -2), Is.False);
+            Assert.That(cache.Contains(WorldLayer.Underwater, 4, -2), Is.True);
         }
 
         /// <summary>明示実行する局所比較です。同じWorldで旧全件配列化と新キャッシュを3回暖機後24回測り、CPU・managed allocationを記録します。</summary>
@@ -128,12 +181,22 @@ namespace Farmware.WorldGeneration.Tests
             using NativeArray<Entity> far = new NativeArray<Entity>(farCount, Allocator.Temp);
             manager.CreateEntity(farType, far);
             for (int i = 0; i < far.Length; i++) manager.SetComponentData(far[i],
-                new AnimalTilePosition { TileX = 10000 + i % 256, TileY = 10000 + i / 256 });
+                new AnimalTilePosition
+                {
+                    Layer = WorldLayer.Surface,
+                    TileX = 10000 + i % 256,
+                    TileY = 10000 + i / 256
+                });
             EntityArchetype nearType = manager.CreateArchetype(typeof(WildAnimal), typeof(AnimalTilePosition));
             using NativeArray<Entity> near = new NativeArray<Entity>(4, Allocator.Temp);
             manager.CreateEntity(nearType, near);
             for (int i = 0; i < near.Length; i++) manager.SetComponentData(near[i],
-                new AnimalTilePosition { TileX = i - 1, TileY = i - 1 });
+                new AnimalTilePosition
+                {
+                    Layer = WorldLayer.Surface,
+                    TileX = i - 1,
+                    TileY = i - 1
+                });
         }
 
         /// <summary>テストのOverlayと同じ、Enableable条件を含まない読取専用Queryを作ります。</summary>

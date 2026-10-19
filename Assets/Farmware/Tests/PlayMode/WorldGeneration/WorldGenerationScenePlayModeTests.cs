@@ -165,6 +165,35 @@ namespace Farmware.WorldGeneration.PlayModeTests
         }
 
         /// <summary>
+        /// 同じ可視タイル矩形を地上と海中へ変換し、包含するX/Yは同じでもObserverのLayerが分離されることを保証します。
+        /// </summary>
+        [Test]
+        public void CalculateChunkBounds_SameXyDifferentLayers_PreservesRequestedLayer()
+        {
+            ChunkStreamingObserver surface =
+                CameraChunkStreamingBridge.CalculateChunkBoundsFromVisibleTileBounds(
+                    WorldLayer.Surface,
+                    -65,
+                    -2,
+                    64,
+                    127);
+            ChunkStreamingObserver underwater =
+                CameraChunkStreamingBridge.CalculateChunkBoundsFromVisibleTileBounds(
+                    WorldLayer.Underwater,
+                    -65,
+                    -2,
+                    64,
+                    127);
+
+            Assert.That(surface.Layer, Is.EqualTo(WorldLayer.Surface));
+            Assert.That(underwater.Layer, Is.EqualTo(WorldLayer.Underwater));
+            Assert.That(underwater.MinimumVisibleChunkX, Is.EqualTo(surface.MinimumVisibleChunkX));
+            Assert.That(underwater.MaximumVisibleChunkX, Is.EqualTo(surface.MaximumVisibleChunkX));
+            Assert.That(underwater.MinimumVisibleChunkY, Is.EqualTo(surface.MinimumVisibleChunkY));
+            Assert.That(underwater.MaximumVisibleChunkY, Is.EqualTo(surface.MaximumVisibleChunkY));
+        }
+
+        /// <summary>
         /// 通常移動で512タイル閾値を越え、表示原点をチャンク境界へ自動更新しても絶対Camera位置とObserver範囲が変わらないことを保証します。
         /// 正負の両方向を通し、C#の0方向丸めではなく床方向のチャンク境界が選ばれることも確認します。
         /// </summary>
@@ -643,6 +672,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
         {
             InitialSpawnLocation spawnLocation = new InitialSpawnLocation
             {
+                Layer = WorldLayer.Surface,
                 TileX = -65,
                 TileY = 64
             };
@@ -667,11 +697,12 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 BiomeId.Snowfield);
 
             Assert.That(text, Does.Contain("Tile  : (5, -3)"));
+            Assert.That(text, Does.Contain("Layer : Surface"));
             Assert.That(text, Does.Contain("SubChunk: (0, 3)"));
             Assert.That(text, Does.Contain("Biome: Snowfield"));
             Assert.That(text, Does.Contain("GeneratorVersion: 7"));
             Assert.That(text, Does.Contain("WorldSeed: 0x0000000000001234"));
-            Assert.That(text, Does.Contain("Spawn: Tile (-65, 64) / Chunk (-2, 1)"));
+            Assert.That(text, Does.Contain("Spawn: Surface Tile (-65, 64) / Chunk (-2, 1)"));
         }
 
         /// <summary>
@@ -734,6 +765,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     chunkEntity,
                     new ChunkCoordinateComponent
                     {
+                        Layer = WorldLayer.Surface,
                         X = 0,
                         Y = -1
                     });
@@ -769,7 +801,12 @@ namespace Farmware.WorldGeneration.PlayModeTests
 
                 object[] settingsArguments = { default(WorldGenerationSettings) };
                 object[] searchStatusArguments = { default(InitialSpawnSearchStatus) };
-                object[] biomeArguments = { new Vector3Int(5, -3, 0), default(BiomeId) };
+                object[] biomeArguments =
+                {
+                    WorldLayer.Surface,
+                    new Vector3Int(5, -3, 0),
+                    default(BiomeId)
+                };
                 Assert.That(readSettings.Invoke(overlay, settingsArguments), Is.EqualTo(true));
                 Assert.That(readSearchStatus.Invoke(overlay, searchStatusArguments), Is.EqualTo(true));
                 Assert.That(readBiome.Invoke(overlay, biomeArguments), Is.EqualTo(true));
@@ -781,7 +818,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Assert.That(
                     ((InitialSpawnSearchStatus)searchStatusArguments[0]).Phase,
                     Is.EqualTo(InitialSpawnSearchPhase.Failed));
-                Assert.That((BiomeId)biomeArguments[1], Is.EqualTo(BiomeId.Volcanic));
+                Assert.That((BiomeId)biomeArguments[2], Is.EqualTo(BiomeId.Volcanic));
             }
             finally
             {
@@ -803,6 +840,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
         {
             InitialSpawnLocation spawnLocation = new InitialSpawnLocation
             {
+                Layer = WorldLayer.Surface,
                 TileX = -65,
                 TileY = 64
             };
@@ -1003,6 +1041,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     firstSpawnEntity,
                     new InitialSpawnLocation
                     {
+                        Layer = WorldLayer.Surface,
                         TileX = 2,
                         TileY = 3
                     });
@@ -1011,6 +1050,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     secondSpawnEntity,
                     new InitialSpawnLocation
                     {
+                        Layer = WorldLayer.Surface,
                         TileX = -5,
                         TileY = 7
                     });
@@ -1081,6 +1121,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     spawnEntity,
                     new InitialSpawnLocation
                     {
+                        Layer = WorldLayer.Surface,
                         TileX = 2,
                         TileY = 3
                     });
@@ -1926,6 +1967,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
                             break;
                         }
 
+                        // BatchModeは描画フレームだけが実時間より速く進むため、Workerと10 Tick/秒の境界へ最低限の実時間を渡します。
+                        System.Threading.Thread.Sleep(1);
                         yield return null;
                     }
 
@@ -2371,6 +2414,12 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 developerVisualization,
                 Is.Not.Null,
                 "Main CameraにWorldGenerationDebugVisualizationOverlayがありません。");
+            developerVisualization.SetLayer(WorldLayer.Underwater);
+            Assert.That(
+                developerVisualization.CurrentLayer,
+                Is.EqualTo(WorldLayer.Underwater),
+                "開発者可視化は同じX/Yを別層として診断できるよう、選択レイヤーを保持する必要があります。");
+            developerVisualization.SetLayer(WorldLayer.Surface);
             FieldInfo developerVisualizationPanControllerField =
                 typeof(WorldGenerationDebugVisualizationOverlay).GetField(
                     "cameraPanController",
@@ -2524,6 +2573,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     }
                 }
 
+                // 初回生成も固定Tickで投入するため、BatchModeの高速空フレームだけで待機上限を使い切らないようにします。
+                System.Threading.Thread.Sleep(1);
                 yield return null;
             }
 
@@ -2757,6 +2808,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     break;
                 }
 
+                // 遠方移動後の生成Jobと固定Tick公開へ処理時間を渡し、EditorとBatchModeで同じ待機契約にします。
+                System.Threading.Thread.Sleep(1);
                 yield return null;
             }
 
@@ -2808,13 +2861,36 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     break;
                 }
 
+                // 負座標への即時移動後も、BatchModeの高速空フレームだけで待機上限を使い切らないようにします。
+                System.Threading.Thread.Sleep(1);
                 yield return null;
             }
 
+            EntityQuery negativeFinalObserverQuery = world.EntityManager.CreateEntityQuery(
+                ComponentType.ReadOnly<ChunkStreamingObserver>());
+            bool hasNegativeFinalObserver = negativeFinalObserverQuery.CalculateEntityCount() == 1;
+            ChunkStreamingObserver negativeFinalObserver = hasNegativeFinalObserver
+                ? negativeFinalObserverQuery.GetSingleton<ChunkStreamingObserver>()
+                : default;
+            negativeFinalObserverQuery.Dispose();
+            int negativeTargetChunkCount = CountChunksAt(
+                chunkQuery,
+                negativeFarCameraChunk.X,
+                negativeFarCameraChunk.Y);
+            string negativeTargetChunkState = DescribeSurfaceChunkState(
+                world.EntityManager,
+                chunkQuery,
+                negativeFarCameraChunk.X,
+                negativeFarCameraChunk.Y);
             Assert.That(
                 negativeFarLoadCompleted,
                 Is.True,
-                $"{MaximumWaitFrames}フレーム以内に負座標の遠方チャンクが生成・表示されませんでした。");
+                $"{MaximumWaitFrames}フレーム以内に負座標の遠方チャンクが生成・表示されませんでした。"
+                + $" Observer={hasNegativeFinalObserver}/{negativeFinalObserver.Layer}:"
+                + $"({negativeFinalObserver.MinimumVisibleChunkX}..{negativeFinalObserver.MaximumVisibleChunkX}, "
+                + $"{negativeFinalObserver.MinimumVisibleChunkY}..{negativeFinalObserver.MaximumVisibleChunkY}), "
+                + $"Target={negativeFarCameraChunk}, TargetEntityCount={negativeTargetChunkCount}, "
+                + $"TargetState={negativeTargetChunkState}");
             AssertDeveloperVisualizationUsesAbsoluteCoordinates(
                 developerVisualization,
                 cameraPanController,
@@ -2850,6 +2926,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     break;
                 }
 
+                // 再生成Jobと固定Tick公開へ処理時間を渡し、EditorとBatchModeで同じ待機契約にします。
+                System.Threading.Thread.Sleep(1);
                 yield return null;
             }
 
@@ -2920,6 +2998,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     break;
                 }
 
+                // 遠方の液体チャンクも固定Tickで生成を投入するため、BatchModeではWorkerとTickへ最低限の実時間を渡します。
+                System.Threading.Thread.Sleep(1);
                 yield return null;
             }
 
@@ -2958,7 +3038,9 @@ namespace Farmware.WorldGeneration.PlayModeTests
             int matchingCount = 0;
             for (int index = 0; index < coordinates.Length; index++)
             {
-                if (coordinates[index].X == chunkX && coordinates[index].Y == chunkY)
+                if (coordinates[index].Layer == WorldLayer.Surface
+                    && coordinates[index].X == chunkX
+                    && coordinates[index].Y == chunkY)
                 {
                     matchingCount++;
                 }
@@ -3067,7 +3149,9 @@ namespace Farmware.WorldGeneration.PlayModeTests
 
             for (int index = 0; index < coordinates.Length; index++)
             {
-                if (coordinates[index].X == chunkX && coordinates[index].Y == chunkY)
+                if (coordinates[index].Layer == WorldLayer.Surface
+                    && coordinates[index].X == chunkX
+                    && coordinates[index].Y == chunkY)
                 {
                     return true;
                 }
@@ -3144,7 +3228,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
 
             for (int index = 0; index < entities.Length; index++)
             {
-                if (coordinates[index].X != chunkX
+                if (coordinates[index].Layer != WorldLayer.Surface
+                    || coordinates[index].X != chunkX
                     || coordinates[index].Y != chunkY
                     || statuses[index].Phase != ChunkGenerationPhase.Active)
                 {
@@ -3164,6 +3249,63 @@ namespace Farmware.WorldGeneration.PlayModeTests
 
             chunkEntity = Entity.Null;
             return false;
+        }
+
+        /// <summary>
+        /// 失敗メッセージ用に、指定した地上チャンクの生成段階とBuffer件数を文字列へまとめます。
+        /// 通常の成功経路ではAssertion本文に表示されず、Simulation状態は変更しません。
+        /// </summary>
+        /// <param name="entityManager">チャンクEntityとBufferを所有するDefault Worldです。</param>
+        /// <param name="chunkQuery">座標、状態、地形・資源Bufferを持つチャンクQueryです。</param>
+        /// <param name="chunkX">調べる水平論理チャンク座標です。</param>
+        /// <param name="chunkY">調べる垂直論理チャンク座標です。</param>
+        /// <returns>該当Entityの生成段階とBuffer長、またはmissingです。</returns>
+        private static string DescribeSurfaceChunkState(
+            EntityManager entityManager,
+            EntityQuery chunkQuery,
+            int chunkX,
+            int chunkY)
+        {
+            using NativeArray<Entity> entities = chunkQuery.ToEntityArray(Allocator.Temp);
+            using NativeArray<ChunkCoordinateComponent> coordinates =
+                chunkQuery.ToComponentDataArray<ChunkCoordinateComponent>(Allocator.Temp);
+            using NativeArray<ChunkGenerationStatus> statuses =
+                chunkQuery.ToComponentDataArray<ChunkGenerationStatus>(Allocator.Temp);
+            int queuedCount = 0;
+            int generatingCount = 0;
+            int readyOrActiveCount = 0;
+            string targetState = "missing";
+            for (int index = 0; index < entities.Length; index++)
+            {
+                if (statuses[index].Phase == ChunkGenerationPhase.Queued)
+                {
+                    queuedCount++;
+                }
+                else if (statuses[index].Phase == ChunkGenerationPhase.GeneratingData)
+                {
+                    generatingCount++;
+                }
+                else if (statuses[index].Phase == ChunkGenerationPhase.ReadyToApply
+                    || statuses[index].Phase == ChunkGenerationPhase.Active)
+                {
+                    readyOrActiveCount++;
+                }
+
+                if (coordinates[index].Layer != WorldLayer.Surface
+                    || coordinates[index].X != chunkX
+                    || coordinates[index].Y != chunkY)
+                {
+                    continue;
+                }
+
+                int terrainCount = entityManager.GetBuffer<GeneratedTile>(entities[index], true).Length;
+                int resourceCount =
+                    entityManager.GetBuffer<GeneratedResourceTile>(entities[index], true).Length;
+                targetState =
+                    $"{statuses[index].Phase}/terrain={terrainCount}/resources={resourceCount}";
+            }
+
+            return $"{targetState}; totals=queued:{queuedCount},generating:{generatingCount},readyOrActive:{readyOrActiveCount}";
         }
 
         /// <summary>

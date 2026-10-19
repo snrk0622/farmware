@@ -135,6 +135,31 @@ namespace Farmware.Tests.EditMode
         }
 
         /// <summary>
+        /// 同じ地域座標と受付順を異なるWorldLayer相当のScopeへ分け、重複拒否せずScope順にIDを発行することを保証します。
+        /// </summary>
+        [Test]
+        public void TryAllocateBatch_SameKeysDifferentScopes_DoNotCollide()
+        {
+            PersistentIdAllocationRequest underwater = CreateRequest(-2, 5, 10, scopeOrder: 2);
+            PersistentIdAllocationRequest surface = CreateRequest(-2, 5, 10, scopeOrder: 1);
+            using NativeArray<PersistentIdAllocationRequest> requests =
+                new NativeArray<PersistentIdAllocationRequest>(
+                    new[] { underwater, surface },
+                    Allocator.Temp);
+            using NativeArray<PersistentIdAssignment> assignments =
+                new NativeArray<PersistentIdAssignment>(2, Allocator.Temp);
+            PersistentIdAllocatorState state = PersistentIdAllocatorState.CreateInitial();
+
+            Assert.That(
+                PersistentIdAllocator.TryAllocateBatch(ref state, requests, assignments),
+                Is.True);
+            Assert.That(assignments[0].Request.ScopeOrder, Is.EqualTo(1));
+            Assert.That(assignments[0].Id.Value, Is.EqualTo(1ul));
+            Assert.That(assignments[1].Request.ScopeOrder, Is.EqualTo(2));
+            Assert.That(assignments[1].Id.Value, Is.EqualTo(2ul));
+        }
+
+        /// <summary>
         /// 重複した安定キーまたは残数を越える一括要求を、IDを一部消費せず全体として拒否することを保証します。
         /// </summary>
         [Test]
@@ -280,19 +305,22 @@ namespace Farmware.Tests.EditMode
         }
 
         /// <summary>
-        /// 一括発行テストで使う3段階の安定キーを、各値が分かる形で作成します。
+        /// 一括発行テストで使う4段階の安定キーを、各値が分かる形で作成します。
         /// </summary>
-        /// <param name="majorOrder">最初に比較する地域やCommand分類相当の値です。</param>
-        /// <param name="minorOrder">次に比較する地域やオブジェクト分類相当の値です。</param>
+        /// <param name="majorOrder">Scopeの後に比較する地域やCommand分類相当の値です。</param>
+        /// <param name="minorOrder">Majorの後に比較する地域やオブジェクト分類相当の値です。</param>
         /// <param name="sequence">最後に比較する一意な受付順です。</param>
+        /// <param name="scopeOrder">WorldLayerなど、同じ座標空間を分離する最優先の範囲値です。</param>
         /// <returns>指定値を保持する生成要求です。</returns>
         private static PersistentIdAllocationRequest CreateRequest(
             long majorOrder,
             long minorOrder,
-            ulong sequence)
+            ulong sequence,
+            long scopeOrder = 0)
         {
             return new PersistentIdAllocationRequest
             {
+                ScopeOrder = scopeOrder,
                 MajorOrder = majorOrder,
                 MinorOrder = minorOrder,
                 Sequence = sequence

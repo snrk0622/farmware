@@ -22,6 +22,10 @@
                     <ui:Label text="表示" class="compact-label" />
                     <ui:DropdownField name="viewModeField" class="mode-field" />
                 </ui:VisualElement>
+                <ui:VisualElement class="mode-control">
+                    <ui:Label text="Layer" class="compact-label" />
+                    <ui:DropdownField name="layerField" class="mode-field" />
+                </ui:VisualElement>
                 <ui:Toggle name="gridToggle" label="Grid" value="true" class="grid-toggle" />
                 <ui:Button name="goButton" text="移動・再生成" class="primary-button" />
                 <ui:Button name="reloadSettingsButton" text="実設定を再読込" />

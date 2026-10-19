@@ -1,6 +1,7 @@
 // このファイルは、プレイヤーがF3で現在・初期スポーン座標、F4で各グリッド境界と初期スポーン位置を表示できるようにします。
 // ゲーム状態を変更しない診断表示として製品版でも利用でき、開発者専用のノイズ可視化とは入力と責務を分離します。
 
+using Farmware.Simulation;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
@@ -134,6 +135,9 @@ namespace Farmware.WorldGeneration.Presentation
 
         // F3へGeneratorVersionとワールドシードを表示するため、生成設定Singletonだけを読み取るQueryです。
         private EntityQuery generationSettingsQuery;
+
+        // F3とF4が現在表示中の論理レイヤーをTransform Zから推測せず、Simulation入力と同じ値から読むためのQueryです。
+        private EntityQuery streamingObserverQuery;
 
         // F3へ現在タイルのBiomeを表示するため、生成済みチャンク座標・状態・地形Bufferを読むQueryです。
         private EntityQuery generatedChunkQuery;
@@ -441,9 +445,11 @@ namespace Farmware.WorldGeneration.Presentation
                 out InitialSpawnSearchStatus spawnSearchStatus);
             bool hasGenerationSettings = TryGetWorldGenerationSettings(
                 out WorldGenerationSettings generationSettings);
-            bool hasBiome = TryGetCurrentTileBiome(tile, out BiomeId biome);
+            WorldLayer layer = GetCurrentWorldLayer();
+            bool hasBiome = TryGetCurrentTileBiome(layer, tile, out BiomeId biome);
             string text = BuildCoordinateHudText(
                 absoluteWorldPosition,
+                layer,
                 tile,
                 hasSpawnLocation,
                 spawnLocation,
@@ -454,7 +460,7 @@ namespace Farmware.WorldGeneration.Presentation
                 hasBiome,
                 biome);
 
-            const int textLineCount = 10;
+            const int textLineCount = 11;
             const float panelWidth = 420f;
             const float horizontalPadding = 8f;
             const float verticalPadding = 6f;
@@ -489,7 +495,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="generationSettings">現在のWorldが保持する生成設定です。未準備時は表示に使用しません。</param>
         /// <param name="hasBiome">現在タイルの生成済みBiomeを読めた場合はtrueです。</param>
         /// <param name="biome">現在タイルの論理Biomeです。未生成時は表示に使用しません。</param>
-        /// <returns>見出しを含む10行のF3座標HUD文字列です。</returns>
+        /// <returns>互換用のSurfaceレイヤーを含む、見出し込み11行のF3座標HUD文字列です。</returns>
         public static string BuildCoordinateHudText(
             double2 absoluteWorldPosition,
             Vector3Int tile,
@@ -502,7 +508,49 @@ namespace Farmware.WorldGeneration.Presentation
             bool hasBiome,
             BiomeId biome)
         {
-            ChunkCoordinate chunk = WorldGrid.ToChunkCoordinate(tile.x, tile.y);
+            return BuildCoordinateHudText(
+                absoluteWorldPosition,
+                WorldLayer.Surface,
+                tile,
+                hasSpawnLocation,
+                spawnLocation,
+                hasSpawnSearchStatus,
+                spawnSearchStatus,
+                hasGenerationSettings,
+                generationSettings,
+                hasBiome,
+                biome);
+        }
+
+        /// <summary>
+        /// 現在のレイヤー、座標、生成済みBiome、生成互換情報、記録済み初期スポーンをF3表示用文字列へまとめます。
+        /// </summary>
+        /// <param name="absoluteWorldPosition">現在のカメラ中心の絶対ワールドXY座標です。</param>
+        /// <param name="layer">現在表示している固定ワールドレイヤーです。</param>
+        /// <param name="tile">現在のカメラ中心タイル座標です。</param>
+        /// <param name="hasSpawnLocation">初期スポーン探索が完了し、記録済み座標を渡せる場合はtrueです。</param>
+        /// <param name="spawnLocation">記録済みの初期スポーン座標です。未完了時は表示に使用しません。</param>
+        /// <param name="hasSpawnSearchStatus">初期スポーン探索状態Singletonを読み取れた場合はtrueです。</param>
+        /// <param name="spawnSearchStatus">現在の探索段階です。失敗時の代替カメラ位置表示に使用します。</param>
+        /// <param name="hasGenerationSettings">生成設定Singletonからバージョンとシードを読めた場合はtrueです。</param>
+        /// <param name="generationSettings">現在のWorldが保持する生成設定です。未準備時は表示に使用しません。</param>
+        /// <param name="hasBiome">現在タイルの生成済みBiomeを読めた場合はtrueです。</param>
+        /// <param name="biome">現在タイルの論理Biomeです。未生成時は表示に使用しません。</param>
+        /// <returns>見出しを含む11行のF3座標HUD文字列です。</returns>
+        public static string BuildCoordinateHudText(
+            double2 absoluteWorldPosition,
+            WorldLayer layer,
+            Vector3Int tile,
+            bool hasSpawnLocation,
+            InitialSpawnLocation spawnLocation,
+            bool hasSpawnSearchStatus,
+            InitialSpawnSearchStatus spawnSearchStatus,
+            bool hasGenerationSettings,
+            WorldGenerationSettings generationSettings,
+            bool hasBiome,
+            BiomeId biome)
+        {
+            ChunkCoordinate chunk = WorldGrid.ToChunkCoordinate(layer, tile.x, tile.y);
             ChunkLocalTileCoordinate local = WorldGrid.ToLocalTileCoordinate(tile.x, tile.y);
             SubChunkCoordinate subChunk = WorldGrid.ToSubChunkCoordinate(local.X, local.Y);
             string biomeText = hasBiome ? biome.ToString() : "Loading...";
@@ -516,9 +564,10 @@ namespace Farmware.WorldGeneration.Presentation
             if (hasSpawnLocation)
             {
                 ChunkCoordinate spawnChunk = WorldGrid.ToChunkCoordinate(
+                    spawnLocation.Layer,
                     spawnLocation.TileX,
                     spawnLocation.TileY);
-                spawnText = $"Spawn: Tile ({spawnLocation.TileX}, {spawnLocation.TileY})"
+                spawnText = $"Spawn: {spawnLocation.Layer} Tile ({spawnLocation.TileX}, {spawnLocation.TileY})"
                     + $" / Chunk ({spawnChunk.X}, {spawnChunk.Y})";
             }
             else if (hasSpawnSearchStatus
@@ -529,6 +578,7 @@ namespace Farmware.WorldGeneration.Presentation
             }
 
             return $"F3  Coordinates\n"
+                + $"Layer : {layer}\n"
                 + $"World : ({absoluteWorldPosition.x:0.###}, {absoluteWorldPosition.y:0.###})\n"
                 + $"Tile  : ({tile.x}, {tile.y})\n"
                 + $"Chunk : ({chunk.X}, {chunk.Y})\n"
@@ -549,6 +599,7 @@ namespace Farmware.WorldGeneration.Presentation
         public static RectInt CalculateInitialSpawnChunkTileBounds(InitialSpawnLocation spawnLocation)
         {
             ChunkCoordinate spawnChunk = WorldGrid.ToChunkCoordinate(
+                spawnLocation.Layer,
                 spawnLocation.TileX,
                 spawnLocation.TileY);
             return new RectInt(
@@ -635,13 +686,31 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
+        /// Simulationへ送られているストリーミング入力から、現在表示中の固定ワールドレイヤーを取得します。
+        /// Scene移行中や旧テストWorldでObserverがない場合は、従来どおりSurfaceを表示します。
+        /// </summary>
+        /// <returns>有効なObserverのレイヤー、または互換用のSurfaceです。</returns>
+        private WorldLayer GetCurrentWorldLayer()
+        {
+            if (!TryEnsureDiagnosticQueries()
+                || streamingObserverQuery.CalculateEntityCount() != 1)
+            {
+                return WorldLayer.Surface;
+            }
+
+            WorldLayer layer = streamingObserverQuery.GetSingleton<ChunkStreamingObserver>().Layer;
+            return WorldLayerUtility.IsPlayable(layer) ? layer : WorldLayer.Surface;
+        }
+
+        /// <summary>
         /// 現在タイルを含む生成済みチャンクのGeneratedTile Bufferから、論理Biomeを読み取ります。
         /// 同じ64×64チャンク内ではEntityを再利用し、F3表示中に全チャンク配列を毎フレーム確保しないようにします。
         /// </summary>
+        /// <param name="layer">検索する固定ワールドレイヤーです。</param>
         /// <param name="tile">Biomeを調べる符号付きワールドタイル座標です。</param>
         /// <param name="biome">成功時に、Simulationが生成した現在タイルのBiomeを返します。</param>
         /// <returns>生成完了済みの4096タイルBufferからBiomeを読めた場合はtrueです。</returns>
-        private bool TryGetCurrentTileBiome(Vector3Int tile, out BiomeId biome)
+        private bool TryGetCurrentTileBiome(WorldLayer layer, Vector3Int tile, out BiomeId biome)
         {
             biome = default;
             if (!TryEnsureDiagnosticQueries())
@@ -649,7 +718,7 @@ namespace Farmware.WorldGeneration.Presentation
                 return false;
             }
 
-            ChunkCoordinate requestedChunk = WorldGrid.ToChunkCoordinate(tile.x, tile.y);
+            ChunkCoordinate requestedChunk = WorldGrid.ToChunkCoordinate(layer, tile.x, tile.y);
             EntityManager entityManager = diagnosticWorld.EntityManager;
             if (!hasCachedGeneratedChunk
                 || !cachedGeneratedChunkCoordinate.Equals(requestedChunk)
@@ -665,7 +734,9 @@ namespace Farmware.WorldGeneration.Presentation
                 for (int index = 0; index < entities.Length; index++)
                 {
                     ChunkCoordinateComponent coordinate = coordinates[index];
-                    if (coordinate.X != requestedChunk.X || coordinate.Y != requestedChunk.Y)
+                    if (coordinate.Layer != requestedChunk.Layer
+                        || coordinate.X != requestedChunk.X
+                        || coordinate.Y != requestedChunk.Y)
                     {
                         continue;
                     }
@@ -730,6 +801,8 @@ namespace Farmware.WorldGeneration.Presentation
                 ComponentType.ReadOnly<InitialSpawnSearchStatus>());
             generationSettingsQuery = entityManager.CreateEntityQuery(
                 ComponentType.ReadOnly<WorldGenerationSettings>());
+            streamingObserverQuery = entityManager.CreateEntityQuery(
+                ComponentType.ReadOnly<ChunkStreamingObserver>());
             generatedChunkQuery = entityManager.CreateEntityQuery(
                 ComponentType.ReadOnly<ChunkCoordinateComponent>(),
                 ComponentType.ReadOnly<ChunkGenerationStatus>(),
@@ -751,6 +824,7 @@ namespace Farmware.WorldGeneration.Presentation
                 spawnLocationQuery.Dispose();
                 spawnSearchStatusQuery.Dispose();
                 generationSettingsQuery.Dispose();
+                streamingObserverQuery.Dispose();
                 generatedChunkQuery.Dispose();
             }
 
@@ -758,6 +832,7 @@ namespace Farmware.WorldGeneration.Presentation
             spawnLocationQuery = default;
             spawnSearchStatusQuery = default;
             generationSettingsQuery = default;
+            streamingObserverQuery = default;
             generatedChunkQuery = default;
             diagnosticQueriesAreCreated = false;
             cachedGeneratedChunkEntity = Entity.Null;
@@ -771,9 +846,10 @@ namespace Farmware.WorldGeneration.Presentation
         private void DrawVisibleChunkGrid()
         {
             VisibleGridBounds bounds = CalculateVisibleGridBounds();
+            WorldLayer currentLayer = GetCurrentWorldLayer();
             bool hasSpawnLocation = TryGetInitialSpawnLocation(out InitialSpawnLocation spawnLocation);
             ChunkCoordinate spawnChunk = hasSpawnLocation
-                ? WorldGrid.ToChunkCoordinate(spawnLocation.TileX, spawnLocation.TileY)
+                ? WorldGrid.ToChunkCoordinate(spawnLocation.Layer, spawnLocation.TileX, spawnLocation.TileY)
                 : default;
             long chunkCountX = (long)bounds.MaximumChunkX - bounds.MinimumChunkX + 1L;
             long chunkCountY = (long)bounds.MaximumChunkY - bounds.MinimumChunkY + 1L;
@@ -832,7 +908,7 @@ namespace Farmware.WorldGeneration.Presentation
                 chunkBoundaryThicknessInPixels);
 
             // 通常グリッドの後から赤系マーカーを重ね、同じ境界座標でもスポーン側の線を手前に表示します。
-            if (hasSpawnLocation)
+            if (hasSpawnLocation && spawnLocation.Layer == currentLayer)
             {
                 DrawInitialSpawnMarkers(spawnLocation);
             }
@@ -842,6 +918,7 @@ namespace Farmware.WorldGeneration.Presentation
                 for (int chunkX = bounds.MinimumChunkX; chunkX <= bounds.MaximumChunkX; chunkX++)
                 {
                     bool isInitialSpawnChunk = hasSpawnLocation
+                        && spawnLocation.Layer == currentLayer
                         && chunkX == spawnChunk.X
                         && chunkY == spawnChunk.Y;
                     DrawChunkCoordinateLabel(chunkX, chunkY, isInitialSpawnChunk);

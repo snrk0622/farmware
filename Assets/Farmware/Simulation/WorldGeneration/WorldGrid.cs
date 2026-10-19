@@ -2,9 +2,83 @@
 // 生成Systemと表示側が同じ変換を使うことで、特に負座標のチャンク境界で食い違いが起きないようにします。
 
 using System;
+using Farmware.Simulation;
 
 namespace Farmware.WorldGeneration
 {
+    /// <summary>
+    /// 固定ワールドレイヤーと絶対タイルX/Yをまとめた、1セルの安定した論理座標です。
+    /// 地形差分、占有、個体位置、診断表示が同じX/Yの別レイヤーを混同しないために使用します。
+    /// </summary>
+    public readonly struct WorldTileCoordinate : IEquatable<WorldTileCoordinate>
+    {
+        /// <summary>セルが属する固定ワールドレイヤーです。通常状態ではNoneを使用しません。</summary>
+        public readonly WorldLayer Layer;
+
+        /// <summary>水平方向の絶対タイル座標です。ワールド原点より左では負になります。</summary>
+        public readonly int X;
+
+        /// <summary>垂直方向の絶対タイル座標です。ワールド原点より下では負になります。</summary>
+        public readonly int Y;
+
+        /// <summary>
+        /// レイヤーと絶対X/Yから論理セル座標を作ります。
+        /// </summary>
+        /// <param name="layer">セルが属する固定ワールドレイヤーです。</param>
+        /// <param name="x">水平方向の絶対タイル座標です。</param>
+        /// <param name="y">垂直方向の絶対タイル座標です。</param>
+        public WorldTileCoordinate(WorldLayer layer, int x, int y)
+        {
+            Layer = layer;
+            X = x;
+            Y = y;
+        }
+
+        /// <summary>
+        /// 2つのセル座標が同じレイヤーと絶対X/Yを表すか判定します。
+        /// </summary>
+        /// <param name="other">比較するセル座標です。</param>
+        /// <returns>Layer、X、Yがすべて同じ場合はtrueです。</returns>
+        public bool Equals(WorldTileCoordinate other)
+        {
+            return Layer == other.Layer && X == other.X && Y == other.Y;
+        }
+
+        /// <summary>
+        /// オブジェクトが同じセル座標か判定します。
+        /// </summary>
+        /// <param name="obj">比較対象です。</param>
+        /// <returns>同じWorldTileCoordinate値ならtrueです。</returns>
+        public override bool Equals(object obj)
+        {
+            return obj is WorldTileCoordinate other && Equals(other);
+        }
+
+        /// <summary>
+        /// Dictionary等の実行時検索に使う、レイヤーを含むハッシュ値を返します。
+        /// セーブIDや生成乱数には使用せず、決定論的生成はWorldSeedUtilityを使用します。
+        /// </summary>
+        /// <returns>Layer、X、Yから求めた32bitハッシュです。</returns>
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                int hash = (int)Layer;
+                hash = (hash * 397) ^ X;
+                return (hash * 397) ^ Y;
+            }
+        }
+
+        /// <summary>
+        /// デバッグ表示用にレイヤーと絶対座標を返します。
+        /// </summary>
+        /// <returns>「Layer:(X, Y)」形式の文字列です。</returns>
+        public override string ToString()
+        {
+            return $"{Layer}:({X}, {Y})";
+        }
+    }
+
     /// <summary>
     /// ワールド生成で固定して扱うグリッド寸法をまとめます。
     /// 生成処理、セーブ差分、表示更新のすべてが同じ値を参照します。
@@ -45,6 +119,9 @@ namespace Farmware.WorldGeneration
     /// </summary>
     public readonly struct ChunkCoordinate : IEquatable<ChunkCoordinate>
     {
+        /// <summary>チャンクが属する固定ワールドレイヤーです。通常状態ではNoneを使用しません。</summary>
+        public readonly WorldLayer Layer;
+
         /// <summary>水平方向の論理チャンク座標です。ワールド原点より左では負になります。</summary>
         public readonly int X;
 
@@ -52,12 +129,25 @@ namespace Farmware.WorldGeneration
         public readonly int Y;
 
         /// <summary>
-        /// 指定した2軸の値から論理チャンク座標を作ります。
+        /// Surfaceレイヤーと指定した2軸の値から論理チャンク座標を作ります。
+        /// WORLD-01C以前の地上専用呼び出しを安全に移行する互換入口であり、新規の多層処理はLayerを明示するコンストラクターを使います。
         /// </summary>
         /// <param name="x">水平方向の論理チャンク座標です。</param>
         /// <param name="y">垂直方向の論理チャンク座標です。</param>
         public ChunkCoordinate(int x, int y)
+            : this(WorldLayer.Surface, x, y)
         {
+        }
+
+        /// <summary>
+        /// 固定ワールドレイヤーと2軸の値から論理チャンク座標を作ります。
+        /// </summary>
+        /// <param name="layer">チャンクが属する固定ワールドレイヤーです。</param>
+        /// <param name="x">水平方向の論理チャンク座標です。</param>
+        /// <param name="y">垂直方向の論理チャンク座標です。</param>
+        public ChunkCoordinate(WorldLayer layer, int x, int y)
+        {
+            Layer = layer;
             X = x;
             Y = y;
         }
@@ -66,10 +156,10 @@ namespace Farmware.WorldGeneration
         /// 2つのチャンク座標が同じ位置を表すか判定します。
         /// </summary>
         /// <param name="other">比較するチャンク座標です。</param>
-        /// <returns>XとYが両方同じ場合はtrueです。</returns>
+        /// <returns>Layer、X、Yがすべて同じ場合はtrueです。</returns>
         public bool Equals(ChunkCoordinate other)
         {
-            return X == other.X && Y == other.Y;
+            return Layer == other.Layer && X == other.X && Y == other.Y;
         }
 
         /// <summary>
@@ -91,17 +181,19 @@ namespace Farmware.WorldGeneration
         {
             unchecked
             {
-                return (X * 397) ^ Y;
+                int hash = (int)Layer;
+                hash = (hash * 397) ^ X;
+                return (hash * 397) ^ Y;
             }
         }
 
         /// <summary>
         /// デバッグ表示用に読みやすい座標文字列を返します。
         /// </summary>
-        /// <returns>「(X, Y)」形式の文字列です。</returns>
+        /// <returns>「Layer:(X, Y)」形式の文字列です。</returns>
         public override string ToString()
         {
-            return $"({X}, {Y})";
+            return $"{Layer}:({X}, {Y})";
         }
     }
 
@@ -189,9 +281,33 @@ namespace Farmware.WorldGeneration
         /// <returns>対象タイルを含む64×64論理チャンクの座標です。</returns>
         public static ChunkCoordinate ToChunkCoordinate(int tileX, int tileY)
         {
+            return ToChunkCoordinate(WorldLayer.Surface, tileX, tileY);
+        }
+
+        /// <summary>
+        /// レイヤー付きワールドタイル座標から、そのタイルを所有する論理チャンク座標を求めます。
+        /// X/Yの変換規則は全レイヤー共通ですが、戻り値へLayerを保持して別層の索引衝突を防ぎます。
+        /// </summary>
+        /// <param name="layer">タイルが属する固定ワールドレイヤーです。</param>
+        /// <param name="tileX">符号付きのワールド水平タイル座標です。</param>
+        /// <param name="tileY">符号付きのワールド垂直タイル座標です。</param>
+        /// <returns>対象タイルを含むレイヤー付き64×64論理チャンク座標です。</returns>
+        public static ChunkCoordinate ToChunkCoordinate(WorldLayer layer, int tileX, int tileY)
+        {
             return new ChunkCoordinate(
+                layer,
                 FloorDivide(tileX, WorldGridConstants.LogicalChunkSize),
                 FloorDivide(tileY, WorldGridConstants.LogicalChunkSize));
+        }
+
+        /// <summary>
+        /// レイヤー付きセル座標から、そのセルを所有する論理チャンク座標を求めます。
+        /// </summary>
+        /// <param name="tile">変換するレイヤー付き絶対セル座標です。</param>
+        /// <returns>同じレイヤーを保持する論理チャンク座標です。</returns>
+        public static ChunkCoordinate ToChunkCoordinate(in WorldTileCoordinate tile)
+        {
+            return ToChunkCoordinate(tile.Layer, tile.X, tile.Y);
         }
 
         /// <summary>

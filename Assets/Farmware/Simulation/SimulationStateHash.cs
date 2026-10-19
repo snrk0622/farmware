@@ -14,8 +14,11 @@ namespace Farmware.Simulation
     /// </summary>
     public static class SimulationStateHashSchema
     {
-        /// <summary>SIM-01Fで導入する最初の状態ハッシュ形式です。</summary>
-        public const uint CurrentVersion = 1;
+        /// <summary>
+        /// WORLD-01Cで動物地域・個体位置へWorldLayerを書き込むよう更新した状態ハッシュ形式です。
+        /// Version 1とは入力フィールド順が異なるため、古い結果との誤比較を避けて2へ増やしています。
+        /// </summary>
+        public const uint CurrentVersion = 2;
 
         /// <summary>
         /// 機能固有セクションへ割り当てられる最初のIDです。

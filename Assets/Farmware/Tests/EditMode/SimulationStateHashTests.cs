@@ -255,7 +255,7 @@ namespace Farmware.Tests.EditMode
 
             Assert.That(first, Is.EqualTo(same));
             Assert.That(first, Is.Not.EqualTo(changed));
-            Assert.That(first.SchemaVersion, Is.EqualTo(1u));
+            Assert.That(first.SchemaVersion, Is.EqualTo(2u));
             Assert.That(first.ToString().Length, Is.EqualTo(32));
         }
 

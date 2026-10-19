@@ -990,7 +990,10 @@ namespace Farmware.WorldGeneration.Presentation
             {
                 for (int index = 0; index < entities.Length; index++)
                 {
-                    ChunkCoordinate coordinate = new ChunkCoordinate(coordinates[index].X, coordinates[index].Y);
+                    ChunkCoordinate coordinate = new ChunkCoordinate(
+                        coordinates[index].Layer,
+                        coordinates[index].X,
+                        coordinates[index].Y);
                     bool isVisible = Contains(observer, coordinate, 0);
                     if (isVisible != (pass == 0))
                     {
@@ -2371,7 +2374,8 @@ namespace Farmware.WorldGeneration.Presentation
             long maximumX = (long)Mathf.Max(observer.MinimumVisibleChunkX, observer.MaximumVisibleChunkX) + margin;
             long minimumY = (long)Mathf.Min(observer.MinimumVisibleChunkY, observer.MaximumVisibleChunkY) - margin;
             long maximumY = (long)Mathf.Max(observer.MinimumVisibleChunkY, observer.MaximumVisibleChunkY) + margin;
-            return coordinate.X >= minimumX
+            return coordinate.Layer == observer.Layer
+                && coordinate.X >= minimumX
                 && coordinate.X <= maximumX
                 && coordinate.Y >= minimumY
                 && coordinate.Y <= maximumY;

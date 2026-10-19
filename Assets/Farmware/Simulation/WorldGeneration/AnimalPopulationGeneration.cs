@@ -15,6 +15,9 @@ namespace Farmware.WorldGeneration.Animals
     /// </summary>
     public struct AnimalSpawnCandidate
     {
+        /// <summary>候補を所有する地域と個体が属する固定ワールドレイヤーです。</summary>
+        public WorldLayer Layer;
+
         /// <summary>候補を所有する64×64地域の水平論理チャンク座標です。</summary>
         public int RegionX;
 
@@ -73,11 +76,41 @@ namespace Farmware.WorldGeneration.Animals
             int regionX,
             int regionY)
         {
+            return CreateInitialRegionState(
+                populationSeed,
+                WorldLayer.Surface,
+                regionX,
+                regionY);
+        }
+
+        /// <summary>
+        /// ワールド固有Seed、固定レイヤー、地域座標から保存可能な初回抽選状態を作ります。
+        /// SurfaceはANIMAL-01B時点の抽選列を維持し、別レイヤーだけに追加の混合を行います。
+        /// </summary>
+        /// <param name="populationSeed">地形Seedとは独立した、新規ワールド固有のSeedです。</param>
+        /// <param name="layer">地域が属する固定ワールドレイヤーです。</param>
+        /// <param name="regionX">64×64地域の水平論理チャンク座標です。</param>
+        /// <param name="regionY">64×64地域の垂直論理チャンク座標です。</param>
+        /// <returns>レイヤー付き未初期化地域へ設定する乱数状態と1始まりの受付順です。</returns>
+        public static AnimalPopulationRegionState CreateInitialRegionState(
+            AnimalPopulationSeed populationSeed,
+            WorldLayer layer,
+            int regionX,
+            int regionY)
+        {
             ulong state = Mix(populationSeed.Value ^ 0x9E3779B97F4A7C15UL);
             state = Mix(state ^ unchecked((ulong)(long)regionX));
             state = Mix(state ^ unchecked((ulong)(long)regionY) ^ 0xD1B54A32D192ED03UL);
+
+            // 地上の既存ワールド結果は変えず、海中・深海だけが同X/Yと異なる抽選列を持つようにします。
+            if (layer != WorldLayer.Surface)
+            {
+                state = Mix(state ^ ((ulong)(byte)layer * 0x94D049BB133111EBUL));
+            }
+
             return new AnimalPopulationRegionState
             {
+                Layer = layer,
                 RegionX = regionX,
                 RegionY = regionY,
                 RandomState = state,
@@ -108,6 +141,7 @@ namespace Farmware.WorldGeneration.Animals
                 || !resources.IsCreated
                 || resources.Length != tiles.Length
                 || regionState.NextSpawnSequence == 0
+                || !WorldLayerUtility.IsPlayable(regionState.Layer)
                 || !candidates.IsCreated)
             {
                 return false;
@@ -889,6 +923,7 @@ namespace Farmware.WorldGeneration.Animals
             int localY = localTileIndex / WorldGridConstants.LogicalChunkSize;
             candidates.Add(new AnimalSpawnCandidate
             {
+                Layer = regionState.Layer,
                 RegionX = regionState.RegionX,
                 RegionY = regionState.RegionY,
                 SpeciesRuntimeId = species.SpeciesRuntimeId,

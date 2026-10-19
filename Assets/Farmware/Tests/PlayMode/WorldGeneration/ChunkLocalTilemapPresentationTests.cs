@@ -5,6 +5,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
+using Farmware.Simulation;
 using Farmware.WorldGeneration.Presentation;
 using NUnit.Framework;
 using Unity.Entities;
@@ -390,6 +391,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Assert.That(Invoke("TryEnsureQueries"), Is.True);
                 ChunkStreamingObserver observer = new ChunkStreamingObserver
                 {
+                    Layer = WorldLayer.Surface,
                     MinimumVisibleChunkX = center, MaximumVisibleChunkX = center,
                     MinimumVisibleChunkY = center, MaximumVisibleChunkY = center
                 };
@@ -442,7 +444,10 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 manager.SetComponentData(settingsEntity, WorldGenerationSettings.CreateDefault(1UL, 1));
                 Assert.That(Invoke("TryEnsureQueries"), Is.True);
                 Invoke("SynchronizeDisplayOrigin");
-                ChunkStreamingObserver observer = new ChunkStreamingObserver();
+                ChunkStreamingObserver observer = new ChunkStreamingObserver
+                {
+                    Layer = WorldLayer.Surface
+                };
                 Invoke("CollectPresentationWork", observer, true);
                 var progress = (IDictionary)Field("applyProgressByCoordinate").GetValue(presenter);
                 Assert.That(progress.Count, Is.EqualTo(1), "原点変更の同期経路へ余白を含めません。");
@@ -469,7 +474,14 @@ namespace Farmware.WorldGeneration.PlayModeTests
         private static void CreateCompletedChunk(EntityManager manager, int x, int y, ChunkGenerationPhase phase)
         {
             Entity entity = manager.CreateEntity(typeof(ChunkCoordinateComponent), typeof(ChunkGenerationStatus));
-            manager.SetComponentData(entity, new ChunkCoordinateComponent { X = x, Y = y });
+            manager.SetComponentData(
+                entity,
+                new ChunkCoordinateComponent
+                {
+                    Layer = WorldLayer.Surface,
+                    X = x,
+                    Y = y
+                });
             manager.SetComponentData(entity, new ChunkGenerationStatus { Phase = phase });
             manager.AddBuffer<GeneratedTile>(entity).ResizeUninitialized(WorldGridConstants.TilesPerChunk);
             manager.AddBuffer<GeneratedResourceTile>(entity).ResizeUninitialized(WorldGridConstants.TilesPerChunk);
