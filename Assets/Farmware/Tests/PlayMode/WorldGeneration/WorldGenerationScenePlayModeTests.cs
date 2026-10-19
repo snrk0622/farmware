@@ -1561,6 +1561,27 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(magmaBridgePlacementColor, Is.Not.EqualTo(blockedPlacementColor));
             Assert.That(blockedPlacementColor, Is.Not.EqualTo(normalGroundPlacementColor));
 
+            Color animalIneligibleColor =
+                WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                    WorldGenerationDebugVisualizationMode.AnimalPopulation,
+                    forestTransitionTile);
+            Color animalCandidateColor =
+                WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                    WorldGenerationDebugVisualizationMode.AnimalPopulation,
+                    forestTransitionTile,
+                    isAnimalCandidate: true);
+            Color confirmedAnimalColor =
+                WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                    WorldGenerationDebugVisualizationMode.AnimalPopulation,
+                    forestTransitionTile,
+                    isAnimalCandidate: true,
+                    hasConfirmedAnimal: true);
+
+            // 候補地形と確定個体を別色にし、地形条件の欠落と抽選結果の欠落をGameビューで切り分けられるようにします。
+            Assert.That(animalCandidateColor, Is.Not.EqualTo(animalIneligibleColor));
+            Assert.That(confirmedAnimalColor, Is.Not.EqualTo(animalCandidateColor));
+            Assert.That(confirmedAnimalColor, Is.Not.EqualTo(animalIneligibleColor));
+
             Color hiddenColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
                 WorldGenerationDebugVisualizationMode.None,
                 forestTransitionTile);
@@ -2399,7 +2420,12 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 developerVisualization.CurrentMode,
                 Is.EqualTo(WorldGenerationDebugVisualizationMode.TerrainPlacement));
 
-            // 1描画フレームだけ配置属性とF3/F4を有効にし、GUI Style作成、座標変換、凡例、タイル・グリッド描画まで例外なく通します。
+            developerVisualization.SetMode(WorldGenerationDebugVisualizationMode.AnimalPopulation);
+            Assert.That(
+                developerVisualization.CurrentMode,
+                Is.EqualTo(WorldGenerationDebugVisualizationMode.AnimalPopulation));
+
+            // 1描画フレームだけ動物候補・確定位置とF3/F4を有効にし、Query、座標変換、凡例、タイル・グリッド描画まで例外なく通します。
             yield return null;
             developerVisualization.SetMode(WorldGenerationDebugVisualizationMode.None);
             debugOverlay.SetCoordinateHudVisible(false);
@@ -2408,6 +2434,9 @@ namespace Farmware.WorldGeneration.PlayModeTests
             World world = null;
             EntityQuery settingsQuery = default;
             EntityQuery animalCatalogQuery = default;
+            EntityQuery animalPopulationSeedQuery = default;
+            EntityQuery animalRegionQuery = default;
+            EntityQuery wildAnimalQuery = default;
             EntityQuery locationQuery = default;
             EntityQuery chunkQuery = default;
             bool queriesCreated = false;
@@ -2430,6 +2459,17 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     animalCatalogQuery = world.EntityManager.CreateEntityQuery(
                         ComponentType.ReadOnly<DefinitionCatalog>(),
                         ComponentType.ReadOnly<AnimalSpeciesCatalog>());
+                    animalPopulationSeedQuery = world.EntityManager.CreateEntityQuery(
+                        ComponentType.ReadOnly<AnimalPopulationSeed>());
+                    animalRegionQuery = world.EntityManager.CreateEntityQuery(
+                        ComponentType.ReadOnly<AnimalPopulationRegionState>());
+                    wildAnimalQuery = world.EntityManager.CreateEntityQuery(
+                        ComponentType.ReadOnly<WildAnimal>(),
+                        ComponentType.ReadOnly<PersistentObjectId>(),
+                        ComponentType.ReadOnly<AnimalSpecies>(),
+                        ComponentType.ReadOnly<AnimalTilePosition>(),
+                        ComponentType.ReadOnly<AnimalHerdMembership>(),
+                        ComponentType.ReadOnly<AnimalAppearanceVariant>());
                     locationQuery = world.EntityManager.CreateEntityQuery(
                         ComponentType.ReadOnly<InitialSpawnLocation>());
                     chunkQuery = world.EntityManager.CreateEntityQuery(
@@ -2444,6 +2484,9 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 if (queriesCreated
                     && settingsQuery.CalculateEntityCount() == 1
                     && animalCatalogQuery.CalculateEntityCount() == 1
+                    && animalPopulationSeedQuery.CalculateEntityCount() == 1
+                    && animalRegionQuery.CalculateEntityCount() > 0
+                    && wildAnimalQuery.CalculateEntityCount() > 0
                     && locationQuery.CalculateEntityCount() == 1)
                 {
                     initialSpawnLocation = locationQuery.GetSingleton<InitialSpawnLocation>();
@@ -2523,6 +2566,50 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(chickenDefinition.MovementStepIntervalTicks, Is.EqualTo(5));
             Assert.That(chickenDefinition.MaximumWanderDistanceInTiles, Is.EqualTo(8));
             Assert.That(chickenDefinition.AppearanceVariantCount, Is.EqualTo(3));
+
+            // SampleSceneの実際の固定Tickで独立Seed、地域状態、個体Entityまで作られ、静的定義だけで止まっていないことを確認します。
+            AnimalPopulationSeed runtimePopulationSeed =
+                animalPopulationSeedQuery.GetSingleton<AnimalPopulationSeed>();
+            Assert.That(runtimePopulationSeed.IsValid, Is.True);
+            Assert.That(animalRegionQuery.CalculateEntityCount(), Is.GreaterThan(0));
+            Assert.That(wildAnimalQuery.CalculateEntityCount(), Is.GreaterThan(0));
+            using (NativeArray<AnimalSpecies> runtimeSpecies =
+                   wildAnimalQuery.ToComponentDataArray<AnimalSpecies>(Allocator.Temp))
+            using (NativeArray<AnimalHerdMembership> runtimeHerds =
+                   wildAnimalQuery.ToComponentDataArray<AnimalHerdMembership>(Allocator.Temp))
+            using (NativeArray<AnimalTilePosition> runtimePositions =
+                   wildAnimalQuery.ToComponentDataArray<AnimalTilePosition>(Allocator.Temp))
+            using (EntityQuery resourceConfigurationQuery = world.EntityManager.CreateEntityQuery(
+                   ComponentType.ReadOnly<ResourceGenerationSettings>()))
+            {
+                WorldGenerationSettings animalWorldSettings = settingsQuery.GetSingleton<WorldGenerationSettings>();
+                ResourceGenerationSettings animalResourceSettings = resourceConfigurationQuery.GetSingleton<ResourceGenerationSettings>();
+                for (int animalIndex = 0; animalIndex < runtimeSpecies.Length; animalIndex++)
+                {
+                    Assert.That(runtimeSpecies[animalIndex].RuntimeId, Is.EqualTo(chickenRuntimeId));
+                    Assert.That(runtimeHerds[animalIndex].HerdId, Is.GreaterThan(0));
+
+                    // 実際に使用中の設定と絶対座標から優先レイヤーの資源予約を再確認し、Scene上の生成個体との重複を検出します。
+                    AnimalTilePosition animalPosition = runtimePositions[animalIndex];
+                    GeneratedTile animalTerrain = DeterministicChunkGenerator.GenerateTile(
+                        animalWorldSettings, animalPosition.TileX, animalPosition.TileY);
+                    GeneratedResourceTile animalResource = DeterministicResourceGenerator.GenerateResource(
+                        animalWorldSettings, animalResourceSettings, animalTerrain,
+                        animalPosition.TileX, animalPosition.TileY);
+                    Assert.That(animalResource.Type, Is.EqualTo(GeneratedResourceType.None),
+                        "野生動物を地形生成時の資源予約と同じセルへ生成してはいけません。");
+                }
+            }
+
+            // 候補表示もRuntimeと同じ資源予約条件を使用することを、実際にBakeされたカタログで確認します。
+            MethodInfo animalCandidateMethod = typeof(WorldGenerationDebugVisualizationOverlay).GetMethod(
+                "IsEligibleForAnyAnimalSpecies", BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.That(animalCandidateMethod, Is.Not.Null);
+            GeneratedTile candidateTerrain = new GeneratedTile { Biome = BiomeId.Grassland, Ground = GroundType.Land };
+            Assert.That(animalCandidateMethod.Invoke(null, new object[]
+                { candidateTerrain, new GeneratedResourceTile { Type = GeneratedResourceType.Tree }, runtimeAnimalCatalog.Value }), Is.False);
+            Assert.That(animalCandidateMethod.Invoke(null, new object[]
+                { candidateTerrain, default(GeneratedResourceTile), runtimeAnimalCatalog.Value }), Is.True);
             int2 initialDisplayOrigin =
                 cameraPanController.CurrentDisplayOrigin.AbsoluteTileCoordinate;
             int originalResourceAbsoluteTileX = initialDisplayOrigin.x + originalResourceCell.x;
@@ -2849,6 +2936,9 @@ namespace Farmware.WorldGeneration.PlayModeTests
             {
                 settingsQuery.Dispose();
                 animalCatalogQuery.Dispose();
+                animalPopulationSeedQuery.Dispose();
+                animalRegionQuery.Dispose();
+                wildAnimalQuery.Dispose();
                 locationQuery.Dispose();
                 chunkQuery.Dispose();
             }

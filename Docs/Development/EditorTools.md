@@ -1,6 +1,6 @@
 # Unity Editorツール
 
-- 最終更新日: 2026-10-17
+- 最終更新日: 2026-10-19
 - 対象: `Assets/Farmware/Editor/WorldGeneration/`
 
 ## 1. 用途
@@ -71,6 +71,10 @@ Profilerでは、全体の`Farmware.WorldGeneration.TilemapPresentation`と原�
 
 生成の非同期公開比較では、`ChunkGenerationPublish`が完了確認後のECSコピー、`ChunkGenerationSchedule`が作業枠確保・Job投入を計測する。接頭辞はいずれも`Farmware.WorldGeneration.`である。`PresentationWorkCollection`と`ChunkStreaming`も同時に確認し、生成Jobの待ちが別の区間へ移っていないことを調べる。Workerの生成は`GenerateChunkJob (Burst)`で確認する。開発者可視化は従来どおり`ReadyToApply`／`Active`の完成Bufferだけを読むため、生成中の作業配列は表示しない。新規メニューやプレイヤー用キーは追加しない。
 
+ANIMAL-01Bの個体群Worldでは、通常進行中の生成Job投入・完了待ち・公開を固定Tick入口へまとめる。Queued要求を絶対チャンクX・Y順に選び、各Tickで同時生成上限の1バッチを処理するため、複数の追いつきTickが1フレームへ集まっても次バッチを進められる。`ChunkGenerationBoundaryWait`はその境界と停止中の前フレームバッチ公開の待ちを計測する。既定2件・10 Tick/秒の上限20チャンク/秒は維持するが、最大追いつき4 Tickのフレームには最大8件分の同期費用が集まる。最大ズーム・通常／Shift移動・停止中移動で地形が順次表示され、再開後に`Animal Population`の確定位置が追加されることを確認する。候補条件・色・凡例・HUDは変更せず、生成中の専用配列も可視化へ渡さない。
+
+`Animal Population`の確定位置は、全個体を毎Repaintで配列化せず、ECS Chunkの範囲・位置変更版・構造変更版を使って可視位置だけをキャッシュする。これは64×64論理地域とは異なる格納Chunk単位の粗い索引で、範囲が画面と重なるChunk内では個体ごとの座標判定を行う。初回・位置書込・構造変更時には該当Chunkの全座標を読み直すが、不変の画面外Chunkは範囲だけで除外する。Camera移動、個体移動、個体の削除、World切替で色が古いまま残らないことを確認する。広域個体が同じECS Chunkに混在する場合や全個体が毎Tick移動する場合の費用まで解消したとは扱わない。
+
 岩壁影マスクの改善後も同じ`RockWallShadowMask`で比較する。80×80のマスク作成は同期Burst `IJob.Run`でメインスレッド上に完了し、Workerへ未完了Jobを残す方式ではない。親の`RockWallShadowBuild`、後続の`RockWallShadowOpacity`も確認し、Native配列参照への変更で後続処理へ負荷が移っていないか調べる。停止・再開時のNativeメモリ寿命、チャンク境界の影、原点変更前後の位置も確認する。Rock Wall開発者可視化の生成式・凡例・キー／メニューは変更しない。
 
 影なしの停止を調べる場合は、`SubChunkClassification`と`SubChunkTilemapWrite`の同フレーム内の回数も確認する。書込MarkerにはTilemapの取得・再利用処理も含まれ、子の`ITilemap.FindAllRefreshPositions`だけを全書込時間とはしない。フレーム間隔はMain／Render ThreadのTimelineで`WaitForTargetFPS`、描画コマンド待ち、Renderer更新と照合し、表示Markerの時間やGPU時間と混同しない。CSV／PNGの出力と終了時の大きな停止は移動区間から除外する。詳しい帰属と制約は[影なしのスパイク切り分け](./Map02DPerformanceReport.md#影構築なしの表示スパイクとフレーム待機の切り分け)を参照する。製品の目標FPSや予算の既定値は、この診断だけで変更しない。
@@ -125,6 +129,7 @@ Gameビューでは`CameraPanController`の表示原点を使い、CameraとGrid
 | `Magma` | マグマ本体と淡水を抑制する火山影響域 |
 | `Resources` | 配置なし、木、石、砂の最終配置 |
 | `Terrain Placement` | 共通配置APIで通常設備＋通常ベルト、耐熱性を問わない橋、耐熱橋だけ、全対象の配置不可となる地形を色分けし、中央HUDへ4要求の判定結果と耐熱不足理由を表示 |
+| `Animal Population` | 全動物種のBiome・Ground条件を満たし資源予約のない候補タイル、候補外、初期補充で確定した個体位置を色分け |
 
 #### 次の修正をしたら確認する
 
@@ -133,6 +138,7 @@ Gameビューでは`CameraPanController`の表示原点を使い、CameraとGrid
 - `GeneratedTile`、ECS Buffer、Presentationへ渡すデータを変更した。
 - 可視化の色、凡例、HUD、Tilemap、Camera、黒帯、表示範囲を変更した。
 - `CameraPanController`、`DisplayOrigin`、Gridと絶対タイル座標の変換境界を変更した。
+- 動物種の対応バイオーム・有効地形、地域生成、個体位置を変更した。
 - 新しい生成要素を追加し、通常表示だけでは内部判定を確認できなくなった。
 
 #### 確認内容
@@ -142,7 +148,8 @@ Gameビューでは`CameraPanController`の表示原点を使い、CameraとGrid
 3. 黒帯へ着色や凡例がはみ出さない。
 4. チャンク境界をまたいでも分類やグラデーションが不自然に途切れず、`Terrain Placement`で陸地・水・マグマ・岩壁の契約を判別できる。中央HUDでは陸地が設備・ベルトだけ、水が非耐熱・耐熱の両橋、マグマが耐熱橋だけを`Allowed`とし、マグマの非耐熱橋を`Heat Required`と表示する。
 5. 正負の遠方へ明示的にCameraを移した場合も、色面が表示中のTilemapと同じ絶対セルへ重なり、中央HUDがCamera中央の絶対タイル情報を示す。
-6. `Off`へ戻すと通常表示へ完全に戻る。
+6. `Animal Population`で候補外、候補タイル、確定個体が凡例どおりの3色になり、確定個体色が候補色より優先される。草原陸地でも木・石などの資源があるセルは候補外になる。
+7. `Off`へ戻すと通常表示へ完全に戻る。
 
 ### 2.4 Analyze Distribution
 
@@ -182,7 +189,28 @@ Consoleレポートには、次の比較材料を出力する。
 4. 同一コード・同一条件で再実行した署名が一致する。
 5. 大きな比率変化がある場合は、ランダムマップ生成仕様の調整値と説明も更新する。
 
-### 2.5 Map Viewer
+### 2.5 Analyze Animal Population
+
+- メニュー: `Farmware > World Generation > Analyze Animal Population`
+- 実装: `AnimalPopulationDistributionAuditMenu`、`AnimalPopulationDistributionAnalyzer`
+- PlayMode: 不要。既定ではバックグラウンドで実行する。
+
+#### 用途
+
+固定した3組の地形Seed・個体群Seedについて、原点周囲9×9地域、合計243地域と約100万タイルを調べる。実際の地形・資源生成器と`AnimalPopulationGenerator.TryAppendSpeciesPopulation`を使用し、鶏の有効タイル数、面積比例の目標数、生成候補数、未充足地域、群れサイズ・徘徊距離違反、位置重複、比較署名をConsoleへ出力する。
+
+資源のあるセルは生成候補から除外するが、報告する有効タイル数と目標数はBiome・Ground条件に合う地形面積を基準とする。資源により候補が減っても密度の基準を変更せず、配置不能分は未充足として集計する。
+
+この監査は密度8を最終的な合格値とは扱わない。調整前後の同一条件比較と、Gameビューの`Animal Population`表示を組み合わせて判断する。動物種の初期値を変更した場合は、監査が使う定義値も同じ変更で更新する。
+
+#### 確認内容
+
+1. Consoleへ開始ログと完了レポートが1回ずつ出る。
+2. 不正群れと重複位置が0件である。
+3. 同一コード・同一条件で再実行した署名と集計値が一致する。
+4. 抽選した群れを先に置くと後続の残数を有効な群れへ分割できない場合は、有限バックトラックで別の群れサイズ・中心・メンバーの組合せが再探索される。中心とメンバーのタイル選択は合計4,096回までに制限される。完全配置が不可能または探索上限へ達した後も残る目標個体数と確定候補数の差、および未充足地域数が地形分断と群れ最小数の方針に合う。
+
+### 2.6 Map Viewer
 
 - メニュー: `Farmware > World Generation > Map Viewer`
 - 実装: `WorldGenerationMapViewerWindow`、`WorldGenerationMapSampler`
@@ -246,6 +274,7 @@ Farmwareのワールドは無限なので「全体」を有限画像へ収める
 | Authoring、Scene、Tileアセット、Camera、Tilemapレイヤー | Build Fallback Map Prototype |
 | 個別タイルの分類、色、境界、凡例 | Debug Visualization |
 | バイオームや地形の広域分布、隣接関係、決定性 | Analyze Distribution |
+| 動物の候補地形、確定位置、群れ・密度・重複 | Animal Population表示、Analyze Animal Population |
 | 広域形状、特定Seed・遠距離座標の探索 | Map Viewer |
 | 生成規則と表示の両方 | Analyze Distribution、Map Viewer、Debug Visualization |
 

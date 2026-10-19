@@ -1,7 +1,7 @@
 # Farmware シミュレーション技術仕様 v0.1
 
 - 作成日: 2026-10-14
-- 最終更新日: 2026-10-17
+- 最終更新日: 2026-10-19
 - 状態: 設備・物流・施設実装前の基盤仕様
 - 対象環境: Unity 6000.3.8f1、Entities 1.5.0
 - 関連仕様: [ゲームコンセプト](../GameSpecification/2026-10-11_casual_factory_concept_v0.1.md)
@@ -41,7 +41,13 @@ ECSの共通ルートGroupは次のとおりとする。
 | `FarmwareFixedTickGameplaySystemGroup` | `FarmwareFixedTickSimulationSystemGroup` | Command確定後の生産、物流、敵、動物などのゲームルール更新 |
 | `FarmwarePresentationSystemGroup` | `PresentationSystemGroup` | Simulation結果の描画・音声への反映 |
 
-`FarmwareSimulationSystemGroup`の更新回数はゲーム内時間の正ではない。固定Tickで進める機能は`FarmwareFixedTickSimulationSystemGroup`の子へ置き、機能固有CommandはValidation／Commit Group、生産・物流・動物などの通常ゲームルールは`FarmwareFixedTickGameplaySystemGroup`へ所属させる。カメラ可視範囲に応じたチャンク要求と地形生成は表示ストリーミング用のフレーム駆動処理であり、固定Tickのゲームルールへ含めない。
+`FarmwareSimulationSystemGroup`の更新回数はゲーム内時間の正ではない。固定Tickで進める機能は`FarmwareFixedTickSimulationSystemGroup`の子へ置き、機能固有CommandはValidation／Commit Group、生産・物流・動物などの通常ゲームルールは`FarmwareFixedTickGameplaySystemGroup`へ所属させる。カメラ可視範囲に応じたチャンク要求は表示ストリーミング用のフレーム駆動処理とする。ただし動物種カタログとTickを持つWorldでは、生成Jobの投入・完了待ち・公開を`ChunkGenerationFixedTickPublicationSystem`でTick加算後・Command処理前へまとめて接続する。
+
+この境界では、Queued要求を絶対チャンクX・Y順へ整列してから同時生成上限まで投入し、全Jobを待って同じTick内で公開する。通常の描画フレームでは投入せず、1フレームに2 Tickを追いつく場合も各Tickで次バッチを処理する。これによりWorker完了順だけでなく、同じ要求集合を0.2秒×1フレーム／0.1秒×2フレーム／0.05秒×4フレームで進めた差も保存状態へ持ち込まない。後続Gameplayは公開された地域を座標・受付順へ並べてID・初期化Tickを確定する。一時停止中だけは前フレームのバッチを全件待って公開してから次を投入し、カメラ移動と地形表示を継続するが、Tick・個体群・IDは進めない。個体群のない地形単独Worldでは、描画フレームで投入し完成Jobだけ公開する従来の非同期経路を維持する。保証の比較条件は、同じ初期状態・設定・Tick時点の要求集合とTick進行とし、入力タイミング自体を変えるカメラ操作のリプレイは対象外である。
+
+1 Tickは同時生成上限の1バッチで打ち切り、待ちの終了後に同Tick内で要求を尽くすループは行わない。既定2チャンク・10 Tick/秒では最大20チャンク/秒で、最大追いつき4 Tickの描画フレームでは最大8チャンク分の同期費用を引き受ける。先のフレームへ投入して待ちを隠す方式ではなくなるため、旧方式のPlayer測定を今回の性能合格へ流用しない。`ChunkGenerationSchedule`・`ChunkGenerationBoundaryWait`・`ChunkGenerationPublish`で投入・待ち・コピーを分け、表示Queryへ暗黙の生成Job依存を戻さない。これは性能改善ではなく決定論の修正である。
+
+開発者用の個体位置可視化は、Presentation所有の`AnimalPositionViewportCache`がECS Chunkの範囲・位置変更版・構造変更版を索引として使い、可視矩形内のタイル座標だけを保持する。索引は保存対象に含めず、位置の正は常に`AnimalTilePosition`とする。初回や更新されたChunkの走査と不変Chunkの範囲判定は残るが、全個体位置の毎Repaint配列化は行わない。World切替では旧索引を消去し、個体位置をSimulationへ書き戻さない。
 
 ## 2. 固定Tickと決定論
 
@@ -135,7 +141,9 @@ ECSの共通ルートGroupは次のとおりとする。
 
 `SIM-01D`では、全0を無効値とする上位・下位各64bitの`DefinitionGuid`と、1始まりの`DefinitionRuntimeId`を共通Simulation型として実装した。Authoringの定義配列はBakerでGUID昇順へ正規化し、入力順に依存しない連続ID、定義分類、解決済み参照を`DefinitionCatalogBlob`へ格納する。GUID文字列はInspectorとセーブ境界だけで扱い、実行時の定義参照は整数IDを使用する。BakerとEditModeテストは同じ`DefinitionCatalogBuilder`を使い、GUID未設定、重複、参照切れ、参照先分類不一致を破損したBlob Assetの生成前に拒否する。実際のアイテム、設備、施設、レシピ、動物種データとSceneへのカタログ配置は各機能PRで追加する。
 
-`ANIMAL-01A`では、動物種固有の生成条件と移動調整値を`AnimalSpeciesCatalogBlob`へ分離し、共通`DefinitionCatalogBlob`で解決した`DefinitionRuntimeId`を参照する。対応バイオームと有効地形は値域の異なる別々のビットマスクで保持し、通常Tickで文字列、GUID、managed参照を使わない。BakerとEditModeテストが共有する`AnimalSpeciesCatalogBuilder`は、未登録・分類不一致・重複する動物種、未知ビット、群れ範囲、密度、固定Tick範囲、徘徊距離、外見差分数を検証してから、実行時ID順のBlob Assetを作る。最初の定義は草原の通常陸地に生息する鶏であり、個体Entityや動物生成Systemは後続PRで追加する。`AnimalSpeciesStateHasher`は機能固有セクションID 1024へ全静的値を固定順で追加し、同じGUIDでも生成条件や移動値が異なるWorldのハッシュを区別する。
+`ANIMAL-01A`では、動物種固有の生成条件と移動調整値を`AnimalSpeciesCatalogBlob`へ分離し、共通`DefinitionCatalogBlob`で解決した`DefinitionRuntimeId`を参照する。対応バイオームと有効地形は値域の異なる別々のビットマスクで保持し、通常Tickで文字列、GUID、managed参照を使わない。BakerとEditModeテストが共有する`AnimalSpeciesCatalogBuilder`は、未登録・分類不一致・重複する動物種、未知ビット、群れ範囲、密度、固定Tick範囲、徘徊距離、外見差分数を検証してから、実行時ID順のBlob Assetを作る。最初の定義は草原の通常陸地に生息する鶏である。`AnimalSpeciesStateHasher`は機能固有セクションID 1024へ全静的値を固定順で追加し、同じGUIDでも生成条件や移動値が異なるWorldのハッシュを区別する。
+
+`ANIMAL-01B`では、64×64論理チャンクを動物地域として扱い、新規ワールドごとの非0な`AnimalPopulationSeed`から地域専用の乱数状態を初期化する。生成完了地域は座標順に処理し、地形と資源の4096件Bufferが揃う地域だけを初期化し、資源予約のあるセルを候補から除外する。資源面積を差し引く前の、種ごとのバイオーム・地形条件を満たすタイル面積へ4096タイル当たり密度を比例配分し、3〜6羽の群れを最大徘徊距離内へ配置する。現在の鶏のように地域目標が64羽以下なら、抽選した群れを確定する前に後続の残数も有効な群れへ配置できるかを有限バックトラックで確認し、分断地形でも全体を満たす群れサイズ・中心・メンバーの組合せを優先する。中心と各メンバーのタイル選択は合計4,096回までとし、後続配置が失敗した分岐の候補、占有タイル、乱数状態、受付順を戻して別の組合せを試す。配置不可能、探索上限到達、または64羽を超える高密度定義では、最小群れ数まで縮める部分補充へ戻り、固定Tickを無制限に占有しない。地域状態はチャンクEntityから分離した永続Entityへ保持し、表示チャンクが再生成されても初期補充を繰り返さない。個体は種類、整数位置、群れ先頭ID、外見差分、共通アロケーターの永続IDを持つ独立Entityとする。初期補充は、後続リスポーンが既存位置と不足数を渡して再利用できる`AnimalPopulationGenerator.TryAppendSpeciesPopulation`を通す。`IsSpawnTileEligible`を初期生成・分布監査・候補表示で共有し、後続リスポーンにも同じ候補抽出条件を提供する。`AnimalPopulationStateHasher`は、群れIDが同種の実在する先頭を直接参照し、その先頭自身の群れIDが永続IDと一致すること、および個体の種IDが`AnimalSpeciesCatalog`に存在し、外見差分番号がその種の定義範囲内であることを検証してから、セクション1025へSeed、地域座標順の抽選状態、永続ID順の個体状態を追加する。表示用処理済みタグと地域索引キャッシュは含めない。
 
 ## 6. チャンク境界と保存所有権
 
