@@ -119,6 +119,9 @@ namespace Farmware.WorldGeneration.Tests
             /// <summary>上下移動の遷移元と遷移先でX/Yが異なり、同座標条件を満たしません。</summary>
             BlockedByDifferentHorizontalCoordinate,
 
+            /// <summary>通常の水平移動として指定されましたが、遷移元と遷移先のレイヤーが異なります。</summary>
+            BlockedByDifferentLayerForHorizontalTraversal,
+
             /// <summary>隣接していないレイヤーへの移動で、中間レイヤーを飛ばそうとしています。</summary>
             BlockedByNonAdjacentLayer,
 
@@ -325,6 +328,12 @@ namespace Farmware.WorldGeneration.Tests
                     }
 
                     return PrototypeTransitionResult.Allowed;
+                }
+
+                // Horizontalは同一レイヤー内の通常移動だけを表すため、別レイヤーを指定して上下条件を迂回させません。
+                if (source.Layer != destination.Layer)
+                {
+                    return PrototypeTransitionResult.BlockedByDifferentLayerForHorizontalTraversal;
                 }
 
                 // 同じ媒体同士なら、開いた同一レイヤー境界を通常移動できます。
@@ -541,6 +550,27 @@ namespace Farmware.WorldGeneration.Tests
                 PrototypeBoundaryKind.Open);
 
             Assert.That(actual, Is.EqualTo(PrototypeTransitionResult.Allowed));
+        }
+
+        /// <summary>
+        /// 異なるレイヤーの同一媒体セルを水平移動として渡し、潜水・浮上の条件を迂回できないことを保証します。
+        /// </summary>
+        [Test]
+        public void HorizontalTraversal_RejectsDifferentLayers()
+        {
+            PrototypeCellState surface = ReadyWater(PrototypeWorldLayer.Surface);
+            PrototypeCellState underwater = ReadyWater(PrototypeWorldLayer.Underwater);
+
+            PrototypeTransitionResult actual = PrototypeTransitionEvaluator.Evaluate(
+                surface,
+                underwater,
+                PrototypeTraversalKind.Horizontal,
+                PrototypeBoundaryKind.Open);
+
+            Assert.That(
+                actual,
+                Is.EqualTo(
+                    PrototypeTransitionResult.BlockedByDifferentLayerForHorizontalTraversal));
         }
 
         /// <summary>
