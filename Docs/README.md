@@ -19,6 +19,7 @@
 - [実装ロードマップ](./Development/ImplementationRoadmap.md)
 - [シミュレーション技術仕様](./Development/SimulationArchitectureSpecification.md)
 - [WORLD-01A 多層水域の設計試作](./Development/World01AMultiLayerWaterPrototype.md)
+- [WORLD-01B 多層水域の製品契約](./Development/World01BMultiLayerWaterContract.md)
 - [Codexスキル](./Development/CodexSkills.md)
 - [Unity Editorツール](./Development/EditorTools.md)
 - [テスト](./Development/Testing.md)
