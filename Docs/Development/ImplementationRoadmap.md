@@ -2,7 +2,7 @@
 
 - 作成日: 2026-10-14
 - 全面改訂日: 2026-10-19
-- 実装状況の基準: WORLD-01C完了時点（commit hashとGitHub PR番号はGit履歴を正とする）
+- 実装状況の基準: WORLD-01D完了時点（commit hashとGitHub PR番号はGit履歴を正とする）
 - 対象: 地上・海中・深海の生物探索、採集、建築、飼育・栽培を中心とするエンドレスゲーム
 - 正となる仕様: [ゲーム仕様](../GameSpecification/2026-10-11_casual_factory_concept_v0.1.md)、[マップ仕様](../GameSpecification/RandomMapGenerationSpecification.md)、[技術仕様](./SimulationArchitectureSpecification.md)
 - 検証・制作: [テスト](./Testing.md)、[Editorツール](./EditorTools.md)、[アート制作](../Art/TilemapSpriteProductionChecklist.md)
@@ -69,7 +69,7 @@ ANIMAL-01Bの最終記録は、World Generation EditMode 225件、Common EditMod
 | 25 | SAVE-02 | 全状態の復元・破損復旧・長時間監査 |
 | 26 | RELEASE-01 | 操作・導線・対象機器でのリリース評価 |
 
-全て未実装。初回の遊べる範囲は段階的に増やす。全車種・全生物の完成まで最初のプレイテストを待たない。
+WORLD-01まで実装済み。以降の初回の遊べる範囲は段階的に増やす。全車種・全生物の完成まで最初のプレイテストを待たない。
 
 ## 4. 境界と地形を先に整える
 
@@ -78,7 +78,7 @@ ANIMAL-01Bの最終記録は、World Generation EditMode 225件、Common EditMod
 - [x] **PR WORLD-01A 多層水域の設計試作**: 少数セルの検証用モデルで、3層の存在、同座標遷移、人工造成、地面による上下遮断、乾燥室との出入りを示す。A1の固定3層常在、B1の地形由来上下遮断、施設単位の排水規則を合意済み。操作例と保存候補は[試作モデルと合意事項](./World01AMultiLayerWaterPrototype.md)に記録した。試作の列挙値・判定順は製品契約へ暗黙に流用せず、WORLD-01Bで置き換える。
 - [x] **PR WORLD-01B 多層水域の契約確定**: 固定レイヤーID、セル存在と常駐、自然水柱、人工造成、上下境界、即時浸水・排水、移動、未ロード先、保存・再構築を製品用純粋計算へ置き換えた。川・池はUnderwaterまで、DeepSeaは海の沖合だけとし、1階層掘った下層は上が水なら移動判定前に自動浸水する。排水停止時の即時浸水、乾燥室の水平入退室、準備後の潜水自動再判定とキャンセル条件を合意済み。[製品契約](./World01BMultiLayerWaterContract.md)を参照する。
 - [x] **PR WORLD-01C レイヤー付き座標**: 既存生成・要求・索引・個体位置・状態ハッシュ・診断へLayerキーを接続した。Surfaceの現在結果を維持し、同X/Yの別層が衝突しない純粋計算・ECS・表示回帰を追加した。Underwater／DeepSeaの自然生成は地上結果を複製せず、TERRAIN-01Bまで未接続表示とする。[実装記録](./World01CLayeredCoordinates.md)を参照する。
-- [ ] **PR WORLD-01D 操作主体とワールド境界**: WorldId／PlayerId、Commandの操作主体、ワールドとプレイヤー状態の責務、関心範囲・睡眠・停止の窓口を定める。ローカル1人で検証し、Netcodeや未使用の通信抽象層は作らない。
+- [x] **PR WORLD-01D 操作主体とワールド境界**: 128bit WorldId、ワールド内PlayerId、Commandの明示的な操作主体、ワールド共有状態とPlayer Entityの責務を実装した。停止は主体検証付きのQueue外制御、睡眠は将来の主体付きCommand、Simulation関心範囲は表示Observerと分離する契約とし、ローカル1人で検証した。Netcodeや未使用の通信抽象層は追加していない。[実装記録](./World01DWorldPlayerBoundary.md)を参照する。
 
 完了条件: レイヤーとPlayerIdが後続の保存・インベントリ・個体に渡せる。自然生成・Floating Origin・既存個体群の回帰が成功し、多層未決事項を型へ埋め込んでいない。
 

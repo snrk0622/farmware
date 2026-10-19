@@ -1,5 +1,5 @@
 // このファイルは、InputからSimulationへ渡すゲーム用Commandの共通データと受付APIを定義します。
-// Commandの内容は機能固有Componentへ分離し、この共通層は受付順、一時停止、処理結果の寿命だけを管理します。
+// Commandの内容は機能固有Componentへ分離し、この共通層は操作主体、受付順、一時停止、処理結果の寿命だけを管理します。
 
 using Unity.Entities;
 
@@ -66,6 +66,12 @@ namespace Farmware.Simulation
         /// 0から1023までは共通基盤用に予約し、各機能は1024以上のenum値をFailureCodeへ保存します。
         /// </summary>
         public const int FirstFeatureFailureCode = 1024;
+
+        /// <summary>
+        /// Commandを発行したWorldIdとPlayerIdです。
+        /// 受付前に現在Worldへ登録済みであることを検証し、処理結果と診断でも同じ主体を保持します。
+        /// </summary>
+        public WorldCommandActor Actor;
 
         /// <summary>
         /// World内で受付順を一意に表す番号です。0は無効で、1から単調増加し、失敗後も再利用しません。
@@ -160,7 +166,7 @@ namespace Farmware.Simulation
 
     /// <summary>
     /// Inputまたはテストが機能固有Command Componentを共通Queueへ安全に追加するための受付APIです。
-    /// 一時停止、Singleton不整合、受付番号上限ではEntityも受付番号も変更せずfalseを返します。
+    /// 主体不整合、一時停止、Singleton不整合、受付番号上限ではEntityも受付番号も変更せずfalseを返します。
     /// </summary>
     public static class SimulationCommandQueue
     {
@@ -170,12 +176,14 @@ namespace Farmware.Simulation
         /// </summary>
         /// <typeparam name="TCommand">建築、採取などの依頼内容を保持するunmanaged Component型です。</typeparam>
         /// <param name="entityManager">Command Entity、Queue Singleton、一時停止状態を所有するWorldのEntityManagerです。</param>
+        /// <param name="actor">現在のWorldIdと登録済みPlayerIdを明示する操作主体です。</param>
         /// <param name="commandData">新しいCommand Entityへコピーする機能固有データです。</param>
         /// <param name="commandEntity">成功時に作成したCommand Entity、失敗時にEntity.Nullを返します。</param>
         /// <param name="receiptNumber">成功時に発行した1以上の受付番号、失敗時に0を返します。</param>
         /// <returns>一時停止中ではなく、QueueへCommandを完全に追加できた場合はtrueです。</returns>
         public static bool TryEnqueue<TCommand>(
             EntityManager entityManager,
+            WorldCommandActor actor,
             TCommand commandData,
             out Entity commandEntity,
             out ulong receiptNumber)
@@ -183,6 +191,15 @@ namespace Farmware.Simulation
         {
             commandEntity = Entity.Null;
             receiptNumber = 0;
+
+            // 古いWorldのUI入力や未登録Playerの要求は、Queueや受付番号へ触れる前に共通境界で拒否します。
+            if (!WorldSessionAuthority.TryValidateActor(
+                    entityManager,
+                    actor,
+                    out _))
+            {
+                return false;
+            }
 
             EntityQuery queueQuery = entityManager.CreateEntityQuery(
                 ComponentType.ReadWrite<SimulationCommandQueueState>(),
@@ -223,6 +240,7 @@ namespace Farmware.Simulation
                     commandEntity,
                     new SimulationCommand
                     {
+                        Actor = actor,
                         ReceiptNumber = receiptNumber,
                         Status = SimulationCommandStatus.Queued,
                         FailureCode = (int)SimulationCommandFailureCode.None,

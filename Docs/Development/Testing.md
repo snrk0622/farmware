@@ -40,13 +40,17 @@ Sceneを使わない最小ECS Worldへ描画フレーム相当のDeltaTimeを直
 
 32桁とハイフン付きのGUID文字列が同じ128bit値へ正規化され、全0と不正文字列を拒否することを検証する。定義入力順に依存せずGUID昇順で1始まりの実行時IDを割り当て、定義間のGUID参照を整数IDへ解決すること、重複GUID、参照切れ、参照先分類不一致、連結されていない参照範囲ではBlob Assetを作成しないことも保証する。複数定義の参照を平坦化した後も、検証エラーの参照番号はInspector上の定義内添字へ戻す。テスト内で作成したPersistent Blob Assetは各テストが所有し、終了時にDisposeする。
 
+#### `WorldSessionBoundaryTests`
+
+WORLD-01Dの128bit WorldId、ワールド内PlayerId、開発用単独プレイヤー初期化、ローカルInput Context、共通主体検証、停止・再開窓口をSceneなしで検証する。GUID表記の正規化と無効値拒否、外部から一部だけ供給されたセッション状態を推測で補修しないこと、別WorldId、未登録PlayerId、重複PlayerIdを状態変更前に拒否すること、正規プレイヤーが停止中にも再開できること、不正主体の停止要求がPause状態を変更しないことを保証する。
+
 #### `SimulationCommandQueueTests`
 
-Sceneを使わない最小ECS Worldで、受付番号が1から単調増加し、`ulong.MaxValue`を1回使用した後は0へ周回しないことを検証する。一時停止中はCommand Entityも受付番号も消費しない。同一固定Tickへ成功、競合失敗、成功の3件を順に投入し、各CommandがValidation、Commit、ECB再生、結果確定まで完了してから次へ進むこと、失敗Commandが状態を部分変更しないこと、Gameplay Groupが同Tick内の最終確定状態だけを読むことを保証する。Validation／Commit担当不在と複数Validation担当の拒否、未完了Commitが記録したECBの非再生、未完了Commitが連続した後も成功Commandだけを反映できること、完了結果を現在の描画フレーム中保持して次フレーム先頭で破棄する寿命も確認する。
+Sceneを使わない最小ECS Worldで、受付番号が1から単調増加し、`ulong.MaxValue`を1回使用した後は0へ周回しないことを検証する。別WorldId、未登録PlayerId、一時停止中はCommand Entityも受付番号も消費せず、正常な次Commandが未使用番号を取得する。同一固定Tickへ成功、競合失敗、成功の3件を順に投入し、各CommandがValidation、Commit、ECB再生、結果確定まで完了してから次へ進むこと、失敗Commandが状態を部分変更しないこと、Gameplay Groupが同Tick内の最終確定状態だけを読むことを保証する。Validation／Commit担当不在と複数Validation担当の拒否、未完了Commitが記録したECBの非再生、未完了Commitが連続した後も成功Commandだけを反映できること、完了結果を現在の描画フレーム中保持して次フレーム先頭で破棄する寿命も確認する。
 
 #### `SimulationStateHashTests`
 
-`xxHash3-128`へ渡す整数の固定バイト表現、セクションIDの昇順・重複禁止、Complete後の再利用禁止を検証する。共通状態では必須Singletonの欠落・重複、正規化前の固定Tick設定、未処理Command、無効な永続IDアロケーター、定義カタログを検査し、不完全な値を比較へ使わないことを保証する。同じ定義を異なる入力順から構築した場合もGUID順に同じハッシュとなることを確認する。さらに、同じCommand列とTick数を、Entity IndexとChunk配置をずらした2つのWorldで`Run`と`ScheduleParallel`へ分けて実行し、永続ID順へ正規化した機能状態ハッシュが一致すること、論理値の変更と永続ID重複を検出することを保証する。初回リリース前で永続化した比較基準がない現在は、WORLD-01CのLayer追加もVersion 1の定義更新として扱う。リリース後、または保存済みハッシュを異なるビルド間で比較する運用を始めた後は、入力形式の変更時にSchema Versionを増やす。
+`xxHash3-128`へ渡す整数の固定バイト表現、セクションIDの昇順・重複禁止、Complete後の再利用禁止を検証する。共通状態では必須Singletonの欠落・重複、正規化前の固定Tick設定、未処理Command、無効な永続IDアロケーター、定義カタログ、WorldId、PlayerId一覧を検査し、不完全な値を比較へ使わないことを保証する。Player Entityの作成順はハッシュへ影響せず、WorldId／PlayerId変更は検出し、無効または重複PlayerIdを拒否する。同じ定義を異なる入力順から構築した場合もGUID順に同じハッシュとなることを確認する。さらに、同じCommand列とTick数を、Entity IndexとChunk配置をずらした2つのWorldで`Run`と`ScheduleParallel`へ分けて実行し、永続ID順へ正規化した機能状態ハッシュが一致すること、論理値の変更と永続ID重複を検出することを保証する。初回リリース前で永続化した比較基準がない現在は、WORLD-01CのLayer追加とWORLD-01DのWorld／Player追加もVersion 1の定義更新として扱う。リリース後、または保存済みハッシュを異なるビルド間で比較する運用を始めた後は、入力形式の変更時にSchema Versionを増やす。
 
 #### `AnimalPopulationStateHashTests`
 
@@ -196,7 +200,7 @@ Sprite Packer ModeがV2であること、土地Atlasが7バイオームの本番
 
 | 変更内容／系列 | 必須の自動確認 | 人間・計測で確認する内容 |
 | --- | --- | --- |
-| 既存の共通基盤 | SystemGroupBoundaryTests、FixedTickSimulationTests、PersistentIdTests、DefinitionCatalogTests、SimulationCommandQueueTests、SimulationStateHashTestsから関連範囲。失敗時無変更、安定順、上限、停止・再開を維持 | Console、Assembly依存、必要時Player |
+| 既存の共通基盤 | SystemGroupBoundaryTests、FixedTickSimulationTests、PersistentIdTests、DefinitionCatalogTests、WorldSessionBoundaryTests、SimulationCommandQueueTests、SimulationStateHashTestsから関連範囲。失敗時無変更、安定順、上限、停止・再開を維持 | Console、Assembly依存、必要時Player |
 | WORLD-01 | Layer付きセル・チャンク・索引、同X/Yの分離、負座標・int端点、PlayerIdと操作主体。多層試作の遷移元・先・水密条件 | 人工海中、上下遮断、乾燥室への出入りの試作 |
 | TERRAIN-01 | 同Seed・版・設定の地形、固定Biomeと可変Blockの分離、複数パレット、差分適用、元生成不変、変更済みHalo・影境界 | 分布監査、Map Viewer、Debug Visualization、ブロック識別 |
 | 新スポーン | バイオーム許可、占有・通行、段階探索、全禁止・候補なしの明示失敗、禁止バイオームへ妥協しないこと。3×3コア・12×8・近傍資源条件を要求しない | 周辺難易度・希少度の不変、隣接危険地域も生成されること |

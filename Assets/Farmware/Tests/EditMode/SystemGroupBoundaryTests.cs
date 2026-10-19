@@ -44,6 +44,9 @@ namespace Farmware.Tests.EditMode
                 typeof(FarmwareInitializationSystemGroup),
                 expectedOrderFirst: true);
             AssertUpdatesInGroup(
+                typeof(WorldSessionInitializationSystem),
+                typeof(FarmwareInitializationSystemGroup));
+            AssertUpdatesInGroup(
                 typeof(PersistentIdInitializationSystem),
                 typeof(FarmwareInitializationSystemGroup));
             AssertUpdatesInGroup(
@@ -83,6 +86,9 @@ namespace Farmware.Tests.EditMode
                 typeof(FarmwareSimulationSystemGroup),
                 expectedOrderFirst: true);
 
+            AssertUpdatesAfter(
+                typeof(WorldSessionInitializationSystem),
+                typeof(SimulationTimeInitializationSystem));
             AssertUpdatesAfter(
                 typeof(FarmwareCommandProcessingSystemGroup),
                 typeof(SimulationTickAdvanceSystem));
