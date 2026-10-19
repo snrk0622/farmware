@@ -16,7 +16,7 @@ namespace Farmware.Simulation
         /// <summary>定義作成後に変更しない128bit GUIDです。</summary>
         public DefinitionGuid Guid;
 
-        /// <summary>アイテム、設備、施設、レシピ、動物種のいずれかです。</summary>
+        /// <summary>アイテム、設備、施設、レシピ、動物種、地形4分類のいずれかです。</summary>
         public DefinitionKind Kind;
 
         /// <summary>DefinitionBuildReference配列内で、この定義の参照が始まる添字です。</summary>
@@ -365,14 +365,14 @@ namespace Farmware.Simulation
         }
 
         /// <summary>
-        /// DefinitionKindが現在サポートする5分類のいずれかかを確認します。
+        /// DefinitionKindが現在サポートする分類のいずれかかを確認します。
         /// </summary>
         /// <param name="kind">Inspectorまたはテストから渡された分類値です。</param>
         /// <returns>有効な静的定義分類ならtrueです。</returns>
         private static bool IsSupportedKind(DefinitionKind kind)
         {
             return kind >= DefinitionKind.Item &&
-                kind <= DefinitionKind.AnimalSpecies;
+                kind <= DefinitionKind.TerrainSurface;
         }
 
         /// <summary>

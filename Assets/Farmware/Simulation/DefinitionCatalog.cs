@@ -9,7 +9,7 @@ using Unity.Entities;
 namespace Farmware.Simulation
 {
     /// <summary>
-    /// アイテム、設備、施設、レシピ、動物種の分類を表す変更禁止の数値です。
+    /// アイテム、設備、施設、レシピ、動物種、地形ブロックの分類を表す変更禁止の数値です。
     /// セーブ互換性のため既存値を再利用せず、新しい分類は末尾へ追加します。
     /// </summary>
     public enum DefinitionKind : byte
@@ -30,7 +30,19 @@ namespace Farmware.Simulation
         Recipe = 4,
 
         /// <summary>生成条件や移動特性を持つ動物種の定義です。</summary>
-        AnimalSpecies = 5
+        AnimalSpecies = 5,
+
+        /// <summary>掘削・埋立できる地面ブロックの定義です。</summary>
+        GroundBlock = 6,
+
+        /// <summary>採掘・設置できる壁ブロックの定義です。</summary>
+        WallBlock = 7,
+
+        /// <summary>水、海水、マグマなど、セルを満たす液体の定義です。</summary>
+        Liquid = 8,
+
+        /// <summary>床、舗装、耕地など、地面の上へ重なる表面状態の定義です。</summary>
+        TerrainSurface = 9
     }
 
     /// <summary>

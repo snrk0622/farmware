@@ -59,7 +59,7 @@ namespace Farmware.WorldGeneration.Editor
         private const string ResourcesMenuPath =
             "Farmware/World Generation/Debug Visualization/Resources";
 
-        /// <summary>通常設備・通常ベルト・橋と耐熱要件の地形属性表示へ切り替えるメニューパスです。</summary>
+        /// <summary>通常設備・橋と耐熱要件の地形属性表示へ切り替えるメニューパスです。</summary>
         private const string TerrainPlacementMenuPath =
             "Farmware/World Generation/Debug Visualization/Terrain Placement";
 

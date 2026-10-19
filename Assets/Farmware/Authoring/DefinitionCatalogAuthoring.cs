@@ -1,4 +1,4 @@
-// このファイルは、Inspectorで編集する静的定義GUID、参照、動物種固有値をECS用の定義カタログへ変換します。
+// このファイルは、Inspectorの静的定義・動物種固有値と組み込み地形定義をECS用カタログへ変換します。
 // MonoBehaviourは入力だけを保持し、Bakerが検証済みの連続IDと用途別Blob AssetをSimulationへ渡します。
 
 using System;
@@ -11,7 +11,7 @@ using UnityEngine;
 namespace Farmware.Authoring
 {
     /// <summary>
-    /// アイテム、設備、施設、レシピ、動物種の共通定義と、動物種固有値を用途別Blob AssetへまとめるAuthoring用MonoBehaviourです。
+    /// アイテム、設備、施設、レシピ、動物種、地形4分類の共通定義と、動物種・地形の固有値を用途別Blob AssetへまとめるAuthoring用MonoBehaviourです。
     /// SceneまたはSubSceneへ1件だけ配置し、実行中のゲーム状態ではなく編集可能な定義表の入力として使用します。
     /// </summary>
     [DisallowMultipleComponent]
@@ -39,7 +39,7 @@ namespace Farmware.Authoring
             [SerializeField] private string displayName = string.Empty;
 
             // 数値はセーブ互換境界になるため、既存分類の値を後から変更しません。
-            [Tooltip("定義の分類です。アイテム、設備、施設、レシピ、動物種から選び、作成後は意味を変更しません。")]
+            [Tooltip("定義の分類です。アイテム、設備、施設、レシピ、動物種、地形区画から選び、作成後は意味を変更しません。")]
             [SerializeField] private DefinitionKind kind = DefinitionKind.None;
 
             // GUIDは定義の永続キーなので、名前変更や配列並べ替えでも同じ文字列を維持します。
@@ -233,6 +233,22 @@ namespace Farmware.Authoring
                     };
                 }
 
+                // TERRAIN-01Aの最小Blockは既存Sceneへ手作業のGUID追加を要求せず、全Worldで同じ定義を必ず登録します。
+                // 将来の追加パレットは別GUIDで増やし、ここにある5件のGUIDや意味を変更しません。
+                DefinitionBuildEntry[] builtInTerrainDefinitions =
+                    BuiltInTerrainBlockDefinitions.CreateCommonDefinitions(
+                        buildReferences.Count);
+                int authoredDefinitionCount = buildDefinitions.Length;
+                Array.Resize(
+                    ref buildDefinitions,
+                    authoredDefinitionCount + builtInTerrainDefinitions.Length);
+                Array.Copy(
+                    builtInTerrainDefinitions,
+                    0,
+                    buildDefinitions,
+                    authoredDefinitionCount,
+                    builtInTerrainDefinitions.Length);
+
                 if (!DefinitionCatalogBuilder.TryBuild(
                     buildDefinitions,
                     buildReferences.ToArray(),
@@ -290,9 +306,30 @@ namespace Farmware.Authoring
                         CreateAnimalValidationMessage(sourceAnimalSpecies, animalError));
                 }
 
+                if (!TerrainBlockCatalogBuilder.TryBuild(
+                    catalog,
+                    BuiltInTerrainBlockDefinitions.CreateTerrainDefinitions(),
+                    out BlobAssetReference<TerrainBlockCatalogBlob> terrainCatalog)
+                    || !BuiltInTerrainBlockDefinitions.TryResolveRuntimeIds(
+                        catalog,
+                        out BuiltInTerrainBlockRuntimeIds terrainRuntimeIds))
+                {
+                    // どのBlobもまだBakerへ登録していないため、失敗時はこの処理が3件すべての所有権を解放します。
+                    if (terrainCatalog.IsCreated)
+                    {
+                        terrainCatalog.Dispose();
+                    }
+
+                    animalCatalog.Dispose();
+                    catalog.Dispose();
+                    throw new InvalidOperationException(
+                        "組み込み地形定義を共通DefinitionCatalogへ接続できませんでした。");
+                }
+
                 // Bakerへ登録して差分Bake時の参照数を正しく管理し、手動Disposeによる二重解放を避けます。
                 AddBlobAsset(ref catalog, out _);
                 AddBlobAsset(ref animalCatalog, out _);
+                AddBlobAsset(ref terrainCatalog, out _);
                 Entity entity = GetEntity(TransformUsageFlags.None);
                 AddComponent(entity, new DefinitionCatalog
                 {
@@ -301,6 +338,11 @@ namespace Farmware.Authoring
                 AddComponent(entity, new AnimalSpeciesCatalog
                 {
                     Value = animalCatalog
+                });
+                AddComponent(entity, new TerrainBlockCatalog
+                {
+                    Value = terrainCatalog,
+                    BuiltInRuntimeIds = terrainRuntimeIds
                 });
             }
 

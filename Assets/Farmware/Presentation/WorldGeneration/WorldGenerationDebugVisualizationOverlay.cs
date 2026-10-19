@@ -58,7 +58,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// <summary>プレイヤー表示へ出さない標準・肥沃・砂質のSoilTypeを固定色で表示します。</summary>
         Soil = 12,
 
-        /// <summary>通常設備・通常ベルト・橋の配置可否と、橋の耐熱要件を地形契約ごとの固定色で表示します。</summary>
+        /// <summary>通常設備・橋の配置可否と、橋の耐熱要件を地形契約ごとの固定色で表示します。</summary>
         TerrainPlacement = 13,
 
         /// <summary>動物種定義を満たす候補タイルと、初期補充で確定した個体位置を別色で表示します。</summary>
@@ -424,12 +424,9 @@ namespace Farmware.WorldGeneration.Presentation
                     TerrainPlacementResult equipmentResult = TerrainPlacementRules.Evaluate(
                         tile,
                         TerrainPlacementKind.NormalEquipment);
-                    TerrainPlacementResult beltResult = TerrainPlacementRules.Evaluate(
-                        tile,
-                        TerrainPlacementKind.NormalBelt);
-                    if (equipmentResult == TerrainPlacementResult.Allowed
-                        && beltResult == TerrainPlacementResult.Allowed)
+                    if (equipmentResult == TerrainPlacementResult.Allowed)
                     {
+                        // 探索・建築向けの診断へ絞り、補助物流であるベルト固有の許可状態は色分類へ含めません。
                         return new Color32(72, 194, 92, 242);
                     }
 
@@ -1221,9 +1218,6 @@ namespace Farmware.WorldGeneration.Presentation
                 TerrainPlacementResult equipmentPlacementResult = TerrainPlacementRules.Evaluate(
                     centerTile,
                     TerrainPlacementKind.NormalEquipment);
-                TerrainPlacementResult beltPlacementResult = TerrainPlacementRules.Evaluate(
-                    centerTile,
-                    TerrainPlacementKind.NormalBelt);
                 TerrainPlacementResult bridgePlacementResult = TerrainPlacementRules.Evaluate(
                     centerTile,
                     TerrainPlacementKind.Bridge,
@@ -1237,8 +1231,7 @@ namespace Farmware.WorldGeneration.Presentation
                 centerInformation = $"Layer={currentLayer}  Tile ({centerCoordinate.x}, {centerCoordinate.y})  "
                     + $"Biome={centerTile.Biome}  Ground={centerTile.Ground}  Soil={centerTile.Soil}\n"
                     + $"Water={centerTile.WaterSalinity} / {centerTile.WaterBodyType}\n"
-                    + $"Placement: Equipment={GetPlacementResultState(equipmentPlacementResult)}  "
-                    + $"Belt={GetPlacementResultState(beltPlacementResult)}\n"
+                    + $"Placement: Equipment={GetPlacementResultState(equipmentPlacementResult)}\n"
                     + $"Bridge={GetPlacementResultState(bridgePlacementResult)}  "
                     + $"HeatBridge={GetPlacementResultState(heatBridgePlacementResult)}\n"
                     + $"Elevation={centerTile.Elevation}  Temperature={centerTile.Temperature}\n"
@@ -1490,10 +1483,9 @@ namespace Farmware.WorldGeneration.Presentation
                             new GeneratedTile
                             {
                                 GameplayFlags = TileGameplayFlags.AllowsNormalEquipment
-                                    | TileGameplayFlags.AllowsNormalBelt
                             }),
-                        "Equipment+Belt",
-                        110f);
+                        "Equipment",
+                        82f);
                     DrawLegendEntry(
                         ref nextX,
                         y,

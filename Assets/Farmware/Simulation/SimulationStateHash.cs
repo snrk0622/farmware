@@ -740,7 +740,7 @@ namespace Farmware.Simulation
                 if (!definition.Guid.IsValid
                     || definition.RuntimeId.Value != definitionIndex + 1
                     || definition.Kind <= DefinitionKind.None
-                    || definition.Kind > DefinitionKind.AnimalSpecies
+                    || definition.Kind > DefinitionKind.TerrainSurface
                     || invalidOrder
                     || invalidReferenceRange)
                 {
