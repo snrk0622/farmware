@@ -71,7 +71,9 @@ Profilerでは、全体の`Farmware.WorldGeneration.TilemapPresentation`と原�
 
 生成の非同期公開比較では、`ChunkGenerationPublish`が完了確認後のECSコピー、`ChunkGenerationSchedule`が作業枠確保・Job投入を計測する。接頭辞はいずれも`Farmware.WorldGeneration.`である。`PresentationWorkCollection`と`ChunkStreaming`も同時に確認し、生成Jobの待ちが別の区間へ移っていないことを調べる。Workerの生成は`GenerateChunkJob (Burst)`で確認する。開発者可視化は従来どおり`ReadyToApply`／`Active`の完成Bufferだけを読むため、生成中の作業配列は表示しない。新規メニューやプレイヤー用キーは追加しない。
 
-ANIMAL-01Bの個体群Worldでは、通常進行中の公開を固定Tick入口へ限定する。`ChunkGenerationBoundaryWait`は、その境界と一時停止中の前フレームバッチ公開で必要な全Job待ちを計測する。既定2チャンク・10 Tick/秒の新規公開上限は20チャンク/秒であり、従来の描画フレーム単位の公開と同じスループットとは扱わない。最大ズーム・通常／Shift移動・停止中のカメラ移動で、地形が順次表示され、再開後に`Animal Population`の確定位置が追加されることを確認する。候補の条件・色・凡例・中央HUDは変わらず、生成中の専用配列を可視化へ渡さない。
+ANIMAL-01Bの個体群Worldでは、通常進行中の生成Job投入・完了待ち・公開を固定Tick入口へまとめる。Queued要求を絶対チャンクX・Y順に選び、各Tickで同時生成上限の1バッチを処理するため、複数の追いつきTickが1フレームへ集まっても次バッチを進められる。`ChunkGenerationBoundaryWait`はその境界と停止中の前フレームバッチ公開の待ちを計測する。既定2件・10 Tick/秒の上限20チャンク/秒は維持するが、最大追いつき4 Tickのフレームには最大8件分の同期費用が集まる。最大ズーム・通常／Shift移動・停止中移動で地形が順次表示され、再開後に`Animal Population`の確定位置が追加されることを確認する。候補条件・色・凡例・HUDは変更せず、生成中の専用配列も可視化へ渡さない。
+
+`Animal Population`の確定位置は、全個体を毎Repaintで配列化せず、ECS Chunkの範囲・位置変更版・構造変更版を使って可視位置だけをキャッシュする。これは64×64論理地域とは異なる格納Chunk単位の粗い索引で、範囲が画面と重なるChunk内では個体ごとの座標判定を行う。初回・位置書込・構造変更時には該当Chunkの全座標を読み直すが、不変の画面外Chunkは範囲だけで除外する。Camera移動、個体移動、個体の削除、World切替で色が古いまま残らないことを確認する。広域個体が同じECS Chunkに混在する場合や全個体が毎Tick移動する場合の費用まで解消したとは扱わない。
 
 岩壁影マスクの改善後も同じ`RockWallShadowMask`で比較する。80×80のマスク作成は同期Burst `IJob.Run`でメインスレッド上に完了し、Workerへ未完了Jobを残す方式ではない。親の`RockWallShadowBuild`、後続の`RockWallShadowOpacity`も確認し、Native配列参照への変更で後続処理へ負荷が移っていないか調べる。停止・再開時のNativeメモリ寿命、チャンク境界の影、原点変更前後の位置も確認する。Rock Wall開発者可視化の生成式・凡例・キー／メニューは変更しない。
 

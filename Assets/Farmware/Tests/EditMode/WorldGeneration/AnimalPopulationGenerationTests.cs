@@ -8,6 +8,7 @@ using Farmware.Simulation.Animals;
 using Farmware.WorldGeneration.Animals;
 using NUnit.Framework;
 using Unity.Collections;
+using Unity.Core;
 using Unity.Entities;
 using Unity.Jobs;
 
@@ -519,6 +520,86 @@ namespace Farmware.WorldGeneration.Tests
             }
         }
 
+        /// <summary>
+        /// 同じ4要求と0.2秒を1・2・4描画フレームへ分け、実物のRate Managerで2 Tick後の保存状態が一致することを保証します。
+        /// </summary>
+        [Test]
+        public void GenerationBoundary_MatchesAcrossFramePartitionsAndRequestCreationOrder()
+        {
+            CreateCatalogs(out BlobAssetReference<DefinitionCatalogBlob> definitions,
+                out BlobAssetReference<AnimalSpeciesCatalogBlob> animals);
+            try
+            {
+                SimulationStateHash singleFrame = RunFramePartitionedGeneration(animals, new[] { 0.2f }, false);
+                Assert.That(RunFramePartitionedGeneration(animals, new[] { 0.1f, 0.1f }, false), Is.EqualTo(singleFrame));
+                Assert.That(RunFramePartitionedGeneration(animals, new[] { 0.05f, 0.05f, 0.05f, 0.05f }, true),
+                    Is.EqualTo(singleFrame));
+            }
+            finally
+            {
+                DisposeCatalogs(definitions, animals);
+            }
+        }
+
+        /// <summary>最初から同じ4要求を作り、描画フレーム更新と実物の固定Tick Groupを通したハッシュを返します。</summary>
+        /// <param name="catalog">各比較Worldで共通に使う動物種Blobです。</param>
+        /// <param name="frameDeltas">合計0.2秒となる描画フレーム幅です。固定Tickは手動加算しません。</param>
+        /// <param name="reverseCreation">Entity作成順を逆転し、Query順ではなく座標順でバッチを選ぶか確認します。</param>
+        /// <returns>初期化Tick・個体ID・群れID・抽選状態・次回IDを含む保存状態ハッシュです。</returns>
+        private static SimulationStateHash RunFramePartitionedGeneration(
+            BlobAssetReference<AnimalSpeciesCatalogBlob> catalog, float[] frameDeltas, bool reverseCreation)
+        {
+            using World world = new World("Animal frame partition regression");
+            EntityManager manager = world.EntityManager;
+            PrepareWorldSingletons(world, catalog);
+            using (EntityQuery tick = manager.CreateEntityQuery(typeof(SimulationTickState)))
+                tick.SetSingleton(new SimulationTickState { CurrentTick = 0 });
+            Entity configuration = manager.CreateEntity();
+            manager.AddComponentData(configuration, WorldGenerationSettings.CreateDefault(123456789UL, 1));
+            manager.AddComponentData(configuration, ResourceGenerationSettings.CreateDefault());
+            manager.AddComponentData(configuration, ChunkStreamingSettings.CreateDefault());
+            manager.AddComponentData(configuration, FixedTickConfiguration.CreateDefault());
+            manager.AddComponentData(configuration, new SimulationPauseState());
+            int[] xs = { -4, -3, 1, 2 };
+            for (int i = 0; i < xs.Length; i++)
+            {
+                Entity chunk = CreateReadyChunk(manager, xs[reverseCreation ? xs.Length - 1 - i : i], -4);
+                manager.SetComponentData(chunk, new ChunkGenerationStatus { Phase = ChunkGenerationPhase.Queued });
+                manager.AddComponent<ChunkGenerationRequest>(chunk);
+                manager.GetBuffer<GeneratedTile>(chunk).Clear();
+                manager.GetBuffer<GeneratedResourceTile>(chunk).Clear();
+            }
+
+            // Rate Managerを含む本番Group構成で実行し、公開Systemだけを直接呼ぶテストの見落としを防ぎます。
+            var root = world.GetOrCreateSystemManaged<FarmwareSimulationSystemGroup>();
+            var fixedTicks = world.GetOrCreateSystemManaged<FarmwareFixedTickSimulationSystemGroup>();
+            var gameplay = world.GetOrCreateSystemManaged<FarmwareFixedTickGameplaySystemGroup>();
+            root.AddSystemToUpdateList(world.GetOrCreateSystem<ChunkGenerationSystem>());
+            root.AddSystemToUpdateList(fixedTicks);
+            fixedTicks.AddSystemToUpdateList(world.GetOrCreateSystem<SimulationTickAdvanceSystem>());
+            fixedTicks.AddSystemToUpdateList(world.GetOrCreateSystem<ChunkGenerationFixedTickPublicationSystem>());
+            fixedTicks.AddSystemToUpdateList(gameplay);
+            gameplay.AddSystemToUpdateList(world.GetOrCreateSystem<AnimalPopulationInitializationSystem>());
+            root.SortSystems(); fixedTicks.SortSystems(); gameplay.SortSystems();
+            foreach (float delta in frameDeltas)
+            {
+                world.PushTime(new TimeData(world.Time.ElapsedTime + delta, delta));
+                try { root.Update(); }
+                finally { world.PopTime(); }
+            }
+
+            Assert.That(CountRegionStates(manager), Is.EqualTo(4), "追いつき2 Tickでも各2地域を処理します。");
+            using EntityQuery regions = manager.CreateEntityQuery(typeof(AnimalPopulationRegionState));
+            using NativeArray<AnimalPopulationRegionState> states = regions.ToComponentDataArray<AnimalPopulationRegionState>(Allocator.Temp);
+            foreach (AnimalPopulationRegionState region in states)
+                Assert.That(region.InitializedAtTick, Is.EqualTo(region.RegionX < 0 ? 1ul : 2ul));
+            var builder = new SimulationStateHashBuilder(SimulationStateHashSchema.CurrentVersion);
+            builder.BeginSection(AnimalSpeciesStateHasher.SpeciesDefinitionSectionId);
+            builder.WriteUInt64(GetAllocatorState(manager).NextId);
+            Assert.That(AnimalPopulationStateHasher.TryAppendTo(manager, ref builder, out _), Is.True);
+            return builder.Complete();
+        }
+
         /// <summary>公開境界がTick加算後・Command前に接続され、同TickのGameplayより先に動くことを保証します。</summary>
         [Test]
         public void GenerationBoundary_RunsAtFixedTickEntry()
@@ -572,6 +653,13 @@ namespace Farmware.WorldGeneration.Tests
                 }
 
                 generation.Update(world.Unmanaged);
+                if (!isPaused)
+                {
+                    // 本番Tick境界と同じ投入APIを使い、待ち合わせ前の実物Job完了順だけを操作します。
+                    ref ChunkGenerationSystem generator = ref world.Unmanaged.GetUnsafeSystemRef<ChunkGenerationSystem>(generation);
+                    generator.ScheduleBatch(manager, WorldGenerationSettings.CreateDefault(123456789UL, 1),
+                        ResourceGenerationSettings.CreateDefault(), 2);
+                }
                 ulong nextIdBeforePublication = GetAllocatorState(manager).NextId;
                 if (earlySlot >= 0)
                 {

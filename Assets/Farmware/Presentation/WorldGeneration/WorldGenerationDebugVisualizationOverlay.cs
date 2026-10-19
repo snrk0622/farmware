@@ -124,8 +124,8 @@ namespace Farmware.WorldGeneration.Presentation
         private readonly Dictionary<long, bool> rockWallProbeCache =
             new Dictionary<long, bool>();
 
-        // 同じタイルに複数の描画判定を行ってもEntity Queryを繰り返さないよう、1 Repaint分の確定個体座標を再利用します。
-        private readonly HashSet<long> animalPositionCache = new HashSet<long>();
+        // 可視タイル座標だけを保持し、変更のない画面外ECS Chunkの個体を毎Repaintで読み直さない索引です。
+        private readonly AnimalPositionViewportCache animalPositionCache = new AnimalPositionViewportCache();
 
         /// <summary>Editorメニューが選択中として表示する、現在の開発者用可視化モードです。</summary>
         public WorldGenerationDebugVisualizationMode CurrentMode => currentMode;
@@ -670,7 +670,7 @@ namespace Farmware.WorldGeneration.Presentation
 
             // 距離探索範囲は隣接タイル同士で重なるため、Rock Wallモードの1描画中だけ座標判定を共有します。
             rockWallProbeCache.Clear();
-            CacheAnimalPositionsForCurrentRepaint();
+            CacheAnimalPositionsForCurrentRepaint(bounds);
 
             using NativeArray<Entity> entities = chunkQuery.ToEntityArray(Allocator.Temp);
             using NativeArray<ChunkCoordinateComponent> coordinates =
@@ -757,7 +757,7 @@ namespace Farmware.WorldGeneration.Presentation
                             && IsEligibleForAnyAnimalSpecies(tile, resource, animalCatalog);
                         bool hasConfirmedAnimal = currentMode
                                 == WorldGenerationDebugVisualizationMode.AnimalPopulation
-                            && animalPositionCache.Contains(EncodeTileCoordinate(tileX, tileY));
+                            && animalPositionCache.Contains(tileX, tileY);
                         GUI.color = GetVisualizationColor(
                             currentMode,
                             tile,
@@ -791,23 +791,18 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// Animal Populationモードの1 Repaintで使う確定個体座標を、ECS QueryからHashSetへまとめます。
+        /// Animal Populationモードの可視位置だけを更新します。画面外Chunkは変更時の範囲更新だけで済ませます。
         /// </summary>
-        private void CacheAnimalPositionsForCurrentRepaint()
+        /// <param name="bounds">8192タイル上限の検査を済ませた絶対座標の包含矩形です。</param>
+        private void CacheAnimalPositionsForCurrentRepaint(VisibleTileBounds bounds)
         {
-            animalPositionCache.Clear();
             if (currentMode != WorldGenerationDebugVisualizationMode.AnimalPopulation)
             {
+                animalPositionCache.Clear();
                 return;
             }
-
-            using NativeArray<AnimalTilePosition> positions =
-                animalPositionQuery.ToComponentDataArray<AnimalTilePosition>(Allocator.Temp);
-            for (int index = 0; index < positions.Length; index++)
-            {
-                AnimalTilePosition position = positions[index];
-                animalPositionCache.Add(EncodeTileCoordinate(position.TileX, position.TileY));
-            }
+            animalPositionCache.Update(presentationWorld.EntityManager, animalPositionQuery,
+                bounds.MinimumTileX, bounds.MinimumTileY, bounds.MaximumTileX, bounds.MaximumTileY);
         }
 
         /// <summary>
@@ -832,17 +827,6 @@ namespace Farmware.WorldGeneration.Presentation
             }
 
             return false;
-        }
-
-        /// <summary>
-        /// 符号付き2次元タイル座標を衝突しない64bitキーへ変換し、Repaint内の検索に使用します。
-        /// </summary>
-        /// <param name="tileX">絶対水平タイル座標です。</param>
-        /// <param name="tileY">絶対垂直タイル座標です。</param>
-        /// <returns>Xを上位32bit、Yを下位32bitへ保持した検索キーです。</returns>
-        private static long EncodeTileCoordinate(int tileX, int tileY)
-        {
-            return ((long)tileX << 32) | (uint)tileY;
         }
 
         /// <summary>

@@ -1,6 +1,7 @@
 // このファイルは、地形・資源をECSから独立した作業領域で生成し、完成結果だけをECSへ公開します。
 // ChunkStreamingSystemが要求と寿命、Presentationが確定済みBufferの表示、固定Tick公開Systemが個体群の決定論境界を担当します。
 
+using System;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Entities;
@@ -15,7 +16,7 @@ namespace Farmware.WorldGeneration
     /// <summary>
     /// 有効なChunkGenerationRequestを持つチャンクだけを生成し、同じ座標の地形と資源を対応付けるECS Systemです。
     /// 開始時に要求を無効化します。動物個体群があるWorldでは固定Tick境界で一括公開し、Job完了順を論理状態へ持ち込みません。
-    /// 投入はFarmwareSimulationSystemGroupで行い、個体群Worldの公開だけを固定Tick入口へ分離します。
+    /// 個体群Worldでは投入と公開を固定Tick入口へ揃え、追いつきTickでも同じバッチ数を処理します。
     /// </summary>
     [UpdateInGroup(typeof(FarmwareSimulationSystemGroup))]
     [UpdateAfter(typeof(ChunkStreamingSystem))]
@@ -57,7 +58,7 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>
-        /// 毎描画フレームで空き枠へ要求を投入します。個体群があるWorldの通常公開は固定Tick入口へ委ねます。
+        /// 地形単独Worldと停止中だけ描画フレームで要求を投入します。個体群Worldの稼働中は投入も固定Tickへ委ねます。
         /// 停止中は前回投入したバッチを全件公開し、Tickを進めずカメラ周辺の表示を更新します。
         /// </summary>
         /// <param name="state">SystemのQuery、依存関係、Worldへアクセスする状態です。</param>
@@ -69,12 +70,13 @@ namespace Farmware.WorldGeneration
                 && pauseState.IsPaused;
             if (fixedTickPublication)
             {
-                // 完了した枠だけを先に解放すると、次の要求集合までWorker速度で変わります。
-                // 稼働中は全枠をTick境界まで保持し、停止中も前フレームの全枠を待って一括解放します。
-                if (isPaused)
+                // 通常フレームで先に投入すると、1フレームに複数Tickがある場合だけ次バッチが不足します。
+                // 稼働中は要求をQueuedのまま残し、各Tickが同じ上限と座標順で投入・公開します。
+                if (!isPaused)
                 {
-                    CompleteAndPublishBatch(state.EntityManager);
+                    return;
                 }
+                CompleteAndPublishBatch(state.EntityManager);
             }
             else
             {
@@ -82,9 +84,26 @@ namespace Farmware.WorldGeneration
                 PublishCompletedResults(state.EntityManager);
             }
 
+            int limit = SystemAPI.TryGetSingleton(out ChunkStreamingSettings streamingSettings)
+                ? streamingSettings.MaximumConcurrentGenerations
+                : ChunkStreamingSettings.CreateDefault().MaximumConcurrentGenerations;
+            ScheduleBatch(state.EntityManager, SystemAPI.GetSingleton<WorldGenerationSettings>(),
+                SystemAPI.GetSingleton<ResourceGenerationSettings>(), limit);
+        }
+
+        /// <summary>
+        /// Tick境界または描画フレームで呼び、座標順の要求から上限までJobを投入します。完了待ち・公開はTick境界または次回更新で行います。
+        /// </summary>
+        /// <param name="manager">このSystemと同じWorldのEntityManagerです。</param>
+        /// <param name="settings">投入時点で固定する地形生成設定です。</param>
+        /// <param name="resourceSettings">投入時点で固定する資源生成設定です。</param>
+        /// <param name="maximumConcurrentGenerations">同時実行上限です。1未満は1へ正規化します。</param>
+        public void ScheduleBatch(EntityManager manager, WorldGenerationSettings settings,
+            ResourceGenerationSettings resourceSettings, int maximumConcurrentGenerations)
+        {
             using (ScheduleProfilerMarker.Auto())
             {
-                ScheduleRequests(ref state);
+                ScheduleRequests(manager, settings, resourceSettings, math.max(1, maximumConcurrentGenerations));
             }
         }
 
@@ -175,12 +194,13 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>実行中枠数を上限内に保ち、Queued要求だけを専用配列のJobへ渡します。</summary>
-        /// <param name="state">設定と生成段階へアクセスする状態です。</param>
-        private void ScheduleRequests(ref SystemState state)
+        /// <param name="manager">要求と生成状態を所有する同じWorldです。</param>
+        /// <param name="settings">値コピーしてJobへ渡す地形設定です。</param>
+        /// <param name="resourceSettings">値コピーしてJobへ渡す資源設定です。</param>
+        /// <param name="limit">1以上へ正規化済みの同時生成上限です。</param>
+        private void ScheduleRequests(EntityManager manager, WorldGenerationSettings settings,
+            ResourceGenerationSettings resourceSettings, int limit)
         {
-            int limit = SystemAPI.TryGetSingleton(out ChunkStreamingSettings streamingSettings)
-                ? math.max(1, streamingSettings.MaximumConcurrentGenerations)
-                : ChunkStreamingSettings.CreateDefault().MaximumConcurrentGenerations;
             int running = 0;
             for (int index = 0; index < slots.Length; index++)
             {
@@ -194,14 +214,19 @@ namespace Farmware.WorldGeneration
             {
                 return;
             }
-            WorldGenerationSettings settings = SystemAPI.GetSingleton<WorldGenerationSettings>();
-            ResourceGenerationSettings resourceSettings = SystemAPI.GetSingleton<ResourceGenerationSettings>();
-            EntityManager manager = state.EntityManager;
             using NativeArray<Entity> requests = requestQuery.ToEntityArray(Allocator.Temp);
-            bool scheduled = false;
-            for (int index = 0; index < requests.Length && running < limit; index++)
+            using NativeList<OrderedRequest> ordered = new NativeList<OrderedRequest>(requests.Length, Allocator.Temp);
+            // Entity配列の順番は構造変更・作成順で変わるため、バッチを区切る前に論理座標で整列します。
+            foreach (Entity entity in requests)
             {
-                Entity entity = requests[index];
+                if (manager.GetComponentData<ChunkGenerationStatus>(entity).Phase == ChunkGenerationPhase.Queued)
+                    ordered.Add(new OrderedRequest { Entity = entity, Coordinate = manager.GetComponentData<ChunkCoordinateComponent>(entity) });
+            }
+            ordered.AsArray().Sort();
+            bool scheduled = false;
+            for (int index = 0; index < ordered.Length && running < limit; index++)
+            {
+                Entity entity = ordered[index].Entity;
                 ChunkGenerationStatus status = manager.GetComponentData<ChunkGenerationStatus>(entity);
                 if (status.Phase != ChunkGenerationPhase.Queued)
                 {
@@ -237,6 +262,23 @@ namespace Farmware.WorldGeneration
             if (scheduled)
             {
                 JobHandle.ScheduleBatchedJobs();
+            }
+        }
+
+        /// <summary>投入バッチの境界をEntity配置から切り離す、同一フレーム／Tick内だけの要求レコードです。</summary>
+        private struct OrderedRequest : IComparable<OrderedRequest>
+        {
+            /// <summary>要求の所有Entityです。比較キーには使用しません。</summary>
+            public Entity Entity;
+            /// <summary>受付順を決める絶対チャンク座標です。Streamingが同座標の重複要求を防ぎます。</summary>
+            public ChunkCoordinateComponent Coordinate;
+            /// <summary>X、Yの辞書順で比較し、同じ要求集合から同じ先頭バッチを選びます。</summary>
+            /// <param name="other">比較対象の要求です。</param>
+            /// <returns>この要求が先なら負、同座標なら0、後なら正です。</returns>
+            public int CompareTo(OrderedRequest other)
+            {
+                int x = Coordinate.X.CompareTo(other.Coordinate.X);
+                return x != 0 ? x : Coordinate.Y.CompareTo(other.Coordinate.Y);
             }
         }
 
@@ -333,7 +375,7 @@ namespace Farmware.WorldGeneration
     }
 
     /// <summary>
-    /// Tick加算後・Command処理前に地形の実行中バッチを一括公開する、個体群World専用の同期境界です。
+    /// Tick加算後・Command処理前に地形を上限件数だけ投入して一括公開する、個体群World専用の同期境界です。
     /// 後続Gameplayの個体群初期化は、この境界で揃った地域全体へ同じTickでIDを発行します。
     /// </summary>
     [UpdateInGroup(typeof(FarmwareFixedTickSimulationSystemGroup), OrderFirst = true)]
@@ -347,6 +389,8 @@ namespace Farmware.WorldGeneration
         {
             state.RequireForUpdate<AnimalSpeciesCatalog>();
             state.RequireForUpdate<SimulationTickState>();
+            state.RequireForUpdate<WorldGenerationSettings>();
+            state.RequireForUpdate<ResourceGenerationSettings>();
         }
 
         /// <summary>同じWorldの生成Systemを探し、そのSystemだけが所有するJobバッチをTick境界で確定します。</summary>
@@ -363,6 +407,13 @@ namespace Farmware.WorldGeneration
             // 呼び、参照をフィールドへ保持しないことでSystem破棄後や別Worldへ持ち出すことを避けます。
             ref ChunkGenerationSystem generator =
                 ref state.WorldUnmanaged.GetUnsafeSystemRef<ChunkGenerationSystem>(generation);
+            int limit = SystemAPI.TryGetSingleton(out ChunkStreamingSettings streamingSettings)
+                ? streamingSettings.MaximumConcurrentGenerations
+                : ChunkStreamingSettings.CreateDefault().MaximumConcurrentGenerations;
+            // 毎Tickの先頭で同じ上限まで投入し、そのTick内で全件を確定します。
+            // 追いつき2 Tickでも描画フレームを待たず、2バッチを同じ順序で進めます。
+            generator.ScheduleBatch(state.EntityManager, SystemAPI.GetSingleton<WorldGenerationSettings>(),
+                SystemAPI.GetSingleton<ResourceGenerationSettings>(), limit);
             generator.CompleteAndPublishBatch(state.EntityManager);
         }
     }

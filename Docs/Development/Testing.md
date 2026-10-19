@@ -97,7 +97,17 @@ Editorの分布監査と同じAnalyzerを小さな固定サンプルで2回実�
 
 `GenerationBoundary_KeepsPopulationIndependentOfWorkerCompletion`は、実際のBurst地形Jobを2件ずつ2バッチ投入し、片方を先に完了・もう片方を先に完了・強制完了なしの3条件を、通常進行と一時停止で比較する。sleepによるタイミング推測はせず、反射は実物JobのHandle読取に限り、本番の公開経路と固定Tick境界を実行する。通常フレームでは完成枠だけを公開せず、停止中もバッチ全件を公開してから枠を解放すること、IDはその時点で消費されないこと、Tick 12・13の各地域の初期化時刻と、全個体ID・群れID・抽選状態・次回IDを含むハッシュが一致することを保証する。`GenerationBoundary_RunsAtFixedTickEntry`は、公開Systemの所属とTick加算後・Command前の順序属性を確認する。地形単独Worldの既存非同期テストは引き続き通常回帰へ含める。
 
+再レビューのフレーム分割反例には`GenerationBoundary_MatchesAcrossFramePartitionsAndRequestCreationOrder`を追加した。最初から4つの同じ生成要求を用意し、親Simulation Groupと実物のRate Managerを通して0.2秒×1フレーム・0.1秒×2フレーム・0.05秒×4フレームを比較する。最後の条件では要求Entity作成順も逆転する。各条件で2 Tick後に4地域が揃い、座標順の先頭2地域がTick 1・残り2地域がTick 2に初期化され、ID・群れID・抽選状態を含むハッシュが一致することを保証する。修正前は単一フレーム条件で期待4地域に対し2地域となる失敗を確認した。
+
+#### `AnimalPositionViewportCacheTests`
+
+1,000／10,000／100,000の画面外個体と4つの同Chunk内個体を用意し、可視矩形内の3タイルだけを保持すること、初回以外は不変Chunkの範囲更新が0件・可視Chunkの位置読取が4件となることを確認する。負座標・包含境界・Camera範囲変更・Simulation Systemによる位置変更・Entity破棄・索引消去も検証する。`VisibleCache_ReportsScalingComparison`は`Explicit`の局所計測で、旧全件配列化と新しいECS Chunk範囲索引を同じWorld・矩形で3回暖機後24回比較し、CPU平均・managed allocation・読取件数を記録する。通常回帰では実行せず、開発者表示の変更時に明示実行する。人工配置・Editorの結果であり、全個体移動・実際の探索順によるChunk混在・製品Playerの性能合格へ外挿しない。
+
+#### 生成境界のPlayer検証履歴と再検証
+
 この自動回帰とEditor局所計測だけでは、固定Tick公開境界のDevelopment Player性能を確認済みにしない。2026-10-19に修正commit`abb0e373`後の次作業として、修正前`b2713628`との同条件Player比較を10ケース・17,915前面フレームで実施した。通常／拡大Viewport、通常／高速移動、停止10秒・再開20秒で可視未完成は0件・0秒、停止中のTick・次回ID・個体群は不変、再開後の追加も確認した。生成境界待ち最大12.656msとフレーム間隔最大約32.0msを含む費用を記録し、性能改善・製品性能合格とは扱わない。製品コードは修正commitと完全一致へ戻したため、同commitで成功したEditMode 296件・PlayMode 53件は再実行せず、比較ビルドと復元後のコンパイル確認を追加検証とした。既知のビルド警告・終了時ComputeBuffer警告は両版で残る。続いて修正後Playerの5ケースを開発者向けに再生し、「問題ないように見えます」との確認とcommit・push許可を得た。今回PRの局所回帰と表示・停止感の受け入れは完了とし、製品最大Viewport・長時間・対象機器の性能合格とは分離する。条件・終了条件は[ロードマップのANIMAL-01B残検証](./ImplementationRoadmap.md#animal-01b-残検証生成公開境界のdevelopment-player回帰)、実測値・成果物・制約は[性能計測の追補](./Map02DPerformanceReport.md#修正commit後のdevelopment-player比較条件)を参照する。
+
+2026-10-19の投入境界・可視キャッシュ修正後は、World Generation EditMode 225件・Common EditMode 76件・PlayMode 53件と、明示局所計測1件が成功した。同日、開発者から「問題ありません」とcommit許可を得て、今回修正のEditorでの人間確認も完了した。上記`abb0e373`のPlayer比較・人間確認は同commitの履歴であり、今回変更のPlayer性能を確認済みとはしない。再計測は今回の修正commit後の最初の検証作業としてPR #23マージ前・ANIMAL-01C着手前に行い、詳しい条件は[ロードマップ](./ImplementationRoadmap.md#animal-01b-再レビュー追補フレーム分割と可視位置キャッシュ)へ記録する。
 
 #### `AnimalPopulationDistributionAuditTests`
 
