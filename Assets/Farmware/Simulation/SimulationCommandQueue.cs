@@ -52,7 +52,10 @@ namespace Farmware.Simulation
         CommitDidNotComplete = 4,
 
         /// <summary>Queue内のEntity、受付番号、または処理状態が共通契約を満たしていません。</summary>
-        InvalidCommandState = 5
+        InvalidCommandState = 5,
+
+        /// <summary>受付後にWorldまたはPlayerが変わり、保存済み操作主体が現在のセッションで無効になりました。</summary>
+        ActorIsNoLongerAuthorized = 6
     }
 
     /// <summary>
@@ -69,7 +72,7 @@ namespace Farmware.Simulation
 
         /// <summary>
         /// Commandを発行したWorldIdとPlayerIdです。
-        /// 受付前に現在Worldへ登録済みであることを検証し、処理結果と診断でも同じ主体を保持します。
+        /// 受付前と固定Tickでの処理開始直前に現在Worldへ登録済みであることを検証し、処理結果と診断でも同じ主体を保持します。
         /// </summary>
         public WorldCommandActor Actor;
 

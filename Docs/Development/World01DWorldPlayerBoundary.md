@@ -33,6 +33,8 @@
 
 別ワールドへ切り替えた直後に古いUI入力が残っても、WorldId不一致として状態変更前に拒否する。不正主体ではCommand Entityも受付番号も消費しない。到達距離、所持品、地形、占有等の機能固有条件は、後続のValidation Systemが同じ主体を起点に検証する。
 
+受付後から固定Tick開始前にWorld読込やPlayer削除が行われる場合もあるため、QueueからCommandを選択してActiveにする直前に保存済み主体を再検証する。現在セッションと一致しなくなったCommandは機能固有Validationへ渡さず、`ActorIsNoLongerAuthorized`で失敗確定して新しいワールド状態を変更しない。
+
 ## 4. 停止・睡眠・関心範囲
 
 停止は`SimulationPauseControl.TrySetPaused`へ集約した。固定Tick停止中はCommand Queue自体が進まないため、停止と再開だけはQueue外で同じWorld／Player主体を検証して即時反映する。通常のゲーム状態変更Commandは従来どおり停止中に受け付けず、受付番号も消費しない。
@@ -55,6 +57,7 @@ Simulationの関心範囲はPLAYER-01以降でPlayerId、Layer、論理位置か
 - 別WorldId、未登録PlayerId、重複PlayerIdを状態変更前に拒否する。
 - 正規主体は停止と再開を行え、停止中でも再開経路を失わない。
 - 不正主体のCommandはEntityと受付番号を消費しない。
+- 受付後にWorldIdまたはPlayer登録が変わったCommandは、処理開始直前の再検証で拒否する。
 - Player Entity作成順を変えても状態ハッシュが一致し、WorldId／PlayerId変更を検出する。
 - WORLD-01CまでのSurface生成、Floating Origin、既存個体群、表示回帰を維持する。
 

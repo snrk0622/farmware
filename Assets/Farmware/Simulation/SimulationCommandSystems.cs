@@ -476,6 +476,23 @@ namespace Farmware.Simulation
                     continue;
                 }
 
+                // 受付後にWorld読込やPlayer削除が行われた可能性があるため、機能固有Validationへ渡す直前にも主体を確認します。
+                // 古いCommandを新しいセーブへ適用しないことが目的であり、不一致時はActiveにせず結果だけを公開します。
+                if (!WorldSessionAuthority.TryValidateActor(
+                        entityManager,
+                        command.Actor,
+                        out _))
+                {
+                    command.Status = SimulationCommandStatus.Rejected;
+                    command.FailureCode =
+                        (int)SimulationCommandFailureCode.ActorIsNoLongerAuthorized;
+                    entityManager.SetComponentData(element.CommandEntity, command);
+                    entityManager.SetComponentEnabled<SimulationCommandCompleted>(
+                        element.CommandEntity,
+                        true);
+                    continue;
+                }
+
                 command.Status = SimulationCommandStatus.Validating;
                 entityManager.SetComponentData(element.CommandEntity, command);
                 entityManager.SetComponentEnabled<SimulationCommandActive>(

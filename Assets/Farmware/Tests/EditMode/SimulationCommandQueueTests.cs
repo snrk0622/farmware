@@ -475,6 +475,50 @@ namespace Farmware.Tests.EditMode
         }
 
         /// <summary>
+        /// 受付後から固定Tick開始前にWorldIdが変わったCommandを再検証で拒否し、新しいWorldへ状態変更を適用しないことを保証します。
+        /// </summary>
+        [Test]
+        public void ProcessingGroup_RejectsActorThatBecameStaleAfterEnqueue()
+        {
+            using World world = CreateProcessingWorld(
+                out FarmwareFixedTickSimulationSystemGroup fixedTickGroup);
+            SimulationCommandQueue.TryEnqueue(
+                world.EntityManager,
+                CreateActor(),
+                CreatePayload(expectedMarkerCount: 0),
+                out Entity staleCommand,
+                out ulong staleReceipt);
+
+            EntityQuery worldIdentityQuery = world.EntityManager.CreateEntityQuery(
+                ComponentType.ReadWrite<WorldSessionIdentity>());
+            try
+            {
+                Entity worldIdentityEntity = worldIdentityQuery.GetSingletonEntity();
+                world.EntityManager.SetComponentData(
+                    worldIdentityEntity,
+                    new WorldSessionIdentity
+                    {
+                        Id = new WorldId(300, 400)
+                    });
+            }
+            finally
+            {
+                worldIdentityQuery.Dispose();
+            }
+
+            UpdateFixedTickGroup(world, fixedTickGroup, 0.1f);
+
+            Assert.That(CountComponents<CommandQueueTestMarker>(world), Is.Zero);
+            AssertCommandResult(
+                world,
+                staleCommand,
+                staleReceipt,
+                SimulationCommandStatus.Rejected,
+                (int)SimulationCommandFailureCode.ActorIsNoLongerAuthorized);
+            Assert.That(GetQueue(world).Length, Is.Zero);
+        }
+
+        /// <summary>
         /// 担当Validation SystemがないCommandを共通基盤が拒否し、Commitや状態変更へ進めないことを保証します。
         /// </summary>
         [Test]
