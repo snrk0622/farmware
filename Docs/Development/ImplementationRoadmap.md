@@ -86,7 +86,7 @@ WORLD-01まで実装済み。以降の初回の遊べる範囲は段階的に増
 
 依存: WORLD-01。
 
-- [ ] **PR TERRAIN-01A ブロック定義と有効セル**: 固定Biome、GroundBlock、WallBlock、Liquid、Surface、自然資源・配置物の境界を導入し、元生成＋疎な変更差分を読むAPIを作る。移動・建築の問い合わせを分ける。
+- [x] **PR TERRAIN-01A ブロック定義と有効セル**: 固定Biome、GroundBlock、WallBlock、Liquid、Surface、自然資源・配置物の境界を導入し、元生成＋疎な変更差分を読むAPIを作る。移動・建築の問い合わせを分ける。[実装記録](./Terrain01AEffectiveTerrain.md)を参照する。
 - [ ] **PR TERRAIN-01B ブロックパレットと表示**: 既存気候生成を使い、同バイオーム内に複数地面・壁のパッチを生成する。表示をBiome直結からBlock参照へ移し、監査、Map Viewer、凡例、境界・影・Haloを同時更新する。
 - [ ] **PR TERRAIN-01C 新しい初期スポーン**: バイオーム別許可、通行可能座標、段階拡張・明示失敗を実装する。12×8・3×3コアと資源距離保証を外し、周辺難易度・希少度が変わらないことを検証する。
 
