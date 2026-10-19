@@ -261,6 +261,53 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// 未ロードだがレイヤーまたは位置関係が不正な移動先を準備し、不要な生成・読込を要求する前に拒否することを確認します。
+        /// </summary>
+        [Test]
+        public void EvaluateTransition_UnloadedInvalidDestinationIsRejectedBeforePreparation()
+        {
+            WorldLayerCellState surfaceWater = CreateReadyCell(
+                0,
+                0,
+                WorldLayer.Surface,
+                WorldLayerCellMedium.Water);
+
+            // 不正レイヤーは、媒体をまだ読めない状態でも固定IDだけで拒否できます。
+            Assert.That(
+                WorldLayerWaterContract.EvaluateTransition(
+                    surfaceWater,
+                    CreateUnloadedCell(0, 0, WorldLayer.None),
+                    WorldLayerTraversalKind.VerticalLayerChange,
+                    WorldLayerBoundaryKind.Open),
+                Is.EqualTo(WorldLayerTransitionResult.BlockedByInvalidLayer));
+
+            // 上下移動のX/Y不一致とレイヤー飛び越しも、チャンク生成を始める前に判定します。
+            Assert.That(
+                WorldLayerWaterContract.EvaluateTransition(
+                    surfaceWater,
+                    CreateUnloadedCell(1, 0, WorldLayer.Underwater),
+                    WorldLayerTraversalKind.VerticalLayerChange,
+                    WorldLayerBoundaryKind.Open),
+                Is.EqualTo(WorldLayerTransitionResult.BlockedByMismatchedLocation));
+            Assert.That(
+                WorldLayerWaterContract.EvaluateTransition(
+                    surfaceWater,
+                    CreateUnloadedCell(0, 0, WorldLayer.DeepSea),
+                    WorldLayerTraversalKind.VerticalLayerChange,
+                    WorldLayerBoundaryKind.Open),
+                Is.EqualTo(WorldLayerTransitionResult.BlockedByNonAdjacentDestination));
+
+            // 同一レイヤーでも共有辺ではない遠隔セルは、未ロードを理由に準備対象へしません。
+            Assert.That(
+                WorldLayerWaterContract.EvaluateTransition(
+                    surfaceWater,
+                    CreateUnloadedCell(2, 0, WorldLayer.Surface),
+                    WorldLayerTraversalKind.Horizontal,
+                    WorldLayerBoundaryKind.Open),
+                Is.EqualTo(WorldLayerTransitionResult.BlockedByNonAdjacentDestination));
+        }
+
+        /// <summary>
         /// 未知の準備状態と移動種別を準備し、通常の移動や未ロード待ちへ丸めず破損入力として拒否することを確認します。
         /// </summary>
         [Test]
@@ -449,6 +496,23 @@ namespace Farmware.WorldGeneration.Tests
                 layer,
                 WorldLayerCellReadiness.Ready,
                 medium);
+        }
+
+        /// <summary>
+        /// 未ロード先の構造検証で繰り返し使うセルを作成し、媒体を読めない状態を表します。
+        /// </summary>
+        /// <param name="x">セルの絶対X座標です。</param>
+        /// <param name="y">セルの絶対Y座標です。</param>
+        /// <param name="layer">生成・読込前でも要求から確定しているワールドレイヤーです。</param>
+        /// <returns>Unloaded状態で、媒体を仮のSolidとして保持する契約用セルです。</returns>
+        private static WorldLayerCellState CreateUnloadedCell(int x, int y, WorldLayer layer)
+        {
+            return new WorldLayerCellState(
+                x,
+                y,
+                layer,
+                WorldLayerCellReadiness.Unloaded,
+                WorldLayerCellMedium.Solid);
         }
     }
 }

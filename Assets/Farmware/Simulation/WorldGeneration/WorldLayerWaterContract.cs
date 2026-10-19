@@ -362,19 +362,13 @@ namespace Farmware.WorldGeneration
                 return WorldLayerTransitionResult.BlockedByInvalidContractValue;
             }
 
-            // 未ロードを不存在や固体と誤認せず、生成・読込後に同じ要求を再判定させます。
-            if (source.Readiness == WorldLayerCellReadiness.Unloaded
-                || destination.Readiness == WorldLayerCellReadiness.Unloaded)
-            {
-                return WorldLayerTransitionResult.NeedsPreparation;
-            }
-
             if (!WorldLayerUtility.IsPlayable(source.Layer)
                 || !WorldLayerUtility.IsPlayable(destination.Layer))
             {
                 return WorldLayerTransitionResult.BlockedByInvalidLayer;
             }
 
+            // レイヤー、座標、隣接関係はチャンクを読まなくても判断できるため、不要な生成要求を出す前に検証します。
             if (traversalKind == WorldLayerTraversalKind.VerticalLayerChange)
             {
                 if (source.X != destination.X || source.Y != destination.Y)
@@ -403,6 +397,13 @@ namespace Farmware.WorldGeneration
                 {
                     return WorldLayerTransitionResult.BlockedByNonAdjacentDestination;
                 }
+            }
+
+            // 構造的に妥当な要求だけを準備対象とし、未ロードを不存在や固体と誤認せず読込後に再判定させます。
+            if (source.Readiness == WorldLayerCellReadiness.Unloaded
+                || destination.Readiness == WorldLayerCellReadiness.Unloaded)
+            {
+                return WorldLayerTransitionResult.NeedsPreparation;
             }
 
             if (source.Medium == WorldLayerCellMedium.Solid
