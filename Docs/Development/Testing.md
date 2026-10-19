@@ -97,7 +97,7 @@ Editorの分布監査と同じAnalyzerを小さな固定サンプルで2回実�
 
 `GenerationBoundary_KeepsPopulationIndependentOfWorkerCompletion`は、実際のBurst地形Jobを2件ずつ2バッチ投入し、片方を先に完了・もう片方を先に完了・強制完了なしの3条件を、通常進行と一時停止で比較する。sleepによるタイミング推測はせず、反射は実物JobのHandle読取に限り、本番の公開経路と固定Tick境界を実行する。通常フレームでは完成枠だけを公開せず、停止中もバッチ全件を公開してから枠を解放すること、IDはその時点で消費されないこと、Tick 12・13の各地域の初期化時刻と、全個体ID・群れID・抽選状態・次回IDを含むハッシュが一致することを保証する。`GenerationBoundary_RunsAtFixedTickEntry`は、公開Systemの所属とTick加算後・Command前の順序属性を確認する。地形単独Worldの既存非同期テストは引き続き通常回帰へ含める。
 
-この自動回帰とEditor局所計測だけでは、固定Tick公開境界のDevelopment Player性能を確認済みにしない。修正commit後・PR #23マージ前・`ANIMAL-01C`着手前の次の検証作業として、修正前後の同条件Player比較と開発者の確認を行う。条件・採取項目・終了条件は[ロードマップのANIMAL-01B残検証](./ImplementationRoadmap.md#animal-01b-残検証生成公開境界のdevelopment-player回帰)、実測結果は[性能計測の追補](./Map02DPerformanceReport.md#2026-10-19-animal-01b-個体群worldの固定tick公開境界)へ記録する。
+この自動回帰とEditor局所計測だけでは、固定Tick公開境界のDevelopment Player性能を確認済みにしない。2026-10-19に修正commit`abb0e373`後の次作業として、修正前`b2713628`との同条件Player比較を10ケース・17,915前面フレームで実施した。通常／拡大Viewport、通常／高速移動、停止10秒・再開20秒で可視未完成は0件・0秒、停止中のTick・次回ID・個体群は不変、再開後の追加も確認した。生成境界待ち最大12.656msとフレーム間隔最大約32.0msを含む費用を記録し、性能改善・製品性能合格とは扱わない。製品コードは修正commitと完全一致へ戻したため、同commitで成功したEditMode 296件・PlayMode 53件は再実行せず、比較ビルドと復元後のコンパイル確認を追加検証とした。既知のビルド警告・終了時ComputeBuffer警告は両版で残る。続いて修正後Playerの5ケースを開発者向けに再生し、「問題ないように見えます」との確認とcommit・push許可を得た。今回PRの局所回帰と表示・停止感の受け入れは完了とし、製品最大Viewport・長時間・対象機器の性能合格とは分離する。条件・終了条件は[ロードマップのANIMAL-01B残検証](./ImplementationRoadmap.md#animal-01b-残検証生成公開境界のdevelopment-player回帰)、実測値・成果物・制約は[性能計測の追補](./Map02DPerformanceReport.md#修正commit後のdevelopment-player比較条件)を参照する。
 
 #### `AnimalPopulationDistributionAuditTests`
 
