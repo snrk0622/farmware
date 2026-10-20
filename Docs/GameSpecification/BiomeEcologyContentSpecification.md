@@ -1,4 +1,4 @@
-# Farmware バイオーム・生態コンテンツ仕様 v0.49
+# Farmware バイオーム・生態コンテンツ仕様 v0.50
 
 - 作成日: 2026-10-19
 - 改訂日: 2026-10-20
@@ -614,7 +614,8 @@ CandidateVariation = SampleFractalNoise(
 
 | 値 | 型 | 意味と用途 |
 | --- | --- | --- |
-| `CatchmentAreaCells` | `uint` | 対象セルへ上流から流入する集水域のセル数。河川規模、水量候補、水域生息地の判定に使う |
+| `CatchmentAreaCells` | `uint` | 対象セルへ流入する正規化済み上流集合のセル数。河川規模、水量候補、水域生息地の判定に使う |
+| `CatchmentTruncated` | 真偽値 | 実際の上流集合が集計上限4,096セルを超え、遠方の上流を固定生成値へ含めなかったことを表す |
 | `ConnectionFlags` | `ushort`のビットフラグ | `Stream`、`River`、`Lake`、`Groundwater`、`ClosedBasin`、`Marine`への自然な接続を重複して保持する |
 | `NaturalFloodingPotential` | `ushort`、0〜65,535 | 平常水位と増水時の地形関係から、自然状態で周期的または恒常的に冠水しやすい度合いを表す |
 | `NaturalSoilSaturationPotential` | `ushort`、0〜65,535 | 地形、地下水、水系との距離、排水条件から、自然状態で土壌が飽和しやすい度合いを表す |
@@ -684,23 +685,39 @@ PlateauRank = StableHash64(
 
 ### 2.18 CatchmentAreaCellsの集計（確定）
 
-`CatchmentAreaCells`はD8水系グラフ上で対象水文セルへ流入する集水域面積とし、8×8タイルの水文セル1個を1単位として数える。対象セル自身を必ず含める。
+`CatchmentAreaCells`はD8水系グラフ上で対象水文セルへ流入する正規化済み上流集合の面積とし、8×8タイルの水文セル1個を1単位として数える。無限に近い流域をオンデマンド生成時に全走査しないため、1対象セルへ寄与させる水文セル数を次の固定上限へ制限する。
 
 ```text
-CatchmentAreaCells(cell) = SaturateTo65,535(
-    1 + Σ CatchmentAreaCells(directUpstreamCell))
+MaxCatchmentContributingCells = 4,096
+
+UpstreamOrderKey = (
+    FlowDistanceFromTarget,
+    HydrologyHeight,
+    PlateauRank,
+    HydrologyCellX,
+    HydrologyCellY)
+
+ContributingUpstreamCells(target) =
+    TakeFirst(MaxCatchmentContributingCells,
+        target自身と、D8辺を逆向きにたどってtargetへ到達する全セルを
+        UpstreamOrderKey昇順に並べた集合)
+
+CatchmentAreaCells(target) = Count(ContributingUpstreamCells(target))
 ```
 
 - `directUpstreamCell`は周囲8水文セルのうち、第2.17節の確定流向が対象セルを指すセルとする。距離だけで上流と推測せず、D8グラフの辺を参照する。
-- 値`1`は8×8タイル、64タイル分の集水面積を表す。保存値`65,535`は正確に65,535であることではなく、65,535水文セル以上、約419万タイル以上の集水域を表す飽和值とする。
+- `FlowDistanceFromTarget`は対象セルを0とし、確定D8辺を何本下れば対象へ到達するかを表す。D8グラフは非循環で各セルの下流が高々一つなので、対象へ到達する上流セルの距離は一意になる。同距離では`FlowKey`、さらに座標X・Yの昇順で一意にする。
+- 値`1`は8×8タイル、64タイル分の集水面積を表す。上流候補が4,096件を超える場合は先頭4,096件だけを固定生成値へ含め、`CatchmentAreaCells = 4,096`かつ`CatchmentTruncated = true`とする。ちょうど4,096件で上流フロンティアが空なら`CatchmentTruncated = false`とし、上限到達と打切りを区別する。
 - 基礎湿度、現在の降雨、蒸発、地面Block、土壌水分を集水セル数へ合成しない。`CatchmentAreaCells`は地形から決まる面積であり、水量、恒常流、洪水頻度は別の値として導出する。
-- 加算は符号付き64bit以上で行い、65,535以上になった時点で65,535へ飽和させる。オーバーフロー後の値を比較したり、`uint`の周回へ依存したりしない。
-- D8の非循環性を前提に、再帰呼出しの深さへ依存しない反復処理またはメモ化された有向非巡回グラフ集計を使う。実装は計算済み水文セルをキャッシュできるが、キャッシュの有無・計算順・並列度で結果を変えない。
-- 集計中に65,535へ到達した場合、それ以上の未集計上流セルを値の確定目的で走査しない。飽和後の実面積を診断用に推測してSimulationの正へ戻さない。
-- 水文セル座標、上流探索、加算順には決定論的な安定順を使う。ただし飽和前の全上流値を整数加算するため、正しい実装では候補列挙順、Job実行順、チャンク生成順、ロード範囲によって結果は変化しない。
+- D8の非循環性を前提に、優先度付きフロンティアを使う反復処理で正規化済み上流集合を作る。再帰呼出しの深さ、候補列挙順、Job実行順、チャンク生成順、ロード範囲へ依存しない。
+- 優先度付きフロンティアへは、選択済みセルを直接指す周囲8セルだけを追加する。4,096件を選択した時点で、残ったフロンティアのさらに上流は列挙しない。現在距離の候補が上限を超える場合も、選択済みセルから検査できるD8逆辺の範囲内で安定キー順の先頭だけを採用する。
+- 集計の再利用には、1水文セルをLevel 0とし、各辺長を2倍にするLevel 0〜6の整列済み`HydrologyAggregationSummary`を使える。Level 6は64×64水文セル、最大4,096セルを表す。各SummaryはD8辺が同じ境界出口へ到達する内部セルについて、件数、`HydrologyMoisture`合計、対象境界までの距離と安定順を保持し、4子Summaryから決定論的に合成する。
+- Summary全体が次の正規化順序に入り、同じ境界出口から対象へ到達し、残り件数内へ収まる場合だけ一括加算する。4,096件目をまたぐ場合、複数出口へ分かれる場合、またはノード外へ出たD8経路が同じノードへ再進入する場合は子へ分解し、Level 0で同じ`UpstreamOrderKey`を適用する。キャッシュが空ならLevel 0まで展開して同じ値を得るため、Summaryの有無、破棄、生成順で結果を変えない。空間的なSummary境界で集水値を0へ戻さない。
+- 1対象セルのキャッシュなし最悪時でも、選択する水文セルは4,096件、D8逆辺の判定は各セル8辺の32,768件を上限とする。64×64タイルの論理チャンクに含まれる64水文セルを個別に求めても、選択262,144件、逆辺判定2,097,152件を越えない。重複Summaryの共有は最適化であり、この上限を合格値の代わりに性能未計測の根拠として扱わない。
+- 実装は固定の処理予算で複数フレームまたはJobへ分割できるが、未完了の部分値を`HydrologyState`として公開しない。中断・再開、Summaryキャッシュの有無、並列度で最終値を変えない。
 - `CatchmentAreaCells`は`uint`で保持する。現行上限では上位16bitを使用しないが、保存形式とECS Componentの型を安易に縮小せず、将来GeneratorVersionで上限を拡張できる契約を維持する。
 - 上流グラフの参照が対応可能なワールド座標を越える場合は、端へ丸めたり飽和セル扱いしたりせず生成を明示的に失敗させる。
-- 単位、飽和値、対象セルを含む規則はGeneratorVersionとワールド生成設定の対象とする。開発者用表示ではセル数と64倍したタイル換算面積、飽和の有無を区別して表示する。
+- 単位、上限4,096、正規化順、Summary階層、対象セルを含む規則はGeneratorVersionとワールド生成設定の対象とする。開発者用表示ではセル数と64倍したタイル換算面積、`CatchmentTruncated`、最遠寄与距離、Summary利用数とLevel別展開数を区別して表示する。
 
 ### 2.19 流出寄与と渓流・河川の判定（確定）
 
@@ -718,20 +735,21 @@ sampleX, sampleY ∈ {-3, 0, +3}
 D8グラフ上の流出寄与は、集水セル数とは別の非負飽和加算として求める。
 
 ```text
-MaxRunoffMoistureSum = 65,535 × 65,535
+MaxRunoffMoistureSum = 4,096 × 65,535
+                     = 268,431,360
 
-RunoffMoistureSum(cell) = SaturateToMaxRunoffMoistureSum(
-    HydrologyMoisture(cell)
-    + Σ RunoffMoistureSum(directUpstreamCell))
+RunoffMoistureSum(cell) =
+    Σ HydrologyMoisture(upstreamCell)
+    for upstreamCell in ContributingUpstreamCells(cell)
 
 RunoffEquivalentCells = floor(
     RunoffMoistureSum ÷ 65,535)
 ```
 
-- `RunoffEquivalentCells`は`ushort`の`0〜65,535`とする。基礎湿度65,535の水文セル1個を流出寄与1セル相当として表す。
-- 上流全体の基礎湿度をD8グラフに沿って合算するため、湿潤な上流から乾燥地へ流れ込む外来河川を、下流セル自身の基礎湿度だけで消滅させない。
+- `RunoffEquivalentCells`は`ushort`の`0〜4,096`とする。基礎湿度65,535の水文セル1個を流出寄与1セル相当として表す。
+- 第2.18節と同じ正規化済み上流集合の基礎湿度をD8グラフに沿って合算するため、その集合内にある湿潤な上流から乾燥地へ流れ込む外来河川を、下流セル自身の基礎湿度だけで消滅させない。4,096件より遠い上流は`CatchmentTruncated`時の固定値へ含めない。
 - `CatchmentAreaCells`へ湿度を掛けた近似値ではなく、各上流水文セルの`HydrologyMoisture`を加算する。集水面積と流出寄与は別々に監査できるようにする。
-- `RunoffMoistureSum`は符号付き64bit以上で計算し、最大値へ到達した後だけ追加上流走査を打ち切れる。非負値の飽和加算なので、合流の列挙順、Job実行順、キャッシュの有無によって結果を変えない。
+- `RunoffMoistureSum`は符号付き64bit以上で計算する。第2.18節で確定した同じ集合と`HydrologyAggregationSummary`を再利用し、流出寄与だけの追加上流走査を行わない。非負整数の合計なので、合流の列挙順、Job実行順、キャッシュの有無によって結果を変えない。
 
 固定生成の表流水路は次の閾値で分類する。
 
@@ -739,20 +757,21 @@ RunoffEquivalentCells = floor(
 | --- | --- | --- |
 | `RunoffEquivalentCells`が0〜15 | 追加なし | 固定水路にせず、現在の降雨条件による一時流路候補にできる |
 | `RunoffEquivalentCells`が16〜127 | `Stream` | 渓流・小川の固定水路候補にする |
-| `RunoffEquivalentCells`が128〜65,535 | `Stream`と`River` | 河川の固定水路候補にする。`River`だけを単独で設定しない |
+| `RunoffEquivalentCells`が128〜4,096 | `Stream`と`River` | 河川の固定水路候補にする。`River`だけを単独で設定しない |
 
 - 湖、地下水、泉からの固定供給は後続の水収支判定で`Stream`を追加できる。上表の表面流出閾値を満たさないことだけを理由に、流出口を持つ恒久湖の下流を一時流路へしない。
 - `NaturalSurfaceWater`は、`Stream`または`River`となった水文セル内で細分化された連続流路タイルと、第2.20節で確定する湖面タイルだけを`true`にする。集水域全体や8×8水文セル全体を水面にしない。
 - 流路の細分化に失敗した場合、周辺タイルを無条件に水面化せず生成エラーにする。細分化後もD8グラフの入口、出口、下流接続、`RunoffEquivalentCells`を変更しない。
 - `RunoffEquivalentCells`は固定水文の導出値および診断値であり、通常Biomeの新しい独立適性軸にはしない。湿原判定では後続の冠水・飽和ポテンシャルを介して利用する。
-- 9地点の湿度サンプル、合算上限、除数65,535、`Stream`境界16、`River`境界128はGeneratorVersionとワールド生成設定の対象にする。分布監査で水路密度、次数、連続長、流域面積、乾燥地を横断する外来河川を確認し、閾値変更を既存ワールドへ暗黙適用しない。
+- 9地点の湿度サンプル、上流集合上限4,096、合算上限268,431,360、除数65,535、`Stream`境界16、`River`境界128はGeneratorVersionとワールド生成設定の対象にする。分布監査で水路密度、次数、連続長、流域面積、`CatchmentTruncated`率、最遠寄与距離、乾燥地を横断する外来河川を確認し、閾値変更を既存ワールドへ暗黙適用しない。
 
 ### 2.20 閉鎖流域と湖面の生成（確定）
 
 第2.17節で流向なしとなった陸上水文セルを流域末端とし、D8流向をたどって同じ末端へ到達する水文セル群を一つの`ClosedBasin`として扱う。流域末端と、その流域に属する水文セルへ`ClosedBasin`接続を設定できるようにする。
 
-- `BasinAreaCells`は対象末端へ到達する水文セル数とし、対象末端自身を含める。4水文セル未満の小窪地は固定の湖にせず、池、一時水たまり、降雨時だけの一時湖候補にする。
-- 流域内セルと隣接する流域外セルの全境界辺について、`max(InsideHydrologyHeight, OutsideHydrologyHeight)`を越流標高候補とする。候補が最小の境界辺を`SpillPoint`とし、同値の場合は外側セルの`FlowKey`、内側セル座標X・Y、外側セル座標X・Yの昇順で一意に決める。
+- `BasinAreaCells`は対象末端について第2.18節の正規化済み上流集合を数え、対象末端自身を含める。4水文セル未満の小窪地は固定の湖にせず、池、一時水たまり、降雨時だけの一時湖候補にする。
+- `CatchmentTruncated = false`の閉鎖流域だけ、流域内セルと隣接する流域外セルの全境界辺について、`max(InsideHydrologyHeight, OutsideHydrologyHeight)`を越流標高候補とする。候補が最小の境界辺を`SpillPoint`とし、同値の場合は外側セルの`FlowKey`、内側セル座標X・Y、外側セル座標X・Yの昇順で一意に決める。
+- `CatchmentTruncated = true`の大規模閉鎖流域は、不完全な境界から湖面を推測せず、初回実装では固定湖候補から除外する。末端と確認済み下流鎖の`ClosedBasin`は維持し、局所的な池・一時水面・湿潤生息地は別条件で成立できるようにする。階層上限を拡張する将来版で固定湖へ昇格する場合はGeneratorVersionを分ける。
 - 流域末端の`HydrologyHeight`を`LakeBottomHeight`、`SpillPoint`の越流標高候補を`SpillHeight`とする。`SpillHeight <= LakeBottomHeight`の場合は正の水深を作れないため固定湖候補から除外し、設定・生成監査へ理由を記録する。
 
 湖面の充填率と水文セル単位の湖面標高は次の整数式で求める。
@@ -770,6 +789,7 @@ LakeSurfaceHeight = LakeBottomHeight + floor(
 
 | 条件 | 固定生成での扱い |
 | --- | --- |
+| `CatchmentTruncated = true` | 大規模閉鎖流域。固定湖面と`SpillPoint`を作らず、診断対象にする |
 | `BasinAreaCells < 4` | 固定湖にせず、小池・一時水たまり候補 |
 | `RunoffEquivalentCellsAtSink < 8` | 乾燥窪地・一時湖候補。`Lake`を設定しない |
 | `RunoffEquivalentCellsAtSink >= 8`かつ正の水深あり | `Lake`候補。8で最大水深のおよそ25%、16でおよそ50% |
@@ -781,7 +801,7 @@ LakeSurfaceHeight = LakeBottomHeight + floor(
 - 最大湖面へ到達した場合だけ、`SpillPoint`の内側セルから外側セルへ`LakeOverflowEdge`を作る。これは湖面からの水域接続と下流水路供給に使うが、第2.17節の地表D8流向と第2.18節の基礎集水面積を上書きしない。
 - `LakeOverflowEdge`の外側セルは元の閉鎖流域に属さないため、元のD8下流鎖が同じ末端へ戻らない。複数湖の越流接続を処理する場合も、越流標高と安定座標順で循環検査を行い、循環を検出した設定・生成結果を明示的に失敗させる。
 - 湖水の淡水・塩水、恒久・一時の最終区分は、流入、越流、地下水、基礎湿度、蒸発傾向を使う後続の水収支判定で決める。この節の`Lake`候補だけから淡水湖と断定しない。
-- 流域最低数4、流出寄与境界8・16・32、充填係数2,048、境界辺と同点規則はGeneratorVersionとワールド生成設定の対象にする。監査では流域面積、比高、充填率、湖面積、孤立水面、越流接続、乾燥窪地を可視化する。
+- 流域最低数4、打切り時の固定湖除外、流出寄与境界8・16・32、充填係数2,048、境界辺と同点規則はGeneratorVersionとワールド生成設定の対象にする。監査では流域面積、`CatchmentTruncated`、比高、充填率、湖面積、孤立水面、越流接続、乾燥窪地を可視化する。
 
 ### 2.21 GeologyClassの分類と責務（確定）
 
