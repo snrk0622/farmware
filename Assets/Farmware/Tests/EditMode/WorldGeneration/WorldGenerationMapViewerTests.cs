@@ -7,6 +7,7 @@ using System.Threading;
 using Farmware.Simulation;
 using Farmware.WorldGeneration.Authoring;
 using Farmware.WorldGeneration.Editor;
+using Farmware.WorldGeneration.Presentation;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -226,7 +227,7 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// Map Viewerの8つの連続環境表示が、それぞれ0と65,535を異なる不透明色へ変換することを保証します。
+        /// Map Viewerの8環境軸と3地質特性が、それぞれ0と65,535を異なる不透明色へ変換することを保証します。
         /// Gameビューだけ更新して広域診断が旧Terrain／Biome表示のまま残る退行を防ぎます。
         /// </summary>
         [Test]
@@ -242,7 +243,10 @@ namespace Farmware.WorldGeneration.Tests
                 WoodyVegetationPotential = ushort.MaxValue,
                 TerrainRuggedness = ushort.MaxValue,
                 CoastalInfluence = ushort.MaxValue,
-                VolcanicActivityPotential = ushort.MaxValue
+                VolcanicActivityPotential = ushort.MaxValue,
+                GeologyPermeability = ushort.MaxValue,
+                GeologyGroundwaterStorage = ushort.MaxValue,
+                GeologyErosionResistance = ushort.MaxValue
             };
             WorldGenerationMapViewMode[] environmentModes =
             {
@@ -253,7 +257,10 @@ namespace Farmware.WorldGeneration.Tests
                 WorldGenerationMapViewMode.WoodyVegetationPotential,
                 WorldGenerationMapViewMode.TerrainRuggedness,
                 WorldGenerationMapViewMode.CoastalInfluence,
-                WorldGenerationMapViewMode.VolcanicActivityPotential
+                WorldGenerationMapViewMode.VolcanicActivityPotential,
+                WorldGenerationMapViewMode.GeologyPermeability,
+                WorldGenerationMapViewMode.GeologyGroundwaterStorage,
+                WorldGenerationMapViewMode.GeologyErosionResistance
             };
 
             // 全モードを同じ端点条件で調べ、追加漏れや透明色によるEditor背景との混色をまとめて検出します。
@@ -268,6 +275,118 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// 地質分類・フラグ・支配サイト・境界の各モードが入力差を不透明な別色へ変換することを保証します。
+        /// </summary>
+        [Test]
+        public void DisplayColor_GeologyDiagnosticModesUseDistinctOpaqueColors()
+        {
+            GeneratedTile limestone = new GeneratedTile
+            {
+                GeologyClass = GeologyClass.Limestone,
+                GeologyFlags = GeologyDefinitionFlags.SupportsKarst
+            };
+            GeneratedTile volcanic = new GeneratedTile
+            {
+                GeologyClass = GeologyClass.VolcanicRock,
+                GeologyFlags = GeologyDefinitionFlags.SupportsActiveVolcanism
+            };
+            GeologySiteData firstSite = new GeologySiteData { MacroCellX = -2, MacroCellY = 3 };
+            GeologySiteData secondSite = new GeologySiteData { MacroCellX = -1, MacroCellY = 3 };
+
+            Color32 limestoneColor = WorldGenerationMapSampler.GetDisplayColor(
+                WorldGenerationMapViewMode.GeologyClass,
+                limestone);
+            Color32 volcanicColor = WorldGenerationMapSampler.GetDisplayColor(
+                WorldGenerationMapViewMode.GeologyClass,
+                volcanic);
+            Color32 karstColor = WorldGenerationMapSampler.GetDisplayColor(
+                WorldGenerationMapViewMode.GeologyFlags,
+                limestone);
+            Color32 activeVolcanismColor = WorldGenerationMapSampler.GetDisplayColor(
+                WorldGenerationMapViewMode.GeologyFlags,
+                volcanic);
+            Color32 firstSiteColor = WorldGenerationMapSampler.GetDisplayColor(
+                WorldGenerationMapViewMode.GeologyDominantSite,
+                default,
+                firstSite,
+                false);
+            Color32 secondSiteColor = WorldGenerationMapSampler.GetDisplayColor(
+                WorldGenerationMapViewMode.GeologyDominantSite,
+                default,
+                secondSite,
+                false);
+            Color32 interiorColor = WorldGenerationMapSampler.GetDisplayColor(
+                WorldGenerationMapViewMode.GeologySiteBoundary,
+                default,
+                firstSite,
+                false);
+            Color32 boundaryColor = WorldGenerationMapSampler.GetDisplayColor(
+                WorldGenerationMapViewMode.GeologySiteBoundary,
+                default,
+                firstSite,
+                true);
+
+            Assert.That(limestoneColor, Is.Not.EqualTo(volcanicColor));
+            Assert.That(karstColor, Is.Not.EqualTo(activeVolcanismColor));
+            Assert.That(firstSiteColor, Is.Not.EqualTo(secondSiteColor));
+            Assert.That(interiorColor, Is.Not.EqualTo(boundaryColor));
+            Assert.That(limestoneColor.a, Is.EqualTo(byte.MaxValue));
+            Assert.That(firstSiteColor.a, Is.EqualTo(byte.MaxValue));
+            Assert.That(boundaryColor.a, Is.EqualTo(byte.MaxValue));
+        }
+
+        /// <summary>
+        /// 固定Seedの広域格子で支配サイトと4近傍境界を評価し、中央サイトがGeneratorの直接結果と一致し、
+        /// 少なくとも1つのサイト境界を検出できることを保証します。
+        /// </summary>
+        [Test]
+        public void GeologySiteVisualizationData_MatchesGeneratorAndFindsBoundary()
+        {
+            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.FromString("map-viewer-geology-site-boundary-test"),
+                1);
+            bool foundBoundary = false;
+
+            // 512タイル規模のサイトを複数またぐよう128タイル間隔で走査し、特定の境界座標への依存を避けます。
+            for (int worldTileY = -1024; worldTileY <= 1024 && !foundBoundary; worldTileY += 128)
+            {
+                for (int worldTileX = -1024; worldTileX <= 1024; worldTileX += 128)
+                {
+                    bool generated =
+                        WorldGenerationDebugVisualizationOverlay.TryGetGeologySiteVisualizationData(
+                            settings,
+                            worldTileX,
+                            worldTileY,
+                            128,
+                            out GeologySiteData displayedSite,
+                            out bool isBoundary);
+                    bool directGenerated = DeterministicGeologyGenerator.TryGenerate(
+                        settings,
+                        worldTileX,
+                        worldTileY,
+                        out GeneratedGeologyData directGeology);
+
+                    Assert.That(generated, Is.EqualTo(directGenerated));
+                    Assert.That(generated, Is.True);
+                    Assert.That(
+                        WorldGenerationDebugVisualizationOverlay.IsSameGeologySite(
+                            displayedSite,
+                            directGeology.Site),
+                        Is.True,
+                        $"tile=({worldTileX}, {worldTileY})");
+
+                    if (isBoundary)
+                    {
+                        foundBoundary = true;
+                        break;
+                    }
+                }
+            }
+
+            Assert.That(foundBoundary, Is.True, "固定格子内で地質サイト境界を検出できませんでした。");
+        }
+
+        /// <summary>
         /// byte基底の表示モードへDropdownのint Indexを変換し、定義値は保持し、未選択・範囲外値はTerrainへ戻すことを保証します。
         /// `Enum.IsDefined`へintを直接渡してMap Viewer起動時に例外となった回帰を防ぎます。
         /// </summary>
@@ -278,13 +397,13 @@ namespace Farmware.WorldGeneration.Tests
                 WorldGenerationMapViewerWindow.ResolveViewModeChoiceIndex(0),
                 Is.EqualTo(WorldGenerationMapViewMode.Terrain));
             Assert.That(
-                WorldGenerationMapViewerWindow.ResolveViewModeChoiceIndex(9),
-                Is.EqualTo(WorldGenerationMapViewMode.VolcanicActivityPotential));
+                WorldGenerationMapViewerWindow.ResolveViewModeChoiceIndex(16),
+                Is.EqualTo(WorldGenerationMapViewMode.GeologySiteBoundary));
             Assert.That(
                 WorldGenerationMapViewerWindow.ResolveViewModeChoiceIndex(-1),
                 Is.EqualTo(WorldGenerationMapViewMode.Terrain));
             Assert.That(
-                WorldGenerationMapViewerWindow.ResolveViewModeChoiceIndex(10),
+                WorldGenerationMapViewerWindow.ResolveViewModeChoiceIndex(17),
                 Is.EqualTo(WorldGenerationMapViewMode.Terrain));
             Assert.That(
                 WorldGenerationMapViewerWindow.ResolveViewModeChoiceIndex(byte.MaxValue + 1),

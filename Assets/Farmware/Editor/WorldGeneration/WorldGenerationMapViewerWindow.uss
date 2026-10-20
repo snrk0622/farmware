@@ -163,8 +163,8 @@
 }
 
 .hover-label {
-    /* 初回から3行分を確保し、全環境軸のHover表示で地図が縮んで二度生成されることを防ぎます。 */
-    min-height: 56px;
+    /* 初回から5行分を確保し、地質サイトを含むHover表示で地図が縮んで二度生成されることを防ぎます。 */
+    min-height: 86px;
     flex-shrink: 0;
     padding: 5px 8px;
     background-color: #1b1f26;
