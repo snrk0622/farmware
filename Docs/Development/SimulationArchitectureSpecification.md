@@ -1,7 +1,7 @@
 # Farmware シミュレーション技術仕様 v0.2
 
 - 作成日: 2026-10-14
-- 最終更新日: 2026-10-19
+- 最終更新日: 2026-10-20
 - 状態: 探索ゲームへの移行先仕様と実装済み基盤の記録。第12.1・12.4の共通境界は段階実装済み
 - 対象環境: Unity 6000.3.8f1、Entities 1.5.0
 - 関連仕様: [ゲームコンセプト](../GameSpecification/2026-10-11_casual_factory_concept_v0.1.md)
@@ -285,6 +285,10 @@ WORLD-01Cでセル・チャンク座標、ストリーミング要求、動物�
 不変の基礎生成、可変セル差分、現在の有効セル、表示キャッシュを分離する。地形型は固定Biome、GroundBlock、WallBlock、Liquid、Surfaceを混同しない。データの正はECS／保存差分にあり、TilemapやHaloへ変更内容を逆流させない。
 
 TERRAIN-01Aでは共通`DefinitionCatalog`へ`GroundBlock`、`WallBlock`、`Liquid`、`TerrainSurface`分類を追加し、通常地面、自然岩壁、淡水、海水、マグマの変更禁止GUIDを全Worldへ登録する。`TerrainBlockCatalogBlob`は共通RuntimeId、硬度、回収Item参照、移動・設置・水密・施設境界属性をRuntimeId順で保持する。現行`GeneratedTile`は互換変換で、Landを地面、RockWallを地面＋壁、Waterを地面なし＋水種別Liquid、Magmaを地面なし＋Magmaへ分解する。生成器がBlockを直接選ぶことと表示参照は、TERRAIN-01Bのバイオーム構成合意後にTERRAIN-01Cで接続する。
+
+TERRAIN-01C以降の地形材質は、安定材質ID、共通`TerrainBlockItem`、Ground形態Definition、Wall形態Definitionを明示的な一対一組として登録する。Ground／Wall区画と形態別属性は統合せず、インベントリだけを材質Itemへ統一する。配置Commandは変更前の有効セルを読み、GroundがなければGround形態、GroundがありWallがなければWall形態を選ぶ。液体からGroundへの置換、Item消費、差分更新、占有・依存関係Dirtyは同じトランザクションで確定し、失敗時に部分変更しない。Wall採掘はGroundを維持し、Wallが残るセルのGround掘削は拒否する。WallはGround上にだけ存在でき、GroundなしのWallとLiquidとの重複を有効セル検証で拒否する。形態間の対応を命名規則やRuntimeIdの隣接から推測しない。
+
+`TerrainBlockItem`は地形再配置専用で、クラフト資源ItemとDefinitionを共有しない。石材・鉱物は有限な`GeologyDeposit`としてBlockとは別の安定Definition、Host座標、形態、残量、採掘済み差分を持つ。`LooseSurface`と`MassiveDeposit`は独立占有、`GroundEmbedded`はGround参照、`WallEmbedded`はWall参照とし、Host Definition名から資源を推測しない。Wall内鉱床の採掘はWall差分、Block Item回収、資源回収を一つのCommandで確定し、Ground内鉱床の採掘はGroundを維持する。鉱床除去差分をBlock差分と分離し、Block再配置・自然状態復元・チャンク再生成で復活させない。複数セル大型鉱床の残量更新と電力不要採掘設備は、個別セルEntityの毎Tick走査ではなく鉱床Entity単位の固定Tick処理にする。
 
 可変状態は、ストリーミング対象の生成チャンクEntityとは別の`TerrainChunkDeltaOwner`と`TerrainCellDelta` Bufferが所有する。所有キーは`WorldLayer＋論理チャンクX/Y`、Bufferは0〜4095の`LocalTileIndex`昇順・重複なしとし、変更Maskによって未変更と明示除去を区別する。自然状態へ戻った要素は削除し、空の所有者は正規状態にしない。保存前の状態ハッシュ監査はOwnerとBufferを独立して列挙し、片方だけが残った不完全Entityを差分なしとして無視せず拒否する。`EffectiveTerrainResolver`は基礎セルへGround、Wall、Liquid、TerrainSurfaceの順で差分を適用し、分類違い、地面と液体の重複、地面のないSurfaceを拒否する。有効セルは再構築値であり保存しない。
 

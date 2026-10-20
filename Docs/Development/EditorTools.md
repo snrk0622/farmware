@@ -1,6 +1,6 @@
 # Unity Editorツール
 
-- 最終更新日: 2026-10-19
+- 最終更新日: 2026-10-20
 - 対象: `Assets/Farmware/Editor/WorldGeneration/`
 
 ## 1. 用途
@@ -289,7 +289,7 @@ Editorツールだけで検証を完了しない。対応する自動テスト�
 - WORLD-01CでLayerキーをビューア・中央情報・可視化の検索へ接続済み。Map Viewerの`Layer`欄、または`Farmware > World Generation > Debug Visualization > Layer`からSurface／Underwater／Deep Seaを選ぶ。Surface以外の自然生成はTERRAIN-01Cまで未接続のため、Map Viewerは暗色と未接続メッセージ、Gameビュー可視化は空表示を返す。
 - TERRAIN-01AではBlock定義と有効セルAPIをSimulationへ追加するが、色判定は既存`GeneratedTile`互換のままとする。仕様転換に合わせて`Terrain Placement`からベルト固有のHUDと凡例だけを除き、差分込み表示、Blockパレット、自然生成と実ワールドの表示切替はTERRAIN-01Cで追加する。
 - TERRAIN-01Bでバイオーム構成と安定ID方針を再検討し、TERRAIN-01C/DでBlockパレットと変更後地形、スポーン許可・探索失敗理由を追加する。Map Viewerは合意後の全バイオームを識別し、自然生成と実ワールド差分込みを明示する。
-- GATHER-01／TERRAIN-02: 編集後の隣接差分、穴・液体、反応・保留キューを表示し、元生成を現在地形と誤表示しない。
+- TERRAIN-01C／GATHER-01／AUTO-01D: 編集後の隣接差分、穴・液体、反応・保留キューに加え、`LooseSurface`／`GroundEmbedded`／`WallEmbedded`／`MassiveDeposit`の形態、Host、採掘済み差分、巨大鉱床の残量・占有を表示する。自然生成Block、配置済みBlock、クラフト用資源を区別し、元生成を現在地形と誤表示しない。
 - ECO-01／JOURNAL-01: 永続／匿名、地域会計、収容数・回復、証拠判定を確認可能にする。
 - DIVE-01／VEHICLE-01: 現在Layerと直下プレビュー、遷移失敗、高速先読み・生成待ちを診断する。
 - 構築ツールが既存の本番参照・採用GUID・未保存Sceneを守り、新プレイヤー・保存設定へ更新できることを各PRで確認する。
