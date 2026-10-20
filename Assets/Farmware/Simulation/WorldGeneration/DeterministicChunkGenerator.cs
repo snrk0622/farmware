@@ -111,6 +111,77 @@ namespace Farmware.WorldGeneration
             out GeneratedTile tile)
         {
             tile = default;
+            if (!DeterministicGeologyGenerator.TryGenerate(
+                settings,
+                worldTileX,
+                worldTileY,
+                out GeneratedGeologyData geology))
+            {
+                return false;
+            }
+
+            return TryGenerateTileWithGeology(
+                settings,
+                worldTileX,
+                worldTileY,
+                geology,
+                out tile);
+        }
+
+        /// <summary>
+        /// チャンク共有の地質サイトキャッシュを使って1タイルの基礎地形データを生成します。
+        /// Chunk生成Jobとチャンク状態ハッシュだけが呼び、公開APIと同じ最終タイル値を返します。
+        /// </summary>
+        /// <param name="settings">キャッシュ作成時と同じワールド生成設定です。</param>
+        /// <param name="geologyCache">対象チャンクの候補サイトと分類を保持する一時キャッシュです。</param>
+        /// <param name="worldTileX">符号付きワールド水平タイル座標です。</param>
+        /// <param name="worldTileY">符号付きワールド垂直タイル座標です。</param>
+        /// <param name="tile">成功時に全基礎値を持つタイルを返します。失敗時はdefaultです。</param>
+        /// <returns>キャッシュ内の5×5候補と環境固定サンプルが有効ならtrueです。</returns>
+        internal static bool TryGenerateTile(
+            in WorldGenerationSettings settings,
+            in GeologyChunkCache geologyCache,
+            int worldTileX,
+            int worldTileY,
+            out GeneratedTile tile)
+        {
+            tile = default;
+            if (!DeterministicGeologyGenerator.TryGenerateFromChunkCache(
+                settings,
+                geologyCache,
+                worldTileX,
+                worldTileY,
+                out GeneratedGeologyData geology))
+            {
+                return false;
+            }
+
+            return TryGenerateTileWithGeology(
+                settings,
+                worldTileX,
+                worldTileY,
+                geology,
+                out tile);
+        }
+
+        /// <summary>
+        /// 確定済み地質と同じ座標の環境・旧地形分類を合成し、GeneratedTileを完成させます。
+        /// 単一タイル生成とチャンクキャッシュ生成の結果を同じ代入処理へ集約するために呼びます。
+        /// </summary>
+        /// <param name="settings">環境、旧7Biome、地面、水域を生成する固定設定です。</param>
+        /// <param name="worldTileX">符号付きワールド水平タイル座標です。</param>
+        /// <param name="worldTileY">符号付きワールド垂直タイル座標です。</param>
+        /// <param name="geology">同じ絶対座標で確定済みの固定地質結果です。</param>
+        /// <param name="tile">成功時に環境と地質を含むタイルを返します。失敗時はdefaultです。</param>
+        /// <returns>環境の固定半径サンプルが座標域内で生成できた場合はtrueです。</returns>
+        private static bool TryGenerateTileWithGeology(
+            in WorldGenerationSettings settings,
+            int worldTileX,
+            int worldTileY,
+            in GeneratedGeologyData geology,
+            out GeneratedTile tile)
+        {
+            tile = default;
             if (!DeterministicEnvironmentGenerator.TryGenerate(
                 settings,
                 worldTileX,
@@ -184,7 +255,12 @@ namespace Farmware.WorldGeneration
                 WoodyVegetationPotential = environment.WoodyVegetationPotential,
                 TerrainRuggedness = environment.TerrainRuggedness,
                 CoastalInfluence = environment.CoastalInfluence,
-                VolcanicActivityPotential = environment.VolcanicActivityPotential
+                VolcanicActivityPotential = environment.VolcanicActivityPotential,
+                GeologyClass = geology.Class,
+                GeologyFlags = geology.Flags,
+                GeologyPermeability = geology.Permeability,
+                GeologyGroundwaterStorage = geology.GroundwaterStorage,
+                GeologyErosionResistance = geology.ErosionResistance
             };
             return true;
         }
@@ -638,6 +714,11 @@ namespace Farmware.WorldGeneration
             ChunkCoordinate chunkCoordinate)
         {
             ulong hash = 0xCBF29CE484222325UL;
+            bool hasGeologyCache = DeterministicGeologyGenerator.TryCreateChunkCache(
+                settings,
+                chunkCoordinate.X,
+                chunkCoordinate.Y,
+                out GeologyChunkCache geologyCache);
 
             // 行優先の順序を固定し、同じ4096タイルでも並びが変われば別ハッシュになるようにします。
             for (int localY = 0; localY < WorldGridConstants.LogicalChunkSize; localY++)
@@ -646,7 +727,18 @@ namespace Farmware.WorldGeneration
                 {
                     int worldTileX = WorldGrid.ToWorldTileX(chunkCoordinate.X, localX);
                     int worldTileY = WorldGrid.ToWorldTileY(chunkCoordinate.Y, localY);
-                    GeneratedTile tile = GenerateTile(settings, worldTileX, worldTileY);
+                    GeneratedTile tile;
+                    if (!hasGeologyCache
+                        || !TryGenerateTile(
+                            settings,
+                            geologyCache,
+                            worldTileX,
+                            worldTileY,
+                            out tile))
+                    {
+                        // 座標端や不正設定では従来の単一タイルAPIへ戻し、公開済みハッシュ契約を維持します。
+                        tile = GenerateTile(settings, worldTileX, worldTileY);
+                    }
                     hash = HashTile(hash, tile);
                 }
             }
@@ -1202,7 +1294,14 @@ namespace Farmware.WorldGeneration
                 ulong soilHash = WorldSeedUtility.Mix64(classificationsHash ^ (byte)tile.Soil);
                 ulong climateHash = WorldSeedUtility.Mix64(soilHash ^ packedClimate);
                 ulong environmentHash = WorldSeedUtility.Mix64(climateHash ^ packedEnvironment);
-                return WorldSeedUtility.Mix64(environmentHash ^ tile.VolcanicActivityPotential);
+                ulong volcanicHash = WorldSeedUtility.Mix64(
+                    environmentHash ^ tile.VolcanicActivityPotential);
+                ulong packedGeology = (byte)tile.GeologyClass;
+                packedGeology |= (ulong)(byte)tile.GeologyFlags << 8;
+                packedGeology |= (ulong)tile.GeologyPermeability << 16;
+                packedGeology |= (ulong)tile.GeologyGroundwaterStorage << 32;
+                packedGeology |= (ulong)tile.GeologyErosionResistance << 48;
+                return WorldSeedUtility.Mix64(volcanicHash ^ packedGeology);
             }
         }
     }

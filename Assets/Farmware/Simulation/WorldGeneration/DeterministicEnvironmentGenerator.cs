@@ -814,8 +814,14 @@ namespace Farmware.WorldGeneration
             }
         }
 
-        /// <summary>同じ標高純粋関数を、中心・起伏・海洋影響の全サンプルで共有します。</summary>
-        private static ushort SampleElevation(
+        /// <summary>
+        /// 同じ標高純粋関数を、中心、起伏、海洋影響、地質サイトの全サンプルで共有します。
+        /// </summary>
+        /// <param name="settings">標高格子、Octave数、Seed、GeneratorVersionを持つ生成設定です。</param>
+        /// <param name="worldTileX">標高を読む水平ワールドタイル座標です。</param>
+        /// <param name="worldTileY">標高を読む垂直ワールドタイル座標です。</param>
+        /// <returns>0〜65,535へ正規化した連続標高です。</returns>
+        public static ushort SampleElevation(
             in WorldGenerationSettings settings,
             int worldTileX,
             int worldTileY)

@@ -35,6 +35,7 @@ v0.52では、上流集合の4,096件目についても直接逆辺8件を必ず
 - [WORLD-01D 操作主体とワールド境界の実装記録](./Development/World01DWorldPlayerBoundary.md)
 - [TERRAIN-01A ブロック定義と有効セルの実装記録](./Development/Terrain01AEffectiveTerrain.md)
 - [TERRAIN-01C1 連続環境軸の実装記録](./Development/Terrain01C1ContinuousEnvironmentAxes.md)
+- [TERRAIN-01C2 地質基盤の実装記録](./Development/Terrain01C2GeologyFoundation.md)
 - [Codexスキル](./Development/CodexSkills.md)
 - [Unity Editorツール](./Development/EditorTools.md)
 - [テスト](./Development/Testing.md)

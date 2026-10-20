@@ -158,6 +158,8 @@ Gameビューでは`CameraPanController`の表示原点を使い、CameraとGrid
 
 TERRAIN-01C1で、旧7Biomeの代表土壌との差だけを見る`Biome Transition`と、旧7Biome互換値だけを見る`Weirdness`モードを削除した。旧`Weirdness`データはTERRAIN-01C5まで内部互換生成に残るが、火山活動の診断には使用しない。
 
+TERRAIN-01C2-Aでは地質DefinitionとSimulation生成結果だけを先に接続し、Editorメニュー、Gameビュー、Map Viewerの表示項目は変更しない。地質分類、透水性、地下水保持力、侵食抵抗、必須フラグ、支配サイトと境界の個別表示は、複数Seed分布監査と合わせてC2-Bで追加する。C2-Aの結果を既存`Biome`、`Terrain`、`Volcanic Activity Potential`表示へ暗黙に混ぜない。
+
 ### 2.4 Analyze Distribution
 
 - メニュー: `Farmware > World Generation > Analyze Distribution`
