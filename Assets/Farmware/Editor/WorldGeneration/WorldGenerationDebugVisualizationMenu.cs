@@ -26,14 +26,33 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>連続標高表示へ切り替えるメニューパスです。</summary>
         private const string ElevationMenuPath = "Farmware/World Generation/Debug Visualization/Elevation";
 
-        /// <summary>連続気温表示へ切り替えるメニューパスです。</summary>
-        private const string TemperatureMenuPath = "Farmware/World Generation/Debug Visualization/Temperature";
+        /// <summary>標高補正前の基礎気温表示へ切り替えるメニューパスです。</summary>
+        private const string BaseTemperatureMenuPath =
+            "Farmware/World Generation/Debug Visualization/Environment/Base Temperature";
 
-        /// <summary>連続湿度表示へ切り替えるメニューパスです。</summary>
-        private const string MoistureMenuPath = "Farmware/World Generation/Debug Visualization/Moisture";
+        /// <summary>標高寒冷補正後の地形気温表示へ切り替えるメニューパスです。</summary>
+        private const string TerrainTemperatureMenuPath =
+            "Farmware/World Generation/Debug Visualization/Environment/Terrain Temperature";
 
-        /// <summary>連続Weirdness表示へ切り替えるメニューパスです。</summary>
-        private const string WeirdnessMenuPath = "Farmware/World Generation/Debug Visualization/Weirdness";
+        /// <summary>現在土壌水分から独立した基礎湿度表示へ切り替えるメニューパスです。</summary>
+        private const string BaseMoistureMenuPath =
+            "Farmware/World Generation/Debug Visualization/Environment/Base Moisture";
+
+        /// <summary>木本植生ポテンシャル表示へ切り替えるメニューパスです。</summary>
+        private const string WoodyVegetationMenuPath =
+            "Farmware/World Generation/Debug Visualization/Environment/Woody Vegetation Potential";
+
+        /// <summary>地形起伏表示へ切り替えるメニューパスです。</summary>
+        private const string TerrainRuggednessMenuPath =
+            "Farmware/World Generation/Debug Visualization/Environment/Terrain Ruggedness";
+
+        /// <summary>海洋影響表示へ切り替えるメニューパスです。</summary>
+        private const string CoastalInfluenceMenuPath =
+            "Farmware/World Generation/Debug Visualization/Environment/Coastal Influence";
+
+        /// <summary>旧Weirdnessと独立した火山活動度表示へ切り替えるメニューパスです。</summary>
+        private const string VolcanicActivityMenuPath =
+            "Farmware/World Generation/Debug Visualization/Environment/Volcanic Activity Potential";
 
         /// <summary>淡水・海水表示へ切り替えるメニューパスです。</summary>
         private const string WaterSalinityMenuPath =
@@ -42,10 +61,6 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>川・池・海表示へ切り替えるメニューパスです。</summary>
         private const string WaterBodyMenuPath =
             "Farmware/World Generation/Debug Visualization/Water Body";
-
-        /// <summary>バイオーム移行タイル表示へ切り替えるメニューパスです。</summary>
-        private const string TransitionMenuPath =
-            "Farmware/World Generation/Debug Visualization/Biome Transition";
 
         /// <summary>岩壁の最終形状と内部影濃度表示へ切り替えるメニューパスです。</summary>
         private const string RockWallMenuPath =
@@ -107,99 +122,120 @@ namespace Farmware.WorldGeneration.Editor
             SelectMode(WorldGenerationDebugVisualizationMode.Elevation);
         }
 
-        /// <summary>PlayMode中の連続気温値を青から赤のグラデーションで表示します。</summary>
-        [MenuItem(TemperatureMenuPath, false, 204)]
-        private static void SelectTemperature()
+        /// <summary>PlayMode中の標高補正前の基礎気温を青から赤のグラデーションで表示します。</summary>
+        [MenuItem(BaseTemperatureMenuPath, false, 204)]
+        private static void SelectBaseTemperature()
         {
-            SelectMode(WorldGenerationDebugVisualizationMode.Temperature);
+            SelectMode(WorldGenerationDebugVisualizationMode.BaseTemperature);
         }
 
-        /// <summary>PlayMode中の連続湿度値を茶から水色のグラデーションで表示します。</summary>
-        [MenuItem(MoistureMenuPath, false, 205)]
-        private static void SelectMoisture()
+        /// <summary>PlayMode中の標高寒冷補正後の地形気温を青から赤のグラデーションで表示します。</summary>
+        [MenuItem(TerrainTemperatureMenuPath, false, 205)]
+        private static void SelectTerrainTemperature()
         {
-            SelectMode(WorldGenerationDebugVisualizationMode.Moisture);
+            SelectMode(WorldGenerationDebugVisualizationMode.TerrainTemperature);
         }
 
-        /// <summary>PlayMode中の連続Weirdness値を紫から黄のグラデーションで表示します。</summary>
-        [MenuItem(WeirdnessMenuPath, false, 206)]
-        private static void SelectWeirdness()
+        /// <summary>PlayMode中の基礎湿度を茶から水色のグラデーションで表示します。</summary>
+        [MenuItem(BaseMoistureMenuPath, false, 206)]
+        private static void SelectBaseMoisture()
         {
-            SelectMode(WorldGenerationDebugVisualizationMode.Weirdness);
+            SelectMode(WorldGenerationDebugVisualizationMode.BaseMoisture);
+        }
+
+        /// <summary>PlayMode中の木本植生ポテンシャルを茶から緑のグラデーションで表示します。</summary>
+        [MenuItem(WoodyVegetationMenuPath, false, 207)]
+        private static void SelectWoodyVegetation()
+        {
+            SelectMode(WorldGenerationDebugVisualizationMode.WoodyVegetationPotential);
+        }
+
+        /// <summary>PlayMode中の地形起伏を平坦側の明色から急峻側の暗色で表示します。</summary>
+        [MenuItem(TerrainRuggednessMenuPath, false, 208)]
+        private static void SelectTerrainRuggedness()
+        {
+            SelectMode(WorldGenerationDebugVisualizationMode.TerrainRuggedness);
+        }
+
+        /// <summary>PlayMode中の海洋影響を内陸色から沿岸色のグラデーションで表示します。</summary>
+        [MenuItem(CoastalInfluenceMenuPath, false, 209)]
+        private static void SelectCoastalInfluence()
+        {
+            SelectMode(WorldGenerationDebugVisualizationMode.CoastalInfluence);
+        }
+
+        /// <summary>PlayMode中の火山活動度を非活動色から活動色のグラデーションで表示します。</summary>
+        [MenuItem(VolcanicActivityMenuPath, false, 210)]
+        private static void SelectVolcanicActivity()
+        {
+            SelectMode(WorldGenerationDebugVisualizationMode.VolcanicActivityPotential);
         }
 
         /// <summary>PlayMode中の水域を陸地・淡水・海水の固定色で表示します。</summary>
-        [MenuItem(WaterSalinityMenuPath, false, 207)]
+        [MenuItem(WaterSalinityMenuPath, false, 220)]
         private static void SelectWaterSalinity()
         {
             SelectMode(WorldGenerationDebugVisualizationMode.WaterSalinity);
         }
 
         /// <summary>PlayMode中の水域を陸地・川・池・海の固定色で表示します。</summary>
-        [MenuItem(WaterBodyMenuPath, false, 208)]
+        [MenuItem(WaterBodyMenuPath, false, 221)]
         private static void SelectWaterBody()
         {
             SelectMode(WorldGenerationDebugVisualizationMode.WaterBody);
         }
 
-        /// <summary>PlayMode中に論理Biomeと異なる陸上Groundだけを強調表示します。</summary>
-        [MenuItem(TransitionMenuPath, false, 209)]
-        private static void SelectTransition()
-        {
-            SelectMode(WorldGenerationDebugVisualizationMode.BiomeTransition);
-        }
-
         /// <summary>PlayMode中の岩壁を非岩壁・露出面・内部影の濃淡で表示します。</summary>
-        [MenuItem(RockWallMenuPath, false, 210)]
+        [MenuItem(RockWallMenuPath, false, 222)]
         private static void SelectRockWall()
         {
             SelectMode(WorldGenerationDebugVisualizationMode.RockWall);
         }
 
         /// <summary>PlayMode中のマグマ本体と周囲の淡水抑制域を固定色で表示します。</summary>
-        [MenuItem(MagmaMenuPath, false, 211)]
+        [MenuItem(MagmaMenuPath, false, 223)]
         private static void SelectMagma()
         {
             SelectMode(WorldGenerationDebugVisualizationMode.Magma);
         }
 
         /// <summary>PlayMode中の最終資源配置を木・石・砂の固定色で表示します。</summary>
-        [MenuItem(ResourcesMenuPath, false, 212)]
+        [MenuItem(ResourcesMenuPath, false, 224)]
         private static void SelectResources()
         {
             SelectMode(WorldGenerationDebugVisualizationMode.Resources);
         }
 
         /// <summary>PlayMode中の地形配置属性を、通常地面・水上橋・耐熱橋・配置不可の固定色で表示します。</summary>
-        [MenuItem(TerrainPlacementMenuPath, false, 213)]
+        [MenuItem(TerrainPlacementMenuPath, false, 225)]
         private static void SelectTerrainPlacement()
         {
             SelectMode(WorldGenerationDebugVisualizationMode.TerrainPlacement);
         }
 
         /// <summary>PlayMode中の動物配置候補と確定個体位置を別色で表示します。</summary>
-        [MenuItem(AnimalPopulationMenuPath, false, 214)]
+        [MenuItem(AnimalPopulationMenuPath, false, 226)]
         private static void SelectAnimalPopulation()
         {
             SelectMode(WorldGenerationDebugVisualizationMode.AnimalPopulation);
         }
 
         /// <summary>PlayMode中の診断検索を地上レイヤーへ切り替えます。</summary>
-        [MenuItem(SurfaceLayerMenuPath, false, 230)]
+        [MenuItem(SurfaceLayerMenuPath, false, 240)]
         private static void SelectSurfaceLayer()
         {
             SelectLayer(WorldLayer.Surface);
         }
 
         /// <summary>PlayMode中の診断検索を海中レイヤーへ切り替えます。未生成なら空表示になります。</summary>
-        [MenuItem(UnderwaterLayerMenuPath, false, 231)]
+        [MenuItem(UnderwaterLayerMenuPath, false, 241)]
         private static void SelectUnderwaterLayer()
         {
             SelectLayer(WorldLayer.Underwater);
         }
 
         /// <summary>PlayMode中の診断検索を深海レイヤーへ切り替えます。未生成なら空表示になります。</summary>
-        [MenuItem(DeepSeaLayerMenuPath, false, 232)]
+        [MenuItem(DeepSeaLayerMenuPath, false, 242)]
         private static void SelectDeepSeaLayer()
         {
             SelectLayer(WorldLayer.DeepSea);
@@ -237,28 +273,74 @@ namespace Farmware.WorldGeneration.Editor
             return ValidateMode(ElevationMenuPath, WorldGenerationDebugVisualizationMode.Elevation);
         }
 
-        /// <summary>Temperature項目の有効状態とチェック表示を更新します。</summary>
+        /// <summary>Base Temperature項目の有効状態とチェック表示を更新します。</summary>
         /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
-        [MenuItem(TemperatureMenuPath, true)]
-        private static bool ValidateTemperature()
+        [MenuItem(BaseTemperatureMenuPath, true)]
+        private static bool ValidateBaseTemperature()
         {
-            return ValidateMode(TemperatureMenuPath, WorldGenerationDebugVisualizationMode.Temperature);
+            return ValidateMode(
+                BaseTemperatureMenuPath,
+                WorldGenerationDebugVisualizationMode.BaseTemperature);
         }
 
-        /// <summary>Moisture項目の有効状態とチェック表示を更新します。</summary>
+        /// <summary>Terrain Temperature項目の有効状態とチェック表示を更新します。</summary>
         /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
-        [MenuItem(MoistureMenuPath, true)]
-        private static bool ValidateMoisture()
+        [MenuItem(TerrainTemperatureMenuPath, true)]
+        private static bool ValidateTerrainTemperature()
         {
-            return ValidateMode(MoistureMenuPath, WorldGenerationDebugVisualizationMode.Moisture);
+            return ValidateMode(
+                TerrainTemperatureMenuPath,
+                WorldGenerationDebugVisualizationMode.TerrainTemperature);
         }
 
-        /// <summary>Weirdness項目の有効状態とチェック表示を更新します。</summary>
+        /// <summary>Base Moisture項目の有効状態とチェック表示を更新します。</summary>
         /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
-        [MenuItem(WeirdnessMenuPath, true)]
-        private static bool ValidateWeirdness()
+        [MenuItem(BaseMoistureMenuPath, true)]
+        private static bool ValidateBaseMoisture()
         {
-            return ValidateMode(WeirdnessMenuPath, WorldGenerationDebugVisualizationMode.Weirdness);
+            return ValidateMode(
+                BaseMoistureMenuPath,
+                WorldGenerationDebugVisualizationMode.BaseMoisture);
+        }
+
+        /// <summary>Woody Vegetation Potential項目の有効状態とチェック表示を更新します。</summary>
+        /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
+        [MenuItem(WoodyVegetationMenuPath, true)]
+        private static bool ValidateWoodyVegetation()
+        {
+            return ValidateMode(
+                WoodyVegetationMenuPath,
+                WorldGenerationDebugVisualizationMode.WoodyVegetationPotential);
+        }
+
+        /// <summary>Terrain Ruggedness項目の有効状態とチェック表示を更新します。</summary>
+        /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
+        [MenuItem(TerrainRuggednessMenuPath, true)]
+        private static bool ValidateTerrainRuggedness()
+        {
+            return ValidateMode(
+                TerrainRuggednessMenuPath,
+                WorldGenerationDebugVisualizationMode.TerrainRuggedness);
+        }
+
+        /// <summary>Coastal Influence項目の有効状態とチェック表示を更新します。</summary>
+        /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
+        [MenuItem(CoastalInfluenceMenuPath, true)]
+        private static bool ValidateCoastalInfluence()
+        {
+            return ValidateMode(
+                CoastalInfluenceMenuPath,
+                WorldGenerationDebugVisualizationMode.CoastalInfluence);
+        }
+
+        /// <summary>Volcanic Activity Potential項目の有効状態とチェック表示を更新します。</summary>
+        /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
+        [MenuItem(VolcanicActivityMenuPath, true)]
+        private static bool ValidateVolcanicActivity()
+        {
+            return ValidateMode(
+                VolcanicActivityMenuPath,
+                WorldGenerationDebugVisualizationMode.VolcanicActivityPotential);
         }
 
         /// <summary>Water Salinity項目の有効状態とチェック表示を更新します。</summary>
@@ -277,16 +359,6 @@ namespace Farmware.WorldGeneration.Editor
         private static bool ValidateWaterBody()
         {
             return ValidateMode(WaterBodyMenuPath, WorldGenerationDebugVisualizationMode.WaterBody);
-        }
-
-        /// <summary>Biome Transition項目の有効状態とチェック表示を更新します。</summary>
-        /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
-        [MenuItem(TransitionMenuPath, true)]
-        private static bool ValidateTransition()
-        {
-            return ValidateMode(
-                TransitionMenuPath,
-                WorldGenerationDebugVisualizationMode.BiomeTransition);
         }
 
         /// <summary>Rock Wall項目の有効状態とチェック表示を更新します。</summary>

@@ -36,7 +36,10 @@
         </ui:VisualElement>
         <ui:VisualElement name="body" class="body">
             <ui:VisualElement name="mapPanel" class="map-panel">
-                <ui:VisualElement name="mapHost" class="map-host" />
+                <ui:VisualElement name="mapHost" class="map-host">
+                    <!-- 初回画像が完成するまで、進捗や失敗理由を地図領域にも表示します。 -->
+                    <ui:Label name="generationLabel" text="地図の表示を準備しています…" class="generation-label" picking-mode="Ignore" />
+                </ui:VisualElement>
                 <ui:Label name="hoverLabel" text="カーソルを地図へ移動すると座標と地形を表示します" class="hover-label" />
             </ui:VisualElement>
             <ui:ScrollView name="sidePanel" class="side-panel">

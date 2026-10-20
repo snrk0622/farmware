@@ -146,6 +146,7 @@ namespace Farmware.WorldGeneration
                 slot.Handle.Complete();
                 slot.Tiles.Dispose();
                 slot.Resources.Dispose();
+                slot.GenerationFailed.Dispose();
             }
 
             slots.Dispose();
@@ -179,11 +180,20 @@ namespace Farmware.WorldGeneration
                         && coordinate.Y == slot.Coordinate.Y
                         && status.Phase == ChunkGenerationPhase.GeneratingData)
                     {
-                        // 両Bufferを確定してからReadyへ進め、半分だけ完成した結果を表示側へ渡さないようにします。
-                        manager.GetBuffer<GeneratedTile>(slot.Entity).CopyFrom(slot.Tiles);
-                        manager.GetBuffer<GeneratedResourceTile>(slot.Entity).CopyFrom(slot.Resources);
-                        status.GeneratedWithVersion = slot.GeneratorVersion;
-                        status.Phase = ChunkGenerationPhase.ReadyToApply;
+                        if (slot.GenerationFailed[0] != 0)
+                        {
+                            // 固定半径サンプルがワールド座標域を越えた場合は、不完全なBufferを公開せず明示的な失敗へ進めます。
+                            status.GeneratedWithVersion = 0;
+                            status.Phase = ChunkGenerationPhase.Failed;
+                        }
+                        else
+                        {
+                            // 両Bufferを確定してからReadyへ進め、半分だけ完成した結果を表示側へ渡さないようにします。
+                            manager.GetBuffer<GeneratedTile>(slot.Entity).CopyFrom(slot.Tiles);
+                            manager.GetBuffer<GeneratedResourceTile>(slot.Entity).CopyFrom(slot.Resources);
+                            status.GeneratedWithVersion = slot.GeneratorVersion;
+                            status.Phase = ChunkGenerationPhase.ReadyToApply;
+                        }
                         manager.SetComponentData(slot.Entity, status);
                     }
                 }
@@ -246,13 +256,15 @@ namespace Farmware.WorldGeneration
                 slot.Coordinate = manager.GetComponentData<ChunkCoordinateComponent>(entity);
                 slot.GeneratorVersion = settings.GeneratorVersion;
                 slot.Running = true;
+                slot.GenerationFailed[0] = 0;
                 GenerateChunkJob job = new GenerateChunkJob
                 {
                     Settings = settings,
                     ResourceSettings = resourceSettings,
                     Coordinate = slot.Coordinate,
                     Tiles = slot.Tiles,
-                    Resources = slot.Resources
+                    Resources = slot.Resources,
+                    GenerationFailed = slot.GenerationFailed
                 };
 
                 // JobはECSへ一切触れず入力も値コピーです。Dependencyへ連結すると表示側が再び待つため、
@@ -313,7 +325,8 @@ namespace Farmware.WorldGeneration
                 Tiles = new NativeArray<GeneratedTile>(WorldGridConstants.TilesPerChunk, Allocator.Persistent,
                     NativeArrayOptions.UninitializedMemory),
                 Resources = new NativeArray<GeneratedResourceTile>(WorldGridConstants.TilesPerChunk, Allocator.Persistent,
-                    NativeArrayOptions.UninitializedMemory)
+                    NativeArrayOptions.UninitializedMemory),
+                GenerationFailed = new NativeArray<byte>(1, Allocator.Persistent, NativeArrayOptions.ClearMemory)
             });
             return slots.Length - 1;
         }
@@ -335,6 +348,8 @@ namespace Farmware.WorldGeneration
             public NativeArray<GeneratedTile> Tiles;
             /// <summary>資源4096件の作業配列です。地形配列と同じ所有・解放規則です。</summary>
             public NativeArray<GeneratedResourceTile> Resources;
+            /// <summary>1件でも環境軸を生成できなかった場合に1となる、Jobと公開処理の失敗通知領域です。</summary>
+            public NativeArray<byte> GenerationFailed;
         }
 
         /// <summary>
@@ -358,6 +373,9 @@ namespace Farmware.WorldGeneration
             /// <summary>地形と同じ位置に対応し、完了後にSystemへ返す資源配列です。</summary>
             public NativeArray<GeneratedResourceTile> Resources;
 
+            /// <summary>座標範囲外や不正設定を検出した場合に1を書き、公開処理へチャンク失敗を伝えます。</summary>
+            public NativeArray<byte> GenerationFailed;
+
             /// <summary>
             /// Worker上で4096セルを生成します。ECSの状態やBufferへはアクセスしません。
             /// </summary>
@@ -371,10 +389,19 @@ namespace Farmware.WorldGeneration
                         int tileIndex = WorldGrid.ToTileIndex(localX, localY);
                         int worldTileX = WorldGrid.ToWorldTileX(Coordinate.X, localX);
                         int worldTileY = WorldGrid.ToWorldTileY(Coordinate.Y, localY);
-                        GeneratedTile terrainTile = DeterministicChunkGenerator.GenerateTile(
+                        bool generated = DeterministicChunkGenerator.TryGenerateTile(
                             Settings,
                             worldTileX,
-                            worldTileY);
+                            worldTileY,
+                            out GeneratedTile terrainTile);
+                        if (!generated)
+                        {
+                            // IJobは単一Workerで順に実行するため原子的操作は不要です。残りも初期化して未定義配列を残しません。
+                            GenerationFailed[0] = 1;
+                            Tiles[tileIndex] = default;
+                            Resources[tileIndex] = default;
+                            continue;
+                        }
                         Tiles[tileIndex] = terrainTile;
                         Resources[tileIndex] = DeterministicResourceGenerator.GenerateResource(
                             Settings,

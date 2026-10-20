@@ -31,22 +31,20 @@ namespace Farmware.WorldGeneration
                 return false;
             }
 
-            ushort elevation = DeterministicNoise.SampleFractalNoise(
-                settings.WorldSeed,
-                settings.GeneratorVersion,
-                worldTileX,
-                worldTileY,
-                settings.ElevationCellSizeInTiles,
-                settings.OctaveCount,
-                WorldGenerationPurposeSalts.Elevation);
-
-            SampleBiomeClimate(
+            if (!DeterministicEnvironmentGenerator.TryGenerateBaseClimate(
                 settings,
                 worldTileX,
                 worldTileY,
-                out ushort temperature,
-                out ushort moisture,
-                out ushort weirdness);
+                out GeneratedEnvironmentData environment))
+            {
+                // ワールド端で固定半径サンプルがint範囲を越える場合は、反対端へ周回した偽の岩壁を作りません。
+                return false;
+            }
+
+            ushort elevation = environment.Elevation;
+            ushort temperature = environment.BaseTemperature;
+            ushort moisture = environment.BaseMoisture;
+            ushort weirdness = SampleLegacyWeirdness(settings, environment);
 
             BiomeId biome = ClassifyBiome(
                 elevation,
@@ -89,22 +87,43 @@ namespace Farmware.WorldGeneration
             int worldTileX,
             int worldTileY)
         {
-            ushort elevation = DeterministicNoise.SampleFractalNoise(
-                settings.WorldSeed,
-                settings.GeneratorVersion,
-                worldTileX,
-                worldTileY,
-                settings.ElevationCellSizeInTiles,
-                settings.OctaveCount,
-                WorldGenerationPurposeSalts.Elevation);
-
-            SampleBiomeClimate(
+            TryGenerateTile(
                 settings,
                 worldTileX,
                 worldTileY,
-                out ushort temperature,
-                out ushort moisture,
-                out ushort weirdness);
+                out GeneratedTile tile);
+            return tile;
+        }
+
+        /// <summary>
+        /// 1つのワールドタイル座標に対応する基礎地形データを生成し、固定半径サンプルが座標域外なら失敗を返します。
+        /// ChunkGenerationSystemはこの戻り値を使い、不完全なチャンクをReadyとして公開しません。
+        /// </summary>
+        /// <param name="settings">ワールド作成時に固定した生成設定です。</param>
+        /// <param name="worldTileX">符号付きワールド水平タイル座標です。</param>
+        /// <param name="worldTileY">符号付きワールド垂直タイル座標です。</param>
+        /// <param name="tile">成功時に全基礎値を持つタイルを返します。失敗時はdefaultです。</param>
+        /// <returns>設定と固定サンプル座標が有効ならtrue、それ以外はfalseです。</returns>
+        public static bool TryGenerateTile(
+            in WorldGenerationSettings settings,
+            int worldTileX,
+            int worldTileY,
+            out GeneratedTile tile)
+        {
+            tile = default;
+            if (!DeterministicEnvironmentGenerator.TryGenerate(
+                settings,
+                worldTileX,
+                worldTileY,
+                out GeneratedEnvironmentData environment))
+            {
+                return false;
+            }
+
+            ushort elevation = environment.Elevation;
+            ushort temperature = environment.BaseTemperature;
+            ushort moisture = environment.BaseMoisture;
+            ushort weirdness = SampleLegacyWeirdness(settings, environment);
 
             BiomeId biome = ClassifyBiome(
                 elevation,
@@ -146,113 +165,49 @@ namespace Farmware.WorldGeneration
                     worldTileY)
                 : SoilType.None;
 
-            return new GeneratedTile
+            tile = new GeneratedTile
             {
                 Biome = biome,
                 Ground = ground,
                 Soil = soil,
                 WaterSalinity = ClassifyWaterSalinity(waterBodyType),
                 WaterBodyType = waterBodyType,
-                ElevationClass = ClassifyElevation(elevation, ground, settings),
+                ElevationClass = DeterministicEnvironmentGenerator.ClassifyElevation(elevation, settings),
                 GameplayFlags = ClassifyGameplayFlags(ground),
                 ResourceSuitability = ClassifyResourceSuitability(ground, soil, biome),
                 MovementCost = ClassifyMovementCost(ground),
                 Elevation = elevation,
                 Temperature = temperature,
                 Moisture = moisture,
-                Weirdness = weirdness
+                Weirdness = weirdness,
+                TerrainTemperature = environment.TerrainTemperature,
+                WoodyVegetationPotential = environment.WoodyVegetationPotential,
+                TerrainRuggedness = environment.TerrainRuggedness,
+                CoastalInfluence = environment.CoastalInfluence,
+                VolcanicActivityPotential = environment.VolcanicActivityPotential
             };
+            return true;
         }
 
         /// <summary>
-        /// 歪ませた共通座標から気温・湿度・Weirdnessをまとめて取得します。
-        /// 通常生成と外周岩壁判定が同じ気候値を使い、水域優先順位の結果を一致させるために共有します。
+        /// TERRAIN-01C5まで旧7Biome分類を維持するため、新方式と別SaltのWeirdnessだけを取得します。
+        /// 新しい火山活動度へ暗黙に改名せず、移行中も両方の生成結果を状態ハッシュへ含めます。
         /// </summary>
-        /// <param name="settings">気候ノイズと座標歪みの設定です。</param>
-        /// <param name="worldTileX">元の水平ワールドタイル座標です。</param>
-        /// <param name="worldTileY">元の垂直ワールドタイル座標です。</param>
-        /// <param name="temperature">0〜65535の気温を返します。</param>
-        /// <param name="moisture">0〜65535の湿度を返します。</param>
-        /// <param name="weirdness">0〜65535の特殊地形度を返します。</param>
-        private static void SampleBiomeClimate(
+        /// <param name="settings">旧Weirdnessの格子とSaltを保持する設定です。</param>
+        /// <param name="environment">新方式と共有するBiome Warp後座標です。</param>
+        /// <returns>旧7Biome分類専用の0〜65,535のWeirdnessです。</returns>
+        private static ushort SampleLegacyWeirdness(
             in WorldGenerationSettings settings,
-            int worldTileX,
-            int worldTileY,
-            out ushort temperature,
-            out ushort moisture,
-            out ushort weirdness)
+            in GeneratedEnvironmentData environment)
         {
-            CalculateWarpedBiomeCoordinate(
-                settings,
-                worldTileX,
-                worldTileY,
-                out int biomeSampleX,
-                out int biomeSampleY);
-
-            temperature = DeterministicNoise.SampleFractalNoise(
+            return DeterministicNoise.SampleFractalNoise(
                 settings.WorldSeed,
                 settings.GeneratorVersion,
-                biomeSampleX,
-                biomeSampleY,
-                settings.TemperatureCellSizeInTiles,
-                settings.OctaveCount,
-                WorldGenerationPurposeSalts.Temperature);
-            moisture = DeterministicNoise.SampleFractalNoise(
-                settings.WorldSeed,
-                settings.GeneratorVersion,
-                biomeSampleX,
-                biomeSampleY,
-                settings.MoistureCellSizeInTiles,
-                settings.OctaveCount,
-                WorldGenerationPurposeSalts.Moisture);
-            weirdness = DeterministicNoise.SampleFractalNoise(
-                settings.WorldSeed,
-                settings.GeneratorVersion,
-                biomeSampleX,
-                biomeSampleY,
+                environment.WarpedSampleX,
+                environment.WarpedSampleY,
                 settings.WeirdnessCellSizeInTiles,
                 settings.OctaveCount,
                 WorldGenerationPurposeSalts.Weirdness);
-        }
-
-        /// <summary>
-        /// 気候ノイズを読む座標へ低周波の歪みを加え、バイオーム境界が直線的・帯状になりすぎることを防ぎます。
-        /// 標高と水域の形状ノイズは元座標で生成し、水域の気候補正だけがこの歪ませた気候値を参照します。
-        /// </summary>
-        /// <param name="settings">歪みノイズの格子サイズと最大変位量を保持する生成設定です。</param>
-        /// <param name="worldTileX">歪ませる前の水平ワールドタイル座標です。</param>
-        /// <param name="worldTileY">歪ませる前の垂直ワールドタイル座標です。</param>
-        /// <param name="sampleX">気温・湿度・Weirdnessを読む水平座標を返します。</param>
-        /// <param name="sampleY">気温・湿度・Weirdnessを読む垂直座標を返します。</param>
-        private static void CalculateWarpedBiomeCoordinate(
-            in WorldGenerationSettings settings,
-            int worldTileX,
-            int worldTileY,
-            out int sampleX,
-            out int sampleY)
-        {
-            ushort horizontalWarp = DeterministicNoise.SampleFractalNoise(
-                settings.WorldSeed,
-                settings.GeneratorVersion,
-                worldTileX,
-                worldTileY,
-                settings.BiomeWarpCellSizeInTiles,
-                settings.OctaveCount,
-                WorldGenerationPurposeSalts.BiomeWarpX);
-            ushort verticalWarp = DeterministicNoise.SampleFractalNoise(
-                settings.WorldSeed,
-                settings.GeneratorVersion,
-                worldTileX,
-                worldTileY,
-                settings.BiomeWarpCellSizeInTiles,
-                settings.OctaveCount,
-                WorldGenerationPurposeSalts.BiomeWarpY);
-
-            // 0〜65535をおよそ-1〜+1へ中央寄せし、整数タイル単位の最大変位量へ変換します。
-            int horizontalOffset = ((horizontalWarp - 32768) * settings.BiomeWarpAmplitudeInTiles) / 32768;
-            int verticalOffset = ((verticalWarp - 32768) * settings.BiomeWarpAmplitudeInTiles) / 32768;
-            sampleX = worldTileX + horizontalOffset;
-            sampleY = worldTileY + verticalOffset;
         }
 
         /// <summary>
@@ -1116,41 +1071,6 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>
-        /// 連続標高を水域・低地・平地・高地へ分け、独立生成された岩壁だけを岩壁分類へ上書きします。
-        /// </summary>
-        /// <param name="elevation">0〜65535の標高です。</param>
-        /// <param name="ground">淡水を含めて分類済みの地面です。</param>
-        /// <param name="settings">海面を保持する生成設定です。</param>
-        /// <returns>表示や配置条件で使う標高クラスです。</returns>
-        private static ElevationClass ClassifyElevation(
-            ushort elevation,
-            GroundType ground,
-            in WorldGenerationSettings settings)
-        {
-            // 川と池は元の標高が海面より高くても、水域として同じ分類を返します。
-            if (ground == GroundType.Water)
-            {
-                return ElevationClass.Water;
-            }
-
-            if (ground == GroundType.RockWall)
-            {
-                return ElevationClass.RockWall;
-            }
-
-            int landRange = ushort.MaxValue - settings.SeaLevelThreshold;
-            int lowlandEnd = settings.SeaLevelThreshold + (landRange / 3);
-            int plainEnd = settings.SeaLevelThreshold + ((landRange * 2) / 3);
-
-            if (elevation < lowlandEnd)
-            {
-                return ElevationClass.Lowland;
-            }
-
-            return elevation < plainEnd ? ElevationClass.Plain : ElevationClass.Highland;
-        }
-
-        /// <summary>
         /// 地面種別から通常設備、通常ベルト、橋の配置可否と、橋の耐熱要件を決めます。
         /// 後続の建築処理がGroundTypeを独自解釈せず、生成済み属性だけを参照できるようにします。
         /// </summary>
@@ -1272,10 +1192,17 @@ namespace Farmware.WorldGeneration
                 packedClimate |= (ulong)tile.Moisture << 32;
                 packedClimate |= (ulong)tile.Weirdness << 48;
 
+                ulong packedEnvironment = tile.TerrainTemperature;
+                packedEnvironment |= (ulong)tile.WoodyVegetationPotential << 16;
+                packedEnvironment |= (ulong)tile.TerrainRuggedness << 32;
+                packedEnvironment |= (ulong)tile.CoastalInfluence << 48;
+
                 ulong classificationsHash = WorldSeedUtility.Mix64(currentHash ^ packedClassifications);
                 // 既存8分類で64bitを使い切っているため、土壌は独立した混合段階へ加えて配置差分も検出します。
                 ulong soilHash = WorldSeedUtility.Mix64(classificationsHash ^ (byte)tile.Soil);
-                return WorldSeedUtility.Mix64(soilHash ^ packedClimate);
+                ulong climateHash = WorldSeedUtility.Mix64(soilHash ^ packedClimate);
+                ulong environmentHash = WorldSeedUtility.Mix64(climateHash ^ packedEnvironment);
+                return WorldSeedUtility.Mix64(environmentHash ^ tile.VolcanicActivityPotential);
             }
         }
     }

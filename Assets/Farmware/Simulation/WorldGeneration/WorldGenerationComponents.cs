@@ -113,25 +113,25 @@ namespace Farmware.WorldGeneration
     }
 
     /// <summary>
-    /// 連続した標高値をゲームルール向けに大まかに分類した値です。
-    /// デバッグ表示や地形別の配置条件で使用します。
+    /// 連続した標高値を、地面・水域・岩壁の表示状態とは独立して分類した安定値です。
+    /// デバッグ表示とBiome候補条件で使用し、河川や岩壁でも元の標高区分を保持します。
     /// </summary>
     public enum ElevationClass : byte
     {
-        /// <summary>水面より低い領域です。</summary>
-        Water = 0,
+        /// <summary>海面閾値より低い海面下の領域です。</summary>
+        BelowSeaLevel = 0,
 
         /// <summary>水際に近い低地です。</summary>
         Lowland = 1,
 
-        /// <summary>通常の平地です。</summary>
-        Plain = 2,
+        /// <summary>低地上限より高く、山地境界より低い平地・台地です。</summary>
+        PlainOrPlateau = 2,
 
-        /// <summary>陸地の標高範囲を3分割したうち最も高い領域です。</summary>
-        Highland = 3,
+        /// <summary>標高43,000以上54,000未満の山地です。</summary>
+        Mountain = 3,
 
-        /// <summary>固体地形として扱う岩壁です。</summary>
-        RockWall = 4
+        /// <summary>標高54,000以上の高山です。</summary>
+        Alpine = 4
     }
 
     /// <summary>
@@ -297,6 +297,12 @@ namespace Farmware.WorldGeneration
         /// <summary>各気候値へ重ねるノイズ解像度の数です。</summary>
         public int OctaveCount;
 
+        /// <summary>
+        /// 地形気温、木本植生、起伏、海洋影響、火山活動度を再計算する固定設定です。
+        /// GeneratorVersionと一緒にワールド寿命中は変更しません。
+        /// </summary>
+        public ContinuousEnvironmentSettings EnvironmentAxes;
+
         /// <summary>7バイオームの適性が閾値付近で滑らかに入れ替わる帯のおおよその幅です。単位はタイルです。</summary>
         public int BiomeClassificationTransitionWidthInTiles;
 
@@ -447,6 +453,7 @@ namespace Farmware.WorldGeneration
                 BiomeWarpCellSizeInTiles = 192,
                 BiomeWarpAmplitudeInTiles = 12,
                 OctaveCount = 4,
+                EnvironmentAxes = ContinuousEnvironmentSettings.CreateDefault(),
                 BiomeClassificationTransitionWidthInTiles = 12,
                 BiomeTransitionWidthInTiles = 6,
                 SeaLevelThreshold = DefaultSeaLevelThreshold,
@@ -863,7 +870,7 @@ namespace Farmware.WorldGeneration
         /// <summary>水域なら川・池・海の生成由来、陸地ならNoneです。</summary>
         public WaterBodyType WaterBodyType;
 
-        /// <summary>連続標高をゲームルール向けに分類した値です。</summary>
+        /// <summary>水域や岩壁でも上書きしない、連続標高由来の5段階区分です。</summary>
         public ElevationClass ElevationClass;
 
         /// <summary>通常設備、通常ベルト、橋の配置可否と、橋の耐熱要件をまとめたビットフラグです。</summary>
@@ -878,14 +885,29 @@ namespace Farmware.WorldGeneration
         /// <summary>0〜65535へ正規化した連続標高値です。</summary>
         public ushort Elevation;
 
-        /// <summary>0〜65535へ正規化した連続気温値です。</summary>
+        /// <summary>0〜65535へ正規化した、標高寒冷補正前の基礎気温値です。</summary>
         public ushort Temperature;
 
-        /// <summary>0〜65535へ正規化した連続湿度値です。</summary>
+        /// <summary>0〜65535へ正規化した、現在土壌水分とは独立する基礎湿度値です。</summary>
         public ushort Moisture;
 
-        /// <summary>0〜65535へ正規化した火山・特殊地域候補用の連続Weirdness値です。</summary>
+        /// <summary>TERRAIN-01C5まで旧7Biome分類だけが参照する連続Weirdness値です。新しい火山活動度とは別Saltです。</summary>
         public ushort Weirdness;
+
+        /// <summary>基礎気温へ海面より上の標高寒冷補正を一度だけ適用した0〜65535の地形気温です。</summary>
+        public ushort TerrainTemperature;
+
+        /// <summary>配置後の樹木数とは独立した0〜65535の木本植生ポテンシャルです。</summary>
+        public ushort WoodyVegetationPotential;
+
+        /// <summary>固定9標高サンプルの局所差から求めた0〜65535の地形起伏です。</summary>
+        public ushort TerrainRuggedness;
+
+        /// <summary>固定32標高サンプルの海への近さと開放方向数から求めた0〜65535の海洋影響です。</summary>
+        public ushort CoastalInfluence;
+
+        /// <summary>地質と旧Weirdnessから独立した0〜65535の火山活動度です。</summary>
+        public ushort VolcanicActivityPotential;
     }
 
     /// <summary>

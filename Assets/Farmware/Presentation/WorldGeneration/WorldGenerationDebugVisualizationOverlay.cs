@@ -28,11 +28,11 @@ namespace Farmware.WorldGeneration.Presentation
         /// <summary>0〜65535の連続標高値を黒から白の濃淡で表示します。</summary>
         Elevation = 2,
 
-        /// <summary>0〜65535の連続気温値を青から赤のグラデーションで表示します。</summary>
-        Temperature = 3,
+        /// <summary>標高補正前の0〜65535の基礎気温を青から赤のグラデーションで表示します。</summary>
+        BaseTemperature = 3,
 
-        /// <summary>0〜65535の連続湿度値を茶から水色のグラデーションで表示します。</summary>
-        Moisture = 4,
+        /// <summary>水域や現在土壌水分と独立した0〜65535の基礎湿度を茶から水色のグラデーションで表示します。</summary>
+        BaseMoisture = 4,
 
         /// <summary>水域を陸地・淡水・海水の固定色で表示します。</summary>
         WaterSalinity = 5,
@@ -40,8 +40,8 @@ namespace Farmware.WorldGeneration.Presentation
         /// <summary>水域の生成由来を陸地・川・池・海の固定色で表示します。</summary>
         WaterBody = 6,
 
-        /// <summary>論理Biomeと異なる陸上Groundが選ばれた移行タイルだけを強調します。</summary>
-        BiomeTransition = 7,
+        /// <summary>標高寒冷補正後の0〜65535の地形気温を青から赤のグラデーションで表示します。</summary>
+        TerrainTemperature = 7,
 
         /// <summary>最終岩壁を非岩壁・露出面・連続した内部影の濃さとして表示します。</summary>
         RockWall = 8,
@@ -49,8 +49,8 @@ namespace Farmware.WorldGeneration.Presentation
         /// <summary>最低間隔と配置競合を適用した後の木・石・砂を固定色で表示します。</summary>
         Resources = 9,
 
-        /// <summary>0〜65535の連続Weirdness値を紫から黄のグラデーションで表示します。</summary>
-        Weirdness = 10,
+        /// <summary>配置済み植生から独立した0〜65535の木本植生ポテンシャルを茶から緑で表示します。</summary>
+        WoodyVegetationPotential = 10,
 
         /// <summary>マグマ本体、淡水抑制用の火山影響域、それ以外を固定色で表示します。</summary>
         Magma = 11,
@@ -62,7 +62,16 @@ namespace Farmware.WorldGeneration.Presentation
         TerrainPlacement = 13,
 
         /// <summary>動物種定義を満たす候補タイルと、初期補充で確定した個体位置を別色で表示します。</summary>
-        AnimalPopulation = 14
+        AnimalPopulation = 14,
+
+        /// <summary>固定9地点の標高差から求めた0〜65535の地形起伏を明色から暗色で表示します。</summary>
+        TerrainRuggedness = 15,
+
+        /// <summary>海への近さと開放方向数から求めた0〜65535の海洋影響を陸色から海色で表示します。</summary>
+        CoastalInfluence = 16,
+
+        /// <summary>旧Weirdnessと独立した0〜65535の火山活動度を暗灰から橙で表示します。</summary>
+        VolcanicActivityPotential = 17
     }
 
     /// <summary>
@@ -458,26 +467,54 @@ namespace Farmware.WorldGeneration.Presentation
                         new Color32(242, 246, 255, 238),
                         elevation);
 
-                case WorldGenerationDebugVisualizationMode.Temperature:
+                case WorldGenerationDebugVisualizationMode.BaseTemperature:
                     float temperature = tile.Temperature / (float)ushort.MaxValue;
                     return Color.Lerp(
                         new Color32(45, 95, 210, 238),
                         new Color32(235, 66, 42, 238),
                         temperature);
 
-                case WorldGenerationDebugVisualizationMode.Moisture:
+                case WorldGenerationDebugVisualizationMode.TerrainTemperature:
+                    float terrainTemperature = tile.TerrainTemperature / (float)ushort.MaxValue;
+                    return Color.Lerp(
+                        new Color32(34, 78, 194, 238),
+                        new Color32(246, 78, 40, 238),
+                        terrainTemperature);
+
+                case WorldGenerationDebugVisualizationMode.BaseMoisture:
                     float moisture = tile.Moisture / (float)ushort.MaxValue;
                     return Color.Lerp(
                         new Color32(176, 116, 52, 238),
                         new Color32(50, 185, 225, 238),
                         moisture);
 
-                case WorldGenerationDebugVisualizationMode.Weirdness:
-                    float weirdness = tile.Weirdness / (float)ushort.MaxValue;
+                case WorldGenerationDebugVisualizationMode.WoodyVegetationPotential:
+                    float woodyVegetation = tile.WoodyVegetationPotential / (float)ushort.MaxValue;
                     return Color.Lerp(
-                        new Color32(69, 48, 112, 238),
-                        new Color32(246, 208, 72, 238),
-                        weirdness);
+                        new Color32(126, 88, 48, 238),
+                        new Color32(42, 174, 76, 238),
+                        woodyVegetation);
+
+                case WorldGenerationDebugVisualizationMode.TerrainRuggedness:
+                    float terrainRuggedness = tile.TerrainRuggedness / (float)ushort.MaxValue;
+                    return Color.Lerp(
+                        new Color32(232, 226, 198, 238),
+                        new Color32(54, 48, 62, 238),
+                        terrainRuggedness);
+
+                case WorldGenerationDebugVisualizationMode.CoastalInfluence:
+                    float coastalInfluence = tile.CoastalInfluence / (float)ushort.MaxValue;
+                    return Color.Lerp(
+                        new Color32(192, 150, 76, 238),
+                        new Color32(42, 132, 218, 238),
+                        coastalInfluence);
+
+                case WorldGenerationDebugVisualizationMode.VolcanicActivityPotential:
+                    float volcanicActivity = tile.VolcanicActivityPotential / (float)ushort.MaxValue;
+                    return Color.Lerp(
+                        new Color32(42, 40, 48, 238),
+                        new Color32(248, 112, 30, 238),
+                        volcanicActivity);
 
                 case WorldGenerationDebugVisualizationMode.WaterSalinity:
                     // 通常地形でも淡水と海水を見分けられますが、専用表示では地表色を消して境界判定だけを確認しやすくします。
@@ -511,11 +548,6 @@ namespace Farmware.WorldGeneration.Presentation
                     }
 
                     return new Color32(45, 45, 52, 210);
-
-                case WorldGenerationDebugVisualizationMode.BiomeTransition:
-                    return IsBiomeTransitionTile(tile)
-                        ? new Color32(255, 28, 210, 242)
-                        : new Color32(0, 0, 0, 110);
 
                 case WorldGenerationDebugVisualizationMode.RockWall:
                     if (tile.Ground != GroundType.RockWall)
@@ -577,34 +609,6 @@ namespace Farmware.WorldGeneration.Presentation
                 default:
                     return Color.clear;
             }
-        }
-
-        /// <summary>
-        /// 論理Biomeの代表Soilと実際の陸上Soilを比較し、移行帯で別の土壌が選ばれたかを判定します。
-        /// 水域と独立生成された岩壁は土壌を持たないため、バイオーム移行としては数えません。
-        /// </summary>
-        /// <param name="tile">判定する1タイルの生成結果です。</param>
-        /// <returns>陸上で論理Biomeと異なるSoilが選択されている場合はtrueです。</returns>
-        public static bool IsBiomeTransitionTile(GeneratedTile tile)
-        {
-            if (tile.Ground == GroundType.Water
-                || tile.Ground == GroundType.RockWall
-                || tile.Ground == GroundType.Magma)
-            {
-                return false;
-            }
-
-            SoilType representativeSoil = SoilType.Normal;
-            if (tile.Biome == BiomeId.Forest || tile.Biome == BiomeId.Wetland)
-            {
-                representativeSoil = SoilType.Fertile;
-            }
-            else if (tile.Biome == BiomeId.Desert)
-            {
-                representativeSoil = SoilType.Sandy;
-            }
-
-            return tile.Soil != representativeSoil;
         }
 
         /// <summary>
@@ -1124,7 +1128,7 @@ namespace Farmware.WorldGeneration.Presentation
             WorldGenerationSettings settings,
             ResourceGenerationSettings resourceSettings)
         {
-            const int generatedTileInformationLineCount = 21;
+            const int generatedTileInformationLineCount = 23;
             const int waitingInformationLineCount = 1;
             const float bottomPadding = 6f;
             float informationStartY = currentMode == WorldGenerationDebugVisualizationMode.Biome
@@ -1234,9 +1238,15 @@ namespace Farmware.WorldGeneration.Presentation
                     + $"Placement: Equipment={GetPlacementResultState(equipmentPlacementResult)}\n"
                     + $"Bridge={GetPlacementResultState(bridgePlacementResult)}  "
                     + $"HeatBridge={GetPlacementResultState(heatBridgePlacementResult)}\n"
-                    + $"Elevation={centerTile.Elevation}  Temperature={centerTile.Temperature}\n"
-                    + $"Moisture={centerTile.Moisture}  Weirdness={centerTile.Weirdness}\n"
-                    + $"Transition={(IsBiomeTransitionTile(centerTile) ? "Yes" : "No")}\n"
+                    + $"Elevation={centerTile.Elevation}  Class={centerTile.ElevationClass}\n"
+                    + $"BaseTemperature={centerTile.Temperature}  "
+                    + $"TerrainTemperature={centerTile.TerrainTemperature}\n"
+                    + $"BaseMoisture={centerTile.Moisture}  "
+                    + $"WoodyPotential={centerTile.WoodyVegetationPotential}\n"
+                    + $"Ruggedness={centerTile.TerrainRuggedness}  "
+                    + $"CoastalInfluence={centerTile.CoastalInfluence}\n"
+                    + $"VolcanicActivity={centerTile.VolcanicActivityPotential}  "
+                    + $"LegacyWeirdness={centerTile.Weirdness}\n"
                     + $"RockDensity={rockWallInfo.Density} / {settings.RockWallNoiseThreshold}  "
                     + $"Raw={(rockWallInfo.RawCandidate ? "Yes" : "No")}\n"
                     + $"Corridor={(rockWallInfo.Corridor ? "Yes" : "No")}  "
@@ -1383,8 +1393,38 @@ namespace Farmware.WorldGeneration.Presentation
                 return "Animal Population";
             }
 
-            return mode == WorldGenerationDebugVisualizationMode.BiomeTransition
-                ? "Biome Transition"
+            if (mode == WorldGenerationDebugVisualizationMode.BaseTemperature)
+            {
+                return "Base Temperature";
+            }
+
+            if (mode == WorldGenerationDebugVisualizationMode.TerrainTemperature)
+            {
+                return "Terrain Temperature";
+            }
+
+            if (mode == WorldGenerationDebugVisualizationMode.BaseMoisture)
+            {
+                return "Base Moisture";
+            }
+
+            if (mode == WorldGenerationDebugVisualizationMode.WoodyVegetationPotential)
+            {
+                return "Woody Vegetation Potential";
+            }
+
+            if (mode == WorldGenerationDebugVisualizationMode.TerrainRuggedness)
+            {
+                return "Terrain Ruggedness";
+            }
+
+            if (mode == WorldGenerationDebugVisualizationMode.CoastalInfluence)
+            {
+                return "Coastal Influence";
+            }
+
+            return mode == WorldGenerationDebugVisualizationMode.VolcanicActivityPotential
+                ? "Volcanic Activity Potential"
                 : mode.ToString();
         }
 
@@ -1519,14 +1559,26 @@ namespace Farmware.WorldGeneration.Presentation
                 case WorldGenerationDebugVisualizationMode.Elevation:
                     DrawContinuousValueLegend(mode, ref nextX, y, "0 (Low)", "65535 (High)");
                     break;
-                case WorldGenerationDebugVisualizationMode.Temperature:
+                case WorldGenerationDebugVisualizationMode.BaseTemperature:
                     DrawContinuousValueLegend(mode, ref nextX, y, "0 (Cold)", "65535 (Hot)");
                     break;
-                case WorldGenerationDebugVisualizationMode.Moisture:
+                case WorldGenerationDebugVisualizationMode.TerrainTemperature:
+                    DrawContinuousValueLegend(mode, ref nextX, y, "0 (Cold)", "65535 (Hot)");
+                    break;
+                case WorldGenerationDebugVisualizationMode.BaseMoisture:
                     DrawContinuousValueLegend(mode, ref nextX, y, "0 (Dry)", "65535 (Wet)");
                     break;
-                case WorldGenerationDebugVisualizationMode.Weirdness:
-                    DrawContinuousValueLegend(mode, ref nextX, y, "0 (Common)", "65535 (Weird)");
+                case WorldGenerationDebugVisualizationMode.WoodyVegetationPotential:
+                    DrawContinuousValueLegend(mode, ref nextX, y, "0 (Sparse)", "65535 (Dense)");
+                    break;
+                case WorldGenerationDebugVisualizationMode.TerrainRuggedness:
+                    DrawContinuousValueLegend(mode, ref nextX, y, "0 (Flat)", "65535 (Rugged)");
+                    break;
+                case WorldGenerationDebugVisualizationMode.CoastalInfluence:
+                    DrawContinuousValueLegend(mode, ref nextX, y, "0 (Inland)", "65535 (Coastal)");
+                    break;
+                case WorldGenerationDebugVisualizationMode.VolcanicActivityPotential:
+                    DrawContinuousValueLegend(mode, ref nextX, y, "0 (Inactive)", "65535 (Active)");
                     break;
                 case WorldGenerationDebugVisualizationMode.WaterSalinity:
                     DrawLegendEntry(
@@ -1598,34 +1650,6 @@ namespace Farmware.WorldGeneration.Presentation
                             }),
                         "Sea",
                         58f);
-                    break;
-                case WorldGenerationDebugVisualizationMode.BiomeTransition:
-                    DrawLegendEntry(
-                        ref nextX,
-                        y,
-                        GetVisualizationColor(
-                            mode,
-                            new GeneratedTile
-                            {
-                                Biome = BiomeId.Forest,
-                                Ground = GroundType.Land,
-                                Soil = SoilType.Normal
-                            }),
-                        "Transition Soil",
-                        132f);
-                    DrawLegendEntry(
-                        ref nextX,
-                        y,
-                        GetVisualizationColor(
-                            mode,
-                            new GeneratedTile
-                            {
-                                Biome = BiomeId.Forest,
-                                Ground = GroundType.Land,
-                                Soil = SoilType.Fertile
-                            }),
-                        "Unchanged",
-                        96f);
                     break;
                 case WorldGenerationDebugVisualizationMode.RockWall:
                     DrawLegendEntry(
@@ -1751,7 +1775,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// <summary>
         /// 連続値モードの最小値と最大値を、対象フィールドだけ設定したGeneratedTileから描きます。
         /// </summary>
-        /// <param name="mode">Elevation、Temperature、Moisture、Weirdnessのいずれかです。</param>
+        /// <param name="mode">標高またはTERRAIN-01C1で生成する連続環境軸のいずれかです。</param>
         /// <param name="nextX">次の凡例要素を描くX座標です。描画後は右端へ進めます。</param>
         /// <param name="y">色見本の上端Y座標です。</param>
         /// <param name="minimumLabel">最小値側に表示する説明です。</param>
@@ -1772,14 +1796,26 @@ namespace Farmware.WorldGeneration.Presentation
                 case WorldGenerationDebugVisualizationMode.Elevation:
                     maximumTile.Elevation = ushort.MaxValue;
                     break;
-                case WorldGenerationDebugVisualizationMode.Temperature:
+                case WorldGenerationDebugVisualizationMode.BaseTemperature:
                     maximumTile.Temperature = ushort.MaxValue;
                     break;
-                case WorldGenerationDebugVisualizationMode.Moisture:
+                case WorldGenerationDebugVisualizationMode.TerrainTemperature:
+                    maximumTile.TerrainTemperature = ushort.MaxValue;
+                    break;
+                case WorldGenerationDebugVisualizationMode.BaseMoisture:
                     maximumTile.Moisture = ushort.MaxValue;
                     break;
-                case WorldGenerationDebugVisualizationMode.Weirdness:
-                    maximumTile.Weirdness = ushort.MaxValue;
+                case WorldGenerationDebugVisualizationMode.WoodyVegetationPotential:
+                    maximumTile.WoodyVegetationPotential = ushort.MaxValue;
+                    break;
+                case WorldGenerationDebugVisualizationMode.TerrainRuggedness:
+                    maximumTile.TerrainRuggedness = ushort.MaxValue;
+                    break;
+                case WorldGenerationDebugVisualizationMode.CoastalInfluence:
+                    maximumTile.CoastalInfluence = ushort.MaxValue;
+                    break;
+                case WorldGenerationDebugVisualizationMode.VolcanicActivityPotential:
+                    maximumTile.VolcanicActivityPotential = ushort.MaxValue;
                     break;
             }
 

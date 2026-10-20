@@ -144,8 +144,28 @@
     background-position: center;
 }
 
+/* 絶対配置で案内を重ね、進捗文言の更新によるCanvasのリサイズ・再生成を防ぎます。 */
+.generation-label {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    padding: 16px;
+    -unity-text-align: middle-center;
+    white-space: normal;
+    color: var(--text-main);
+}
+
+/* 画像の適用後は案内だけを非表示にし、地図とPointer操作を維持します。 */
+.generation-label.hidden {
+    display: none;
+}
+
 .hover-label {
-    min-height: 24px;
+    /* 初回から3行分を確保し、全環境軸のHover表示で地図が縮んで二度生成されることを防ぎます。 */
+    min-height: 56px;
+    flex-shrink: 0;
     padding: 5px 8px;
     background-color: #1b1f26;
     border-top-width: 1px;

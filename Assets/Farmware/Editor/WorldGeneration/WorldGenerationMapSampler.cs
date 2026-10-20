@@ -4,6 +4,7 @@
 using System;
 using System.Threading;
 using Farmware.Simulation;
+using Farmware.WorldGeneration.Presentation;
 using UnityEngine;
 
 namespace Farmware.WorldGeneration.Editor
@@ -18,7 +19,31 @@ namespace Farmware.WorldGeneration.Editor
         Terrain = 0,
 
         /// <summary>水域や障害物に隠れている場所も含め、7種類の論理バイオームを表示します。</summary>
-        Biome = 1
+        Biome = 1,
+
+        /// <summary>0〜65535の連続標高を表示します。</summary>
+        Elevation = 2,
+
+        /// <summary>標高補正前の0〜65535の基礎気温を表示します。</summary>
+        BaseTemperature = 3,
+
+        /// <summary>標高寒冷補正後の0〜65535の地形気温を表示します。</summary>
+        TerrainTemperature = 4,
+
+        /// <summary>現在土壌水分と独立した0〜65535の基礎湿度を表示します。</summary>
+        BaseMoisture = 5,
+
+        /// <summary>配置済み植生と独立した0〜65535の木本植生ポテンシャルを表示します。</summary>
+        WoodyVegetationPotential = 6,
+
+        /// <summary>固定9標高サンプルから求めた0〜65535の地形起伏を表示します。</summary>
+        TerrainRuggedness = 7,
+
+        /// <summary>海への近さと開放方向数から求めた0〜65535の海洋影響を表示します。</summary>
+        CoastalInfluence = 8,
+
+        /// <summary>旧Weirdnessと独立した0〜65535の火山活動度を表示します。</summary>
+        VolcanicActivityPotential = 9
     }
 
     /// <summary>
@@ -128,6 +153,9 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>1回の誤操作で巨大配列を確保しないための画像1辺上限です。単位はピクセルです。</summary>
         public const int MaximumResolution = 768;
 
+        /// <summary>進捗通知でEditorのイベントキューを埋めないための通知間隔です。単位は生成画像の行です。</summary>
+        private const int ProgressReportRowInterval = 16;
+
         /// <summary>
         /// Canvasの縦横比を保ちながら、1辺が上限以内に収まるTextureサンプル数を求めます。
         /// 各軸を別々に制限すると正方形のタイルが長方形へ歪むため、両軸へ同じ縮小率を適用します。
@@ -142,12 +170,12 @@ namespace Farmware.WorldGeneration.Editor
             out int sampleWidth,
             out int sampleHeight)
         {
-            if (viewportWidth <= 0f)
+            if (float.IsNaN(viewportWidth) || float.IsInfinity(viewportWidth) || viewportWidth <= 0f)
             {
                 throw new ArgumentOutOfRangeException(nameof(viewportWidth));
             }
 
-            if (viewportHeight <= 0f)
+            if (float.IsNaN(viewportHeight) || float.IsInfinity(viewportHeight) || viewportHeight <= 0f)
             {
                 throw new ArgumentOutOfRangeException(nameof(viewportHeight));
             }
@@ -198,7 +226,7 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="width">画像の横ピクセル数です。</param>
         /// <param name="height">画像の縦ピクセル数です。</param>
         /// <param name="tilesPerPixel">1ピクセルごとに進めるワールドタイル数です。</param>
-        /// <param name="viewMode">最終地形または論理バイオームの表示モードです。</param>
+        /// <param name="viewMode">最終地形、論理バイオーム、連続環境軸の表示モードです。</param>
         /// <param name="cancellationToken">新しい操作で不要になった走査を中止するためのTokenです。</param>
         /// <returns>Texture2Dへ適用できる色配列と座標情報です。</returns>
         public static WorldGenerationMapSampleResult Sample(
@@ -234,9 +262,13 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="width">画像の横ピクセル数です。</param>
         /// <param name="height">画像の縦ピクセル数です。</param>
         /// <param name="tilesPerPixel">1ピクセルごとに進めるワールドタイル数です。</param>
-        /// <param name="viewMode">最終地形または論理バイオームの表示モードです。</param>
+        /// <param name="viewMode">最終地形、論理バイオーム、連続環境軸の表示モードです。</param>
         /// <param name="cancellationToken">新しい操作で不要になった走査を中止するためのTokenです。</param>
+        /// <param name="progress">完了割合0〜1の任意通知先です。呼出元でメインスレッドへ戻すProgressを渡し、省略時は通知しません。</param>
         /// <returns>Texture2Dへ適用できる色配列、レイヤー、座標情報です。</returns>
+        /// <exception cref="InvalidOperationException">
+        /// 座標端で固定サンプル範囲を安全に確保できないなど、地形生成を完了できない場合に発生します。
+        /// </exception>
         public static WorldGenerationMapSampleResult Sample(
             in WorldGenerationSettings settings,
             WorldLayer layer,
@@ -246,7 +278,8 @@ namespace Farmware.WorldGeneration.Editor
             int height,
             int tilesPerPixel,
             WorldGenerationMapViewMode viewMode,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            IProgress<float> progress = null)
         {
             if (!WorldLayerUtility.IsPlayable(layer))
             {
@@ -296,10 +329,18 @@ namespace Farmware.WorldGeneration.Editor
                         tilesPerPixel);
                     if (hasGeneratedData)
                     {
-                        GeneratedTile generatedTile = DeterministicChunkGenerator.GenerateTile(
-                            settings,
-                            worldTileX,
-                            worldTileY);
+                        // int座標端で近傍サンプルを確保できない場合は、値0の地形を本物の結果として表示せず、
+                        // EditorWindow側のエラー表示へ伝えます。これにより診断画像とSimulationの失敗判定が一致します。
+                        if (!DeterministicChunkGenerator.TryGenerateTile(
+                                settings,
+                                worldTileX,
+                                worldTileY,
+                                out GeneratedTile generatedTile))
+                        {
+                            throw new InvalidOperationException(
+                                $"地形生成に必要な固定サンプル範囲を確保できません: ({worldTileX}, {worldTileY})");
+                        }
+
                         pixelColors[(pixelY * width) + pixelX] = GetDisplayColor(
                             viewMode,
                             generatedTile);
@@ -310,6 +351,12 @@ namespace Farmware.WorldGeneration.Editor
                         // 暗い透明度なしの固定色で「データなし」を示し、座標操作自体は検証できるようにします。
                         pixelColors[(pixelY * width) + pixelX] = new Color32(24, 28, 36, 255);
                     }
+                }
+
+                // ピクセルごとではなく一定行数と最終行で通知し、正しい地形計算を省略せず待ち時間を可視化します。
+                if ((pixelY + 1) % ProgressReportRowInterval == 0 || pixelY + 1 == height)
+                {
+                    progress?.Report((float)(pixelY + 1) / height);
                 }
             }
 
@@ -641,7 +688,7 @@ namespace Farmware.WorldGeneration.Editor
         /// 生成済みタイルを選択中モードの固定色へ変換します。
         /// 色は観察用であり、生成判定そのものには使用しません。
         /// </summary>
-        /// <param name="viewMode">最終地形または論理バイオームの表示モードです。</param>
+        /// <param name="viewMode">最終地形、論理バイオーム、連続環境軸の表示モードです。</param>
         /// <param name="tile">実ゲームと同じGeneratorが返したタイルです。</param>
         /// <returns>凡例とTexture2Dで共有する不透明色です。</returns>
         public static Color32 GetDisplayColor(
@@ -651,6 +698,43 @@ namespace Farmware.WorldGeneration.Editor
             if (viewMode == WorldGenerationMapViewMode.Biome)
             {
                 return GetBiomeColor(tile.Biome);
+            }
+
+            // Gameビューの開発者表示と同じ色関数を使い、2つの診断ツールで軸の意味が食い違わないようにします。
+            switch (viewMode)
+            {
+                case WorldGenerationMapViewMode.Elevation:
+                    return GetOpaqueEnvironmentColor(
+                        WorldGenerationDebugVisualizationMode.Elevation,
+                        tile);
+                case WorldGenerationMapViewMode.BaseTemperature:
+                    return GetOpaqueEnvironmentColor(
+                        WorldGenerationDebugVisualizationMode.BaseTemperature,
+                        tile);
+                case WorldGenerationMapViewMode.TerrainTemperature:
+                    return GetOpaqueEnvironmentColor(
+                        WorldGenerationDebugVisualizationMode.TerrainTemperature,
+                        tile);
+                case WorldGenerationMapViewMode.BaseMoisture:
+                    return GetOpaqueEnvironmentColor(
+                        WorldGenerationDebugVisualizationMode.BaseMoisture,
+                        tile);
+                case WorldGenerationMapViewMode.WoodyVegetationPotential:
+                    return GetOpaqueEnvironmentColor(
+                        WorldGenerationDebugVisualizationMode.WoodyVegetationPotential,
+                        tile);
+                case WorldGenerationMapViewMode.TerrainRuggedness:
+                    return GetOpaqueEnvironmentColor(
+                        WorldGenerationDebugVisualizationMode.TerrainRuggedness,
+                        tile);
+                case WorldGenerationMapViewMode.CoastalInfluence:
+                    return GetOpaqueEnvironmentColor(
+                        WorldGenerationDebugVisualizationMode.CoastalInfluence,
+                        tile);
+                case WorldGenerationMapViewMode.VolcanicActivityPotential:
+                    return GetOpaqueEnvironmentColor(
+                        WorldGenerationDebugVisualizationMode.VolcanicActivityPotential,
+                        tile);
             }
 
             // 最終地形の優先順位を反映し、水域や障害物が論理バイオーム色に埋もれないようにします。
@@ -668,6 +752,22 @@ namespace Farmware.WorldGeneration.Editor
                     // Gameビューと同様に、SoilTypeは内部情報として保持しつつ土地の見た目はBiomeだけで決めます。
                     return GetBiomeColor(tile.Biome);
             }
+        }
+
+        /// <summary>
+        /// GameビューOverlayの半透明色を、Map Viewerの背景Texture用の不透明色へ変換します。
+        /// RGBを共通化しつつ、Editor背景色との合成で値が変わって見えることを防ぎます。
+        /// </summary>
+        /// <param name="mode">連続環境軸に対応するGameビュー可視化モードです。</param>
+        /// <param name="tile">色へ変換する実Generatorの1タイル結果です。</param>
+        /// <returns>RGBを共有し、Alphaだけ255へ固定したMap Viewer用色です。</returns>
+        private static Color32 GetOpaqueEnvironmentColor(
+            WorldGenerationDebugVisualizationMode mode,
+            in GeneratedTile tile)
+        {
+            Color32 color = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(mode, tile);
+            color.a = byte.MaxValue;
+            return color;
         }
 
         /// <summary>

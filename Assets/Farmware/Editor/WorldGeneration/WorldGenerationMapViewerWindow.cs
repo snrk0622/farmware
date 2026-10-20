@@ -32,11 +32,22 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>Window連続リサイズが止まってから再生成するまでの待機時間です。単位はミリ秒です。</summary>
         private const long ResizeRenderDelayMilliseconds = 150;
 
+        /// <summary>未レイアウトのCanvasを生成対象にしないための最小表示寸法です。単位はEditorポイントです。</summary>
+        private const float MinimumViewportSize = 64f;
+
         /// <summary>Toolbarの表示名とenumを対応させる固定選択肢です。</summary>
         private static readonly List<string> ViewModeChoices = new List<string>
         {
             "Terrain",
-            "Biome"
+            "Biome",
+            "Elevation",
+            "Base Temperature",
+            "Terrain Temperature",
+            "Base Moisture",
+            "Woody Vegetation Potential",
+            "Terrain Ruggedness",
+            "Coastal Influence",
+            "Volcanic Activity Potential"
         };
 
         /// <summary>Toolbarの表示名と固定ワールドレイヤーを対応させる選択肢です。</summary>
@@ -56,7 +67,7 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>ドメインリロード後も維持する1ピクセルあたりのタイル数です。</summary>
         [SerializeField] private int serializedTilesPerPixel = 4;
 
-        /// <summary>ドメインリロード後も維持する最終地形・論理バイオーム表示モードです。</summary>
+        /// <summary>ドメインリロード後も維持する地形・バイオーム・連続環境軸の表示モードです。</summary>
         [SerializeField] private WorldGenerationMapViewMode serializedViewMode =
             WorldGenerationMapViewMode.Terrain;
 
@@ -72,7 +83,7 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>座標ジャンプと現在中心表示に使う垂直タイル入力欄です。</summary>
         private IntegerField centerYField;
 
-        /// <summary>TerrainとBiomeを切り替える選択欄です。</summary>
+        /// <summary>Terrain、Biome、TERRAIN-01C1の連続環境軸を切り替える選択欄です。</summary>
         private DropdownField viewModeField;
 
         /// <summary>Surface、Underwater、DeepSeaの検索キーを切り替える選択欄です。</summary>
@@ -84,7 +95,7 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>マップTextureと操作イベントを担当するカスタムVisualElementです。</summary>
         private WorldGenerationMapCanvas mapCanvas;
 
-        /// <summary>カーソル下のタイル座標、バイオーム、最終地形を表示するLabelです。</summary>
+        /// <summary>カーソル下の座標、地形、標高区分、全連続環境軸を表示するLabelです。</summary>
         private Label hoverLabel;
 
         /// <summary>設定取得元、GeneratorVersion、実WorldSeedを表示するLabelです。</summary>
@@ -98,6 +109,9 @@ namespace Farmware.WorldGeneration.Editor
 
         /// <summary>生成中、完了時間、エラーを画面下部へ表示するLabelです。</summary>
         private Label statusLabel;
+
+        /// <summary>初回画像がまだない間、地図領域の中央へ生成進捗または失敗理由を表示するLabelです。</summary>
+        private Label generationLabel;
 
         /// <summary>Baker入力またはPlayMode ECSから取得した、独自値を含まない基準設定です。</summary>
         private WorldGenerationSettings sourceSettings;
@@ -178,6 +192,9 @@ namespace Farmware.WorldGeneration.Editor
             // Unityのスクリプト再コンパイル時はEditorWindowの一部フィールドが一時復元されるため、
             // 破棄済みTextureに対応する「初期生成済み」状態を必ず解除します。
             initialRenderRequested = false;
+            CancelPendingRender();
+            DestroyDisplayedTexture();
+            displayedSample = null;
             resizeRenderSchedule?.Pause();
             resizeRenderSchedule = null;
             rootVisualElement.Clear();
@@ -217,10 +234,13 @@ namespace Farmware.WorldGeneration.Editor
             zoomLabel = RequireElement<Label>("zoomLabel");
             legendContainer = RequireElement<VisualElement>("legendContainer");
             statusLabel = RequireElement<Label>("statusLabel");
+            generationLabel = RequireElement<Label>("generationLabel");
 
             VisualElement mapHost = RequireElement<VisualElement>("mapHost");
             mapCanvas = new WorldGenerationMapCanvas();
             mapHost.Add(mapCanvas);
+            // 地図がまだないときの案内をCanvasより前面へ置き、生成途中を空表示と取り違えないようにします。
+            generationLabel.BringToFront();
         }
 
         /// <summary>
@@ -230,6 +250,10 @@ namespace Farmware.WorldGeneration.Editor
         {
             centerXField.SetValueWithoutNotify(serializedCenterTileX);
             centerYField.SetValueWithoutNotify(serializedCenterTileY);
+            // ドメインリロード前の未知値をそのままIndexへ使うとUI構築で例外になるため、現在定義へ含まれない値は通常地形へ戻します。
+            serializedViewMode = Enum.IsDefined(typeof(WorldGenerationMapViewMode), serializedViewMode)
+                ? serializedViewMode
+                : WorldGenerationMapViewMode.Terrain;
             viewModeField.choices = ViewModeChoices;
             viewModeField.SetValueWithoutNotify(ViewModeChoices[(int)serializedViewMode]);
             serializedLayer = WorldLayerUtility.IsPlayable(serializedLayer)
@@ -243,7 +267,7 @@ namespace Farmware.WorldGeneration.Editor
             centerXField.tooltip = "移動先の水平ワールドタイル座標です。負座標も入力できます。";
             centerYField.tooltip = "移動先の垂直ワールドタイル座標です。負座標も入力できます。";
             viewModeField.tooltip =
-                "Terrainは最終地形、Biomeは水域や障害物の下も含む論理バイオームを表示します。";
+                "Terrainは最終地形、Biomeは論理バイオーム、Environment各項目はTERRAIN-01C1の連続軸を表示します。";
             layerField.tooltip =
                 "診断する固定ワールドレイヤーです。WORLD-01CではSurfaceだけに自然生成が接続され、別層は未接続表示になります。";
             gridToggle.tooltip = "白線は16タイル、青線は64タイル境界です。遠距離では自動的に省略します。";
@@ -301,8 +325,7 @@ namespace Farmware.WorldGeneration.Editor
                 return;
             }
 
-            if (mapCanvas.contentRect.width < 64f
-                || mapCanvas.contentRect.height < 64f
+            if (!CanRenderViewport(mapCanvas.contentRect.width, mapCanvas.contentRect.height)
                 || (displayedSample != null
                     && WorldGenerationMapSampler.DoesSampleResolutionMatchViewport(
                         displayedSample.Width,
@@ -327,8 +350,7 @@ namespace Farmware.WorldGeneration.Editor
         {
             if (!hasSourceSettings
                 || mapCanvas == null
-                || mapCanvas.contentRect.width < 64f
-                || mapCanvas.contentRect.height < 64f)
+                || !CanRenderViewport(mapCanvas.contentRect.width, mapCanvas.contentRect.height))
             {
                 return;
             }
@@ -343,14 +365,28 @@ namespace Farmware.WorldGeneration.Editor
         private void RequestInitialRenderAfterLayout()
         {
             if (initialRenderRequested
-                || mapCanvas.contentRect.width < 64f
-                || mapCanvas.contentRect.height < 64f)
+                || !CanRenderViewport(mapCanvas.contentRect.width, mapCanvas.contentRect.height))
             {
                 return;
             }
 
             initialRenderRequested = true;
             RequestRenderFromFields();
+        }
+
+        /// <summary>
+        /// Canvasの実寸が確定し、広域画像を生成できるかを判定します。
+        /// 初回レイアウト前のNaNは「64未満」の比較を通過するため、最小値以上という肯定条件と有限値検査を使います。
+        /// </summary>
+        /// <param name="width">Canvasの横幅です。単位はEditorポイントです。</param>
+        /// <param name="height">Canvasの縦幅です。単位はEditorポイントです。</param>
+        /// <returns>両辺が有限値かつ最小表示寸法以上ならtrueです。状態は変更しません。</returns>
+        public static bool CanRenderViewport(float width, float height)
+        {
+            return width >= MinimumViewportSize
+                && height >= MinimumViewportSize
+                && !float.IsInfinity(width)
+                && !float.IsInfinity(height);
         }
 
         /// <summary>
@@ -393,7 +429,7 @@ namespace Farmware.WorldGeneration.Editor
             UpdateSourceInformation();
             SetStatus("実ゲームと共有する生成設定を読み込みました。", false);
 
-            if (requestRender && mapCanvas.contentRect.width >= 64f)
+            if (requestRender)
             {
                 RequestRenderFromFields();
             }
@@ -407,6 +443,12 @@ namespace Farmware.WorldGeneration.Editor
             if (!hasSourceSettings)
             {
                 SetStatus("生成設定がないため地図を作れません。実設定を再読込してください。", true);
+                return;
+            }
+
+            if (!CanRenderViewport(mapCanvas.contentRect.width, mapCanvas.contentRect.height))
+            {
+                SetStatus("地図の表示サイズが確定するまで待っています…", false);
                 return;
             }
 
@@ -448,9 +490,26 @@ namespace Farmware.WorldGeneration.Editor
             int horizontalTileSpan = width * tilesPerPixel;
             int verticalTileSpan = height * tilesPerPixel;
             SetStatus(
-                $"生成中… {width}×{height} samples / 約{horizontalTileSpan:N0}×{verticalTileSpan:N0} tiles",
+                $"生成中… 0% / {width}×{height} samples / 約{horizontalTileSpan:N0}×{verticalTileSpan:N0} tiles",
                 false);
             Stopwatch stopwatch = Stopwatch.StartNew();
+
+            // Progressは作成時のUnityメインスレッドへ通知を戻すため、ThreadPoolからUIを直接操作しません。
+            // 中止・完了済みの通知は破棄し、連続操作後の新しいステータスを古い進捗で上書きさせません。
+            IProgress<float> progress = new Progress<float>(fraction =>
+            {
+                if (cancellationToken.IsCancellationRequested
+                    || requestId != renderRequestId
+                    || this == null
+                    || !stopwatch.IsRunning)
+                {
+                    return;
+                }
+
+                SetStatus(
+                    $"生成中… {fraction:P0} / {width}×{height} samples / 約{horizontalTileSpan:N0}×{verticalTileSpan:N0} tiles",
+                    false);
+            });
 
             try
             {
@@ -464,7 +523,8 @@ namespace Farmware.WorldGeneration.Editor
                         height,
                         tilesPerPixel,
                         viewMode,
-                        cancellationToken),
+                        cancellationToken,
+                        progress),
                     cancellationToken);
 
                 if (cancellationToken.IsCancellationRequested
@@ -487,8 +547,18 @@ namespace Farmware.WorldGeneration.Editor
             }
             catch (Exception exception)
             {
+                if (cancellationToken.IsCancellationRequested || requestId != renderRequestId || this == null)
+                {
+                    return;
+                }
+
                 UnityEngine.Debug.LogException(exception);
                 SetStatus($"地図生成に失敗しました: {exception.Message}", true);
+            }
+            finally
+            {
+                // 完了後にキューから届く進捗通知が、完了表示やエラー表示を上書きしないようにします。
+                stopwatch.Stop();
             }
         }
 
@@ -520,6 +590,7 @@ namespace Farmware.WorldGeneration.Editor
 
             displayedSample = result;
             displayedSettings = renderSettings;
+            generationLabel?.AddToClassList("hidden");
             lastHoveredTileX = int.MinValue;
             lastHoveredTileY = int.MinValue;
             mapCanvas.SetMapTexture(
@@ -703,7 +774,7 @@ namespace Farmware.WorldGeneration.Editor
         {
             serializedViewMode = GetSelectedViewMode();
             UpdateLegend();
-            if (hasSourceSettings && mapCanvas.contentRect.width >= 64f)
+            if (hasSourceSettings)
             {
                 RequestRenderFromFields();
             }
@@ -716,7 +787,7 @@ namespace Farmware.WorldGeneration.Editor
         private void OnLayerChanged(ChangeEvent<string> evt)
         {
             serializedLayer = GetSelectedLayer();
-            if (hasSourceSettings && mapCanvas.contentRect.width >= 64f)
+            if (hasSourceSettings)
             {
                 RequestRenderFromFields();
             }
@@ -726,14 +797,31 @@ namespace Farmware.WorldGeneration.Editor
         /// DropdownFieldの選択文字列を安定した表示モードenumへ変換します。
         /// ChangeEvent通知中はindexが旧値のままになるUnityバージョンがあるため、確定済みのvalueを使用します。
         /// </summary>
-        /// <returns>表示文字列がBiomeならBiome、それ以外はTerrainです。</returns>
+        /// <returns>表示文字列と同じIndexの表示モードです。未知の文字列はTerrainへ戻します。</returns>
         private WorldGenerationMapViewMode GetSelectedViewMode()
         {
-            return string.Equals(
-                viewModeField.value,
-                ViewModeChoices[(int)WorldGenerationMapViewMode.Biome],
-                StringComparison.Ordinal)
-                ? WorldGenerationMapViewMode.Biome
+            int selectedIndex = ViewModeChoices.IndexOf(viewModeField.value);
+            return ResolveViewModeChoiceIndex(selectedIndex);
+        }
+
+        /// <summary>
+        /// DropdownFieldの選択Indexを表示モードへ変換し、範囲外または未定義の値はTerrainへ戻します。
+        /// </summary>
+        /// <param name="selectedIndex">ViewModeChoices内の0始まりIndexです。未選択時は-1です。</param>
+        /// <returns>定義済みの表示モード、または安全な既定値のTerrainです。</returns>
+        public static WorldGenerationMapViewMode ResolveViewModeChoiceIndex(int selectedIndex)
+        {
+            if (selectedIndex < byte.MinValue || selectedIndex > byte.MaxValue)
+            {
+                return WorldGenerationMapViewMode.Terrain;
+            }
+
+            // WorldGenerationMapViewModeの基底型はbyteです。intをEnum.IsDefinedへ直接渡すと
+            // 基底型不一致のArgumentExceptionになるため、範囲確認後にenum型そのものへ変換します。
+            WorldGenerationMapViewMode candidate =
+                (WorldGenerationMapViewMode)(byte)selectedIndex;
+            return Enum.IsDefined(typeof(WorldGenerationMapViewMode), candidate)
+                ? candidate
                 : WorldGenerationMapViewMode.Terrain;
         }
 
@@ -820,13 +908,26 @@ namespace Farmware.WorldGeneration.Editor
                 return;
             }
 
-            GeneratedTile tile = DeterministicChunkGenerator.GenerateTile(
-                displayedSettings,
-                worldTileX,
-                worldTileY);
+            // 広域画像と同じ失敗境界を使い、生成できない座標を値0の地形として誤表示しません。
+            if (!DeterministicChunkGenerator.TryGenerateTile(
+                    displayedSettings,
+                    worldTileX,
+                    worldTileY,
+                    out GeneratedTile tile))
+            {
+                hoverLabel.text =
+                    $"{displayedSample.Layer} / Tile ({worldTileX}, {worldTileY}) / "
+                    + $"Chunk ({chunk.X}, {chunk.Y}) / 固定サンプル範囲外のため生成失敗";
+                return;
+            }
+
             hoverLabel.text =
                 $"{displayedSample.Layer} / Tile ({worldTileX}, {worldTileY}) / Chunk ({chunk.X}, {chunk.Y}) / "
-                + $"Biome {tile.Biome} / Ground {tile.Ground} / Soil {tile.Soil} / Water {tile.WaterBodyType}";
+                + $"Biome {tile.Biome} / Ground {tile.Ground} / Soil {tile.Soil} / Water {tile.WaterBodyType}\n"
+                + $"Elevation {tile.Elevation} ({tile.ElevationClass}) / BaseTemp {tile.Temperature} / "
+                + $"TerrainTemp {tile.TerrainTemperature} / BaseMoisture {tile.Moisture}\n"
+                + $"Woody {tile.WoodyVegetationPotential} / Ruggedness {tile.TerrainRuggedness} / "
+                + $"Coastal {tile.CoastalInfluence} / Volcanic {tile.VolcanicActivityPotential}";
         }
 
         /// <summary>
@@ -868,6 +969,25 @@ namespace Farmware.WorldGeneration.Editor
         private void UpdateLegend()
         {
             legendContainer.Clear();
+            WorldGenerationMapViewMode selectedMode = GetSelectedViewMode();
+            if (selectedMode != WorldGenerationMapViewMode.Terrain
+                && selectedMode != WorldGenerationMapViewMode.Biome)
+            {
+                GeneratedTile minimumTile = default;
+                GeneratedTile maximumTile = CreateMaximumEnvironmentTile(selectedMode);
+                GetContinuousLegendLabels(
+                    selectedMode,
+                    out string minimumLabel,
+                    out string maximumLabel);
+                AddLegendRow(
+                    minimumLabel,
+                    WorldGenerationMapSampler.GetDisplayColor(selectedMode, minimumTile));
+                AddLegendRow(
+                    maximumLabel,
+                    WorldGenerationMapSampler.GetDisplayColor(selectedMode, maximumTile));
+                return;
+            }
+
             AddLegendRow("Grassland", "legend-grassland");
             AddLegendRow("Forest", "legend-forest");
             AddLegendRow("Desert", "legend-desert");
@@ -876,7 +996,7 @@ namespace Farmware.WorldGeneration.Editor
             AddLegendRow("Snowfield", "legend-snowfield");
             AddLegendRow("Volcanic", "legend-volcanic");
 
-            if (GetSelectedViewMode() == WorldGenerationMapViewMode.Terrain)
+            if (selectedMode == WorldGenerationMapViewMode.Terrain)
             {
                 // TerrainではBiome以外に優先表示する水域・マグマ・岩壁だけを凡例へ追加します。
                 // SoilTypeは通常地形へ反映しないため、Editor専用Debug Visualization側だけで案内します。
@@ -909,6 +1029,114 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>
+        /// 連続環境軸の最大側だけを65,535へ設定した凡例用タイルを作ります。
+        /// 地図の実色関数へ同じGeneratedTileを渡し、凡例だけ別の配色になることを防ぎます。
+        /// </summary>
+        /// <param name="viewMode">最大値を設定する連続環境軸です。</param>
+        /// <returns>対象フィールドだけが最大値で、他フィールドが0のタイルです。</returns>
+        private static GeneratedTile CreateMaximumEnvironmentTile(
+            WorldGenerationMapViewMode viewMode)
+        {
+            GeneratedTile tile = default;
+            switch (viewMode)
+            {
+                case WorldGenerationMapViewMode.Elevation:
+                    tile.Elevation = ushort.MaxValue;
+                    break;
+                case WorldGenerationMapViewMode.BaseTemperature:
+                    tile.Temperature = ushort.MaxValue;
+                    break;
+                case WorldGenerationMapViewMode.TerrainTemperature:
+                    tile.TerrainTemperature = ushort.MaxValue;
+                    break;
+                case WorldGenerationMapViewMode.BaseMoisture:
+                    tile.Moisture = ushort.MaxValue;
+                    break;
+                case WorldGenerationMapViewMode.WoodyVegetationPotential:
+                    tile.WoodyVegetationPotential = ushort.MaxValue;
+                    break;
+                case WorldGenerationMapViewMode.TerrainRuggedness:
+                    tile.TerrainRuggedness = ushort.MaxValue;
+                    break;
+                case WorldGenerationMapViewMode.CoastalInfluence:
+                    tile.CoastalInfluence = ushort.MaxValue;
+                    break;
+                case WorldGenerationMapViewMode.VolcanicActivityPotential:
+                    tile.VolcanicActivityPotential = ushort.MaxValue;
+                    break;
+            }
+
+            return tile;
+        }
+
+        /// <summary>
+        /// 連続環境軸の最小・最大が何を意味するかを、Map Viewerの短い凡例文言へ変換します。
+        /// </summary>
+        /// <param name="viewMode">凡例を求める連続環境軸です。</param>
+        /// <param name="minimumLabel">値0側の説明です。</param>
+        /// <param name="maximumLabel">値65,535側の説明です。</param>
+        private static void GetContinuousLegendLabels(
+            WorldGenerationMapViewMode viewMode,
+            out string minimumLabel,
+            out string maximumLabel)
+        {
+            switch (viewMode)
+            {
+                case WorldGenerationMapViewMode.BaseTemperature:
+                case WorldGenerationMapViewMode.TerrainTemperature:
+                    minimumLabel = "0 (Cold)";
+                    maximumLabel = "65535 (Hot)";
+                    return;
+                case WorldGenerationMapViewMode.BaseMoisture:
+                    minimumLabel = "0 (Dry)";
+                    maximumLabel = "65535 (Wet)";
+                    return;
+                case WorldGenerationMapViewMode.WoodyVegetationPotential:
+                    minimumLabel = "0 (Sparse)";
+                    maximumLabel = "65535 (Dense)";
+                    return;
+                case WorldGenerationMapViewMode.TerrainRuggedness:
+                    minimumLabel = "0 (Flat)";
+                    maximumLabel = "65535 (Rugged)";
+                    return;
+                case WorldGenerationMapViewMode.CoastalInfluence:
+                    minimumLabel = "0 (Inland)";
+                    maximumLabel = "65535 (Coastal)";
+                    return;
+                case WorldGenerationMapViewMode.VolcanicActivityPotential:
+                    minimumLabel = "0 (Inactive)";
+                    maximumLabel = "65535 (Active)";
+                    return;
+                default:
+                    minimumLabel = "0 (Low)";
+                    maximumLabel = "65535 (High)";
+                    return;
+            }
+        }
+
+        /// <summary>
+        /// 連続環境軸の凡例へ、実際の地図色を直接指定した色見本と説明を1行追加します。
+        /// </summary>
+        /// <param name="displayName">値域端点の意味を示す表示名です。</param>
+        /// <param name="color">WorldGenerationMapSamplerと共有する不透明色です。</param>
+        private void AddLegendRow(string displayName, Color32 color)
+        {
+            VisualElement row = new VisualElement();
+            row.AddToClassList("legend-row");
+
+            VisualElement swatch = new VisualElement();
+            swatch.AddToClassList("legend-swatch");
+            // UI ToolkitのStyleColorはColor32を直接受け取らないため、同じRGBA値を保ったColorへ明示変換します。
+            swatch.style.backgroundColor = (Color)color;
+            row.Add(swatch);
+
+            Label label = new Label(displayName);
+            label.AddToClassList("legend-label");
+            row.Add(label);
+            legendContainer.Add(row);
+        }
+
+        /// <summary>
         /// シリアライズ済み中心座標を入力欄へ反映し、値変更イベントによる余分な再生成を避けます。
         /// </summary>
         private void UpdateCoordinateFields()
@@ -926,6 +1154,12 @@ namespace Farmware.WorldGeneration.Editor
         {
             statusLabel.text = message;
             statusLabel.EnableInClassList("error", isError);
+            if (displayedTexture == null && generationLabel != null)
+            {
+                // 初回画像の完成までは地図領域にも同じ進捗を表示します。既存画像があれば再生成中も維持します。
+                generationLabel.text = message;
+                generationLabel.RemoveFromClassList("hidden");
+            }
         }
 
         /// <summary>

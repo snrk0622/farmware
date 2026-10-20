@@ -1466,8 +1466,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
         }
 
         /// <summary>
-        /// 開発者用可視化がBiome、Soil、連続ノイズ、水域、移行帯、資源、地形配置属性を異なる色へ写像することを検証します。
-        /// SceneやECS Worldを作らない純粋計算として、表示色の両端、水域分類、配置契約、最終資源分類と入力値の不変性をまとめて保証します。
+        /// 開発者用可視化がBiome、Soil、連続環境軸、水域、資源、地形配置属性を異なる色へ写像することを検証します。
+        /// SceneやECS Worldを作らない純粋計算として、TERRAIN-01C1各軸の表示色、水域分類、配置契約、最終資源分類と入力値の不変性をまとめて保証します。
         /// </summary>
         [Test]
         public void DebugVisualization_MapsGeneratedTileValuesWithoutChangingSimulationData()
@@ -1482,19 +1482,19 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Elevation = ushort.MaxValue,
                 Temperature = 0,
                 Moisture = ushort.MaxValue,
-                Weirdness = ushort.MaxValue
+                Weirdness = ushort.MaxValue,
+                TerrainTemperature = ushort.MaxValue,
+                WoodyVegetationPotential = ushort.MaxValue,
+                TerrainRuggedness = ushort.MaxValue,
+                CoastalInfluence = ushort.MaxValue,
+                VolcanicActivityPotential = ushort.MaxValue
             };
             GeneratedTile originalForestTransitionTile = forestTransitionTile;
 
-            Assert.That(
-                WorldGenerationDebugVisualizationOverlay.IsBiomeTransitionTile(forestTransitionTile),
-                Is.True,
-                "森林Biomeで標準土壌が選ばれた陸上タイルは移行帯として強調される必要があります。");
-
             Color coldColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
-                WorldGenerationDebugVisualizationMode.Temperature,
+                WorldGenerationDebugVisualizationMode.BaseTemperature,
                 forestTransitionTile);
-            Assert.That(coldColor.b, Is.GreaterThan(coldColor.r), "最低気温は赤より青が強い必要があります。");
+            Assert.That(coldColor.b, Is.GreaterThan(coldColor.r), "最低基礎気温は赤より青が強い必要があります。");
 
             Color highElevationColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
                 WorldGenerationDebugVisualizationMode.Elevation,
@@ -1504,13 +1504,34 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Is.GreaterThan(0.9f),
                 "最高標高は凡例どおり白に近い必要があります。");
 
-            Color highWeirdnessColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
-                WorldGenerationDebugVisualizationMode.Weirdness,
+            Color highTerrainTemperatureColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.TerrainTemperature,
                 forestTransitionTile);
             Assert.That(
-                highWeirdnessColor.r,
-                Is.GreaterThan(highWeirdnessColor.b),
-                "最高Weirdnessは凡例どおり紫より黄に近い必要があります。");
+                highTerrainTemperatureColor.r,
+                Is.GreaterThan(highTerrainTemperatureColor.b),
+                "最高地形気温は凡例どおり青より赤が強い必要があります。");
+
+            Color highMoistureColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.BaseMoisture,
+                forestTransitionTile);
+            Color highWoodyColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.WoodyVegetationPotential,
+                forestTransitionTile);
+            Color highRuggednessColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.TerrainRuggedness,
+                forestTransitionTile);
+            Color highCoastalColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.CoastalInfluence,
+                forestTransitionTile);
+            Color highVolcanicColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.VolcanicActivityPotential,
+                forestTransitionTile);
+            Assert.That(highMoistureColor.b, Is.GreaterThan(highMoistureColor.r));
+            Assert.That(highWoodyColor.g, Is.GreaterThan(highWoodyColor.r));
+            Assert.That(highRuggednessColor.r, Is.LessThan(0.3f));
+            Assert.That(highCoastalColor.b, Is.GreaterThan(highCoastalColor.r));
+            Assert.That(highVolcanicColor.r, Is.GreaterThan(highVolcanicColor.b));
 
             Color wetlandColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
                 WorldGenerationDebugVisualizationMode.Biome,
@@ -1536,22 +1557,10 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(fertileSoilColor, Is.Not.EqualTo(sandySoilColor));
             Assert.That(sandySoilColor, Is.Not.EqualTo(normalSoilColor));
 
-            Color transitionColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
-                WorldGenerationDebugVisualizationMode.BiomeTransition,
-                forestTransitionTile);
-            Assert.That(
-                transitionColor.r,
-                Is.GreaterThan(transitionColor.g),
-                "移行タイルは暗色ではなくマゼンタ系で強調される必要があります。");
-
             GeneratedTile waterTile = forestTransitionTile;
             waterTile.Ground = GroundType.Water;
             waterTile.WaterSalinity = WaterSalinity.FreshWater;
             waterTile.WaterBodyType = WaterBodyType.River;
-            Assert.That(
-                WorldGenerationDebugVisualizationOverlay.IsBiomeTransitionTile(waterTile),
-                Is.False,
-                "標高分類で生じる水域はバイオーム移行帯へ数えません。");
 
             Color freshWaterColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
                 WorldGenerationDebugVisualizationMode.WaterSalinity,
@@ -1585,10 +1594,6 @@ namespace Farmware.WorldGeneration.PlayModeTests
             GeneratedTile magmaTile = forestTransitionTile;
             magmaTile.Biome = BiomeId.Volcanic;
             magmaTile.Ground = GroundType.Magma;
-            Assert.That(
-                WorldGenerationDebugVisualizationOverlay.IsBiomeTransitionTile(magmaTile),
-                Is.False,
-                "独立生成されるマグマはバイオーム移行帯へ数えません。");
             Color magmaColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
                 WorldGenerationDebugVisualizationMode.Magma,
                 magmaTile,
@@ -2819,8 +2824,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 runtimeGenerationSettings.WetMoistureThreshold,
                 Is.EqualTo(WorldGenerationSettings.DefaultWetMoistureThreshold));
 
-            // 生成済みタイルを使う移行帯表示を1フレーム描画し、ECS Buffer読取、Windowboxクリップ、情報HUDまで例外なく通します。
-            developerVisualization.SetMode(WorldGenerationDebugVisualizationMode.BiomeTransition);
+            // 生成済みタイルを使う地形気温表示を1フレーム描画し、ECS Buffer読取、Windowboxクリップ、情報HUDまで例外なく通します。
+            developerVisualization.SetMode(WorldGenerationDebugVisualizationMode.TerrainTemperature);
             yield return null;
             developerVisualization.SetMode(WorldGenerationDebugVisualizationMode.None);
 
@@ -2975,7 +2980,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 negativeFarCameraChunk,
                 negativeFarCameraWorldPosition,
                 "負座標の遠方");
-            developerVisualization.SetMode(WorldGenerationDebugVisualizationMode.Moisture);
+            developerVisualization.SetMode(WorldGenerationDebugVisualizationMode.BaseMoisture);
             yield return null;
             developerVisualization.SetMode(WorldGenerationDebugVisualizationMode.None);
 
@@ -3597,6 +3602,11 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(actual.Temperature, Is.EqualTo(expected.Temperature), $"Temperatureが一致しません。Index={tileIndex}");
             Assert.That(actual.Moisture, Is.EqualTo(expected.Moisture), $"Moistureが一致しません。Index={tileIndex}");
             Assert.That(actual.Weirdness, Is.EqualTo(expected.Weirdness), $"Weirdnessが一致しません。Index={tileIndex}");
+            Assert.That(actual.TerrainTemperature, Is.EqualTo(expected.TerrainTemperature), $"TerrainTemperatureが一致しません。Index={tileIndex}");
+            Assert.That(actual.WoodyVegetationPotential, Is.EqualTo(expected.WoodyVegetationPotential), $"WoodyVegetationPotentialが一致しません。Index={tileIndex}");
+            Assert.That(actual.TerrainRuggedness, Is.EqualTo(expected.TerrainRuggedness), $"TerrainRuggednessが一致しません。Index={tileIndex}");
+            Assert.That(actual.CoastalInfluence, Is.EqualTo(expected.CoastalInfluence), $"CoastalInfluenceが一致しません。Index={tileIndex}");
+            Assert.That(actual.VolcanicActivityPotential, Is.EqualTo(expected.VolcanicActivityPotential), $"VolcanicActivityPotentialが一致しません。Index={tileIndex}");
         }
 
         /// <summary>

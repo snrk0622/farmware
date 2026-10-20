@@ -210,7 +210,7 @@ Streamingは生成中の保持外Entityも完成まで予算に含め、完成�
 
 ### 分類用の外周地形キャッシュ
 
-地形分類はチャンク内部を現在のECS Bufferから読み、外周1セルだけを`TerrainNeighborHaloUtility`の同期Burst Jobでまとめて生成する。260要素のNative配列（現行GeneratedTileの要素本体で4,680 bytes）はPresenterがAwakeでPersistent確保し、OnDestroyでDisposeする。チャンク別・フレーム間キャッシュにはせず、`ProcessApplyQueue`の呼び出し内で同一チャンクの連続反映範囲を共有し、次フレームや別チャンクでは必要範囲を必ず上書きする。これによりWorld再作成、Entity再利用、生成設定変更の古い外周が混入しない。中心の再コピー、ECS書き戻し、未完了Jobは追加しない。外周のint域外は非接続の水域値を使い、境界・岩壁露出・資源の前後判定を維持する。
+地形分類はチャンク内部を現在のECS Bufferから読み、外周1セルだけを`TerrainNeighborHaloUtility`の同期Burst Jobでまとめて生成する。260要素のNative配列（TERRAIN-01C1時点の`GeneratedTile`要素本体28 bytesで7,280 bytes）はPresenterがAwakeでPersistent確保し、OnDestroyでDisposeする。チャンク別・フレーム間キャッシュにはせず、`ProcessApplyQueue`の呼び出し内で同一チャンクの連続反映範囲を共有し、次フレームや別チャンクでは必要範囲を必ず上書きする。これによりWorld再作成、Entity再利用、生成設定変更の古い外周が混入しない。中心の再コピー、ECS書き戻し、未完了Jobは追加しない。外周のint域外は非接続の水域値を使い、境界・岩壁露出・資源の前後判定を維持する。
 
 ### チャンク別Tilemapの空領域履歴
 
@@ -284,7 +284,7 @@ WORLD-01Cでセル・チャンク座標、ストリーミング要求、動物�
 
 不変の基礎生成、可変セル差分、現在の有効セル、表示キャッシュを分離する。地形型は固定Biome、GroundBlock、WallBlock、Liquid、Surfaceを混同しない。データの正はECS／保存差分にあり、TilemapやHaloへ変更内容を逆流させない。
 
-TERRAIN-01Aでは共通`DefinitionCatalog`へ`GroundBlock`、`WallBlock`、`Liquid`、`TerrainSurface`分類を追加し、通常地面、自然岩壁、淡水、海水、マグマの変更禁止GUIDを全Worldへ登録する。`TerrainBlockCatalogBlob`は共通RuntimeId、硬度、回収Item参照、移動・設置・水密・施設境界属性をRuntimeId順で保持する。現行`GeneratedTile`は互換変換で、Landを地面、RockWallを地面＋壁、Waterを地面なし＋水種別Liquid、Magmaを地面なし＋Magmaへ分解する。生成器がBlockを直接選ぶことと表示参照は、TERRAIN-01Bのバイオーム構成合意後にTERRAIN-01Cで接続する。
+TERRAIN-01Aでは共通`DefinitionCatalog`へ`GroundBlock`、`WallBlock`、`Liquid`、`TerrainSurface`分類を追加し、通常地面、自然岩壁、淡水、海水、マグマの変更禁止GUIDを全Worldへ登録する。`TerrainBlockCatalogBlob`は共通RuntimeId、硬度、回収Item参照、移動・設置・水密・施設境界属性をRuntimeId順で保持する。現行`GeneratedTile`は互換変換で、Landを地面、RockWallを地面＋壁、Waterを地面なし＋水種別Liquid、Magmaを地面なし＋Magmaへ分解する。TERRAIN-01Bの採用済み構成に基づいて生成器がBlockを直接選ぶことと表示参照は、TERRAIN-01C6で接続する。
 
 TERRAIN-01C以降の地形材質は、安定材質ID、共通`TerrainBlockItem`、Ground形態Definition、Wall形態Definitionを明示的な一対一組として登録する。Ground／Wall区画と形態別属性は統合せず、インベントリだけを材質Itemへ統一する。配置Commandは変更前の有効セルを読み、GroundがなければGround形態、GroundがありWallがなければWall形態を選ぶ。液体からGroundへの置換、Item消費、差分更新、占有・依存関係Dirtyは同じトランザクションで確定し、失敗時に部分変更しない。Wall採掘はGroundを維持し、Wallが残るセルのGround掘削は拒否する。WallはGround上にだけ存在でき、GroundなしのWallとLiquidとの重複を有効セル検証で拒否する。形態間の対応を命名規則やRuntimeIdの隣接から推測しない。
 
