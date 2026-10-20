@@ -106,5 +106,7 @@ AI確認結果:
 - 地形差分のファイル保存・復元はSAVE-01。
 - プレイヤー移動への接続はPLAYER-01。
 - 採掘、硬度、回収Item、道具耐久はGATHER-01。
+- 地面・壁で共通の材質ItemとGround／Wall両形態を結ぶ対応、配置先による形態決定はTERRAIN-01CとGATHER-01B。
+- 地形Blockとは別の`GeologyDeposit`、Ground／Wall Host、採掘済み差分、大型鉱床はTERRAIN-01C、GATHER-01C、AUTO-01D。
 - 配置物占有、材料精算、橋はBUILD-01。
 - 液体伝播と反応はTERRAIN-02。
