@@ -44,6 +44,9 @@ namespace Farmware.WorldGeneration
         /// <summary>支配地質サイトの標高別重みから地質分類を選ぶ抽選専用ソルトです。</summary>
         public const ulong GeologyClassSelection = 0xA24BAED4963EE407UL;
 
+        /// <summary>同じ代表標高の水文セルを循環しない全順序へ並べる専用ソルトです。</summary>
+        public const ulong HydrologyFlowTie = 0xB5AD4ECEDA1CE2A9UL;
+
         /// <summary>バイオーム用気候ノイズの水平サンプリング座標を歪ませるソルトです。</summary>
         public const ulong BiomeWarpX = 0x243F6A8885A308D3UL;
 

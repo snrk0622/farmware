@@ -1,7 +1,7 @@
 # Farmware シミュレーション技術仕様 v0.2
 
 - 作成日: 2026-10-14
-- 最終更新日: 2026-10-20
+- 最終更新日: 2026-10-21
 - 状態: 探索ゲームへの移行先仕様と実装済み基盤の記録。第12.1・12.4の共通境界は段階実装済み
 - 対象環境: Unity 6000.3.8f1、Entities 1.5.0
 - 関連仕様: [ゲームコンセプト](../GameSpecification/2026-10-11_casual_factory_concept_v0.1.md)
@@ -200,7 +200,7 @@ Presentation
 
 ### チャンク生成の作業データと確定結果
 
-`MAP-02D`の非同期公開比較では、`ChunkGenerationSystem`が上限付きの作業枠とJobHandleをWorld寿命中に所有する。各枠のBurst `IJob`は設定・絶対座標の値コピーと専用Native配列だけへアクセスし、ECSへ書き込まないため、ECS Component依存へHandleを登録しない。代わりにSystemが後続更新で`IsCompleted`を確認してから安全性を確定し、地形と資源の両Bufferを公開して`ReadyToApply`へ進める。未完成作業配列はSimulationの確定結果やPresentationの読み取り対象にしない。
+`MAP-02D`の非同期公開比較では、`ChunkGenerationSystem`が上限付きの作業枠とJobHandleをWorld寿命中に所有する。各枠のBurst `IJob`は設定・絶対座標の値コピーと専用Native配列だけへアクセスし、ECSへ書き込まないため、ECS Component依存へHandleを登録しない。代わりにSystemが後続更新で`IsCompleted`を確認してから安全性を確定し、TERRAIN-01C3-A以後は地形・資源・固定水文の3 Bufferを公開して`ReadyToApply`へ進める。未完成作業配列はSimulationの確定結果やPresentationの読み取り対象にしない。
 
 Streamingは生成中の保持外Entityも完成まで予算に含め、完成後の次回更新でアンロードする。破棄済みEntityへ古い結果を公開せず、World／System破棄時には全Handleを完了してからPersistent配列を解放する。これはMonoBehaviourへチャンク状態を移す変更ではなく、要求と生成段階は引き続きECSを正とする。作業枠は通常フレームごとに再確保せず、使用した同時生成上限まで再利用する。計測条件と残るリスクは[性能計測](./Map02DPerformanceReport.md)を参照する。
 
@@ -213,6 +213,14 @@ Streamingは生成中の保持外Entityも完成まで予算に含め、完成�
 地形分類はチャンク内部を現在のECS Bufferから読み、外周1セルだけを`TerrainNeighborHaloUtility`の同期Burst Jobでまとめて生成する。260要素のNative配列（TERRAIN-01C2-A時点の`GeneratedTile`要素本体36 bytesで9,360 bytes）はPresenterがAwakeでPersistent確保し、OnDestroyでDisposeする。チャンク別・フレーム間キャッシュにはせず、`ProcessApplyQueue`の呼び出し内で同一チャンクの連続反映範囲を共有し、次フレームや別チャンクでは必要範囲を必ず上書きする。これによりWorld再作成、Entity再利用、生成設定変更の古い外周が混入しない。中心の再コピー、ECS書き戻し、未完了Jobは追加しない。外周のint域外は非接続の水域値を使い、境界・岩壁露出・資源の前後判定を維持する。
 
 TERRAIN-01C2-Aでは、固定の卓越基盤地質をBiome、Block、資源とは別IDで`GeneratedTile`へ併記する。地質分類、カルスト・活動的火山の必須フラグ、透水性、地下水保持力、侵食抵抗は、Seed、GeneratorVersion、固定Definition、絶対整数座標だけから生成するSimulation結果であり、Presentationや採掘後の見た目から逆算しない。地質サイトは512タイルのマクロセル、専用座標ワープ、5×5の有限候補探索、64bit平方距離、安定座標同点順を使う。地質クラス抽選はサイト絶対座標の標高区分と安定ID順の整数重みを使い、同じサイト内で結果が変わらない。Chunk生成Jobは64×64タイルと各軸±64タイルのワープから参照し得る最大6×6サイトを値型FixedListへ一度だけ作り、各タイルでは固有のワープと5×5候補の距離比較だけを行う。キャッシュはJobローカルでECSやセーブへ保存せず、単一タイル生成との4096セル一致を回帰テストする。C2-Bの分布監査と診断表示も、この確定Bufferまたは同じ純粋Generatorを読み取るだけで、Simulation結果を変更しない。
+
+### 固定水文の基礎格子とD8流向
+
+TERRAIN-01C3-Aでは、8×8タイルの固定水文セルを4096地形タイルへ複製せず、1論理チャンクEntityへ64件の`GeneratedHydrologyCell` Bufferとして分離する。各要素は絶対水文セル座標、下流座標、固定9地点の代表標高、中心標高、専用Salt由来の`PlateauRank`、D8方向、海洋流出口フラグを保持する。現在水位、降雨、土壌水分、施設排水、可変Blockはこの固定Bufferへ書き戻さない。
+
+流向生成はSeed、GeneratorVersion、固定設定、絶対整数座標だけを入力とする純粋計算である。負座標のセル変換は床方向除算を使い、中心・標本・近傍の座標は64bitで範囲検査する。海洋流出口は中心タイルの標高で決めて終端とし、陸上セルは隣接海洋を最優先、その後は代表標高・`PlateauRank`・衝突時座標の全順序が小さくなる辺だけを選ぶ。これによりロード済みチャンクや候補列挙順を参照せず循環を防ぐ。
+
+Chunk生成Jobは再利用枠の64件Native配列へ水文を生成し、地形・資源と同じ完成境界で公開する。どれか一つでも生成できなければ部分Bufferを公開しない。状態ハッシュは4096地形タイルの後へ64水文セルを行優先で追加する。下流終端、集水・流出、閉鎖流域・湖、診断表示はC3-B〜Dの責務であり、C3-AのBufferから未確定値を推測しない。
 
 ### チャンク別Tilemapの空領域履歴
 

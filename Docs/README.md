@@ -1,6 +1,6 @@
 # Farmware ドキュメント案内
 
-- 最終更新日: 2026-10-20
+- 最終更新日: 2026-10-21
 - 目的: 仕様、制作資料、開発手順の参照先を一か所にまとめる。
 
 ## ゲーム仕様
@@ -36,6 +36,7 @@ v0.52では、上流集合の4,096件目についても直接逆辺8件を必ず
 - [TERRAIN-01A ブロック定義と有効セルの実装記録](./Development/Terrain01AEffectiveTerrain.md)
 - [TERRAIN-01C1 連続環境軸の実装記録](./Development/Terrain01C1ContinuousEnvironmentAxes.md)
 - [TERRAIN-01C2 地質基盤の実装記録](./Development/Terrain01C2GeologyFoundation.md)
+- [TERRAIN-01C3 表面水系の実装記録](./Development/Terrain01C3SurfaceHydrology.md)
 - [Codexスキル](./Development/CodexSkills.md)
 - [Unity Editorツール](./Development/EditorTools.md)
 - [テスト](./Development/Testing.md)
