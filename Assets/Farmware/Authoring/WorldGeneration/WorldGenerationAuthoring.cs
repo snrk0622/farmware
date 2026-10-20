@@ -403,6 +403,8 @@ namespace Farmware.WorldGeneration.Authoring
                 EnvironmentAxes = environmentAxes,
                 // TERRAIN-01C2の固定地質値はInspectorへ重複保持せず、純粋生成と同じ共有既定値をBakeします。
                 Geology = GeologyGenerationSettings.CreateDefault(),
+                // TERRAIN-01C3-Aの水文格子寸法と9点サンプルは調整値にせず、共有既定値をBakeします。
+                Hydrology = HydrologyGenerationSettings.CreateDefault(),
                 BiomeClassificationTransitionWidthInTiles =
                     biomeClassificationTransitionWidthInTiles,
                 BiomeTransitionWidthInTiles = biomeTransitionWidthInTiles,

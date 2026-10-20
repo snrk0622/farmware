@@ -1,4 +1,4 @@
-// このファイルは、地形・資源をECSから独立した作業領域で生成し、完成結果だけをECSへ公開します。
+// このファイルは、地形・資源・固定水文をECSから独立した作業領域で生成し、完成結果だけをECSへ公開します。
 // ChunkStreamingSystemが要求と寿命、Presentationが確定済みBufferの表示、固定Tick公開Systemが個体群の決定論境界を担当します。
 
 using System;
@@ -14,7 +14,7 @@ using Farmware.Simulation.Animals;
 namespace Farmware.WorldGeneration
 {
     /// <summary>
-    /// 有効なChunkGenerationRequestを持つチャンクだけを生成し、同じ座標の地形と資源を対応付けるECS Systemです。
+    /// 有効なChunkGenerationRequestを持つチャンクだけを生成し、同じ座標の地形・資源・固定水文を対応付けるECS Systemです。
     /// 開始時に要求を無効化します。動物個体群があるWorldでは固定Tick境界で一括公開し、Job完了順を論理状態へ持ち込みません。
     /// 個体群Worldでは投入と公開を固定Tick入口へ揃え、追いつきTickでも同じバッチ数を処理します。
     /// </summary>
@@ -49,7 +49,7 @@ namespace Farmware.WorldGeneration
         {
             requestQuery = new EntityQueryBuilder(Allocator.Temp)
                 .WithAll<ChunkCoordinateComponent, ChunkGenerationStatus, ChunkGenerationRequest>()
-                .WithAll<GeneratedTile, GeneratedResourceTile>()
+                .WithAll<GeneratedTile, GeneratedResourceTile, GeneratedHydrologyCell>()
                 .Build(ref state);
             slots = new NativeList<GenerationSlot>(
                 ChunkStreamingSettings.CreateDefault().MaximumConcurrentGenerations, Allocator.Persistent);
@@ -146,13 +146,14 @@ namespace Farmware.WorldGeneration
                 slot.Handle.Complete();
                 slot.Tiles.Dispose();
                 slot.Resources.Dispose();
+                slot.HydrologyCells.Dispose();
                 slot.GenerationFailed.Dispose();
             }
 
             slots.Dispose();
         }
 
-        /// <summary>完成した作業枠だけを読み、存続する同じ要求Entityへ地形と資源をまとめて公開します。</summary>
+        /// <summary>完成した作業枠だけを読み、存続する同じ要求Entityへ地形・資源・固定水文をまとめて公開します。</summary>
         /// <param name="manager">同じWorldの公開先です。所有Jobの専用配列から完成結果をコピーします。</param>
         private void PublishCompletedResults(EntityManager manager)
         {
@@ -171,7 +172,8 @@ namespace Farmware.WorldGeneration
                     && manager.HasComponent<ChunkCoordinateComponent>(slot.Entity)
                     && manager.HasComponent<ChunkGenerationStatus>(slot.Entity)
                     && manager.HasBuffer<GeneratedTile>(slot.Entity)
-                    && manager.HasBuffer<GeneratedResourceTile>(slot.Entity))
+                    && manager.HasBuffer<GeneratedResourceTile>(slot.Entity)
+                    && manager.HasBuffer<GeneratedHydrologyCell>(slot.Entity))
                 {
                     ChunkCoordinateComponent coordinate = manager.GetComponentData<ChunkCoordinateComponent>(slot.Entity);
                     ChunkGenerationStatus status = manager.GetComponentData<ChunkGenerationStatus>(slot.Entity);
@@ -188,9 +190,10 @@ namespace Farmware.WorldGeneration
                         }
                         else
                         {
-                            // 両Bufferを確定してからReadyへ進め、半分だけ完成した結果を表示側へ渡さないようにします。
+                            // 3つのBufferを確定してからReadyへ進め、半分だけ完成した結果を表示側へ渡さないようにします。
                             manager.GetBuffer<GeneratedTile>(slot.Entity).CopyFrom(slot.Tiles);
                             manager.GetBuffer<GeneratedResourceTile>(slot.Entity).CopyFrom(slot.Resources);
+                            manager.GetBuffer<GeneratedHydrologyCell>(slot.Entity).CopyFrom(slot.HydrologyCells);
                             status.GeneratedWithVersion = slot.GeneratorVersion;
                             status.Phase = ChunkGenerationPhase.ReadyToApply;
                         }
@@ -264,6 +267,7 @@ namespace Farmware.WorldGeneration
                     Coordinate = slot.Coordinate,
                     Tiles = slot.Tiles,
                     Resources = slot.Resources,
+                    HydrologyCells = slot.HydrologyCells,
                     GenerationFailed = slot.GenerationFailed
                 };
 
@@ -308,7 +312,7 @@ namespace Farmware.WorldGeneration
             }
         }
 
-        /// <summary>空き枠を返し、不足時だけ4096件のPersistent配列を追加確保します。</summary>
+        /// <summary>空き枠を返し、不足時だけ地形・資源各4096件と固定水文64件のPersistent配列を追加確保します。</summary>
         /// <returns>投入するJobの所有情報を書き込む枠の添字です。</returns>
         private int GetAvailableSlot()
         {
@@ -325,6 +329,10 @@ namespace Farmware.WorldGeneration
                 Tiles = new NativeArray<GeneratedTile>(WorldGridConstants.TilesPerChunk, Allocator.Persistent,
                     NativeArrayOptions.UninitializedMemory),
                 Resources = new NativeArray<GeneratedResourceTile>(WorldGridConstants.TilesPerChunk, Allocator.Persistent,
+                    NativeArrayOptions.UninitializedMemory),
+                HydrologyCells = new NativeArray<GeneratedHydrologyCell>(
+                    DeterministicHydrologyGenerator.CellsPerChunk,
+                    Allocator.Persistent,
                     NativeArrayOptions.UninitializedMemory),
                 GenerationFailed = new NativeArray<byte>(1, Allocator.Persistent, NativeArrayOptions.ClearMemory)
             });
@@ -348,6 +356,8 @@ namespace Farmware.WorldGeneration
             public NativeArray<GeneratedTile> Tiles;
             /// <summary>資源4096件の作業配列です。地形配列と同じ所有・解放規則です。</summary>
             public NativeArray<GeneratedResourceTile> Resources;
+            /// <summary>中心がチャンク内に属する固定水文64件の作業配列です。枠の再利用中は保持します。</summary>
+            public NativeArray<GeneratedHydrologyCell> HydrologyCells;
             /// <summary>1件でも環境軸を生成できなかった場合に1となる、Jobと公開処理の失敗通知領域です。</summary>
             public NativeArray<byte> GenerationFailed;
         }
@@ -373,14 +383,28 @@ namespace Farmware.WorldGeneration
             /// <summary>地形と同じ位置に対応し、完了後にSystemへ返す資源配列です。</summary>
             public NativeArray<GeneratedResourceTile> Resources;
 
+            /// <summary>チャンク中心所有の8×8固定水文を行優先で保持し、完了後にSystemへ返す配列です。</summary>
+            public NativeArray<GeneratedHydrologyCell> HydrologyCells;
+
             /// <summary>座標範囲外や不正設定を検出した場合に1を書き、公開処理へチャンク失敗を伝えます。</summary>
             public NativeArray<byte> GenerationFailed;
 
             /// <summary>
-            /// Worker上で4096セルを生成します。ECSの状態やBufferへはアクセスしません。
+            /// Worker上で固定水文64セルと地形・資源4096タイルを生成します。ECSの状態やBufferへはアクセスしません。
             /// </summary>
             public void Execute()
             {
+                if (!DeterministicHydrologyGenerator.TryGenerateChunkCells(
+                    Settings,
+                    Coordinate.X,
+                    Coordinate.Y,
+                    HydrologyCells))
+                {
+                    // 水文が部分生成になった場合も地形とまとめて失敗させ、未完成Bufferを公開しません。
+                    GenerationFailed[0] = 1;
+                    return;
+                }
+
                 bool hasGeologyCache = DeterministicGeologyGenerator.TryCreateChunkCache(
                     Settings,
                     Coordinate.X,

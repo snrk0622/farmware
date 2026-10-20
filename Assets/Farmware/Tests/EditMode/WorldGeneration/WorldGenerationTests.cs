@@ -1684,6 +1684,7 @@ namespace Farmware.WorldGeneration.Tests
             entityManager.AddComponent<ChunkGenerationRequest>(chunkEntity);
             entityManager.AddBuffer<GeneratedTile>(chunkEntity);
             entityManager.AddBuffer<GeneratedResourceTile>(chunkEntity);
+            entityManager.AddBuffer<GeneratedHydrologyCell>(chunkEntity);
 
             // 初回更新は投入だけです。Workerが早く完成しても、同じ更新で未公開結果を読ませないことを保証します。
             SystemHandle system = world.GetOrCreateSystem<ChunkGenerationSystem>();
@@ -1693,6 +1694,7 @@ namespace Farmware.WorldGeneration.Tests
                 Is.EqualTo(ChunkGenerationPhase.GeneratingData));
             Assert.That(entityManager.GetBuffer<GeneratedTile>(chunkEntity).Length, Is.Zero);
             Assert.That(entityManager.GetBuffer<GeneratedResourceTile>(chunkEntity).Length, Is.Zero);
+            Assert.That(entityManager.GetBuffer<GeneratedHydrologyCell>(chunkEntity).Length, Is.Zero);
             Assert.That(entityManager.IsComponentEnabled<ChunkGenerationRequest>(chunkEntity), Is.False);
             WaitForChunkGeneration(world, system, chunkEntity);
 
@@ -1700,11 +1702,14 @@ namespace Farmware.WorldGeneration.Tests
             DynamicBuffer<GeneratedTile> tiles = entityManager.GetBuffer<GeneratedTile>(chunkEntity);
             DynamicBuffer<GeneratedResourceTile> resources =
                 entityManager.GetBuffer<GeneratedResourceTile>(chunkEntity);
+            DynamicBuffer<GeneratedHydrologyCell> hydrology =
+                entityManager.GetBuffer<GeneratedHydrologyCell>(chunkEntity);
 
             Assert.That(status.Phase, Is.EqualTo(ChunkGenerationPhase.ReadyToApply));
             Assert.That(status.GeneratedWithVersion, Is.EqualTo(settings.GeneratorVersion));
             Assert.That(tiles.Length, Is.EqualTo(WorldGridConstants.TilesPerChunk));
             Assert.That(resources.Length, Is.EqualTo(WorldGridConstants.TilesPerChunk));
+            Assert.That(hydrology.Length, Is.EqualTo(DeterministicHydrologyGenerator.CellsPerChunk));
             Assert.That(entityManager.IsComponentEnabled<ChunkGenerationRequest>(chunkEntity), Is.False);
 
             GeneratedTile expectedFirstTile = DeterministicChunkGenerator.GenerateTile(settings, 64, -64);
@@ -1717,8 +1722,20 @@ namespace Farmware.WorldGeneration.Tests
                     64,
                     -64);
             AssertResourceEqual(expectedFirstResource, resources[0], 64, -64);
+            Assert.That(hydrology[0].CellX, Is.EqualTo(8));
+            Assert.That(hydrology[0].CellY, Is.EqualTo(-8));
+            Assert.That(
+                DeterministicHydrologyGenerator.TryGenerateCell(
+                    settings,
+                    8,
+                    -8,
+                    out GeneratedHydrologyCell expectedFirstHydrology),
+                Is.True);
+            Assert.That(hydrology[0].HydrologyHeight, Is.EqualTo(expectedFirstHydrology.HydrologyHeight));
+            Assert.That(hydrology[0].PlateauRank, Is.EqualTo(expectedFirstHydrology.PlateauRank));
+            Assert.That(hydrology[0].FlowDirection, Is.EqualTo(expectedFirstHydrology.FlowDirection));
 
-            // 先頭だけでなく全セルを直接計算と比較し、作業配列への切替で地形・資源が変わらないことを保証します。
+            // 地形・資源は先頭だけでなく全4096タイルを直接計算と比較し、作業配列への切替で結果が変わらないことを保証します。
             for (int index = 0; index < WorldGridConstants.TilesPerChunk; index++)
             {
                 int x = 64 + index % WorldGridConstants.LogicalChunkSize;
@@ -2327,6 +2344,7 @@ namespace Farmware.WorldGeneration.Tests
             entityManager.SetComponentEnabled<ChunkGenerationRequest>(entity, requestEnabled);
             entityManager.AddBuffer<GeneratedTile>(entity);
             entityManager.AddBuffer<GeneratedResourceTile>(entity);
+            entityManager.AddBuffer<GeneratedHydrologyCell>(entity);
             return entity;
         }
 

@@ -309,6 +309,12 @@ namespace Farmware.WorldGeneration
         /// </summary>
         public GeologyGenerationSettings Geology;
 
+        /// <summary>
+        /// 固定8×8水文セル、代表標高9点、D8流向を再計算する設定です。
+        /// GeneratorVersionと一緒にワールド寿命中は変更しません。
+        /// </summary>
+        public HydrologyGenerationSettings Hydrology;
+
         /// <summary>7バイオームの適性が閾値付近で滑らかに入れ替わる帯のおおよその幅です。単位はタイルです。</summary>
         public int BiomeClassificationTransitionWidthInTiles;
 
@@ -461,6 +467,7 @@ namespace Farmware.WorldGeneration
                 OctaveCount = 4,
                 EnvironmentAxes = ContinuousEnvironmentSettings.CreateDefault(),
                 Geology = GeologyGenerationSettings.CreateDefault(),
+                Hydrology = HydrologyGenerationSettings.CreateDefault(),
                 BiomeClassificationTransitionWidthInTiles = 12,
                 BiomeTransitionWidthInTiles = 6,
                 SeaLevelThreshold = DefaultSeaLevelThreshold,

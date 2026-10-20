@@ -1124,7 +1124,8 @@ namespace Farmware.WorldGeneration.Tests
                 });
             entityManager.AddBuffer<GeneratedTile>(chunkEntity);
             entityManager.AddBuffer<GeneratedResourceTile>(chunkEntity);
-            // Buffer追加は構造変更なので、両方を追加した後に参照を取り直してから初期値を書き込みます。
+            entityManager.AddBuffer<GeneratedHydrologyCell>(chunkEntity);
+            // Buffer追加は構造変更なので、3つを追加した後に参照を取り直してから既存の地形・資源初期値を書き込みます。
             DynamicBuffer<GeneratedTile> tiles = entityManager.GetBuffer<GeneratedTile>(chunkEntity);
             DynamicBuffer<GeneratedResourceTile> resources =
                 entityManager.GetBuffer<GeneratedResourceTile>(chunkEntity);
