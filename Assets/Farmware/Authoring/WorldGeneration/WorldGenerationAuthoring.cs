@@ -391,6 +391,8 @@ namespace Farmware.WorldGeneration.Authoring
                 BiomeWarpCellSizeInTiles = biomeWarpCellSizeInTiles,
                 BiomeWarpAmplitudeInTiles = biomeWarpAmplitudeInTiles,
                 OctaveCount = octaveCount,
+                // TERRAIN-01C1の確定値はGeneratorVersionと一体で変更するため、個別Inspector調整ではなく共有既定値から作ります。
+                EnvironmentAxes = ContinuousEnvironmentSettings.CreateDefault(),
                 BiomeClassificationTransitionWidthInTiles =
                     biomeClassificationTransitionWidthInTiles,
                 BiomeTransitionWidthInTiles = biomeTransitionWidthInTiles,

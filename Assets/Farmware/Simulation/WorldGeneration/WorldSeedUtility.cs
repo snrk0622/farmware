@@ -23,6 +23,12 @@ namespace Farmware.WorldGeneration
         /// <summary>火山などの特殊地域候補を決めるWeirdnessノイズ専用のソルトです。</summary>
         public const ulong Weirdness = 0x589965CC75374CC3UL;
 
+        /// <summary>Biome分類前の固定した木本植生ポテンシャル専用のソルトです。</summary>
+        public const ulong WoodyVegetationPotential = 0x3F84D5B5B5470917UL;
+
+        /// <summary>地質とは独立して生成する火山活動度専用のソルトです。</summary>
+        public const ulong VolcanicActivityPotential = 0x9216D5D98979FB1BUL;
+
         /// <summary>バイオーム用気候ノイズの水平サンプリング座標を歪ませるソルトです。</summary>
         public const ulong BiomeWarpX = 0x243F6A8885A308D3UL;
 

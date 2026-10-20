@@ -121,12 +121,15 @@ Gameビューでは`CameraPanController`の表示原点を使い、CameraとGrid
 | `Biome` | 草原、森林、砂漠、岩地、湿地、雪原、火山の論理バイオーム |
 | `Soil` | 通常表示へ出さない標準、肥沃、砂質の`SoilType` |
 | `Elevation` | 標高の連続値 |
-| `Temperature` | 気温の連続値 |
-| `Moisture` | 湿度の連続値 |
-| `Weirdness` | 特殊地形の候補を決める連続値 |
+| `Environment > Base Temperature` | 標高寒冷補正前の基礎気温 |
+| `Environment > Terrain Temperature` | 標高寒冷補正後にBiome分類へ渡す地形気温 |
+| `Environment > Base Moisture` | 現在土壌水分・水域と独立した基礎湿度 |
+| `Environment > Woody Vegetation Potential` | 配置済み植生と独立した木本植生ポテンシャル |
+| `Environment > Terrain Ruggedness` | 固定9標高サンプルから求めた局所起伏 |
+| `Environment > Coastal Influence` | 標高だけから求めた海への近さと開放方向数の合成値 |
+| `Environment > Volcanic Activity Potential` | 旧`Weirdness`と別Saltで生成する火山活動度 |
 | `Water Salinity` | 陸地、淡水、海水 |
 | `Water Body` | 陸地、川、池、海 |
-| `Biome Transition` | 論理バイオームの代表土壌と実際の`SoilType`が異なる陸上移行帯 |
 | `Rock Wall` | 非岩壁、露出面、内部影の濃度 |
 | `Magma` | マグマ本体と淡水を抑制する火山影響域 |
 | `Resources` | 配置なし、木、石、砂の最終配置 |
@@ -135,7 +138,7 @@ Gameビューでは`CameraPanController`の表示原点を使い、CameraとGrid
 
 #### 次の修正をしたら確認する
 
-- ノイズ、バイオーム分類、移行帯、標高、気温、湿度、Weirdnessを変更した。
+- ノイズ、バイオーム分類、標高、基礎・地形気温、基礎湿度、木本植生、起伏、海洋影響、火山活動度を変更した。
 - 川、池、海、淡水・海水、マグマ、岩壁、資源、地形配置属性の生成規則または列挙値を変更した。
 - `GeneratedTile`、ECS Buffer、Presentationへ渡すデータを変更した。
 - 可視化の色、凡例、HUD、Tilemap、Camera、黒帯、表示範囲を変更した。
@@ -152,6 +155,8 @@ Gameビューでは`CameraPanController`の表示原点を使い、CameraとGrid
 5. 正負の遠方へ明示的にCameraを移した場合も、色面が表示中のTilemapと同じ絶対セルへ重なり、中央HUDがCamera中央の絶対タイル情報を示す。
 6. `Animal Population`で候補外、候補タイル、確定個体が凡例どおりの3色になり、確定個体色が候補色より優先される。草原陸地でも木・石などの資源があるセルは候補外になる。
 7. `Off`へ戻すと通常表示へ完全に戻る。
+
+TERRAIN-01C1で、旧7Biomeの代表土壌との差だけを見る`Biome Transition`と、旧7Biome互換値だけを見る`Weirdness`モードを削除した。旧`Weirdness`データはTERRAIN-01C5まで内部互換生成に残るが、火山活動の診断には使用しない。
 
 ### 2.4 Analyze Distribution
 
@@ -234,9 +239,10 @@ Farmwareのワールドは無限なので「全体」を有限画像へ収める
 - 各代表タイルは`DeterministicChunkGenerator.GenerateTile`で生成し、ビューア専用の簡易バイオーム計算は持たない。
 - 表示領域が生成Textureの上限768サンプルを超える場合は、縦横共通の縮小率でTextureを生成し、正方形のタイルとグリッドを保つ。Windowリサイズで縦横比が変わった場合は、操作停止後に新しい比率のTextureを自動再生成する。生成TextureとCanvasの表示倍率はPointer座標、パン、ズーム、境界線、原点表示へ反映する。Pointer座標とカーソル中心ズームは、Point Filterで実際に表示されるTextureピクセルの代表タイルへ一致させる。グリッドと原点表示は、Texture解像度が奇数の場合も地形生成と同じ整数中央のサンプル境界へ揃える。ツールバーの＋・－ButtonはCanvas中央をPointerへ変換せず、現在の中心タイル座標を直接維持する。再生成直後のHover情報もCanvas中央の境界をPointerとして解釈せず、Side Panelと同じ中心タイルを直接表示する。
 - 実設定を取得できない場合は生成を停止し、別の既定値へフォールバックしない。
+- 初回はCanvasの両辺が有限値かつ64ポイント以上になるまで生成を待ち、未確定の`NaN`寸法から1×1画像を作らない。画像完成までは地図領域の中央と画面下部へ生成進捗の割合を表示する。再生成時は前の画像を維持し、下部の進捗を更新する。Hover情報は初回から3行分の高さを確保し、情報が増えたことによる再生成を避ける。
 
 `Terrain`は7バイオームの基準色だけを使い、SoilTypeを反映せず、淡水、海水、マグマ、岩壁を優先した最終地形を表示する。土壌分布はMap Viewerのプレイヤー向け地形と混ぜず、PlayMode中の`Debug Visualization > Soil`で確認する。
-`Biome`は水域や障害物の下も含む論理バイオームを表示する。木、石、砂の資源分布は現時点では対象外である。
+`Biome`は水域や障害物の下も含む論理バイオームを表示する。`Elevation`、`Base Temperature`、`Terrain Temperature`、`Base Moisture`、`Woody Vegetation Potential`、`Terrain Ruggedness`、`Coastal Influence`、`Volcanic Activity Potential`はGameビューのDebug Visualizationと同じRGBで連続環境軸を表示する。木、石、砂の資源分布は現時点では対象外である。
 
 #### 画面上部の入力欄・ボタン
 
@@ -244,7 +250,7 @@ Farmwareのワールドは無限なので「全体」を有限画像へ収める
 | --- | --- |
 | `Seed` | 確認するワールドのシード文字列。値を変更して`移動・再生成`を押すと、Sceneの設定を変更せずに別シードを比較できる。 |
 | `X` / `Y` | 画像中央に表示するタイル座標。負座標も指定できる。 |
-| `表示` | `Terrain`は最終地形、`Biome`は地形で覆われる前の論理バイオームへ切り替える。変更すると現在位置を再生成する。 |
+| `表示` | `Terrain`は最終地形、`Biome`は論理バイオーム、ほか8項目はTERRAIN-01C1の連続環境軸へ切り替える。変更すると現在位置を再生成する。 |
 | `Grid` | 16×16タイルのサブチャンク境界と64×64タイルの論理チャンク境界の表示を切り替える。生成結果自体は変化しない。 |
 | `移動・再生成` | 入力中のSeedとX/Yを確定し、その地点の画像を生成し直す。 |
 | `実設定を再読込` | EditModeではAuthoring、PlayModeでは実行中ECSから生成設定とSeedを読み直し、現在位置を再生成する。入力した一時的なSeedは破棄される。 |
@@ -263,11 +269,11 @@ Farmwareのワールドは無限なので「全体」を有限画像へ収める
 
 #### 確認内容
 
-1. 原点付近と既知の遠距離座標で、Map ViewerとGameビューのバイオーム・水域・マグマ・岩壁が一致する。同じBiome内では標準・肥沃・砂質の土地表示が同じであり、`Debug Visualization > Soil`へ切り替えた場合だけ3種類を別色で確認できる。
+1. 原点付近と既知の遠距離座標で、Map ViewerとGameビューのバイオーム・水域・マグマ・岩壁、および8つの連続環境軸が一致する。同じBiome内では標準・肥沃・砂質の土地表示が同じであり、`Debug Visualization > Soil`へ切り替えた場合だけ3種類を別色で確認できる。
 2. `実設定を再読込`後のSeed、WorldSeed、GeneratorVersion、設定取得元が想定どおり表示される。
 3. 負座標への移動、ドラッグ、ホイール、＋・－Buttonで中心と縮尺が正しく変化する。＋・－ButtonではTexture解像度が奇数・偶数のどちらでも中心タイル座標を動かさない。再生成直後のHover情報は、偶数解像度でもSide Panelと同じ中心座標を示す。Windowを768ポイントより大きくした場合と、生成Textureの幅または高さが奇数になる大きさにした場合のどちらでも、カーソル下の座標、グリッド、原点印が地形とずれず、正方形のグリッドが維持される。
 4. 同じSeed・座標・縮尺へ戻ると同じ画像になる。
-5. 連続操作で古い非同期結果が後から上書きされず、Editorが長時間応答不能にならない。
+5. 開いた直後に単色の1×1画像を引き伸ばさず、地図領域に生成進捗が表示され、完成後に画像へ切り替わる。連続操作で古い非同期結果や進捗が後から上書きされず、Editorが長時間応答不能にならない。
 
 ## 3. 変更時の選び方
 
@@ -288,9 +294,9 @@ Editorツールだけで検証を完了しない。対応する自動テスト�
 
 - WORLD-01CでLayerキーをビューア・中央情報・可視化の検索へ接続済み。Map Viewerの`Layer`欄、または`Farmware > World Generation > Debug Visualization > Layer`からSurface／Underwater／Deep Seaを選ぶ。Surface以外の自然生成はTERRAIN-01Cまで未接続のため、Map Viewerは暗色と未接続メッセージ、Gameビュー可視化は空表示を返す。
 - TERRAIN-01AではBlock定義と有効セルAPIをSimulationへ追加するが、色判定は既存`GeneratedTile`互換のままとする。仕様転換に合わせて`Terrain Placement`からベルト固有のHUDと凡例だけを除き、差分込み表示、Blockパレット、自然生成と実ワールドの表示切替はTERRAIN-01Cで追加する。
-- TERRAIN-01Bでバイオーム構成と安定ID方針を再検討し、TERRAIN-01C1〜C5で環境軸・地質・水文・Biome診断、TERRAIN-01C6でBlockパレットと変更後地形、TERRAIN-01C7で資源診断、TERRAIN-01Dでスポーン許可・探索失敗理由を追加する。Map Viewerは合意後の全バイオームを識別し、自然生成と実ワールド差分込みを明示する。
+- TERRAIN-01Bで採用したバイオーム構成と安定ID方針に基づき、TERRAIN-01C1〜C5で環境軸・地質・水文・Biome診断、TERRAIN-01C6でBlockパレットと変更後地形、TERRAIN-01C7で資源診断、TERRAIN-01Dでスポーン許可・探索失敗理由を追加する。Map Viewerの18Biome識別と自然生成・実ワールド差分の明示は、最終BiomeとBlockを接続するC5・C6で更新する。
 - TERRAIN-01C3では、水文セル中心タイルの陸海判定、9地点平均の代表標高、海洋流出口、選択した下流セル、海洋優先を適用した理由を同時に確認できるようにする。海洋流出口は下流なしの終端として表示し、海岸セルが代表標高の比較だけで閉鎖流域になっていないことを確認できるようにする。集水診断には4,096件の寄与上限、`CatchmentTruncated`、上限セルで見つけた未選択直接上流数、最遠寄与距離、Level 0〜6のSummary利用数・展開数、1チャンクの選択セル数・D8逆辺判定数、未完了状態を追加し、Summary境界やキャッシュ状態で集水・流出値が変わらないことを比較できるようにする。下流診断には4,096辺上限、`Marine`／`ClosedBasin`／`LongDrainage`、Level 0〜12のDownstream Summary利用数・展開数、終端までの辺数、1チャンクの流向辺数・候補判定数を追加し、ロードやキャッシュで終端分類が変わらないことを確認できるようにする。打切られた大規模閉鎖流域は固定湖候補と別色・別理由で表示する。これは実装時の更新予定であり、現行表示を変更済みとは扱わない。
-- TERRAIN-01C5では、環境として自然な直接接続を認めるv0.48の方針に合わせ、全18Biomeの153ペアの境界長・接触率、両側の気温・湿度・標高と差、植生・地質・火山段階・水文・海岸条件、最終選択理由を境界診断へ追加する。既存7Biome向けの`Biome Transition`や隣接抑制件数を第三Biome強制の仕様と混同しない。新方式では橋不足や接続例への未記載を異常表示にせず、不正候補・必須ゲート違反と、景観品質の確認事項を区別する。湿原の専用Host許可・不許可とOverlay理由、火山中核の地質・活動度を表示し、周縁リングの欠落だけをエラーにしない。これは実装時の更新予定であり、現行メニュー・表示・監査出力を変更済みとは扱わない。
+- TERRAIN-01C5では、環境として自然な直接接続を認めるv0.48の方針に合わせ、全18Biomeの153ペアの境界長・接触率、両側の気温・湿度・標高と差、植生・地質・火山段階・水文・海岸条件、最終選択理由を境界診断へ追加する。TERRAIN-01C1で削除した旧7Biome向けの`Biome Transition`を復活させず、第三Biome強制の仕様へ戻さない。新方式では橋不足や接続例への未記載を異常表示にせず、不正候補・必須ゲート違反と、景観品質の確認事項を区別する。湿原の専用Host許可・不許可とOverlay理由、火山中核の地質・活動度を表示し、周縁リングの欠落だけをエラーにしない。153ペア監査と最終選択理由はC5の更新予定であり、C1時点で実装済みとは扱わない。
 - TERRAIN-01C／GATHER-01／AUTO-01D: 編集後の隣接差分、穴・液体、反応・保留キューに加え、`LooseSurface`／`GroundEmbedded`／`WallEmbedded`／`MassiveDeposit`の形態、Host、採掘済み差分、巨大鉱床の残量・占有を表示する。自然生成Block、配置済みBlock、クラフト用資源を区別し、元生成を現在地形と誤表示しない。
 - ECO-01／JOURNAL-01: 永続／匿名、地域会計、収容数・回復、証拠判定を確認可能にする。
 - DIVE-01／VEHICLE-01: 現在Layerと直下プレビュー、遷移失敗、高速先読み・生成待ちを診断する。

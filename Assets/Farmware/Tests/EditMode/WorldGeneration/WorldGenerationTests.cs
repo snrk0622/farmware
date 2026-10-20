@@ -359,7 +359,10 @@ namespace Farmware.WorldGeneration.Tests
             WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
                 WorldSeedUtility.FromString("rock-wall-water-priority-test"),
                 1);
-            settings.SeaLevelThreshold = ushort.MaxValue;
+            // 新しい標高帯契約では海面が低地上限を越える設定を無効とするため、
+            // 有効範囲内で海を最大化し、試験範囲では標高格子を細かくして水域との重なりを十分に確保します。
+            settings.SeaLevelThreshold = settings.WetlandMaximumElevation;
+            settings.ElevationCellSizeInTiles = 16;
             int overlappingWaterCandidateCount = 0;
 
             // 64×64だけを調べれば複数のノイズ形状を含み、重い広域生成をせず優先順位を確認できます。
@@ -2609,6 +2612,11 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(actual.Temperature, Is.EqualTo(expected.Temperature));
             Assert.That(actual.Moisture, Is.EqualTo(expected.Moisture));
             Assert.That(actual.Weirdness, Is.EqualTo(expected.Weirdness));
+            Assert.That(actual.TerrainTemperature, Is.EqualTo(expected.TerrainTemperature));
+            Assert.That(actual.WoodyVegetationPotential, Is.EqualTo(expected.WoodyVegetationPotential));
+            Assert.That(actual.TerrainRuggedness, Is.EqualTo(expected.TerrainRuggedness));
+            Assert.That(actual.CoastalInfluence, Is.EqualTo(expected.CoastalInfluence));
+            Assert.That(actual.VolcanicActivityPotential, Is.EqualTo(expected.VolcanicActivityPotential));
         }
 
         /// <summary>

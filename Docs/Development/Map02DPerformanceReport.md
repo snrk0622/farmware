@@ -427,7 +427,7 @@ Playerは後続の有限経路試験も完走し、完了ファイル・自動�
 
 `ChunkStreamingSystem`の未完成生成を待つ明示的同期も除去した。保持外へ出た`GeneratingData`のEntityは完成まで予約枠に数え、完成後の次回更新でアンロードする。生成中に繰り返し移動しても、旧Jobを残したまま新しいJobを無制限に増やさないためである。外部から破棄されたEntityの結果は捨て、World／System終了時は残ったJobを待ってから全配列を破棄する。枠は設定上限まで拡張して再利用し、上限を下げた場合も過去に確保した空き枠の容量はWorld終了まで保持する。
 
-追加作業配列は実型サイズ（地形18 bytes＋資源2 bytes）×4096件で1枠81,920 bytes、現在の2枠なら163,840 bytes（160KiB）である。これは配列要素の容量だけで、枠一覧・安全性情報・Jobスケジューラ・Allocatorの管理領域やECS Bufferを含む総量ではない。完成結果コピーのCPUコストと、このメモリ増を引き換えに同期待ちを避ける比較であり、実装しただけで高速化を確定しない。
+この比較実装時点の追加作業配列は実型サイズ（地形18 bytes＋資源2 bytes）×4096件で1枠81,920 bytes、2枠なら163,840 bytes（160KiB）だった。これは配列要素の容量だけで、枠一覧・安全性情報・Jobスケジューラ・Allocatorの管理領域やECS Bufferを含む総量ではない。完成結果コピーのCPUコストと、このメモリ増を引き換えに同期待ちを避ける比較であり、実装しただけで高速化を確定しない。TERRAIN-01C1後の現行容量は本書末尾に追記する。
 
 `ChunkGenerationPublish`は完成結果の公開、`ChunkGenerationSchedule`は枠確保と投入を計測する。`PresentationWorkCollection`、`ChunkStreaming`と同時取得し、待ちが別の区間へ移っていないかを調べた。開発者可視化は従来のReady／Activeだけを読むため生成中配列を参照せず、地形分類IDや凡例の変更もない。最終ソースの関連EditMode 167件、PlayMode 38件がすべて成功した。以下のPlayer確認と合わせても、人間の表示受け入れやMAP-02D全体の合格とはしない。Tilemap比較方式は既定OFFのままである。
 
@@ -596,7 +596,7 @@ Playerが固定パスへ出す前回の記録6ファイルは開始前に退避�
 
 通常の4サブチャンクずつの反映では外周生成数が100／36／36／100となり、8近傍取得だけで従来764回だった全土地チャンクの外周生成を272回へ減らす。岩壁露出・資源の別経路の再生成もなくなる。ただし、水域などの近傍取得が少ないチャンクでは不要な外周も一部準備するため、生成数の比率だけでCPU改善率を決めない。反映範囲が複数行をまたぐ場合は外周矩形をやや広く取り、最大でも260セルとする。
 
-配列はPresenterがAwakeで一度Persistent確保し、OnDestroyでDisposeする。現行GeneratedTileの要素本体は18 bytes×260＝4,680 bytes追加される（Allocator・安全性管理を含むプロセスメモリ増加量ではない）。チャンクやフレームをまたぐ値のキャッシュを採らず、必要範囲を毎回上書きするため、設定変更・World切替・Entity再利用用の複雑な無効化管理を加えない。代替の66×66全件スナップショットや永続チャンク別キャッシュは、中心コピーと寿命管理を増やすため今回は採らなかった。
+配列はPresenterがAwakeで一度Persistent確保し、OnDestroyでDisposeする。この比較時点の`GeneratedTile`要素本体は18 bytes×260＝4,680 bytes追加された（Allocator・安全性管理を含むプロセスメモリ増加量ではない）。チャンクやフレームをまたぐ値のキャッシュを採らず、必要範囲を毎回上書きするため、設定変更・World切替・Entity再利用用の複雑な無効化管理を加えない。代替の66×66全件スナップショットや永続チャンク別キャッシュは、中心コピーと寿命管理を増やすため今回は採らなかった。TERRAIN-01C1後の現行容量は本書末尾に追記する。
 
 地形・資源生成式、Seed、GeneratorVersion、分類ID、境界基本形、影の濃さと探索半径、Tilemap書込9枚、反映予算4、速度12／36、Scene保存内容、FPS／vSyncの製品設定は変更しない。開発者可視化は従来の生成結果を読むままである。新Marker `Farmware.WorldGeneration.TerrainNeighborHaloBuild`は分類の前処理であり、`SubChunkClassification`と合わせて比較する。
 
@@ -953,7 +953,7 @@ EditMode全243件も19.73秒で成功し、失敗・Skip・Inconclusiveは0だ�
 | 2 | 投入直後 | 0.0085 | 3.4558 | 3.5732 | 3.6017 |
 | 2 | 完了済み | 0.0080 | 0.0067 | 0.0079 | 0.0085 |
 
-全8条件で、managed allocationの中央値は0 byteだった。生成JobのPersistent作業配列は従来と同じで、GeneratedTile 18 byte＋GeneratedResourceTile 2 byte×4096セル、1枠81,920 byte／2枠163,840 byte（コンテナ管理領域・ECS Buffer・アロケーターの余白を除く）である。新しいSystemは所有配列を増やさず、既存SystemのJobHandleを一時的に結合して待つ。全8条件の公開後Buffer件数も確認した。
+全8条件で、managed allocationの中央値は0 byteだった。この比較時点の生成JobのPersistent作業配列は従来と同じで、`GeneratedTile` 18 byte＋`GeneratedResourceTile` 2 byte×4096セル、1枠81,920 byte／2枠163,840 byteだった（コンテナ管理領域・ECS Buffer・アロケーターの余白を除く）。新しいSystemは所有配列を増やさず、既存SystemのJobHandleを一時的に結合して待つ。全8条件の公開後Buffer件数も確認した。TERRAIN-01C1後の現行容量は本書末尾に追記する。
 
 稼働中の新規公開は1 Tick当たり投入済みの同時生成上限までで、既定2件・10 Tick/秒なら最大20チャンク/秒となる。Job待ち時間は`Farmware.WorldGeneration.ChunkGenerationBoundaryWait`、コピーは`ChunkGenerationPublish`、投入は`ChunkGenerationSchedule`で分離する。待ちを測定対象から隠したり、旧方式と同じ生成スループットと説明したりしない。開発者からEditorでの軽い確認では問題なさそうとの報告を受けたが、修正commit時点では通常／Shift移動・最大ズーム・停止中移動の全手順の正式受け入れや、Development Playerのフレーム時間は未検証だった。修正commit後の追加比較と人間確認の結果は後述する。過去のPlayer測定値を今回の性能合格へ流用しない。
 
@@ -1126,3 +1126,9 @@ M3・24GB、Unity 6000.3.8f1、Entities 1.5.0、Burst 1.8.29有効、MetalのDev
 新しいビルド・設定復元・集計・比較元の来歴は`/private/tmp/farmware-animal01b-tick-player.fKAJgU/`、生CSV・条件・画像・Playerログは既存ハーネスの固定保存先`/private/tmp/farmware-animal01b-player.U9DDgu/tick-baseline-*`と`tick-current-*`へ保持する。新ディレクトリの`summary.json`に全Counter分位点、`provenance.md`に来歴を記録する。以前の`baseline-*`・`current-*`・人間向け再生記録は上書きしていない。いずれもローカル一時保存である。
 
 AIによるビルド・自動計測・復元を完了後、2026-10-19に開発者から「問題ないように見えます」と今回Playerの表示・停止感の確認とcommit・push・レビュー返信・スレッド解決の許可を得た。**61.368msの単発間隔と生成待ち最大12.690msの制約を記録したうえで、今回範囲の開発者受け入れは完了**とする。Editor確認や以前のPlayer受け入れで代用したものではない。[ロードマップ](./ImplementationRoadmap_2026-10-19_Archive.md#animal-01b-再レビュー追補フレーム分割と可視位置キャッシュ)のマージ前判断も完了とするが、性能改善や製品性能合格とは扱わず、FPS合格値は新設しない。製品最大Viewport・長時間・大規模個体群・Windows・8GB／16GB実機の後続ゲートは完了扱いにしない。
+
+## TERRAIN-01C1後の生成配列容量
+
+2026-10-20のTERRAIN-01C1では、`GeneratedTile`へ地形気温、木本植生ポテンシャル、地形起伏、海洋影響、火山活動度の`ushort` 5値を追加した。要素本体は18 bytesから28 bytesへ増え、生成JobのPersistent作業配列は`GeneratedTile` 28 bytes＋`GeneratedResourceTile` 2 bytesの4096セルに失敗通知1 byteを加え、1枠122,881 bytes、既定2枠245,762 bytes（約240KiB）となる。分類用外周配列は28 bytes×260要素で7,280 bytesである。いずれもコンテナ管理領域、Allocatorの余白、安全性情報、ECS Bufferを含まない。
+
+新しい連続環境軸は1タイルにつき中心以外の標高を最大41点再評価するため、過去の18 bytes時点のPlayer計測を現行生成負荷の性能根拠へ流用しない。TERRAIN-01C1では決定論、有限のサンプル数、明示失敗を検証し、製品最大Viewport・対象機器・合格FPSが未決定なので新しい性能合格値は設定しない。

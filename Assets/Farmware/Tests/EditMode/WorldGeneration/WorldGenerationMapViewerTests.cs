@@ -1,6 +1,7 @@
 // このファイルは、広域マップビューアが実ゲームと同じ座標・設定・Generator結果を表示することをEditModeで検証します。
 // EditorWindowそのものを開かず、バックグラウンド化できる純粋サンプラーとAuthoring設定変換を対象にします。
 
+using System.Collections.Generic;
 using System.Reflection;
 using System.Threading;
 using Farmware.Simulation;
@@ -172,6 +173,9 @@ namespace Farmware.WorldGeneration.Tests
             DropdownField layerField = root.Q<DropdownField>("layerField");
 
             Assert.That(layerField, Is.Not.Null);
+            Label generationLabel = root.Q<Label>("generationLabel");
+            Assert.That(generationLabel, Is.Not.Null, "初回生成中に地図領域へ進捗を示す案内が必要です。");
+            Assert.That(generationLabel.pickingMode, Is.EqualTo(PickingMode.Ignore));
         }
 
         /// <summary>
@@ -219,6 +223,72 @@ namespace Farmware.WorldGeneration.Tests
                 biomeNormal,
                 Is.EqualTo(biomeFertile),
                 "Biome表示はSoilに左右されず、両方を同じ森林として表示する必要があります。");
+        }
+
+        /// <summary>
+        /// Map Viewerの8つの連続環境表示が、それぞれ0と65,535を異なる不透明色へ変換することを保証します。
+        /// Gameビューだけ更新して広域診断が旧Terrain／Biome表示のまま残る退行を防ぎます。
+        /// </summary>
+        [Test]
+        public void DisplayColor_ContinuousEnvironmentModesMapBothEndpoints()
+        {
+            GeneratedTile minimumTile = default;
+            GeneratedTile maximumTile = new GeneratedTile
+            {
+                Elevation = ushort.MaxValue,
+                Temperature = ushort.MaxValue,
+                TerrainTemperature = ushort.MaxValue,
+                Moisture = ushort.MaxValue,
+                WoodyVegetationPotential = ushort.MaxValue,
+                TerrainRuggedness = ushort.MaxValue,
+                CoastalInfluence = ushort.MaxValue,
+                VolcanicActivityPotential = ushort.MaxValue
+            };
+            WorldGenerationMapViewMode[] environmentModes =
+            {
+                WorldGenerationMapViewMode.Elevation,
+                WorldGenerationMapViewMode.BaseTemperature,
+                WorldGenerationMapViewMode.TerrainTemperature,
+                WorldGenerationMapViewMode.BaseMoisture,
+                WorldGenerationMapViewMode.WoodyVegetationPotential,
+                WorldGenerationMapViewMode.TerrainRuggedness,
+                WorldGenerationMapViewMode.CoastalInfluence,
+                WorldGenerationMapViewMode.VolcanicActivityPotential
+            };
+
+            // 全モードを同じ端点条件で調べ、追加漏れや透明色によるEditor背景との混色をまとめて検出します。
+            foreach (WorldGenerationMapViewMode mode in environmentModes)
+            {
+                Color32 minimumColor = WorldGenerationMapSampler.GetDisplayColor(mode, minimumTile);
+                Color32 maximumColor = WorldGenerationMapSampler.GetDisplayColor(mode, maximumTile);
+                Assert.That(maximumColor, Is.Not.EqualTo(minimumColor), $"{mode}の値域両端が同色です。");
+                Assert.That(minimumColor.a, Is.EqualTo(byte.MaxValue), $"{mode}の最小色が不透明ではありません。");
+                Assert.That(maximumColor.a, Is.EqualTo(byte.MaxValue), $"{mode}の最大色が不透明ではありません。");
+            }
+        }
+
+        /// <summary>
+        /// byte基底の表示モードへDropdownのint Indexを変換し、定義値は保持し、未選択・範囲外値はTerrainへ戻すことを保証します。
+        /// `Enum.IsDefined`へintを直接渡してMap Viewer起動時に例外となった回帰を防ぎます。
+        /// </summary>
+        [Test]
+        public void ResolveViewModeChoiceIndex_HandlesIntIndexWithoutUnderlyingTypeException()
+        {
+            Assert.That(
+                WorldGenerationMapViewerWindow.ResolveViewModeChoiceIndex(0),
+                Is.EqualTo(WorldGenerationMapViewMode.Terrain));
+            Assert.That(
+                WorldGenerationMapViewerWindow.ResolveViewModeChoiceIndex(9),
+                Is.EqualTo(WorldGenerationMapViewMode.VolcanicActivityPotential));
+            Assert.That(
+                WorldGenerationMapViewerWindow.ResolveViewModeChoiceIndex(-1),
+                Is.EqualTo(WorldGenerationMapViewMode.Terrain));
+            Assert.That(
+                WorldGenerationMapViewerWindow.ResolveViewModeChoiceIndex(10),
+                Is.EqualTo(WorldGenerationMapViewMode.Terrain));
+            Assert.That(
+                WorldGenerationMapViewerWindow.ResolveViewModeChoiceIndex(byte.MaxValue + 1),
+                Is.EqualTo(WorldGenerationMapViewMode.Terrain));
         }
 
         /// <summary>
@@ -323,8 +393,10 @@ namespace Farmware.WorldGeneration.Tests
             try
             {
                 Label hoverLabel = new Label();
+                Label generationLabel = new Label("生成中…");
                 SetPrivateField(window, "mapCanvas", new WorldGenerationMapCanvas());
                 SetPrivateField(window, "hoverLabel", hoverLabel);
+                SetPrivateField(window, "generationLabel", generationLabel);
                 SetPrivateField(window, "zoomLabel", new Label());
                 SetPrivateField(window, "sourceLabel", new Label());
                 SetPrivateField(window, "settingsSourceDescription", "EditMode回帰テスト");
@@ -340,6 +412,8 @@ namespace Farmware.WorldGeneration.Tests
                 Assert.That(
                     hoverLabel.text,
                     Does.StartWith($"Surface / Tile ({centerTileX}, {centerTileY}) /"));
+                Assert.That(generationLabel.ClassListContains("hidden"), Is.True,
+                    "画像完成後は案内を隠し、地図を表示する必要があります。");
             }
             finally
             {
@@ -476,6 +550,83 @@ namespace Farmware.WorldGeneration.Tests
 
             Assert.That(sampleWidth, Is.EqualTo(expectedWidth));
             Assert.That(sampleHeight, Is.EqualTo(expectedHeight));
+        }
+
+        /// <summary>
+        /// レイアウト前のNaN、無限大、縮小されたCanvas、最小寸法を準備し、実寸確定前の1×1生成を防ぐことを保証します。
+        /// </summary>
+        /// <param name="width">Canvasの横幅です。単位はEditorポイントです。</param>
+        /// <param name="height">Canvasの縦幅です。単位はEditorポイントです。</param>
+        /// <param name="expected">この寸法で生成を開始できるかの期待値です。</param>
+        [TestCase(float.NaN, float.NaN, false)]
+        [TestCase(float.NaN, 480f, false)]
+        [TestCase(640f, float.NaN, false)]
+        [TestCase(float.PositiveInfinity, 480f, false)]
+        [TestCase(640f, float.PositiveInfinity, false)]
+        [TestCase(float.NegativeInfinity, 480f, false)]
+        [TestCase(0f, 480f, false)]
+        [TestCase(640f, 63f, false)]
+        [TestCase(64f, 64f, true)]
+        [TestCase(640f, 480f, true)]
+        public void CanRenderViewport_WaitsForFiniteUsableLayout(float width, float height, bool expected)
+        {
+            Assert.That(WorldGenerationMapViewerWindow.CanRenderViewport(width, height), Is.EqualTo(expected));
+        }
+
+        /// <summary>
+        /// 未確定または無限大の表示寸法をサンプラーへ渡し、暗黙に1×1へ丸めず引数エラーとして拒否することを保証します。
+        /// </summary>
+        /// <param name="width">検証する横幅です。単位はEditorポイントです。</param>
+        /// <param name="height">検証する縦幅です。単位はEditorポイントです。</param>
+        [TestCase(float.NaN, 480f)]
+        [TestCase(640f, float.NaN)]
+        [TestCase(float.PositiveInfinity, 480f)]
+        [TestCase(640f, float.PositiveInfinity)]
+        [TestCase(float.NegativeInfinity, 480f)]
+        [TestCase(640f, float.NegativeInfinity)]
+        public void CalculateSampleResolution_RejectsNonFiniteViewport(float width, float height)
+        {
+            Assert.That(
+                () => WorldGenerationMapSampler.CalculateSampleResolution(width, height, out _, out _),
+                Throws.TypeOf<System.ArgumentOutOfRangeException>());
+        }
+
+        /// <summary>
+        /// 小さい地図を33行生成し、一定行数の進捗が100%へ到達し、通知の有無で地図の色が変わらないことを保証します。
+        /// UIへ表示する進み具合が本当の生成量を表し、診断追加が生成結果へ影響しないことを検証します。
+        /// </summary>
+        [Test]
+        public void Sample_ReportsCompletedRowsWithoutChangingPixels()
+        {
+            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.FromString("map-viewer-progress-test"), 1);
+            RecordingProgress progress = new RecordingProgress();
+            WorldGenerationMapSampleResult result = WorldGenerationMapSampler.Sample(
+                settings, WorldLayer.Surface, -64, 64, 3, 33, 4,
+                WorldGenerationMapViewMode.Terrain, CancellationToken.None, progress);
+            WorldGenerationMapSampleResult withoutProgress = WorldGenerationMapSampler.Sample(
+                settings, WorldLayer.Surface, -64, 64, 3, 33, 4,
+                WorldGenerationMapViewMode.Terrain, CancellationToken.None);
+
+            Assert.That(progress.Values, Is.EqualTo(new[] { 16f / 33f, 32f / 33f, 1f }));
+            Assert.That(result.PixelColors, Is.EqualTo(withoutProgress.PixelColors));
+        }
+
+        /// <summary>
+        /// サンプラーの通知を同期的に記録するテスト用受け口です。
+        /// 実WindowのProgressと違いUIスレッドへの配送を待たず、通知値と生成結果を同じテスト内で比較します。
+        /// </summary>
+        private sealed class RecordingProgress : System.IProgress<float>
+        {
+            /// <summary>このテストのサンプリング中にReportが受け取った完了割合0〜1を、通知順で保持します。</summary>
+            public List<float> Values { get; } = new List<float>();
+
+            /// <summary>サンプラーが一定行数を完了したときの割合を追記します。生成処理への副作用はありません。</summary>
+            /// <param name="value">完了した行数に対応する0〜1の割合です。</param>
+            public void Report(float value)
+            {
+                Values.Add(value);
+            }
         }
 
         /// <summary>
