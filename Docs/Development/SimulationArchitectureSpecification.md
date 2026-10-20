@@ -210,7 +210,9 @@ Streamingは生成中の保持外Entityも完成まで予算に含め、完成�
 
 ### 分類用の外周地形キャッシュ
 
-地形分類はチャンク内部を現在のECS Bufferから読み、外周1セルだけを`TerrainNeighborHaloUtility`の同期Burst Jobでまとめて生成する。260要素のNative配列（TERRAIN-01C1時点の`GeneratedTile`要素本体28 bytesで7,280 bytes）はPresenterがAwakeでPersistent確保し、OnDestroyでDisposeする。チャンク別・フレーム間キャッシュにはせず、`ProcessApplyQueue`の呼び出し内で同一チャンクの連続反映範囲を共有し、次フレームや別チャンクでは必要範囲を必ず上書きする。これによりWorld再作成、Entity再利用、生成設定変更の古い外周が混入しない。中心の再コピー、ECS書き戻し、未完了Jobは追加しない。外周のint域外は非接続の水域値を使い、境界・岩壁露出・資源の前後判定を維持する。
+地形分類はチャンク内部を現在のECS Bufferから読み、外周1セルだけを`TerrainNeighborHaloUtility`の同期Burst Jobでまとめて生成する。260要素のNative配列（TERRAIN-01C2-A時点の`GeneratedTile`要素本体36 bytesで9,360 bytes）はPresenterがAwakeでPersistent確保し、OnDestroyでDisposeする。チャンク別・フレーム間キャッシュにはせず、`ProcessApplyQueue`の呼び出し内で同一チャンクの連続反映範囲を共有し、次フレームや別チャンクでは必要範囲を必ず上書きする。これによりWorld再作成、Entity再利用、生成設定変更の古い外周が混入しない。中心の再コピー、ECS書き戻し、未完了Jobは追加しない。外周のint域外は非接続の水域値を使い、境界・岩壁露出・資源の前後判定を維持する。
+
+TERRAIN-01C2-Aでは、固定の卓越基盤地質をBiome、Block、資源とは別IDで`GeneratedTile`へ併記する。地質分類、カルスト・活動的火山の必須フラグ、透水性、地下水保持力、侵食抵抗は、Seed、GeneratorVersion、固定Definition、絶対整数座標だけから生成するSimulation結果であり、Presentationや採掘後の見た目から逆算しない。地質サイトは512タイルのマクロセル、専用座標ワープ、5×5の有限候補探索、64bit平方距離、安定座標同点順を使う。地質クラス抽選はサイト絶対座標の標高区分と安定ID順の整数重みを使い、同じサイト内で結果が変わらない。Chunk生成Jobは64×64タイルと各軸±64タイルのワープから参照し得る最大6×6サイトを値型FixedListへ一度だけ作り、各タイルでは固有のワープと5×5候補の距離比較だけを行う。キャッシュはJobローカルでECSやセーブへ保存せず、単一タイル生成との4096セル一致を回帰テストする。C2-Bで追加する監査と表示も、この確定Bufferを読み取るだけとする。
 
 ### チャンク別Tilemapの空領域履歴
 

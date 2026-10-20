@@ -401,6 +401,8 @@ namespace Farmware.WorldGeneration.Authoring
                 OctaveCount = octaveCount,
                 // 新しい軸の確定値は共有既定値を使い、旧7Biomeと意味を共有する山地境界だけ上で同期します。
                 EnvironmentAxes = environmentAxes,
+                // TERRAIN-01C2の固定地質値はInspectorへ重複保持せず、純粋生成と同じ共有既定値をBakeします。
+                Geology = GeologyGenerationSettings.CreateDefault(),
                 BiomeClassificationTransitionWidthInTiles =
                     biomeClassificationTransitionWidthInTiles,
                 BiomeTransitionWidthInTiles = biomeTransitionWidthInTiles,

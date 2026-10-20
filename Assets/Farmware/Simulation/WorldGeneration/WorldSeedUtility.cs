@@ -29,6 +29,21 @@ namespace Farmware.WorldGeneration
         /// <summary>地質とは独立して生成する火山活動度専用のソルトです。</summary>
         public const ulong VolcanicActivityPotential = 0x9216D5D98979FB1BUL;
 
+        /// <summary>地質Voronoi境界の水平サンプリング座標を歪ませるソルトです。</summary>
+        public const ulong GeologyWarpX = 0xD1342543DE82EF95UL;
+
+        /// <summary>地質Voronoi境界の垂直サンプリング座標を歪ませるソルトです。</summary>
+        public const ulong GeologyWarpY = 0xF1357AEA2E62A9C5UL;
+
+        /// <summary>地質サイトをマクロセル中心から水平にずらす抽選専用ソルトです。</summary>
+        public const ulong GeologySiteJitterX = 0xC6BC279692B5CC83UL;
+
+        /// <summary>地質サイトをマクロセル中心から垂直にずらす抽選専用ソルトです。</summary>
+        public const ulong GeologySiteJitterY = 0xDBE6D5D5FE4CCE2FUL;
+
+        /// <summary>支配地質サイトの標高別重みから地質分類を選ぶ抽選専用ソルトです。</summary>
+        public const ulong GeologyClassSelection = 0xA24BAED4963EE407UL;
+
         /// <summary>バイオーム用気候ノイズの水平サンプリング座標を歪ませるソルトです。</summary>
         public const ulong BiomeWarpX = 0x243F6A8885A308D3UL;
 

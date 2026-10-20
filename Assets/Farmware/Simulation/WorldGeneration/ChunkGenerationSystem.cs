@@ -381,6 +381,12 @@ namespace Farmware.WorldGeneration
             /// </summary>
             public void Execute()
             {
+                bool hasGeologyCache = DeterministicGeologyGenerator.TryCreateChunkCache(
+                    Settings,
+                    Coordinate.X,
+                    Coordinate.Y,
+                    out GeologyChunkCache geologyCache);
+
                 // 各タイルはワールド整数座標だけから求めるため、隣接チャンクの生成済み状態を参照しません。
                 for (int localY = 0; localY < WorldGridConstants.LogicalChunkSize; localY++)
                 {
@@ -389,11 +395,14 @@ namespace Farmware.WorldGeneration
                         int tileIndex = WorldGrid.ToTileIndex(localX, localY);
                         int worldTileX = WorldGrid.ToWorldTileX(Coordinate.X, localX);
                         int worldTileY = WorldGrid.ToWorldTileY(Coordinate.Y, localY);
-                        bool generated = DeterministicChunkGenerator.TryGenerateTile(
-                            Settings,
-                            worldTileX,
-                            worldTileY,
-                            out GeneratedTile terrainTile);
+                        GeneratedTile terrainTile = default;
+                        bool generated = hasGeologyCache
+                            && DeterministicChunkGenerator.TryGenerateTile(
+                                Settings,
+                                geologyCache,
+                                worldTileX,
+                                worldTileY,
+                                out terrainTile);
                         if (!generated)
                         {
                             // IJobは単一Workerで順に実行するため原子的操作は不要です。残りも初期化して未定義配列を残しません。

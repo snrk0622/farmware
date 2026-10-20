@@ -2617,6 +2617,11 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(actual.TerrainRuggedness, Is.EqualTo(expected.TerrainRuggedness));
             Assert.That(actual.CoastalInfluence, Is.EqualTo(expected.CoastalInfluence));
             Assert.That(actual.VolcanicActivityPotential, Is.EqualTo(expected.VolcanicActivityPotential));
+            Assert.That(actual.GeologyClass, Is.EqualTo(expected.GeologyClass));
+            Assert.That(actual.GeologyFlags, Is.EqualTo(expected.GeologyFlags));
+            Assert.That(actual.GeologyPermeability, Is.EqualTo(expected.GeologyPermeability));
+            Assert.That(actual.GeologyGroundwaterStorage, Is.EqualTo(expected.GeologyGroundwaterStorage));
+            Assert.That(actual.GeologyErosionResistance, Is.EqualTo(expected.GeologyErosionResistance));
         }
 
         /// <summary>

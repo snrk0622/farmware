@@ -3607,6 +3607,11 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(actual.TerrainRuggedness, Is.EqualTo(expected.TerrainRuggedness), $"TerrainRuggednessが一致しません。Index={tileIndex}");
             Assert.That(actual.CoastalInfluence, Is.EqualTo(expected.CoastalInfluence), $"CoastalInfluenceが一致しません。Index={tileIndex}");
             Assert.That(actual.VolcanicActivityPotential, Is.EqualTo(expected.VolcanicActivityPotential), $"VolcanicActivityPotentialが一致しません。Index={tileIndex}");
+            Assert.That(actual.GeologyClass, Is.EqualTo(expected.GeologyClass), $"GeologyClassが一致しません。Index={tileIndex}");
+            Assert.That(actual.GeologyFlags, Is.EqualTo(expected.GeologyFlags), $"GeologyFlagsが一致しません。Index={tileIndex}");
+            Assert.That(actual.GeologyPermeability, Is.EqualTo(expected.GeologyPermeability), $"GeologyPermeabilityが一致しません。Index={tileIndex}");
+            Assert.That(actual.GeologyGroundwaterStorage, Is.EqualTo(expected.GeologyGroundwaterStorage), $"GeologyGroundwaterStorageが一致しません。Index={tileIndex}");
+            Assert.That(actual.GeologyErosionResistance, Is.EqualTo(expected.GeologyErosionResistance), $"GeologyErosionResistanceが一致しません。Index={tileIndex}");
         }
 
         /// <summary>

@@ -804,8 +804,8 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 新規Authoringの既定値と純粋計算・分布監査が使うCreateDefaultを準備し、主要な気候閾値が一致することを保証します。
-        /// Inspectorの丸めた小数値だけが別の固定小数点へ変換され、実ゲームと監査結果がずれる退行を防ぎます。
+        /// 新規Authoringの既定値と純粋計算・分布監査が使うCreateDefaultを準備し、主要な気候閾値と固定地質が一致することを保証します。
+        /// Inspectorの丸めた小数値や未初期化地質だけが別結果になり、実ゲームと監査結果がずれる退行を防ぎます。
         /// </summary>
         [Test]
         public void AuthoringSnapshot_DefaultClimateThresholdsMatchSharedDefaults()
@@ -834,6 +834,12 @@ namespace Farmware.WorldGeneration.Tests
                 Assert.That(
                     snapshot.EnvironmentAxes.MountainElevationThreshold,
                     Is.EqualTo(snapshot.HighlandElevationThreshold));
+                Assert.That(
+                    DeterministicGeologyGenerator.ValidateSettings(snapshot.Geology),
+                    Is.True);
+                Assert.That(
+                    snapshot.Geology.Definitions.Length,
+                    Is.EqualTo(expected.Geology.Definitions.Length));
             }
             finally
             {

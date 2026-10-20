@@ -303,6 +303,12 @@ namespace Farmware.WorldGeneration
         /// </summary>
         public ContinuousEnvironmentSettings EnvironmentAxes;
 
+        /// <summary>
+        /// 固定地質Definition、512タイル地域、境界ワープ、サイト探索を再計算する設定です。
+        /// GeneratorVersionと一緒にワールド寿命中は変更しません。
+        /// </summary>
+        public GeologyGenerationSettings Geology;
+
         /// <summary>7バイオームの適性が閾値付近で滑らかに入れ替わる帯のおおよその幅です。単位はタイルです。</summary>
         public int BiomeClassificationTransitionWidthInTiles;
 
@@ -454,6 +460,7 @@ namespace Farmware.WorldGeneration
                 BiomeWarpAmplitudeInTiles = 12,
                 OctaveCount = 4,
                 EnvironmentAxes = ContinuousEnvironmentSettings.CreateDefault(),
+                Geology = GeologyGenerationSettings.CreateDefault(),
                 BiomeClassificationTransitionWidthInTiles = 12,
                 BiomeTransitionWidthInTiles = 6,
                 SeaLevelThreshold = DefaultSeaLevelThreshold,
@@ -908,6 +915,21 @@ namespace Farmware.WorldGeneration
 
         /// <summary>地質と旧Weirdnessから独立した0〜65535の火山活動度です。</summary>
         public ushort VolcanicActivityPotential;
+
+        /// <summary>Biome、Block、資源IDから独立した固定の卓越基盤地質です。</summary>
+        public GeologyClass GeologyClass;
+
+        /// <summary>支配地質Definitionが持つカルスト・活動的火山の明示フラグです。</summary>
+        public GeologyDefinitionFlags GeologyFlags;
+
+        /// <summary>支配地質Definitionからコピーした0〜65,535の基礎透水性です。</summary>
+        public ushort GeologyPermeability;
+
+        /// <summary>支配地質Definitionからコピーした0〜65,535の基礎地下水保持力です。</summary>
+        public ushort GeologyGroundwaterStorage;
+
+        /// <summary>支配地質Definitionからコピーした0〜65,535の基礎侵食抵抗です。</summary>
+        public ushort GeologyErosionResistance;
     }
 
     /// <summary>

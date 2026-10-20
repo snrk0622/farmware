@@ -1132,3 +1132,11 @@ AIによるビルド・自動計測・復元を完了後、2026-10-19に開発�
 2026-10-20のTERRAIN-01C1では、`GeneratedTile`へ地形気温、木本植生ポテンシャル、地形起伏、海洋影響、火山活動度の`ushort` 5値を追加した。要素本体は18 bytesから28 bytesへ増え、生成JobのPersistent作業配列は`GeneratedTile` 28 bytes＋`GeneratedResourceTile` 2 bytesの4096セルに失敗通知1 byteを加え、1枠122,881 bytes、既定2枠245,762 bytes（約240KiB）となる。分類用外周配列は28 bytes×260要素で7,280 bytesである。いずれもコンテナ管理領域、Allocatorの余白、安全性情報、ECS Bufferを含まない。
 
 新しい連続環境軸は1タイルにつき中心以外の標高を最大41点再評価するため、過去の18 bytes時点のPlayer計測を現行生成負荷の性能根拠へ流用しない。TERRAIN-01C1では決定論、有限のサンプル数、明示失敗を検証し、製品最大Viewport・対象機器・合格FPSが未決定なので新しい性能合格値は設定しない。
+
+## TERRAIN-01C2-A後の生成配列容量
+
+2026-10-20のTERRAIN-01C2-Aでは、`GeneratedTile`へ地質分類と必須条件フラグの`byte` 2値、透水性、地下水保持力、侵食抵抗の`ushort` 3値を追加した。Unityの`UnsafeUtility.SizeOf<GeneratedTile>()`で確認した要素本体は28 bytesから36 bytesへ増える。生成JobのPersistent作業配列は`GeneratedTile` 36 bytes＋`GeneratedResourceTile` 2 bytesの4096セルに失敗通知1 byteを加え、1枠155,649 bytes、既定2枠311,298 bytes（約304KiB）となる。分類用外周配列は36 bytes×260要素で9,360 bytesである。いずれもコンテナ管理領域、Allocatorの余白、安全性情報、ECS Bufferを含まない。
+
+1タイルの地質生成はワープ後座標を求め、5×5の有限サイトを比較する。Definition検証は8件を1回走査し、抽選用の安定ID順FixedListも管理ヒープを確保せず構築する。最初の実装では25サイトのジッターと分類を4096タイルごとに再計算したため、SampleSceneの初回生成がPlayModeテストの300フレーム上限に達した。修正後のChunk生成Jobとチャンク状態ハッシュは、64×64タイルと各軸±64タイルのワープから参照し得る最大6×6サイトをJobローカルの`FixedList4096Bytes`へ一度だけ作り、タイルごとのワープと仕様どおりの5×5距離比較だけを残す。キャッシュは管理ヒープ、ECS、セーブへ保持せず、4096セルを単一タイル生成と比較する回帰で結果不変を確認する。
+
+地質テストの単一チャンク状態ハッシュはUnity Editor上で約0.13秒だったが、Profiler区間やDevelopment Playerの比較ではなく性能合格値には使わない。C2-Bの複数Seed分布監査で生成量を増やす場合も、製品最大Viewport・対象機器・合格FPSを合意するまでは、TERRAIN-01C1以前のPlayer値を現行生成負荷の合格根拠へ流用しない。
