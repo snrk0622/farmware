@@ -96,7 +96,7 @@ WORLD-01まで実装済み。以降の初回の遊べる範囲は段階的に増
 - [x] **PR TERRAIN-01C2 地質基盤**: TERRAIN-01C1へ依存し、8分類の固定地質、基礎特性、512タイル地域、標高別出現重みを実装する。Biome・Block・資源とIDを分離し、地質Definition検証、負座標・サイト境界、分布監査と個別可視化を完了する。レビュー範囲と検証時間を抑えるため、C2-A「Definition・純粋生成・ECS結果・状態ハッシュ・純粋計算テスト」とC2-B「複数Seed分布監査・Debug Visualization・Map Viewer」を別PRに分けた。C2-AはPR #32としてdevelopへマージ済みであり、C2-BもAI確認と人間による表示確認を完了した。実装境界と確認結果は[地質基盤](./Terrain01C2GeologyFoundation.md)を参照する。
 - [ ] **PR TERRAIN-01C3 表面水系**: TERRAIN-01C1へ依存し、8×8水文セル、D8流向、上流寄与上限4,096件、Level 0〜6の階層集約Summary、下流探索上限4,096辺、Level 0〜12の二分経路Summary、集水面積、自然流出、閉鎖流域と基礎湖面を固定生成結果として実装する。海洋流出口を下流なしの終端とし、隣接陸上セルから代表標高にかかわらず優先接続する規則、`Marine`・`ClosedBasin`・`LongDrainage`の固定分類、有限の作業上限、循環拒否、流域境界、チャンク生成順の不変と個別可視化を完了する。実装量と検証責務を分けるため、同じ系列を次の4変更単位に分割する。[実装記録](./Terrain01C3SurfaceHydrology.md)を参照する。
   - [x] **TERRAIN-01C3-A 水文基礎格子とD8流向**: 8×8格子、固定9標高、中心タイルの海洋流出口、専用Saltの`PlateauRank`、循環しないD8流向、ECS Buffer、状態ハッシュ、純粋計算テストを実装した。実装、AI確認、人間のSampleScene動作確認が完了した。
-  - [ ] **TERRAIN-01C3-B 下流終端**: 最大4,096辺、Level 0〜12のDownstream Summary、`Marine`・`ClosedBasin`・`LongDrainage`を実装する。
+  - [ ] **TERRAIN-01C3-B 下流終端**: 最大4,096辺、Level 0〜12のDownstream Summary、`Marine`・`ClosedBasin`・`LongDrainage`を実装する。実装とAI確認は完了し、人間による動作確認とcommitを待っている。
   - [ ] **TERRAIN-01C3-C 集水と自然流出**: 最大4,096上流セル、Level 0〜6の集約Summary、打切り判定、集水面積、基礎湿度合算、渓流・河川判定を実装する。
   - [ ] **TERRAIN-01C3-D 閉鎖流域・湖・診断**: 閉鎖流域、基礎湖面、流域境界、複数Seed監査、Debug Visualization、Map Viewerを実装する。
 - [ ] **PR TERRAIN-01C4 地下水・湿地水文**: TERRAIN-01C2・01C3へ依存し、地下水、自然土壌飽和、自然冠水、湖水収支、泉を固定生成結果として実装する。現在の降雨・灌水・排水を混ぜず、水文特殊Biomeへ渡すゲートと規模判定、個別可視化を完了する。
