@@ -213,6 +213,8 @@ Sprite Packer ModeがV2であること、土地Atlasが7バイオームの本番
 
 第3章は現存するテストの説明である。以下は2026-10-19のゲーム仕様改訂に対応する実装時の検証方針で、未実装機能のテストが存在することを示さない。現在の地形・個体群・表示回帰を維持し、該当PRで新しいテスト名・実行区分を追記する。旧コア・ドローン・内容物全消失・固定施設性能のテスト計画は撤回する。
 
+TERRAIN-01C1のAuthoring回帰では、既存の高地閾値を43,000以外へ変更した場合も、旧7Biomeの高地判定と新しい山地境界が同じ固定小数点値になり、環境設定検証を通過することを確認する。さらに海面・湿地上限・低温・高温・乾燥・湿潤閾値へInspectorの端値を入力し、5段階の固定境界と生成可能な順序へ補正されることを確認する。
+
 | 変更内容／系列 | 必須の自動確認 | 人間・計測で確認する内容 |
 | --- | --- | --- |
 | 既存の共通基盤 | SystemGroupBoundaryTests、FixedTickSimulationTests、PersistentIdTests、DefinitionCatalogTests、WorldSessionBoundaryTests、SimulationCommandQueueTests、SimulationStateHashTestsから関連範囲。失敗時無変更、安定順、上限、停止・再開を維持 | Console、Assembly依存、必要時Player |

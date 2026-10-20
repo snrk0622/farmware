@@ -33,6 +33,7 @@ TERRAIN-01Bで採用した正仕様から、最終18バイオーム分類より�
 ## 3. 既存生成との移行境界
 
 - 現在の7Biome、Soil、水域、マグマ、岩壁、資源配置はこのPRでは置き換えない。
+- 移行期間中、Authoringの既存`highlandElevationThreshold`は旧7Biomeの高地判定と新しい`MountainElevationThreshold`の両方へ適用する。Inspectorで既定43,000以外へ調整しても両境界を同期し、高山境界54,000未満へ制限する。既存の海面・湿地上限・低温・高温・乾燥閾値も、5段階の固定境界と逆転しない範囲へ`OnValidate`で補正する。
 - 旧7Biomeだけが参照する`Weirdness`はTERRAIN-01C5まで内部互換値として残し、新しい`VolcanicActivityPotential`とは別に状態ハッシュへ含める。
 - 連続環境設定が不正、Warp後座標または固定半径サンプルが`int`範囲外の場合は、`TryGenerateTile`が`false`を返す。チャンクJobは一部だけ完成したBufferを公開せず`Failed`へ進める。
 - 地形気温、標高区分、木本植生、起伏、海洋影響、火山活動度を`GeneratedTile`へ保持し、表示側はECS Bufferを読み取るだけにする。
@@ -57,7 +58,7 @@ AI確認結果:
 - Unity 6000.3.8f1でTundraコンパイルとAssembly Reloadが成功し、今回変更したC#のコンパイルエラーはない。
 - Map Viewer起動時、`byte`基底の表示モードを調べる`Enum.IsDefined`へDropdownの`int` Indexを直接渡し、`ArgumentException`になる問題を人間確認で検出した。Indexを範囲確認後に表示モード型へ変換する純粋関数へ修正し、定義値、未選択、`byte`範囲外を対象とする回帰テストを追加した。
 - 続く空表示の報告をUnity画面で調べ、未確定の`NaN`寸法から作られた1×1画像の全面伸張と、広域画像の生成待ちを確認した。Canvasの有限値・最小寸法を生成開始条件にし、初回地図領域と下部に完了割合を表示する。Hover欄は3行分を初回から確保し、値表示の追加でCanvasが縮んで二度生成されることも防ぐ。
-- 上記修正前の`Farmware.WorldGeneration.EditModeTests`: 310件成功、失敗・スキップ・未確定0件。所要119.31秒。今回のMap Viewer修正後は、Unity 6000.3.8f1のTest Runnerで`WorldGenerationMapViewerTests`を実行し、追加分を含む47件すべて成功、失敗・スキップ・未確定0件、所要0.064秒を結果XMLでも確認した。全Assemblyの再実行はしていない。
+- 上記修正前の`Farmware.WorldGeneration.EditModeTests`: 310件成功、失敗・スキップ・未確定0件、所要119.31秒。レビュー指摘の設定同期とInspector端値補正を追加した後は、Unity 6000.3.8f1のTest Runnerで`WorldGenerationMapViewerTests`を実行し、追加2件を含む49件すべて成功、失敗・スキップ・未確定0件、所要0.101秒を結果XMLでも確認した。全Assemblyの再実行はしていない。
 - Unity CLIのPipelineはサンドボックス外からも到達できなかったが、開いているEditorの画面操作で修正をImportし、初回の進捗表示から地図完成への切替を確認した。Consoleは警告0件・エラー0件だった。地図完成画面の表示値は、既定Seed `Farmware`、Surface、中心(0, 0)、Terrain、768×392サンプル、4 tiles/sampleで4.56秒だった。これは画面上の生成経過時間であり、ProfilerによるCPU・GC計測や性能合格判定ではない。全表示モードの手動切替と連続キャンセル操作は人間確認へ残す。
 - `WorldGenerationScenePlayModeTests`の開発者可視化、SampleScene生成・決定論、繰り返しFloating Origin・負座標通過の3対象は各1件成功。
 - `Farmware.WorldGeneration.PlayModeTests`全体実行中にUnity Pipeline接続が失われ、結果を回収できなかった。Unity 6000.3.8f1で同じプロジェクトを再起動したが、90秒以上待ってもPipelineが到達可能にならなかったため、全PlayModeは未検証事項として残す。接続消失前に上記3対象が成功したことは個別結果で確認済みである。

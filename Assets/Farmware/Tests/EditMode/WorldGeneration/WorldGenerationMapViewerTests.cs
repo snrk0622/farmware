@@ -831,6 +831,102 @@ namespace Farmware.WorldGeneration.Tests
                 Assert.That(
                     snapshot.WetMoistureThreshold,
                     Is.EqualTo(expected.WetMoistureThreshold));
+                Assert.That(
+                    snapshot.EnvironmentAxes.MountainElevationThreshold,
+                    Is.EqualTo(snapshot.HighlandElevationThreshold));
+            }
+            finally
+            {
+                Object.DestroyImmediate(authoringObject);
+            }
+        }
+
+        /// <summary>
+        /// 既存7Biome用の高地閾値をInspectorで既定値以外へ変更し、新しい標高区分の山地境界も同じ値へ同期されることを保証します。
+        /// 片方だけが43,000へ残り、設定検証で全タイル生成が失敗するレビュー指摘の退行を防ぎます。
+        /// </summary>
+        [Test]
+        public void AuthoringSnapshot_CustomHighlandThresholdSynchronizesMountainBoundary()
+        {
+            GameObject authoringObject = new GameObject(
+                "WorldGenerationAuthoring Highland Threshold Test");
+            try
+            {
+                WorldGenerationAuthoring authoring =
+                    authoringObject.AddComponent<WorldGenerationAuthoring>();
+                SerializedObject serializedAuthoring = new SerializedObject(authoring);
+
+                // 高山境界54,000より低い非既定値を入力し、既存Inspectorの調整機能を保った同期経路を確認します。
+                serializedAuthoring.FindProperty("highlandElevationThreshold").floatValue = 0.72f;
+                serializedAuthoring.ApplyModifiedPropertiesWithoutUndo();
+
+                WorldGenerationSettings snapshot =
+                    authoring.CreateWorldGenerationSettingsSnapshot();
+
+                Assert.That(
+                    snapshot.EnvironmentAxes.MountainElevationThreshold,
+                    Is.EqualTo(snapshot.HighlandElevationThreshold));
+                Assert.That(
+                    snapshot.HighlandElevationThreshold,
+                    Is.Not.EqualTo(43000),
+                    "非既定値を固定43,000へ戻すのではなく、旧・新の山地境界を同期する必要があります。");
+                Assert.That(
+                    DeterministicEnvironmentGenerator.ValidateSettings(snapshot),
+                    Is.True,
+                    "Inspectorで有効な高地閾値を変更しても、タイル生成可能な設定である必要があります。");
+            }
+            finally
+            {
+                Object.DestroyImmediate(authoringObject);
+            }
+        }
+
+        /// <summary>
+        /// 既存Inspectorの気温・湿度・標高閾値へ連続環境軸と逆転する端値を入力し、OnValidate後も生成可能な順序へ補正されることを保証します。
+        /// 見かけ上入力できる値によって全チャンクがFailedになる別経路を、同じレビュー原因の回帰として防ぎます。
+        /// </summary>
+        [Test]
+        public void AuthoringOnValidate_ExtremeLegacyThresholdsRemainGenerationCompatible()
+        {
+            GameObject authoringObject = new GameObject(
+                "WorldGenerationAuthoring Continuous Boundary Test");
+            try
+            {
+                WorldGenerationAuthoring authoring =
+                    authoringObject.AddComponent<WorldGenerationAuthoring>();
+                SerializedObject serializedAuthoring = new SerializedObject(authoring);
+
+                // 各Range内では選べるものの、新しい環境軸と逆転する両端をまとめて再現します。
+                serializedAuthoring.FindProperty("waterThreshold").floatValue = 1f;
+                serializedAuthoring.FindProperty("hotTemperatureThreshold").floatValue = 0f;
+                serializedAuthoring.FindProperty("coldTemperatureThreshold").floatValue = 1f;
+                serializedAuthoring.FindProperty("dryMoistureThreshold").floatValue = 0f;
+                serializedAuthoring.FindProperty("wetMoistureThreshold").floatValue = 0f;
+                serializedAuthoring.FindProperty("wetlandMoistureThreshold").floatValue = 0f;
+                serializedAuthoring.FindProperty("wetlandMaximumElevation").floatValue = 1f;
+                serializedAuthoring.FindProperty("highlandElevationThreshold").floatValue = 1f;
+                serializedAuthoring.ApplyModifiedPropertiesWithoutUndo();
+
+                // OnValidateはUnity EditorがInspector変更時に呼ぶため、テストでも同じ補正処理を明示実行します。
+                MethodInfo onValidate = typeof(WorldGenerationAuthoring).GetMethod(
+                    "OnValidate",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.That(onValidate, Is.Not.Null);
+                onValidate.Invoke(authoring, null);
+
+                WorldGenerationSettings snapshot =
+                    authoring.CreateWorldGenerationSettingsSnapshot();
+
+                Assert.That(
+                    DeterministicEnvironmentGenerator.ValidateSettings(snapshot),
+                    Is.True,
+                    "InspectorのRange内にある端値は、連続環境軸と両立する順序へ補正される必要があります。");
+                Assert.That(
+                    snapshot.EnvironmentAxes.MountainElevationThreshold,
+                    Is.EqualTo(snapshot.HighlandElevationThreshold));
+                Assert.That(
+                    snapshot.HighlandElevationThreshold,
+                    Is.LessThan(snapshot.EnvironmentAxes.AlpineElevationThreshold));
             }
             finally
             {

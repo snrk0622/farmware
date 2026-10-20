@@ -79,7 +79,7 @@ namespace Farmware.WorldGeneration.Authoring
         [SerializeField] private int biomeTransitionWidthInTiles = 6;
 
         // 0〜1の標高に対する海面境界です。既存Sceneとの互換のためフィールド名はwaterThresholdを維持します。
-        [Tooltip("これ未満の標高を海水域にする海面閾値です。0〜1で指定し、大きくすると海が増えます。変更すると生成結果が変わります。")]
+        [Tooltip("これ未満の標高を海水域にする海面閾値です。0〜1で指定し、大きくすると海が増えます。湿地上限と山地・高山境界の順序を保てる範囲へ自動補正されます。")]
         [Range(0f, 1f)]
         [SerializeField] private float waterThreshold =
             WorldGenerationSettings.DefaultSeaLevelThreshold / (float)ushort.MaxValue;
@@ -240,18 +240,18 @@ namespace Farmware.WorldGeneration.Authoring
         [SerializeField] private float rockWallCorridorHalfWidth = 1100f / ushort.MaxValue;
 
         // 砂漠判定に使う0〜1の気温境界で、Bake時に固定小数点の閾値へ変換します。
-        [Tooltip("これ以上を高温とみなす気温閾値です。0〜1で指定し、小さくすると砂漠候補が増えます。変更すると生成結果が変わります。")]
+        [Tooltip("これ以上を高温とみなす気温閾値です。0〜1で指定し、小さくすると砂漠候補が増えます。新しい温暖境界32,768より上へ自動補正されます。")]
         [Range(0f, 1f)]
         [SerializeField] private float hotTemperatureThreshold =
             WorldGenerationSettings.DefaultHotTemperatureThreshold / (float)ushort.MaxValue;
 
         // 雪原判定に使う0〜1の低温境界で、高温境界より必ず低く保ちます。
-        [Tooltip("これ未満を低温とみなす気温閾値です。0〜1で指定し、大きくすると雪原候補が増えます。高温閾値より小さくしてください。")]
+        [Tooltip("これ未満を低温とみなす気温閾値です。0〜1で指定し、大きくすると雪原候補が増えます。新しい寒冷境界12,000と温暖境界32,768の間へ自動補正されます。")]
         [Range(0f, 1f)]
         [SerializeField] private float coldTemperatureThreshold = 23000f / ushort.MaxValue;
 
         // 砂漠判定に使う0〜1の乾燥境界で、湿潤境界より必ず低く保ちます。
-        [Tooltip("これ未満を乾燥とみなす湿度閾値です。0〜1で指定し、大きくすると砂漠候補が増えます。森林閾値より小さくしてください。")]
+        [Tooltip("これ未満を乾燥とみなす湿度閾値です。0〜1で指定し、大きくすると砂漠候補が増えます。新しい極乾燥境界16,000より上かつ森林閾値より下へ自動補正されます。")]
         [Range(0f, 1f)]
         [SerializeField] private float dryMoistureThreshold =
             WorldGenerationSettings.DefaultDryMoistureThreshold / (float)ushort.MaxValue;
@@ -268,12 +268,12 @@ namespace Farmware.WorldGeneration.Authoring
         [SerializeField] private float wetlandMoistureThreshold = 50000f / ushort.MaxValue;
 
         // 湿地を低地へ限定する0〜1の標高上限で、高地判定より低く保ちます。
-        [Tooltip("湿地候補にできる最大標高です。0〜1で指定し、大きくすると湿地が高い場所まで広がります。高地閾値より小さくしてください。")]
+        [Tooltip("湿地候補にできる最大標高です。0〜1で指定し、大きくすると湿地が高い場所まで広がります。海面以上かつ高地閾値より下へ自動補正されます。")]
         [Range(0f, 1f)]
         [SerializeField] private float wetlandMaximumElevation = 36000f / ushort.MaxValue;
 
-        // 岩地と火山を高地へ寄せる0〜1の標高境界です。
-        [Tooltip("これ以上を岩地・火山候補とみなす高地閾値です。0〜1で指定し、小さくすると岩地が増えます。")]
+        // 岩地と火山を高地へ寄せ、新しい標高区分の山地開始にも同期する0〜1の標高境界です。
+        [Tooltip("これ以上を岩地・火山候補および山地とみなす高地閾値です。0〜1で指定し、小さくすると岩地・山地が増えます。高山境界54,000未満へ自動補正されます。")]
         [Range(0f, 1f)]
         [SerializeField] private float highlandElevationThreshold = 43000f / ushort.MaxValue;
 
@@ -380,6 +380,14 @@ namespace Farmware.WorldGeneration.Authoring
             string seedTextOverride = null)
         {
             string effectiveSeedText = seedTextOverride ?? seedText;
+
+            // TERRAIN-01C1移行期間は、旧7Biomeの高地判定と新しい標高区分の山地境界が同じ意味を持ちます。
+            // 既存Inspector値だけを変えたときにも両方を同じ値へ揃え、設定検証で全チャンクが失敗することを防ぎます。
+            ContinuousEnvironmentSettings environmentAxes =
+                ContinuousEnvironmentSettings.CreateDefault();
+            environmentAxes.MountainElevationThreshold =
+                ToNormalizedUShort(highlandElevationThreshold);
+
             return new WorldGenerationSettings
             {
                 WorldSeed = WorldSeedUtility.FromString(effectiveSeedText),
@@ -391,8 +399,8 @@ namespace Farmware.WorldGeneration.Authoring
                 BiomeWarpCellSizeInTiles = biomeWarpCellSizeInTiles,
                 BiomeWarpAmplitudeInTiles = biomeWarpAmplitudeInTiles,
                 OctaveCount = octaveCount,
-                // TERRAIN-01C1の確定値はGeneratorVersionと一体で変更するため、個別Inspector調整ではなく共有既定値から作ります。
-                EnvironmentAxes = ContinuousEnvironmentSettings.CreateDefault(),
+                // 新しい軸の確定値は共有既定値を使い、旧7Biomeと意味を共有する山地境界だけ上で同期します。
+                EnvironmentAxes = environmentAxes,
                 BiomeClassificationTransitionWidthInTiles =
                     biomeClassificationTransitionWidthInTiles,
                 BiomeTransitionWidthInTiles = biomeTransitionWidthInTiles,
@@ -475,8 +483,27 @@ namespace Farmware.WorldGeneration.Authoring
         {
             const float minimumGap = 0.001f;
 
-            // 海面が正規化範囲の上端へ達すると淡水上限を置けないため、わずかな余白を残します。
-            waterThreshold = Mathf.Min(waterThreshold, 1f - minimumGap);
+            // 新しい標高区分の高山境界はTERRAIN-01C1の固定値なので、Inspectorの山地境界は必ずその直前へ収めます。
+            // ushortへ丸めた後も山地と高山が1以上離れるよう、固定小数点の1段階を差し引いた上限を使います。
+            ContinuousEnvironmentSettings environmentAxes =
+                ContinuousEnvironmentSettings.CreateDefault();
+            float coldBandBoundary =
+                environmentAxes.ColdTemperatureThreshold / (float)ushort.MaxValue;
+            float temperateBandBoundary =
+                environmentAxes.TemperateTemperatureThreshold / (float)ushort.MaxValue;
+            float extremelyDryBandBoundary =
+                environmentAxes.DryMoistureThreshold / (float)ushort.MaxValue;
+            float maximumHighlandElevationThreshold =
+                (environmentAxes.AlpineElevationThreshold - 1f) / ushort.MaxValue;
+            float maximumWetlandElevation =
+                maximumHighlandElevationThreshold - minimumGap;
+
+            // 海面、湿地上限、山地、高山の順序を保てない入力は、最も高い有効な海面へ戻します。
+            // この制約により、Inspectorの値だけが連続環境軸と逆転して全チャンク生成が失敗することを防ぎます。
+            waterThreshold = Mathf.Clamp(
+                waterThreshold,
+                0f,
+                maximumWetlandElevation);
 
             // 淡水の上限を海面以上へ収め、海水だけの標高帯と逆転しないようにします。
             freshWaterMaximumElevation = Mathf.Max(
@@ -500,8 +527,10 @@ namespace Farmware.WorldGeneration.Authoring
 
             // 乾燥・森林・湿地の3領域をすべて残すには上端側へ2つの間隔が必要なため、乾燥閾値を0.998以下へ収めます。
             // 乾燥閾値を0.999まで許すと、森林閾値も上限0.999へ補正されて同値になり、中湿度の森林候補帯が消えてしまいます。
-            dryMoistureThreshold = Mathf.Min(
+            // 新しい極乾燥境界より下へ入る値も、5段階分類との順序を保てる下限へ戻します。
+            dryMoistureThreshold = Mathf.Clamp(
                 dryMoistureThreshold,
+                extremelyDryBandBoundary + minimumGap,
                 1f - (minimumGap * 2f));
             wetMoistureThreshold = Mathf.Max(wetMoistureThreshold, dryMoistureThreshold + minimumGap);
             wetMoistureThreshold = Mathf.Min(wetMoistureThreshold, 1f - minimumGap);
@@ -510,19 +539,27 @@ namespace Farmware.WorldGeneration.Authoring
                 wetMoistureThreshold + minimumGap);
             wetlandMoistureThreshold = Mathf.Clamp01(wetlandMoistureThreshold);
 
-            // 雪原と高温域の基準が逆転しないよう、低温閾値を高温閾値より下へ保ちます。
-            hotTemperatureThreshold = Mathf.Max(hotTemperatureThreshold, minimumGap);
-            coldTemperatureThreshold = Mathf.Min(
+            // 旧7Biomeの低温・高温境界を、新しい5段階分類の対応する境界の間へ収めます。
+            // 旧境界同士だけでなく連続環境軸との順序も守ることで、Inspector調整後の設定を生成可能に保ちます。
+            hotTemperatureThreshold = Mathf.Clamp(
+                hotTemperatureThreshold,
+                temperateBandBoundary + minimumGap,
+                1f);
+            coldTemperatureThreshold = Mathf.Clamp(
                 coldTemperatureThreshold,
-                hotTemperatureThreshold - minimumGap);
-            coldTemperatureThreshold = Mathf.Clamp01(coldTemperatureThreshold);
+                coldBandBoundary + minimumGap,
+                temperateBandBoundary - minimumGap);
 
             // 湿地上限と高地下限を分け、湿地と岩地の両方が同じ標高条件で最大適性にならないようにします。
-            wetlandMaximumElevation = Mathf.Min(wetlandMaximumElevation, 1f - minimumGap);
-            highlandElevationThreshold = Mathf.Max(
+            // 山地境界を新しい標高区分へ同期するため、高山境界より上のInspector入力もここで有効範囲へ戻します。
+            wetlandMaximumElevation = Mathf.Clamp(
+                wetlandMaximumElevation,
+                waterThreshold,
+                maximumWetlandElevation);
+            highlandElevationThreshold = Mathf.Clamp(
                 highlandElevationThreshold,
-                wetlandMaximumElevation + minimumGap);
-            highlandElevationThreshold = Mathf.Clamp01(highlandElevationThreshold);
+                wetlandMaximumElevation + minimumGap,
+                maximumHighlandElevationThreshold);
 
             // 群半径が中心間隔の半分を超えると同種の群が重なるため、Inspector上で安全な上限へ揃えます。
             treeResourceClusterRadiusInTiles = Mathf.Min(
