@@ -5,7 +5,7 @@
 
 ## 1. 用途
 
-本書のメニュー・設定・表示は、PR #23までの現行実装を説明する。2026-10-19の[改訂マップ仕様](../GameSpecification/RandomMapGenerationSpecification.md)のLayer、可変Block、初期スポーン許可、有効地形差分、水中表示はまだツールに実装されていない。文書改訂だけで以下のメニューの機能が増えたとは扱わない。
+本書のメニュー・設定・表示は、PR #32までのdevelopとTERRAIN-01C2-Bの現行実装を説明する。2026-10-19の[改訂マップ仕様](../GameSpecification/RandomMapGenerationSpecification.md)の可変Block、最終18Biome、水文、水中表示はまだツールに実装されていない。文書改訂だけで以下のメニューの機能が増えたとは扱わない。
 
 開発者専用のUnity Editorツールは、ワールド生成結果の調査、調整前後の比較、確認用Sceneとフォールバック素材の構築に使用する。
 これらは製品版のプレイヤー操作へ含めず、ランタイムのゲーム状態を変更するデバッグ操作にも使用しない。
@@ -128,6 +128,13 @@ Gameビューでは`CameraPanController`の表示原点を使い、CameraとGrid
 | `Environment > Terrain Ruggedness` | 固定9標高サンプルから求めた局所起伏 |
 | `Environment > Coastal Influence` | 標高だけから求めた海への近さと開放方向数の合成値 |
 | `Environment > Volcanic Activity Potential` | 旧`Weirdness`と別Saltで生成する火山活動度 |
+| `Geology > Class` | 8分類の固定地質 |
+| `Geology > Permeability` | 地質Definition由来の透水性 |
+| `Geology > Groundwater Storage` | 地質Definition由来の地下水保持力 |
+| `Geology > Erosion Resistance` | 地質Definition由来の侵食抵抗 |
+| `Geology > Flags` | カルスト適性、活動的火山適性、該当なし |
+| `Geology > Dominant Site` | 支配サイトのマクロセル座標から作る安定色 |
+| `Geology > Site Boundary` | 上下左右1タイルで支配サイトが変わるセル |
 | `Water Salinity` | 陸地、淡水、海水 |
 | `Water Body` | 陸地、川、池、海 |
 | `Rock Wall` | 非岩壁、露出面、内部影の濃度 |
@@ -138,7 +145,7 @@ Gameビューでは`CameraPanController`の表示原点を使い、CameraとGrid
 
 #### 次の修正をしたら確認する
 
-- ノイズ、バイオーム分類、標高、基礎・地形気温、基礎湿度、木本植生、起伏、海洋影響、火山活動度を変更した。
+- ノイズ、バイオーム分類、標高、基礎・地形気温、基礎湿度、木本植生、起伏、海洋影響、火山活動度、地質分類・特性・サイトを変更した。
 - 川、池、海、淡水・海水、マグマ、岩壁、資源、地形配置属性の生成規則または列挙値を変更した。
 - `GeneratedTile`、ECS Buffer、Presentationへ渡すデータを変更した。
 - 可視化の色、凡例、HUD、Tilemap、Camera、黒帯、表示範囲を変更した。
@@ -154,11 +161,12 @@ Gameビューでは`CameraPanController`の表示原点を使い、CameraとGrid
 4. チャンク境界をまたいでも分類やグラデーションが不自然に途切れず、`Terrain Placement`で陸地・水・マグマ・岩壁の契約を判別できる。中央HUDでは陸地が設備、水が非耐熱・耐熱の両橋、マグマが耐熱橋だけを`Allowed`とし、マグマの非耐熱橋を`Heat Required`と表示する。ベルト固有の判定や凡例は表示しない。
 5. 正負の遠方へ明示的にCameraを移した場合も、色面が表示中のTilemapと同じ絶対セルへ重なり、中央HUDがCamera中央の絶対タイル情報を示す。
 6. `Animal Population`で候補外、候補タイル、確定個体が凡例どおりの3色になり、確定個体色が候補色より優先される。草原陸地でも木・石などの資源があるセルは候補外になる。
-7. `Off`へ戻すと通常表示へ完全に戻る。
+7. 地質7モードで分類・3特性・フラグ・支配サイト・サイト境界が個別表示され、中央HUDの分類、フラグ、特性、サイト座標と一致する。サイト境界は同じ支配サイト内部へ出ず、隣接1タイルでサイトが変わる箇所へ出る。
+8. `Off`へ戻すと通常表示へ完全に戻る。
 
 TERRAIN-01C1で、旧7Biomeの代表土壌との差だけを見る`Biome Transition`と、旧7Biome互換値だけを見る`Weirdness`モードを削除した。旧`Weirdness`データはTERRAIN-01C5まで内部互換生成に残るが、火山活動の診断には使用しない。
 
-TERRAIN-01C2-Aでは地質DefinitionとSimulation生成結果だけを先に接続し、Editorメニュー、Gameビュー、Map Viewerの表示項目は変更しない。地質分類、透水性、地下水保持力、侵食抵抗、必須フラグ、支配サイトと境界の個別表示は、複数Seed分布監査と合わせてC2-Bで追加する。C2-Aの結果を既存`Biome`、`Terrain`、`Volcanic Activity Potential`表示へ暗黙に混ぜない。
+TERRAIN-01C2-Aでは地質DefinitionとSimulation生成結果だけを先に接続し、C2-Bで上記の地質7モード、凡例、中央HUDを追加した。地質結果は既存`Biome`、`Terrain`、`Volcanic Activity Potential`表示へ暗黙に混ぜず、選択した地質モードだけで表示する。
 
 ### 2.4 Analyze Distribution
 
@@ -198,7 +206,26 @@ Consoleレポートには、次の比較材料を出力する。
 4. 同一コード・同一条件で再実行した署名が一致する。
 5. 大きな比率変化がある場合は、ランダムマップ生成仕様の調整値と説明も更新する。
 
-### 2.5 Analyze Animal Population
+### 2.5 Analyze Geology Distribution
+
+- メニュー: `Farmware > World Generation > Analyze Geology Distribution`
+- 実装: `GeologyDistributionAuditMenu`、`GeologyDistributionAnalyzer`
+- PlayMode: 不要。既定ではバックグラウンドで実行する。
+
+#### 用途
+
+既存の分布監査と同じ固定3シードを32タイル間隔の129×129代表格子で生成し、地質8分類の比率と地域形状を同条件で比較する。シード同士を連結せず、4近傍の領域数、1サンプル孤立領域、最大概算面積、外接矩形対角による最大概算直径、異種地質の概算境界長を出力する。標高区分、現行Biome、火山活動度5段階とのクロス件数と比較署名もConsoleへ出力する。
+
+面積、直径、境界長は代表格子による比較用の概算であり、全タイル走査の厳密値ではない。分布の合否閾値は設定せず、調整前後の同条件レポート、Gameビュー、Map Viewerを合わせて判断する。実行中は同じ監査を二重起動できない。
+
+#### 確認内容
+
+1. Consoleへ開始ログと完了レポートが1回ずつ出る。
+2. 8分類の件数合計が全代表サンプル数と一致し、標高・Biome・火山活動度の各クロス件数も分類件数と一致する。
+3. 同一コード・同一条件で再実行した署名と集計値が一致する。
+4. 比率、領域、孤立、境界の変化をGameビューとMap Viewerで確認し、任意の数値だけで合否を決めない。
+
+### 2.6 Analyze Animal Population
 
 - メニュー: `Farmware > World Generation > Analyze Animal Population`
 - 実装: `AnimalPopulationDistributionAuditMenu`、`AnimalPopulationDistributionAnalyzer`
@@ -219,7 +246,7 @@ Consoleレポートには、次の比較材料を出力する。
 3. 同一コード・同一条件で再実行した署名と集計値が一致する。
 4. 抽選した群れを先に置くと後続の残数を有効な群れへ分割できない場合は、有限バックトラックで別の群れサイズ・中心・メンバーの組合せが再探索される。中心とメンバーのタイル選択は合計4,096回までに制限される。完全配置が不可能または探索上限へ達した後も残る目標個体数と確定候補数の差、および未充足地域数が地形分断と群れ最小数の方針に合う。
 
-### 2.6 Map Viewer
+### 2.7 Map Viewer
 
 - メニュー: `Farmware > World Generation > Map Viewer`
 - 実装: `WorldGenerationMapViewerWindow`、`WorldGenerationMapSampler`
@@ -241,10 +268,10 @@ Farmwareのワールドは無限なので「全体」を有限画像へ収める
 - 各代表タイルは`DeterministicChunkGenerator.GenerateTile`で生成し、ビューア専用の簡易バイオーム計算は持たない。
 - 表示領域が生成Textureの上限768サンプルを超える場合は、縦横共通の縮小率でTextureを生成し、正方形のタイルとグリッドを保つ。Windowリサイズで縦横比が変わった場合は、操作停止後に新しい比率のTextureを自動再生成する。生成TextureとCanvasの表示倍率はPointer座標、パン、ズーム、境界線、原点表示へ反映する。Pointer座標とカーソル中心ズームは、Point Filterで実際に表示されるTextureピクセルの代表タイルへ一致させる。グリッドと原点表示は、Texture解像度が奇数の場合も地形生成と同じ整数中央のサンプル境界へ揃える。ツールバーの＋・－ButtonはCanvas中央をPointerへ変換せず、現在の中心タイル座標を直接維持する。再生成直後のHover情報もCanvas中央の境界をPointerとして解釈せず、Side Panelと同じ中心タイルを直接表示する。
 - 実設定を取得できない場合は生成を停止し、別の既定値へフォールバックしない。
-- 初回はCanvasの両辺が有限値かつ64ポイント以上になるまで生成を待ち、未確定の`NaN`寸法から1×1画像を作らない。画像完成までは地図領域の中央と画面下部へ生成進捗の割合を表示する。再生成時は前の画像を維持し、下部の進捗を更新する。Hover情報は初回から3行分の高さを確保し、情報が増えたことによる再生成を避ける。
+- 初回はCanvasの両辺が有限値かつ64ポイント以上になるまで生成を待ち、未確定の`NaN`寸法から1×1画像を作らない。画像完成までは地図領域の中央と画面下部へ生成進捗の割合を表示する。再生成時は前の画像を維持し、下部の進捗を更新する。Hover情報は初回から地質サイトを含む5行分の高さを確保し、情報が増えたことによる再生成を避ける。
 
 `Terrain`は7バイオームの基準色だけを使い、SoilTypeを反映せず、淡水、海水、マグマ、岩壁を優先した最終地形を表示する。土壌分布はMap Viewerのプレイヤー向け地形と混ぜず、PlayMode中の`Debug Visualization > Soil`で確認する。
-`Biome`は水域や障害物の下も含む論理バイオームを表示する。`Elevation`、`Base Temperature`、`Terrain Temperature`、`Base Moisture`、`Woody Vegetation Potential`、`Terrain Ruggedness`、`Coastal Influence`、`Volcanic Activity Potential`はGameビューのDebug Visualizationと同じRGBで連続環境軸を表示する。木、石、砂の資源分布は現時点では対象外である。
+`Biome`は水域や障害物の下も含む論理バイオームを表示する。`Elevation`、`Base Temperature`、`Terrain Temperature`、`Base Moisture`、`Woody Vegetation Potential`、`Terrain Ruggedness`、`Coastal Influence`、`Volcanic Activity Potential`はGameビューのDebug Visualizationと同じRGBで連続環境軸を表示する。`Geology Class`、3基礎特性、`Geology Flags`、`Geology Dominant Site`、`Geology Site Boundary`もGameビューと同じ色定義を使う。`Geology Dominant Site`の凡例色は固定の分類色ではなく、サイト座標から生成される実際の色の例であるため、地図には凡例と異なる色も表示される。同じサイトは同じ色を保ち、正確な境界確認には`Geology Site Boundary`を使う。サイト境界は広域縮小でも確認できるよう、上下左右の隣接代表サンプルとのサイト差を表示するため、Gameビューの隣接1タイル判定より太く見える場合がある。木、石、砂の資源分布は現時点では対象外である。
 
 #### 画面上部の入力欄・ボタン
 
@@ -252,7 +279,7 @@ Farmwareのワールドは無限なので「全体」を有限画像へ収める
 | --- | --- |
 | `Seed` | 確認するワールドのシード文字列。値を変更して`移動・再生成`を押すと、Sceneの設定を変更せずに別シードを比較できる。 |
 | `X` / `Y` | 画像中央に表示するタイル座標。負座標も指定できる。 |
-| `表示` | `Terrain`は最終地形、`Biome`は論理バイオーム、ほか8項目はTERRAIN-01C1の連続環境軸へ切り替える。変更すると現在位置を再生成する。 |
+| `表示` | `Terrain`は最終地形、`Biome`は論理バイオーム、TERRAIN-01C1の8連続環境軸、TERRAIN-01C2の地質分類・3特性・フラグ・支配サイト・サイト境界へ切り替える。変更すると現在位置を再生成する。 |
 | `Grid` | 16×16タイルのサブチャンク境界と64×64タイルの論理チャンク境界の表示を切り替える。生成結果自体は変化しない。 |
 | `移動・再生成` | 入力中のSeedとX/Yを確定し、その地点の画像を生成し直す。 |
 | `実設定を再読込` | EditModeではAuthoring、PlayModeでは実行中ECSから生成設定とSeedを読み直し、現在位置を再生成する。入力した一時的なSeedは破棄される。 |
@@ -265,13 +292,13 @@ Farmwareのワールドは無限なので「全体」を有限画像へ収める
 #### 次の修正をしたら確認する
 
 - `WorldGenerationAuthoring`の地形設定、Baker、設定SubSceneを変更した。
-- `DeterministicChunkGenerator`、`GeneratedTile`、Biome、Ground、水域の分類を変更した。
+- `DeterministicChunkGenerator`、`GeneratedTile`、Biome、Ground、水域、地質分類・特性・サイトの生成を変更した。
 - チャンク・サブチャンク寸法、負座標変換、シード変換、GeneratorVersionを変更した。
 - Map Viewerの色、凡例、座標変換、パン、ズーム、非同期処理を変更した。
 
 #### 確認内容
 
-1. 原点付近と既知の遠距離座標で、Map ViewerとGameビューのバイオーム・水域・マグマ・岩壁、および8つの連続環境軸が一致する。同じBiome内では標準・肥沃・砂質の土地表示が同じであり、`Debug Visualization > Soil`へ切り替えた場合だけ3種類を別色で確認できる。
+1. 原点付近と既知の遠距離座標で、Map ViewerとGameビューのバイオーム・水域・マグマ・岩壁、8つの連続環境軸、地質分類・3特性・フラグ・支配サイトが一致する。同じBiome内では標準・肥沃・砂質の土地表示が同じであり、`Debug Visualization > Soil`へ切り替えた場合だけ3種類を別色で確認できる。サイト境界は、Gameビューでは隣接1タイル、Map Viewerでは隣接代表サンプルという縮尺差を踏まえて同じ支配サイト変化を示す。
 2. `実設定を再読込`後のSeed、WorldSeed、GeneratorVersion、設定取得元が想定どおり表示される。
 3. 負座標への移動、ドラッグ、ホイール、＋・－Buttonで中心と縮尺が正しく変化する。＋・－ButtonではTexture解像度が奇数・偶数のどちらでも中心タイル座標を動かさない。再生成直後のHover情報は、偶数解像度でもSide Panelと同じ中心座標を示す。Windowを768ポイントより大きくした場合と、生成Textureの幅または高さが奇数になる大きさにした場合のどちらでも、カーソル下の座標、グリッド、原点印が地形とずれず、正方形のグリッドが維持される。
 4. 同じSeed・座標・縮尺へ戻ると同じ画像になる。

@@ -47,7 +47,14 @@ namespace Farmware.WorldGeneration.Editor
             "Woody Vegetation Potential",
             "Terrain Ruggedness",
             "Coastal Influence",
-            "Volcanic Activity Potential"
+            "Volcanic Activity Potential",
+            "Geology Class",
+            "Geology Permeability",
+            "Geology Groundwater Storage",
+            "Geology Erosion Resistance",
+            "Geology Flags",
+            "Geology Dominant Site",
+            "Geology Site Boundary"
         };
 
         /// <summary>Toolbarの表示名と固定ワールドレイヤーを対応させる選択肢です。</summary>
@@ -267,7 +274,7 @@ namespace Farmware.WorldGeneration.Editor
             centerXField.tooltip = "移動先の水平ワールドタイル座標です。負座標も入力できます。";
             centerYField.tooltip = "移動先の垂直ワールドタイル座標です。負座標も入力できます。";
             viewModeField.tooltip =
-                "Terrainは最終地形、Biomeは論理バイオーム、Environment各項目はTERRAIN-01C1の連続軸を表示します。";
+                "Terrainは最終地形、Biomeは論理バイオーム、Environmentは連続軸、GeologyはTERRAIN-01C2の分類・特性・サイトを表示します。";
             layerField.tooltip =
                 "診断する固定ワールドレイヤーです。WORLD-01CではSurfaceだけに自然生成が接続され、別層は未接続表示になります。";
             gridToggle.tooltip = "白線は16タイル、青線は64タイル境界です。遠距離では自動的に省略します。";
@@ -921,13 +928,28 @@ namespace Farmware.WorldGeneration.Editor
                 return;
             }
 
+            bool hasGeologyInfo = DeterministicGeologyGenerator.TryGenerate(
+                displayedSettings,
+                worldTileX,
+                worldTileY,
+                out GeneratedGeologyData geologyInfo);
+            string geologySiteText = hasGeologyInfo
+                ? $"Macro ({geologyInfo.Site.MacroCellX}, {geologyInfo.Site.MacroCellY}) / "
+                    + $"Site ({geologyInfo.Site.SiteX}, {geologyInfo.Site.SiteY}) / "
+                    + $"DistanceSquared {geologyInfo.Site.DistanceSquared}"
+                : "サイト情報生成失敗";
+
             hoverLabel.text =
                 $"{displayedSample.Layer} / Tile ({worldTileX}, {worldTileY}) / Chunk ({chunk.X}, {chunk.Y}) / "
                 + $"Biome {tile.Biome} / Ground {tile.Ground} / Soil {tile.Soil} / Water {tile.WaterBodyType}\n"
                 + $"Elevation {tile.Elevation} ({tile.ElevationClass}) / BaseTemp {tile.Temperature} / "
                 + $"TerrainTemp {tile.TerrainTemperature} / BaseMoisture {tile.Moisture}\n"
                 + $"Woody {tile.WoodyVegetationPotential} / Ruggedness {tile.TerrainRuggedness} / "
-                + $"Coastal {tile.CoastalInfluence} / Volcanic {tile.VolcanicActivityPotential}";
+                + $"Coastal {tile.CoastalInfluence} / Volcanic {tile.VolcanicActivityPotential}\n"
+                + $"Geology {tile.GeologyClass} / Flags {tile.GeologyFlags} / "
+                + $"Permeability {tile.GeologyPermeability} / Groundwater {tile.GeologyGroundwaterStorage} / "
+                + $"Erosion {tile.GeologyErosionResistance}\n"
+                + $"Geology Site: {geologySiteText}";
         }
 
         /// <summary>
@@ -970,8 +992,7 @@ namespace Farmware.WorldGeneration.Editor
         {
             legendContainer.Clear();
             WorldGenerationMapViewMode selectedMode = GetSelectedViewMode();
-            if (selectedMode != WorldGenerationMapViewMode.Terrain
-                && selectedMode != WorldGenerationMapViewMode.Biome)
+            if (IsContinuousViewMode(selectedMode))
             {
                 GeneratedTile minimumTile = default;
                 GeneratedTile maximumTile = CreateMaximumEnvironmentTile(selectedMode);
@@ -985,6 +1006,61 @@ namespace Farmware.WorldGeneration.Editor
                 AddLegendRow(
                     maximumLabel,
                     WorldGenerationMapSampler.GetDisplayColor(selectedMode, maximumTile));
+                return;
+            }
+
+            if (selectedMode == WorldGenerationMapViewMode.GeologyClass)
+            {
+                for (GeologyClass geologyClass = GeologyClass.UnconsolidatedSediment;
+                     geologyClass <= GeologyClass.UltramaficRock;
+                     geologyClass++)
+                {
+                    GeneratedTile geologyTile = new GeneratedTile { GeologyClass = geologyClass };
+                    AddLegendRow(
+                        geologyClass.ToString(),
+                        WorldGenerationMapSampler.GetDisplayColor(selectedMode, geologyTile));
+                }
+
+                return;
+            }
+
+            if (selectedMode == WorldGenerationMapViewMode.GeologyFlags)
+            {
+                AddGeologyFlagsLegendRow("None", GeologyDefinitionFlags.None);
+                AddGeologyFlagsLegendRow("Supports Karst", GeologyDefinitionFlags.SupportsKarst);
+                AddGeologyFlagsLegendRow(
+                    "Supports Active Volcanism",
+                    GeologyDefinitionFlags.SupportsActiveVolcanism);
+                return;
+            }
+
+            if (selectedMode == WorldGenerationMapViewMode.GeologyDominantSite)
+            {
+                AddLegendRow(
+                    "Examples only: colors vary by site coordinates",
+                    WorldGenerationMapSampler.GetDisplayColor(
+                        selectedMode,
+                        default,
+                        new GeologySiteData { MacroCellX = 0, MacroCellY = 0 },
+                        false));
+                AddLegendRow(
+                    "Second coordinate-derived color example",
+                    WorldGenerationMapSampler.GetDisplayColor(
+                        selectedMode,
+                        default,
+                        new GeologySiteData { MacroCellX = 1, MacroCellY = 0 },
+                        false));
+                return;
+            }
+
+            if (selectedMode == WorldGenerationMapViewMode.GeologySiteBoundary)
+            {
+                AddLegendRow(
+                    "Site interior",
+                    WorldGenerationMapSampler.GetDisplayColor(selectedMode, default, default, false));
+                AddLegendRow(
+                    "Sampled site boundary",
+                    WorldGenerationMapSampler.GetDisplayColor(selectedMode, default, default, true));
                 return;
             }
 
@@ -1005,6 +1081,28 @@ namespace Farmware.WorldGeneration.Editor
                 AddLegendRow("Magma", "legend-magma");
                 AddLegendRow("Rock Wall", "legend-rock-wall");
             }
+        }
+
+        /// <summary>選択モードが0〜65,535の連続値を最小・最大色で示すものかを返します。</summary>
+        /// <param name="viewMode">判定するMap Viewer表示モードです。</param>
+        /// <returns>2端点の連続凡例を表示するモードならtrueです。</returns>
+        private static bool IsContinuousViewMode(WorldGenerationMapViewMode viewMode)
+        {
+            return (viewMode >= WorldGenerationMapViewMode.Elevation
+                    && viewMode <= WorldGenerationMapViewMode.VolcanicActivityPotential)
+                || (viewMode >= WorldGenerationMapViewMode.GeologyPermeability
+                    && viewMode <= WorldGenerationMapViewMode.GeologyErosionResistance);
+        }
+
+        /// <summary>地質フラグ1種類について、実地図色と同じ色見本を凡例へ追加します。</summary>
+        /// <param name="displayName">フラグの意味を示す表示名です。</param>
+        /// <param name="flags">色へ変換する地質Definitionフラグです。</param>
+        private void AddGeologyFlagsLegendRow(string displayName, GeologyDefinitionFlags flags)
+        {
+            GeneratedTile tile = new GeneratedTile { GeologyFlags = flags };
+            AddLegendRow(
+                displayName,
+                WorldGenerationMapSampler.GetDisplayColor(WorldGenerationMapViewMode.GeologyFlags, tile));
         }
 
         /// <summary>
@@ -1064,6 +1162,15 @@ namespace Farmware.WorldGeneration.Editor
                 case WorldGenerationMapViewMode.VolcanicActivityPotential:
                     tile.VolcanicActivityPotential = ushort.MaxValue;
                     break;
+                case WorldGenerationMapViewMode.GeologyPermeability:
+                    tile.GeologyPermeability = ushort.MaxValue;
+                    break;
+                case WorldGenerationMapViewMode.GeologyGroundwaterStorage:
+                    tile.GeologyGroundwaterStorage = ushort.MaxValue;
+                    break;
+                case WorldGenerationMapViewMode.GeologyErosionResistance:
+                    tile.GeologyErosionResistance = ushort.MaxValue;
+                    break;
             }
 
             return tile;
@@ -1106,6 +1213,18 @@ namespace Farmware.WorldGeneration.Editor
                 case WorldGenerationMapViewMode.VolcanicActivityPotential:
                     minimumLabel = "0 (Inactive)";
                     maximumLabel = "65535 (Active)";
+                    return;
+                case WorldGenerationMapViewMode.GeologyPermeability:
+                    minimumLabel = "0 (Impermeable)";
+                    maximumLabel = "65535 (Permeable)";
+                    return;
+                case WorldGenerationMapViewMode.GeologyGroundwaterStorage:
+                    minimumLabel = "0 (Low storage)";
+                    maximumLabel = "65535 (High storage)";
+                    return;
+                case WorldGenerationMapViewMode.GeologyErosionResistance:
+                    minimumLabel = "0 (Erodible)";
+                    maximumLabel = "65535 (Resistant)";
                     return;
                 default:
                     minimumLabel = "0 (Low)";

@@ -43,7 +43,28 @@ namespace Farmware.WorldGeneration.Editor
         CoastalInfluence = 8,
 
         /// <summary>旧Weirdnessと独立した0〜65535の火山活動度を表示します。</summary>
-        VolcanicActivityPotential = 9
+        VolcanicActivityPotential = 9,
+
+        /// <summary>卓越基盤地質の8分類を固定色で表示します。</summary>
+        GeologyClass = 10,
+
+        /// <summary>地質Definitionの0〜65535の基礎透水性を表示します。</summary>
+        GeologyPermeability = 11,
+
+        /// <summary>地質Definitionの0〜65535の地下水保持力を表示します。</summary>
+        GeologyGroundwaterStorage = 12,
+
+        /// <summary>地質Definitionの0〜65535の侵食抵抗を表示します。</summary>
+        GeologyErosionResistance = 13,
+
+        /// <summary>カルスト・活動的火山の必須条件フラグを固定色で表示します。</summary>
+        GeologyFlags = 14,
+
+        /// <summary>支配地質Voronoiサイトをサイト座標由来の疑似色で表示します。</summary>
+        GeologyDominantSite = 15,
+
+        /// <summary>隣接する代表サンプルで支配地質サイトが切り替わる箇所を表示します。</summary>
+        GeologySiteBoundary = 16
     }
 
     /// <summary>
@@ -341,9 +362,35 @@ namespace Farmware.WorldGeneration.Editor
                                 $"地形生成に必要な固定サンプル範囲を確保できません: ({worldTileX}, {worldTileY})");
                         }
 
+                        GeologySiteData geologySite = default;
+                        bool isGeologySiteBoundary = false;
+                        if (viewMode == WorldGenerationMapViewMode.GeologyDominantSite
+                            || viewMode == WorldGenerationMapViewMode.GeologySiteBoundary)
+                        {
+                            // サイト情報はGeneratedTileへ常駐しないため、この2モードだけで診断用に再生成します。
+                            // 境界は隣接する画像サンプル間で比較し、広域ズームでも1ピクセル以上の線として見えるようにします。
+                            int boundaryProbeDistance = viewMode
+                                    == WorldGenerationMapViewMode.GeologySiteBoundary
+                                ? tilesPerPixel
+                                : 0;
+                            if (!WorldGenerationDebugVisualizationOverlay.TryGetGeologySiteVisualizationData(
+                                    settings,
+                                    worldTileX,
+                                    worldTileY,
+                                    boundaryProbeDistance,
+                                    out geologySite,
+                                    out isGeologySiteBoundary))
+                            {
+                                throw new InvalidOperationException(
+                                    $"地質サイト診断に必要な固定サンプル範囲を確保できません: ({worldTileX}, {worldTileY})");
+                            }
+                        }
+
                         pixelColors[(pixelY * width) + pixelX] = GetDisplayColor(
                             viewMode,
-                            generatedTile);
+                            generatedTile,
+                            geologySite,
+                            isGeologySiteBoundary);
                     }
                     else
                     {
@@ -695,6 +742,24 @@ namespace Farmware.WorldGeneration.Editor
             WorldGenerationMapViewMode viewMode,
             in GeneratedTile tile)
         {
+            return GetDisplayColor(viewMode, tile, default, false);
+        }
+
+        /// <summary>
+        /// 生成済みタイルと診断時だけ求める地質サイト情報を、選択中モードの固定色へ変換します。
+        /// Map Viewerのサンプリングと凡例・テストが同じ色写像を共有するために使用します。
+        /// </summary>
+        /// <param name="viewMode">最終地形、論理バイオーム、環境軸、地質診断の表示モードです。</param>
+        /// <param name="tile">実ゲームと同じGeneratorが返したタイルです。</param>
+        /// <param name="geologySite">支配サイト表示に使う診断専用サイト情報です。</param>
+        /// <param name="isGeologySiteBoundary">境界表示で隣接サンプルとサイトが異なる場合はtrueです。</param>
+        /// <returns>凡例とTexture2Dで共有する不透明色です。</returns>
+        public static Color32 GetDisplayColor(
+            WorldGenerationMapViewMode viewMode,
+            in GeneratedTile tile,
+            in GeologySiteData geologySite,
+            bool isGeologySiteBoundary)
+        {
             if (viewMode == WorldGenerationMapViewMode.Biome)
             {
                 return GetBiomeColor(tile.Biome);
@@ -735,6 +800,38 @@ namespace Farmware.WorldGeneration.Editor
                     return GetOpaqueEnvironmentColor(
                         WorldGenerationDebugVisualizationMode.VolcanicActivityPotential,
                         tile);
+                case WorldGenerationMapViewMode.GeologyClass:
+                    return GetOpaqueEnvironmentColor(
+                        WorldGenerationDebugVisualizationMode.GeologyClass,
+                        tile);
+                case WorldGenerationMapViewMode.GeologyPermeability:
+                    return GetOpaqueEnvironmentColor(
+                        WorldGenerationDebugVisualizationMode.GeologyPermeability,
+                        tile);
+                case WorldGenerationMapViewMode.GeologyGroundwaterStorage:
+                    return GetOpaqueEnvironmentColor(
+                        WorldGenerationDebugVisualizationMode.GeologyGroundwaterStorage,
+                        tile);
+                case WorldGenerationMapViewMode.GeologyErosionResistance:
+                    return GetOpaqueEnvironmentColor(
+                        WorldGenerationDebugVisualizationMode.GeologyErosionResistance,
+                        tile);
+                case WorldGenerationMapViewMode.GeologyFlags:
+                    return GetOpaqueEnvironmentColor(
+                        WorldGenerationDebugVisualizationMode.GeologyFlags,
+                        tile);
+                case WorldGenerationMapViewMode.GeologyDominantSite:
+                    return GetOpaqueGeologyDiagnosticColor(
+                        WorldGenerationDebugVisualizationMode.GeologyDominantSite,
+                        tile,
+                        geologySite,
+                        isGeologySiteBoundary);
+                case WorldGenerationMapViewMode.GeologySiteBoundary:
+                    return GetOpaqueGeologyDiagnosticColor(
+                        WorldGenerationDebugVisualizationMode.GeologySiteBoundary,
+                        tile,
+                        geologySite,
+                        isGeologySiteBoundary);
             }
 
             // 最終地形の優先順位を反映し、水域や障害物が論理バイオーム色に埋もれないようにします。
@@ -766,6 +863,27 @@ namespace Farmware.WorldGeneration.Editor
             in GeneratedTile tile)
         {
             Color32 color = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(mode, tile);
+            color.a = byte.MaxValue;
+            return color;
+        }
+
+        /// <summary>Gameビューの支配サイト・境界色を、Map Viewerの不透明Texture色へ変換します。</summary>
+        /// <param name="mode">支配サイトまたはサイト境界のGameビュー可視化モードです。</param>
+        /// <param name="tile">対象タイルです。将来の共通色関数拡張へ同じ入力を渡します。</param>
+        /// <param name="geologySite">対象タイルを支配する診断用サイトです。</param>
+        /// <param name="isGeologySiteBoundary">隣接サンプルと支配サイトが異なる場合はtrueです。</param>
+        /// <returns>RGBを共有し、Alphaだけ255へ固定した色です。</returns>
+        private static Color32 GetOpaqueGeologyDiagnosticColor(
+            WorldGenerationDebugVisualizationMode mode,
+            in GeneratedTile tile,
+            in GeologySiteData geologySite,
+            bool isGeologySiteBoundary)
+        {
+            Color32 color = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                mode,
+                tile,
+                geologySite: geologySite,
+                isGeologySiteBoundary: isGeologySiteBoundary);
             color.a = byte.MaxValue;
             return color;
         }

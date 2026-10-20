@@ -1487,7 +1487,12 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 WoodyVegetationPotential = ushort.MaxValue,
                 TerrainRuggedness = ushort.MaxValue,
                 CoastalInfluence = ushort.MaxValue,
-                VolcanicActivityPotential = ushort.MaxValue
+                VolcanicActivityPotential = ushort.MaxValue,
+                GeologyClass = GeologyClass.Limestone,
+                GeologyFlags = GeologyDefinitionFlags.SupportsKarst,
+                GeologyPermeability = ushort.MaxValue,
+                GeologyGroundwaterStorage = ushort.MaxValue,
+                GeologyErosionResistance = ushort.MaxValue
             };
             GeneratedTile originalForestTransitionTile = forestTransitionTile;
 
@@ -1532,6 +1537,53 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(highRuggednessColor.r, Is.LessThan(0.3f));
             Assert.That(highCoastalColor.b, Is.GreaterThan(highCoastalColor.r));
             Assert.That(highVolcanicColor.r, Is.GreaterThan(highVolcanicColor.b));
+
+            Color geologyClassColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.GeologyClass,
+                forestTransitionTile);
+            Color otherGeologyClassColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.GeologyClass,
+                new GeneratedTile { GeologyClass = GeologyClass.VolcanicRock });
+            Color highPermeabilityColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.GeologyPermeability,
+                forestTransitionTile);
+            Color highGroundwaterColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.GeologyGroundwaterStorage,
+                forestTransitionTile);
+            Color highErosionColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.GeologyErosionResistance,
+                forestTransitionTile);
+            Color karstFlagColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.GeologyFlags,
+                forestTransitionTile);
+            Color activeVolcanismFlagColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.GeologyFlags,
+                new GeneratedTile
+                {
+                    GeologyFlags = GeologyDefinitionFlags.SupportsActiveVolcanism
+                });
+            Color firstSiteColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.GeologyDominantSite,
+                forestTransitionTile,
+                geologySite: new GeologySiteData { MacroCellX = -1, MacroCellY = 2 });
+            Color secondSiteColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.GeologyDominantSite,
+                forestTransitionTile,
+                geologySite: new GeologySiteData { MacroCellX = 0, MacroCellY = 2 });
+            Color siteInteriorColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.GeologySiteBoundary,
+                forestTransitionTile);
+            Color siteBoundaryColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.GeologySiteBoundary,
+                forestTransitionTile,
+                isGeologySiteBoundary: true);
+            Assert.That(geologyClassColor, Is.Not.EqualTo(otherGeologyClassColor));
+            Assert.That(highPermeabilityColor.b, Is.GreaterThan(highPermeabilityColor.r));
+            Assert.That(highGroundwaterColor.b, Is.GreaterThan(highGroundwaterColor.r));
+            Assert.That(highErosionColor.r, Is.LessThan(0.3f));
+            Assert.That(karstFlagColor, Is.Not.EqualTo(activeVolcanismFlagColor));
+            Assert.That(firstSiteColor, Is.Not.EqualTo(secondSiteColor));
+            Assert.That(siteInteriorColor, Is.Not.EqualTo(siteBoundaryColor));
 
             Color wetlandColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
                 WorldGenerationDebugVisualizationMode.Biome,

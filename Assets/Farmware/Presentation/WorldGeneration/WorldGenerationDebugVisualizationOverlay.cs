@@ -71,7 +71,28 @@ namespace Farmware.WorldGeneration.Presentation
         CoastalInfluence = 16,
 
         /// <summary>旧Weirdnessと独立した0〜65535の火山活動度を暗灰から橙で表示します。</summary>
-        VolcanicActivityPotential = 17
+        VolcanicActivityPotential = 17,
+
+        /// <summary>卓越基盤地質の8分類を固定色で表示します。</summary>
+        GeologyClass = 18,
+
+        /// <summary>地質Definitionの0〜65535の基礎透水性を表示します。</summary>
+        GeologyPermeability = 19,
+
+        /// <summary>地質Definitionの0〜65535の基礎地下水保持力を表示します。</summary>
+        GeologyGroundwaterStorage = 20,
+
+        /// <summary>地質Definitionの0〜65535の基礎侵食抵抗を表示します。</summary>
+        GeologyErosionResistance = 21,
+
+        /// <summary>カルスト・活動的火山の必須条件フラグを固定色で表示します。</summary>
+        GeologyFlags = 22,
+
+        /// <summary>各タイルを支配する地質Voronoiサイトを安定した疑似色で表示します。</summary>
+        GeologyDominantSite = 23,
+
+        /// <summary>上下左右で支配地質サイトが切り替わるタイルを明色で表示します。</summary>
+        GeologySiteBoundary = 24
     }
 
     /// <summary>
@@ -368,6 +389,8 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="isMagmaInfluenceArea">Magmaモードで淡水抑制域を暗赤色表示する場合はtrueです。</param>
         /// <param name="isAnimalCandidate">Animal Populationモードで、いずれかの動物種が利用できる地形ならtrueです。</param>
         /// <param name="hasConfirmedAnimal">Animal Populationモードで、確定済み個体がこのタイルに存在するならtrueです。</param>
+        /// <param name="geologySite">支配サイト表示へ使用する診断専用サイト情報です。他モードでは参照しません。</param>
+        /// <param name="isGeologySiteBoundary">地質サイト境界表示で、支配サイトが上下左右のいずれかと異なる場合はtrueです。</param>
         /// <returns>IMGUIへ設定するRGBA色です。Noneの場合は完全な透明色です。</returns>
         public static Color GetVisualizationColor(
             WorldGenerationDebugVisualizationMode mode,
@@ -376,7 +399,9 @@ namespace Farmware.WorldGeneration.Presentation
             GeneratedResourceType resourceType = GeneratedResourceType.None,
             bool isMagmaInfluenceArea = false,
             bool isAnimalCandidate = false,
-            bool hasConfirmedAnimal = false)
+            bool hasConfirmedAnimal = false,
+            GeologySiteData geologySite = default,
+            bool isGeologySiteBoundary = false)
         {
             switch (mode)
             {
@@ -516,6 +541,56 @@ namespace Farmware.WorldGeneration.Presentation
                         new Color32(248, 112, 30, 238),
                         volcanicActivity);
 
+                case WorldGenerationDebugVisualizationMode.GeologyClass:
+                    return GetGeologyClassColor(tile.GeologyClass);
+
+                case WorldGenerationDebugVisualizationMode.GeologyPermeability:
+                    float permeability = tile.GeologyPermeability / (float)ushort.MaxValue;
+                    return Color.Lerp(
+                        new Color32(104, 72, 42, 238),
+                        new Color32(54, 188, 230, 238),
+                        permeability);
+
+                case WorldGenerationDebugVisualizationMode.GeologyGroundwaterStorage:
+                    float groundwaterStorage = tile.GeologyGroundwaterStorage / (float)ushort.MaxValue;
+                    return Color.Lerp(
+                        new Color32(72, 62, 76, 238),
+                        new Color32(50, 118, 232, 238),
+                        groundwaterStorage);
+
+                case WorldGenerationDebugVisualizationMode.GeologyErosionResistance:
+                    float erosionResistance = tile.GeologyErosionResistance / (float)ushort.MaxValue;
+                    return Color.Lerp(
+                        new Color32(214, 174, 106, 238),
+                        new Color32(58, 54, 66, 238),
+                        erosionResistance);
+
+                case WorldGenerationDebugVisualizationMode.GeologyFlags:
+                    bool supportsKarst = (tile.GeologyFlags & GeologyDefinitionFlags.SupportsKarst) != 0;
+                    bool supportsActiveVolcanism =
+                        (tile.GeologyFlags & GeologyDefinitionFlags.SupportsActiveVolcanism) != 0;
+                    if (supportsKarst && supportsActiveVolcanism)
+                    {
+                        return new Color32(210, 82, 224, 242);
+                    }
+
+                    if (supportsKarst)
+                    {
+                        return new Color32(64, 210, 224, 242);
+                    }
+
+                    return supportsActiveVolcanism
+                        ? new Color32(246, 102, 34, 242)
+                        : new Color32(52, 52, 62, 218);
+
+                case WorldGenerationDebugVisualizationMode.GeologyDominantSite:
+                    return GetGeologySiteColor(geologySite);
+
+                case WorldGenerationDebugVisualizationMode.GeologySiteBoundary:
+                    return isGeologySiteBoundary
+                        ? new Color32(250, 250, 250, 248)
+                        : new Color32(28, 28, 34, 180);
+
                 case WorldGenerationDebugVisualizationMode.WaterSalinity:
                     // 通常地形でも淡水と海水を見分けられますが、専用表示では地表色を消して境界判定だけを確認しやすくします。
                     if (tile.WaterSalinity == Farmware.WorldGeneration.WaterSalinity.FreshWater)
@@ -609,6 +684,63 @@ namespace Farmware.WorldGeneration.Presentation
                 default:
                     return Color.clear;
             }
+        }
+
+        /// <summary>
+        /// 地質の安定分類を、GameビューとMap Viewerで共有する識別色へ変換します。
+        /// 色は観察専用であり、分類抽選やゲーム判定には使用しません。
+        /// </summary>
+        /// <param name="geologyClass">色へ変換する卓越基盤地質です。</param>
+        /// <returns>8分類を見分ける半透明RGBA色です。未設定値は暗色になります。</returns>
+        public static Color GetGeologyClassColor(GeologyClass geologyClass)
+        {
+            switch (geologyClass)
+            {
+                case GeologyClass.UnconsolidatedSediment: return new Color32(214, 188, 126, 238);
+                case GeologyClass.Sandstone: return new Color32(196, 126, 74, 238);
+                case GeologyClass.Limestone: return new Color32(218, 216, 196, 238);
+                case GeologyClass.MudstoneSlate: return new Color32(92, 92, 112, 238);
+                case GeologyClass.GraniticRock: return new Color32(192, 142, 154, 238);
+                case GeologyClass.MetamorphicRock: return new Color32(112, 86, 142, 238);
+                case GeologyClass.VolcanicRock: return new Color32(126, 62, 50, 238);
+                case GeologyClass.UltramaficRock: return new Color32(62, 112, 78, 238);
+                default: return new Color32(30, 30, 36, 210);
+            }
+        }
+
+        /// <summary>
+        /// 支配地質サイトのマクロセル座標を安定した疑似色へ変換します。
+        /// 同じサイトは地質分類に関係なく同じ色になり、サイト境界を目視できます。
+        /// </summary>
+        /// <param name="site">DeterministicGeologyGeneratorが返した支配サイトです。</param>
+        /// <returns>サイト座標だけで決まる半透明RGBA色です。</returns>
+        public static Color GetGeologySiteColor(in GeologySiteData site)
+        {
+            unchecked
+            {
+                // int座標を符号なしへ写してから混ぜ、負座標でも正座標と同じ決定論的な色分布を得ます。
+                uint hash = (uint)site.MacroCellX * 0x9E3779B9u;
+                hash ^= (uint)site.MacroCellY * 0x85EBCA6Bu;
+                hash ^= hash >> 16;
+                hash *= 0x7FEB352Du;
+                hash ^= hash >> 15;
+
+                // 暗過ぎる色を避けるため各成分を72〜231へ収め、隣接サイトを識別しやすくします。
+                byte red = (byte)(72 + (hash & 0x9Fu));
+                byte green = (byte)(72 + ((hash >> 8) & 0x9Fu));
+                byte blue = (byte)(72 + ((hash >> 16) & 0x9Fu));
+                return new Color32(red, green, blue, 238);
+            }
+        }
+
+        /// <summary>2つの診断用サイトが同じ地質マクロセルに属するかを返します。</summary>
+        /// <param name="first">1つ目の支配サイトです。</param>
+        /// <param name="second">2つ目の支配サイトです。</param>
+        /// <returns>マクロセルX/Yがともに一致する場合はtrueです。</returns>
+        public static bool IsSameGeologySite(in GeologySiteData first, in GeologySiteData second)
+        {
+            return first.MacroCellX == second.MacroCellX
+                && first.MacroCellY == second.MacroCellY;
         }
 
         /// <summary>
@@ -787,6 +919,26 @@ namespace Farmware.WorldGeneration.Presentation
                         bool hasConfirmedAnimal = currentMode
                                 == WorldGenerationDebugVisualizationMode.AnimalPopulation
                             && animalPositionCache.Contains(currentLayer, tileX, tileY);
+                        GeologySiteData geologySite = default;
+                        bool isGeologySiteBoundary = false;
+                        if (hasGenerationSettings
+                            && (currentMode == WorldGenerationDebugVisualizationMode.GeologyDominantSite
+                                || currentMode == WorldGenerationDebugVisualizationMode.GeologySiteBoundary))
+                        {
+                            // サイト情報はECSへ常駐させず、選択中の診断モードだけで固定生成器から再計算します。
+                            // 境界モードは1タイル先の4近傍を比較し、実ゲーム座標でサイトが切り替わるセルを示します。
+                            int boundaryProbeDistance = currentMode
+                                    == WorldGenerationDebugVisualizationMode.GeologySiteBoundary
+                                ? 1
+                                : 0;
+                            TryGetGeologySiteVisualizationData(
+                                settings,
+                                tileX,
+                                tileY,
+                                boundaryProbeDistance,
+                                out geologySite,
+                                out isGeologySiteBoundary);
+                        }
                         GUI.color = GetVisualizationColor(
                             currentMode,
                             tile,
@@ -794,7 +946,9 @@ namespace Farmware.WorldGeneration.Presentation
                             resource.Type,
                             isMagmaInfluenceArea,
                             isAnimalCandidate,
-                            hasConfirmedAnimal);
+                            hasConfirmedAnimal,
+                            geologySite,
+                            isGeologySiteBoundary);
                         GUI.DrawTexture(CalculateTileGuiRect(tileX, tileY), Texture2D.whiteTexture);
 
                         if (hasCenterCoordinate
@@ -817,6 +971,96 @@ namespace Farmware.WorldGeneration.Presentation
                 centerResource,
                 settings,
                 resourceSettings);
+        }
+
+        /// <summary>
+        /// 指定タイルの支配地質サイトを取得し、必要なら上下左右の指定距離でサイト境界を判定します。
+        /// GameビューとMap Viewerが同じサイト同一性とint座標端の扱いを共有するための診断専用APIです。
+        /// </summary>
+        /// <param name="settings">対象ワールドと同じ生成設定です。</param>
+        /// <param name="tileX">調べる水平ワールドタイル座標です。</param>
+        /// <param name="tileY">調べる垂直ワールドタイル座標です。</param>
+        /// <param name="boundaryProbeDistanceInTiles">0なら境界を調べず、正数なら上下左右へ離すタイル数です。</param>
+        /// <param name="site">成功時に対象タイルを支配する地質サイトを返します。</param>
+        /// <param name="isBoundary">成功時に、生成できた4近傍のいずれかが別サイトならtrueを返します。</param>
+        /// <returns>対象タイルの地質サイトを安全に生成できた場合はtrueです。</returns>
+        public static bool TryGetGeologySiteVisualizationData(
+            in WorldGenerationSettings settings,
+            int tileX,
+            int tileY,
+            int boundaryProbeDistanceInTiles,
+            out GeologySiteData site,
+            out bool isBoundary)
+        {
+            site = default;
+            isBoundary = false;
+            if (boundaryProbeDistanceInTiles < 0
+                || !DeterministicGeologyGenerator.TryGenerate(
+                    settings,
+                    tileX,
+                    tileY,
+                    out GeneratedGeologyData centerGeology))
+            {
+                return false;
+            }
+
+            site = centerGeology.Site;
+            if (boundaryProbeDistanceInTiles == 0)
+            {
+                return true;
+            }
+
+            // 加算前にlongへ広げ、int端で符号反転した座標を別サイトとして誤判定しないようにします。
+            long distance = boundaryProbeDistanceInTiles;
+            isBoundary = IsDifferentGeneratedGeologySite(
+                    settings,
+                    (long)tileX - distance,
+                    tileY,
+                    site)
+                || IsDifferentGeneratedGeologySite(
+                    settings,
+                    (long)tileX + distance,
+                    tileY,
+                    site)
+                || IsDifferentGeneratedGeologySite(
+                    settings,
+                    tileX,
+                    (long)tileY - distance,
+                    site)
+                || IsDifferentGeneratedGeologySite(
+                    settings,
+                    tileX,
+                    (long)tileY + distance,
+                    site);
+            return true;
+        }
+
+        /// <summary>int範囲内の近傍を生成し、対象サイトと異なる場合だけtrueを返します。</summary>
+        /// <param name="settings">対象ワールドと同じ生成設定です。</param>
+        /// <param name="tileX">longで安全に計算した近傍X座標です。</param>
+        /// <param name="tileY">longで安全に計算した近傍Y座標です。</param>
+        /// <param name="centerSite">比較元となる対象タイルの支配サイトです。</param>
+        /// <returns>近傍を生成でき、その支配サイトが比較元と異なる場合はtrueです。</returns>
+        private static bool IsDifferentGeneratedGeologySite(
+            in WorldGenerationSettings settings,
+            long tileX,
+            long tileY,
+            in GeologySiteData centerSite)
+        {
+            if (tileX < int.MinValue
+                || tileX > int.MaxValue
+                || tileY < int.MinValue
+                || tileY > int.MaxValue
+                || !DeterministicGeologyGenerator.TryGenerate(
+                    settings,
+                    (int)tileX,
+                    (int)tileY,
+                    out GeneratedGeologyData neighborGeology))
+            {
+                return false;
+            }
+
+            return !IsSameGeologySite(centerSite, neighborGeology.Site);
         }
 
         /// <summary>
@@ -1128,10 +1372,11 @@ namespace Farmware.WorldGeneration.Presentation
             WorldGenerationSettings settings,
             ResourceGenerationSettings resourceSettings)
         {
-            const int generatedTileInformationLineCount = 23;
+            const int generatedTileInformationLineCount = 26;
             const int waitingInformationLineCount = 1;
             const float bottomPadding = 6f;
             float informationStartY = currentMode == WorldGenerationDebugVisualizationMode.Biome
+                    || currentMode == WorldGenerationDebugVisualizationMode.GeologyClass
                 ? 66f
                 : 48f;
 
@@ -1230,6 +1475,16 @@ namespace Farmware.WorldGeneration.Presentation
                     centerTile,
                     TerrainPlacementKind.Bridge,
                     hasHeatResistance: true);
+                bool hasGeologyDebugInfo = DeterministicGeologyGenerator.TryGenerate(
+                    settings,
+                    centerCoordinate.x,
+                    centerCoordinate.y,
+                    out GeneratedGeologyData geologyDebugInfo);
+                string geologySiteInformation = hasGeologyDebugInfo
+                    ? $"Macro=({geologyDebugInfo.Site.MacroCellX}, {geologyDebugInfo.Site.MacroCellY})  "
+                        + $"Site=({geologyDebugInfo.Site.SiteX}, {geologyDebugInfo.Site.SiteY})  "
+                        + $"DistanceSquared={geologyDebugInfo.Site.DistanceSquared}"
+                    : "Unavailable";
 
                 // 生密度・平滑化後・通路削り・連続影値を同時に表示し、生成規則変更時の食い違いをGameビューだけで診断できます。
                 centerInformation = $"Layer={currentLayer}  Tile ({centerCoordinate.x}, {centerCoordinate.y})  "
@@ -1247,6 +1502,11 @@ namespace Farmware.WorldGeneration.Presentation
                     + $"CoastalInfluence={centerTile.CoastalInfluence}\n"
                     + $"VolcanicActivity={centerTile.VolcanicActivityPotential}  "
                     + $"LegacyWeirdness={centerTile.Weirdness}\n"
+                    + $"Geology={centerTile.GeologyClass}  Flags={centerTile.GeologyFlags}\n"
+                    + $"GeologyTraits: Permeability={centerTile.GeologyPermeability}  "
+                    + $"Groundwater={centerTile.GeologyGroundwaterStorage}  "
+                    + $"Erosion={centerTile.GeologyErosionResistance}\n"
+                    + $"GeologySite: {geologySiteInformation}\n"
                     + $"RockDensity={rockWallInfo.Density} / {settings.RockWallNoiseThreshold}  "
                     + $"Raw={(rockWallInfo.RawCandidate ? "Yes" : "No")}\n"
                     + $"Corridor={(rockWallInfo.Corridor ? "Yes" : "No")}  "
@@ -1423,6 +1683,31 @@ namespace Farmware.WorldGeneration.Presentation
                 return "Coastal Influence";
             }
 
+            if (mode == WorldGenerationDebugVisualizationMode.GeologyPermeability)
+            {
+                return "Geology Permeability";
+            }
+
+            if (mode == WorldGenerationDebugVisualizationMode.GeologyGroundwaterStorage)
+            {
+                return "Geology Groundwater Storage";
+            }
+
+            if (mode == WorldGenerationDebugVisualizationMode.GeologyErosionResistance)
+            {
+                return "Geology Erosion Resistance";
+            }
+
+            if (mode == WorldGenerationDebugVisualizationMode.GeologyDominantSite)
+            {
+                return "Geology Dominant Site";
+            }
+
+            if (mode == WorldGenerationDebugVisualizationMode.GeologySiteBoundary)
+            {
+                return "Geology Site Boundary";
+            }
+
             return mode == WorldGenerationDebugVisualizationMode.VolcanicActivityPotential
                 ? "Volcanic Activity Potential"
                 : mode.ToString();
@@ -1579,6 +1864,91 @@ namespace Farmware.WorldGeneration.Presentation
                     break;
                 case WorldGenerationDebugVisualizationMode.VolcanicActivityPotential:
                     DrawContinuousValueLegend(mode, ref nextX, y, "0 (Inactive)", "65535 (Active)");
+                    break;
+                case WorldGenerationDebugVisualizationMode.GeologyClass:
+                    DrawLegendEntry(
+                        ref nextX, y,
+                        GetVisualizationColor(mode, new GeneratedTile { GeologyClass = GeologyClass.UnconsolidatedSediment }),
+                        "Sediment", 84f);
+                    DrawLegendEntry(
+                        ref nextX, y,
+                        GetVisualizationColor(mode, new GeneratedTile { GeologyClass = GeologyClass.Sandstone }),
+                        "Sandstone", 88f);
+                    DrawLegendEntry(
+                        ref nextX, y,
+                        GetVisualizationColor(mode, new GeneratedTile { GeologyClass = GeologyClass.Limestone }),
+                        "Limestone", 88f);
+                    DrawLegendEntry(
+                        ref nextX, y,
+                        GetVisualizationColor(mode, new GeneratedTile { GeologyClass = GeologyClass.MudstoneSlate }),
+                        "Mud/Slate", 88f);
+                    nextX = startX + 48f;
+                    float secondGeologyLegendY = y + 18f;
+                    DrawLegendEntry(
+                        ref nextX, secondGeologyLegendY,
+                        GetVisualizationColor(mode, new GeneratedTile { GeologyClass = GeologyClass.GraniticRock }),
+                        "Granitic", 84f);
+                    DrawLegendEntry(
+                        ref nextX, secondGeologyLegendY,
+                        GetVisualizationColor(mode, new GeneratedTile { GeologyClass = GeologyClass.MetamorphicRock }),
+                        "Metamorphic", 98f);
+                    DrawLegendEntry(
+                        ref nextX, secondGeologyLegendY,
+                        GetVisualizationColor(mode, new GeneratedTile { GeologyClass = GeologyClass.VolcanicRock }),
+                        "Volcanic", 86f);
+                    DrawLegendEntry(
+                        ref nextX, secondGeologyLegendY,
+                        GetVisualizationColor(mode, new GeneratedTile { GeologyClass = GeologyClass.UltramaficRock }),
+                        "Ultramafic", 94f);
+                    break;
+                case WorldGenerationDebugVisualizationMode.GeologyPermeability:
+                case WorldGenerationDebugVisualizationMode.GeologyGroundwaterStorage:
+                case WorldGenerationDebugVisualizationMode.GeologyErosionResistance:
+                    DrawContinuousValueLegend(mode, ref nextX, y, "0 (Low)", "65535 (High)");
+                    break;
+                case WorldGenerationDebugVisualizationMode.GeologyFlags:
+                    DrawLegendEntry(
+                        ref nextX, y,
+                        GetVisualizationColor(mode, new GeneratedTile()),
+                        "None", 62f);
+                    DrawLegendEntry(
+                        ref nextX, y,
+                        GetVisualizationColor(
+                            mode,
+                            new GeneratedTile { GeologyFlags = GeologyDefinitionFlags.SupportsKarst }),
+                        "Karst", 66f);
+                    DrawLegendEntry(
+                        ref nextX, y,
+                        GetVisualizationColor(
+                            mode,
+                            new GeneratedTile { GeologyFlags = GeologyDefinitionFlags.SupportsActiveVolcanism }),
+                        "Active Volcanism", 124f);
+                    break;
+                case WorldGenerationDebugVisualizationMode.GeologyDominantSite:
+                    DrawLegendEntry(
+                        ref nextX, y,
+                        GetVisualizationColor(
+                            mode,
+                            default,
+                            geologySite: new GeologySiteData { MacroCellX = 0, MacroCellY = 0 }),
+                        "Coordinate color example A", 174f);
+                    DrawLegendEntry(
+                        ref nextX, y,
+                        GetVisualizationColor(
+                            mode,
+                            default,
+                            geologySite: new GeologySiteData { MacroCellX = 1, MacroCellY = 0 }),
+                        "Coordinate color example B", 174f);
+                    break;
+                case WorldGenerationDebugVisualizationMode.GeologySiteBoundary:
+                    DrawLegendEntry(
+                        ref nextX, y,
+                        GetVisualizationColor(mode, default),
+                        "Interior", 76f);
+                    DrawLegendEntry(
+                        ref nextX, y,
+                        GetVisualizationColor(mode, default, isGeologySiteBoundary: true),
+                        "Boundary", 82f);
                     break;
                 case WorldGenerationDebugVisualizationMode.WaterSalinity:
                     DrawLegendEntry(
@@ -1816,6 +2186,15 @@ namespace Farmware.WorldGeneration.Presentation
                     break;
                 case WorldGenerationDebugVisualizationMode.VolcanicActivityPotential:
                     maximumTile.VolcanicActivityPotential = ushort.MaxValue;
+                    break;
+                case WorldGenerationDebugVisualizationMode.GeologyPermeability:
+                    maximumTile.GeologyPermeability = ushort.MaxValue;
+                    break;
+                case WorldGenerationDebugVisualizationMode.GeologyGroundwaterStorage:
+                    maximumTile.GeologyGroundwaterStorage = ushort.MaxValue;
+                    break;
+                case WorldGenerationDebugVisualizationMode.GeologyErosionResistance:
+                    maximumTile.GeologyErosionResistance = ushort.MaxValue;
                     break;
             }
 

@@ -54,6 +54,34 @@ namespace Farmware.WorldGeneration.Editor
         private const string VolcanicActivityMenuPath =
             "Farmware/World Generation/Debug Visualization/Environment/Volcanic Activity Potential";
 
+        /// <summary>卓越基盤地質の8分類表示へ切り替えるメニューパスです。</summary>
+        private const string GeologyClassMenuPath =
+            "Farmware/World Generation/Debug Visualization/Geology/Class";
+
+        /// <summary>地質Definitionの基礎透水性表示へ切り替えるメニューパスです。</summary>
+        private const string GeologyPermeabilityMenuPath =
+            "Farmware/World Generation/Debug Visualization/Geology/Permeability";
+
+        /// <summary>地質Definitionの地下水保持力表示へ切り替えるメニューパスです。</summary>
+        private const string GeologyGroundwaterStorageMenuPath =
+            "Farmware/World Generation/Debug Visualization/Geology/Groundwater Storage";
+
+        /// <summary>地質Definitionの侵食抵抗表示へ切り替えるメニューパスです。</summary>
+        private const string GeologyErosionResistanceMenuPath =
+            "Farmware/World Generation/Debug Visualization/Geology/Erosion Resistance";
+
+        /// <summary>カルスト・活動的火山の必須条件フラグ表示へ切り替えるメニューパスです。</summary>
+        private const string GeologyFlagsMenuPath =
+            "Farmware/World Generation/Debug Visualization/Geology/Flags";
+
+        /// <summary>支配地質サイトごとの疑似色表示へ切り替えるメニューパスです。</summary>
+        private const string GeologyDominantSiteMenuPath =
+            "Farmware/World Generation/Debug Visualization/Geology/Dominant Site";
+
+        /// <summary>支配地質サイトの1タイル境界表示へ切り替えるメニューパスです。</summary>
+        private const string GeologySiteBoundaryMenuPath =
+            "Farmware/World Generation/Debug Visualization/Geology/Site Boundary";
+
         /// <summary>淡水・海水表示へ切り替えるメニューパスです。</summary>
         private const string WaterSalinityMenuPath =
             "Farmware/World Generation/Debug Visualization/Water Salinity";
@@ -169,6 +197,55 @@ namespace Farmware.WorldGeneration.Editor
         private static void SelectVolcanicActivity()
         {
             SelectMode(WorldGenerationDebugVisualizationMode.VolcanicActivityPotential);
+        }
+
+        /// <summary>PlayMode中の卓越基盤地質を8種類の固定色で表示します。</summary>
+        [MenuItem(GeologyClassMenuPath, false, 211)]
+        private static void SelectGeologyClass()
+        {
+            SelectMode(WorldGenerationDebugVisualizationMode.GeologyClass);
+        }
+
+        /// <summary>PlayMode中の基礎透水性を低値から高値のグラデーションで表示します。</summary>
+        [MenuItem(GeologyPermeabilityMenuPath, false, 212)]
+        private static void SelectGeologyPermeability()
+        {
+            SelectMode(WorldGenerationDebugVisualizationMode.GeologyPermeability);
+        }
+
+        /// <summary>PlayMode中の地下水保持力を低値から高値のグラデーションで表示します。</summary>
+        [MenuItem(GeologyGroundwaterStorageMenuPath, false, 213)]
+        private static void SelectGeologyGroundwaterStorage()
+        {
+            SelectMode(WorldGenerationDebugVisualizationMode.GeologyGroundwaterStorage);
+        }
+
+        /// <summary>PlayMode中の侵食抵抗を低値から高値のグラデーションで表示します。</summary>
+        [MenuItem(GeologyErosionResistanceMenuPath, false, 214)]
+        private static void SelectGeologyErosionResistance()
+        {
+            SelectMode(WorldGenerationDebugVisualizationMode.GeologyErosionResistance);
+        }
+
+        /// <summary>PlayMode中の地質必須条件フラグを固定色で表示します。</summary>
+        [MenuItem(GeologyFlagsMenuPath, false, 215)]
+        private static void SelectGeologyFlags()
+        {
+            SelectMode(WorldGenerationDebugVisualizationMode.GeologyFlags);
+        }
+
+        /// <summary>PlayMode中の支配地質サイトをサイトごとの安定疑似色で表示します。</summary>
+        [MenuItem(GeologyDominantSiteMenuPath, false, 216)]
+        private static void SelectGeologyDominantSite()
+        {
+            SelectMode(WorldGenerationDebugVisualizationMode.GeologyDominantSite);
+        }
+
+        /// <summary>PlayMode中の支配地質サイト境界を1タイル幅の明色で表示します。</summary>
+        [MenuItem(GeologySiteBoundaryMenuPath, false, 217)]
+        private static void SelectGeologySiteBoundary()
+        {
+            SelectMode(WorldGenerationDebugVisualizationMode.GeologySiteBoundary);
         }
 
         /// <summary>PlayMode中の水域を陸地・淡水・海水の固定色で表示します。</summary>
@@ -341,6 +418,72 @@ namespace Farmware.WorldGeneration.Editor
             return ValidateMode(
                 VolcanicActivityMenuPath,
                 WorldGenerationDebugVisualizationMode.VolcanicActivityPotential);
+        }
+
+        /// <summary>Geology Class項目の有効状態とチェック表示を更新します。</summary>
+        /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
+        [MenuItem(GeologyClassMenuPath, true)]
+        private static bool ValidateGeologyClass()
+        {
+            return ValidateMode(GeologyClassMenuPath, WorldGenerationDebugVisualizationMode.GeologyClass);
+        }
+
+        /// <summary>Geology Permeability項目の有効状態とチェック表示を更新します。</summary>
+        /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
+        [MenuItem(GeologyPermeabilityMenuPath, true)]
+        private static bool ValidateGeologyPermeability()
+        {
+            return ValidateMode(
+                GeologyPermeabilityMenuPath,
+                WorldGenerationDebugVisualizationMode.GeologyPermeability);
+        }
+
+        /// <summary>Geology Groundwater Storage項目の有効状態とチェック表示を更新します。</summary>
+        /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
+        [MenuItem(GeologyGroundwaterStorageMenuPath, true)]
+        private static bool ValidateGeologyGroundwaterStorage()
+        {
+            return ValidateMode(
+                GeologyGroundwaterStorageMenuPath,
+                WorldGenerationDebugVisualizationMode.GeologyGroundwaterStorage);
+        }
+
+        /// <summary>Geology Erosion Resistance項目の有効状態とチェック表示を更新します。</summary>
+        /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
+        [MenuItem(GeologyErosionResistanceMenuPath, true)]
+        private static bool ValidateGeologyErosionResistance()
+        {
+            return ValidateMode(
+                GeologyErosionResistanceMenuPath,
+                WorldGenerationDebugVisualizationMode.GeologyErosionResistance);
+        }
+
+        /// <summary>Geology Flags項目の有効状態とチェック表示を更新します。</summary>
+        /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
+        [MenuItem(GeologyFlagsMenuPath, true)]
+        private static bool ValidateGeologyFlags()
+        {
+            return ValidateMode(GeologyFlagsMenuPath, WorldGenerationDebugVisualizationMode.GeologyFlags);
+        }
+
+        /// <summary>Geology Dominant Site項目の有効状態とチェック表示を更新します。</summary>
+        /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
+        [MenuItem(GeologyDominantSiteMenuPath, true)]
+        private static bool ValidateGeologyDominantSite()
+        {
+            return ValidateMode(
+                GeologyDominantSiteMenuPath,
+                WorldGenerationDebugVisualizationMode.GeologyDominantSite);
+        }
+
+        /// <summary>Geology Site Boundary項目の有効状態とチェック表示を更新します。</summary>
+        /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
+        [MenuItem(GeologySiteBoundaryMenuPath, true)]
+        private static bool ValidateGeologySiteBoundary()
+        {
+            return ValidateMode(
+                GeologySiteBoundaryMenuPath,
+                WorldGenerationDebugVisualizationMode.GeologySiteBoundary);
         }
 
         /// <summary>Water Salinity項目の有効状態とチェック表示を更新します。</summary>
