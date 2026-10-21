@@ -287,7 +287,7 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>生成済みD8セルへ固定9地点の基礎湿度を加え、上流Heap用の値へ変換します。</summary>
-        private static bool TryCreateCandidate(
+        internal static bool TryCreateCandidate(
             in WorldGenerationSettings settings,
             in GeneratedHydrologyCell cell,
             ushort flowDistance,
@@ -316,7 +316,7 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>優先度付きフロンティアへ候補を追加し、親より小さい間だけ上へ移動します。</summary>
-        private static bool TryPush(
+        internal static bool TryPush(
             NativeArray<HydrologyUpstreamCandidate> frontier,
             int startIndex,
             ref int length,
@@ -347,7 +347,7 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>優先度が最小の候補を取り出し、末尾要素を下へ移動してHeap順を復元します。</summary>
-        private static HydrologyUpstreamCandidate Pop(
+        internal static HydrologyUpstreamCandidate Pop(
             NativeArray<HydrologyUpstreamCandidate> frontier,
             int startIndex,
             ref int length)
@@ -415,7 +415,7 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>水文セル座標へ-1〜+1をlongで加え、int範囲内の場合だけ返します。</summary>
-        private static bool TryAdd(int coordinate, int offset, out int result)
+        internal static bool TryAdd(int coordinate, int offset, out int result)
         {
             long value = (long)coordinate + offset;
             if (value < int.MinValue || value > int.MaxValue)
@@ -429,7 +429,7 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>D8方向IDを、隣接水文セル座標へ加えるX/Y差へ変換します。</summary>
-        private static void GetDirectionOffset(
+        internal static void GetDirectionOffset(
             HydrologyFlowDirection direction,
             out int offsetX,
             out int offsetY)

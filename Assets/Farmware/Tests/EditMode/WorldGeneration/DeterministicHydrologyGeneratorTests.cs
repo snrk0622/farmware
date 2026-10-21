@@ -1,4 +1,4 @@
-// このファイルは、TERRAIN-01C3-A〜Cの水文格子、D8流向、下流終端、集水面積、自然流出を検証します。
+// このファイルは、TERRAIN-01C3-A〜C2の水文格子、D8流向、下流終端、集水面積、自然流出、空間集約Summaryを検証します。
 // 湖と診断表示は後続枝番の責務とし、ここでは下流・上流結果が決定論的かつ有限になることを保証します。
 
 using System;
@@ -11,7 +11,7 @@ using Unity.Collections.LowLevel.Unsafe;
 namespace Farmware.WorldGeneration.Tests
 {
     /// <summary>
-    /// 固定8×8格子、D8辺、下流終端、集水・自然流出をSceneやGameObjectなしで検証するEditModeテストです。
+    /// 固定8×8格子、D8辺、下流終端、集水・自然流出、Level 0〜6集約SummaryをSceneやGameObjectなしで検証するEditModeテストです。
     /// 純粋GeneratorとChunkGenerationSystemが共有する入力・出力契約を対象にします。
     /// </summary>
     public sealed class DeterministicHydrologyGeneratorTests
@@ -100,6 +100,332 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(first.MaximumContributingDistance, Is.EqualTo(repeated.MaximumContributingDistance));
             Assert.That(first.CatchmentFlags, Is.EqualTo(repeated.CatchmentFlags));
             Assert.That(first.SurfaceWaterConnectionFlags, Is.EqualTo(repeated.SurfaceWaterConnectionFlags));
+        }
+
+        /// <summary>
+        /// Level 0〜6を同じ負座標から構築し、1〜4,096セルの階層寸法、行優先セル数、湿度合計が個別生成と一致することを保証します。
+        /// 集約不能な親Levelも失敗へ丸めず、終端・複数出口・再進入などの分解理由を保持することを確認します。
+        /// </summary>
+        [Test]
+        public void AggregationSummary_LevelsZeroThroughSixPreserveCellTotals()
+        {
+            WorldGenerationSettings settings = CreateSettings("hydrology-aggregation-levels");
+            using var cells = new NativeArray<GeneratedHydrologyCell>(
+                DeterministicHydrologyAggregationSummary.MaximumCellCapacity,
+                Allocator.Temp);
+            using var distances = new NativeArray<ushort>(
+                DeterministicHydrologyAggregationSummary.MaximumCellCapacity,
+                Allocator.Temp);
+            using var entrances = new NativeArray<HydrologyCatchmentExternalEntrance>(
+                DeterministicHydrologyAggregationSummary.MaximumExternalEntranceCapacity,
+                Allocator.Temp);
+
+            for (int level = 0; level <= settings.Hydrology.MaximumAggregationSummaryLevel; level++)
+            {
+                Assert.That(
+                    DeterministicHydrologyAggregationSummary.TryBuildAligned(
+                        settings,
+                        -17,
+                        23,
+                        level,
+                        cells,
+                        distances,
+                        entrances,
+                        out HydrologyCatchmentAggregationSummary summary),
+                    Is.True,
+                    $"Level {level}のSummaryを生成できませんでした。");
+
+                int sideLength = 1 << level;
+                int expectedCellCount = sideLength * sideLength;
+                long expectedMoistureSum = 0L;
+                for (int index = 0; index < expectedCellCount; index++)
+                {
+                    expectedMoistureSum += cells[index].HydrologyMoisture;
+                }
+
+                Assert.That(summary.Level, Is.EqualTo(level));
+                Assert.That(summary.CellCount, Is.EqualTo((uint)expectedCellCount));
+                Assert.That(summary.RunoffMoistureSum, Is.EqualTo(expectedMoistureSum));
+                Assert.That(summary.MinimumCellX % sideLength, Is.Zero);
+                Assert.That(summary.MinimumCellY % sideLength, Is.Zero);
+                if (summary.CanAggregate)
+                {
+                    Assert.That(summary.ExternalEntranceCount, Is.LessThanOrEqualTo((4 * sideLength) + 4));
+                    Assert.That(summary.MaximumDistanceToOutlet, Is.LessThan(expectedCellCount));
+                }
+                else
+                {
+                    Assert.That(summary.Flags, Is.Not.EqualTo(HydrologyAggregationSummaryFlags.None));
+                }
+            }
+        }
+
+        /// <summary>
+        /// 集約可能なLevel 0領域を準備し、外周8セルのうち中心へ流れるセルだけが外部入口として残ることを保証します。
+        /// 各入口の距離、FlowKey、湿度も個別生成結果と比較し、Summary境界で上流情報が失われないことを確認します。
+        /// </summary>
+        [Test]
+        public void AggregationSummary_LevelZeroRetainsEveryDirectExternalEntrance()
+        {
+            WorldGenerationSettings settings = CreateSettings("hydrology-aggregation-entrances");
+            using var cells = new NativeArray<GeneratedHydrologyCell>(
+                DeterministicHydrologyAggregationSummary.MaximumCellCapacity,
+                Allocator.Temp);
+            using var distances = new NativeArray<ushort>(
+                DeterministicHydrologyAggregationSummary.MaximumCellCapacity,
+                Allocator.Temp);
+            using var entrances = new NativeArray<HydrologyCatchmentExternalEntrance>(
+                DeterministicHydrologyAggregationSummary.MaximumExternalEntranceCapacity,
+                Allocator.Temp);
+
+            Assert.That(
+                TryFindAggregatableSummary(
+                    settings,
+                    0,
+                    cells,
+                    distances,
+                    entrances,
+                    out HydrologyCatchmentAggregationSummary summary),
+                Is.True);
+
+            int expectedEntranceCount = 0;
+            for (int offsetY = -1; offsetY <= 1; offsetY++)
+            {
+                for (int offsetX = -1; offsetX <= 1; offsetX++)
+                {
+                    if (offsetX == 0 && offsetY == 0)
+                    {
+                        continue;
+                    }
+
+                    int candidateX = summary.MinimumCellX + offsetX;
+                    int candidateY = summary.MinimumCellY + offsetY;
+                    Assert.That(
+                        DeterministicHydrologyGenerator.TryGenerateCell(
+                            settings,
+                            candidateX,
+                            candidateY,
+                            out GeneratedHydrologyCell candidate),
+                        Is.True);
+                    if (!candidate.HasDownstream
+                        || candidate.DownstreamCellX != summary.MinimumCellX
+                        || candidate.DownstreamCellY != summary.MinimumCellY)
+                    {
+                        continue;
+                    }
+
+                    HydrologyCatchmentExternalEntrance actual = entrances[expectedEntranceCount];
+                    Assert.That(actual.CellX, Is.EqualTo(candidateX));
+                    Assert.That(actual.CellY, Is.EqualTo(candidateY));
+                    Assert.That(actual.InternalCellX, Is.EqualTo(summary.MinimumCellX));
+                    Assert.That(actual.InternalCellY, Is.EqualTo(summary.MinimumCellY));
+                    Assert.That(actual.DistanceToOutlet, Is.EqualTo(1));
+                    Assert.That(actual.HydrologyHeight, Is.EqualTo(candidate.HydrologyHeight));
+                    Assert.That(actual.PlateauRank, Is.EqualTo(candidate.PlateauRank));
+                    expectedEntranceCount++;
+                }
+            }
+
+            Assert.That(summary.ExternalEntranceCount, Is.EqualTo(expectedEntranceCount));
+        }
+
+        /// <summary>
+        /// 同じ領域群を昇順と降順で再構築し、先に作った値をキャッシュ相当として保持してもSummaryと外部入口が一致することを保証します。
+        /// これにより共有キャッシュを後から導入・破棄しても、構築順が固定生成結果へ入らないことを確認します。
+        /// </summary>
+        [Test]
+        public void AggregationSummary_RebuildMatchesCachedValuesInDifferentConstructionOrder()
+        {
+            WorldGenerationSettings settings = CreateSettings("hydrology-aggregation-order");
+            var requests = new (int CellX, int CellY, int Level)[]
+            {
+                (-33, 17, 0),
+                (12, -29, 1),
+                (47, 51, 2),
+                (-65, -3, 3),
+                (96, -80, 4)
+            };
+            var cachedSummaries = new HydrologyCatchmentAggregationSummary[requests.Length];
+            var cachedEntrances = new List<HydrologyCatchmentExternalEntrance>[requests.Length];
+            using var cells = new NativeArray<GeneratedHydrologyCell>(
+                DeterministicHydrologyAggregationSummary.MaximumCellCapacity,
+                Allocator.Temp);
+            using var distances = new NativeArray<ushort>(
+                DeterministicHydrologyAggregationSummary.MaximumCellCapacity,
+                Allocator.Temp);
+            using var entrances = new NativeArray<HydrologyCatchmentExternalEntrance>(
+                DeterministicHydrologyAggregationSummary.MaximumExternalEntranceCapacity,
+                Allocator.Temp);
+
+            for (int requestIndex = 0; requestIndex < requests.Length; requestIndex++)
+            {
+                (int cellX, int cellY, int level) = requests[requestIndex];
+                Assert.That(
+                    DeterministicHydrologyAggregationSummary.TryBuildAligned(
+                        settings,
+                        cellX,
+                        cellY,
+                        level,
+                        cells,
+                        distances,
+                        entrances,
+                        out cachedSummaries[requestIndex]),
+                    Is.True);
+                cachedEntrances[requestIndex] = CopyExternalEntrances(cachedSummaries[requestIndex], entrances);
+            }
+
+            for (int requestIndex = requests.Length - 1; requestIndex >= 0; requestIndex--)
+            {
+                (int cellX, int cellY, int level) = requests[requestIndex];
+                Assert.That(
+                    DeterministicHydrologyAggregationSummary.TryBuildAligned(
+                        settings,
+                        cellX,
+                        cellY,
+                        level,
+                        cells,
+                        distances,
+                        entrances,
+                        out HydrologyCatchmentAggregationSummary rebuilt),
+                    Is.True);
+                AssertAggregationSummaryEqual(cachedSummaries[requestIndex], rebuilt);
+
+                List<HydrologyCatchmentExternalEntrance> rebuiltEntrances = CopyExternalEntrances(rebuilt, entrances);
+                Assert.That(rebuiltEntrances.Count, Is.EqualTo(cachedEntrances[requestIndex].Count));
+                for (int entranceIndex = 0; entranceIndex < rebuiltEntrances.Count; entranceIndex++)
+                {
+                    AssertExternalEntranceEqual(
+                        cachedEntrances[requestIndex][entranceIndex],
+                        rebuiltEntrances[entranceIndex]);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 同じ16対象セルをC3-C1基準経路、空キャッシュ、温まったキャッシュ、逆順構築キャッシュで解決します。
+        /// 件数、湿度、最遠距離、流路区分がすべて一致し、キャッシュ命中が固定結果を変えないことを保証します。
+        /// </summary>
+        [Test]
+        public void AggregatedCatchment_CacheMissHitAndConstructionOrderMatchBaseline()
+        {
+            WorldGenerationSettings settings = CreateSettings("hydrology-aggregated-catchment-equivalence");
+            const int targetCount = 16;
+            var targetX = new int[targetCount];
+            var targetY = new int[targetCount];
+            var expected = new HydrologyCatchmentResult[targetCount];
+            using var baselineFrontier = new NativeArray<HydrologyUpstreamCandidate>(
+                DeterministicHydrologyCatchmentResolver.MaximumFrontierCapacity,
+                Allocator.Persistent,
+                NativeArrayOptions.UninitializedMemory);
+            using var forwardCache = new HydrologyAggregationSummaryCache(settings, 256);
+            using var reverseCache = new HydrologyAggregationSummaryCache(settings, 256);
+
+            for (int index = 0; index < targetCount; index++)
+            {
+                targetX[index] = -12 + ((index * 7) % 25);
+                targetY[index] = 18 - ((index * 11) % 31);
+                Assert.That(
+                    DeterministicHydrologyGenerator.TryGenerateFlowCell(
+                        settings,
+                        targetX[index],
+                        targetY[index],
+                        out GeneratedHydrologyCell startCell),
+                    Is.True);
+                Assert.That(
+                    DeterministicHydrologyCatchmentResolver.TryResolveWithStartCell(
+                        settings,
+                        startCell,
+                        baselineFrontier,
+                        out expected[index]),
+                    Is.True);
+                Assert.That(
+                    DeterministicHydrologyAggregatedCatchmentResolver.TryResolve(
+                        forwardCache,
+                        targetX[index],
+                        targetY[index],
+                        out HydrologyCatchmentResult coldResult,
+                        out _),
+                    Is.True);
+                AssertCatchmentResultEqual(expected[index], coldResult);
+            }
+
+            int warmCacheHits = 0;
+            for (int index = targetCount - 1; index >= 0; index--)
+            {
+                Assert.That(
+                    DeterministicHydrologyAggregatedCatchmentResolver.TryResolve(
+                        forwardCache,
+                        targetX[index],
+                        targetY[index],
+                        out HydrologyCatchmentResult warmResult,
+                        out HydrologyAggregatedCatchmentStatistics warmStatistics),
+                    Is.True);
+                AssertCatchmentResultEqual(expected[index], warmResult);
+                warmCacheHits += warmStatistics.CacheHitCount;
+
+                Assert.That(
+                    DeterministicHydrologyAggregatedCatchmentResolver.TryResolve(
+                        reverseCache,
+                        targetX[index],
+                        targetY[index],
+                        out HydrologyCatchmentResult reverseResult,
+                        out _),
+                    Is.True);
+                AssertCatchmentResultEqual(expected[index], reverseResult);
+            }
+
+            Assert.That(warmCacheHits, Is.GreaterThan(0));
+            Assert.That(forwardCache.SummaryCount, Is.GreaterThan(0));
+            Assert.That(reverseCache.SummaryCount, Is.GreaterThan(0));
+
+            // 最初のキャッシュを明示破棄してから同じ設定で作り直し、Nativeコンテナの寿命が固定結果へ入らないことを確認します。
+            forwardCache.Dispose();
+            using var recreatedCache = new HydrologyAggregationSummaryCache(settings, 256);
+            Assert.That(
+                DeterministicHydrologyAggregatedCatchmentResolver.TryResolve(
+                    recreatedCache,
+                    targetX[0],
+                    targetY[0],
+                    out HydrologyCatchmentResult recreatedResult,
+                    out _),
+                Is.True);
+            AssertCatchmentResultEqual(expected[0], recreatedResult);
+        }
+
+        /// <summary>
+        /// 4,095／4,096／4,097件相当のSummaryを準備し、固定上限をまたぐ場合だけ一括利用を拒否することを保証します。
+        /// 拒否されたSummaryは下位Levelまたは個別セルへ分解し、C3-C1の優先順を維持するための境界です。
+        /// </summary>
+        [TestCase(0u, 4095u, true)]
+        [TestCase(0u, 4096u, true)]
+        [TestCase(0u, 4097u, false)]
+        [TestCase(1u, 4095u, true)]
+        [TestCase(1u, 4096u, false)]
+        public void AggregationSummary_CrossingCatchmentLimitRequiresDecomposition(
+            uint selectedCellCount,
+            uint summaryCellCount,
+            bool expected)
+        {
+            var summary = new HydrologyCatchmentAggregationSummary
+            {
+                CellCount = summaryCellCount,
+                Flags = HydrologyAggregationSummaryFlags.None
+            };
+
+            Assert.That(
+                DeterministicHydrologyAggregationSummary.CanAccumulateWithoutCrossingLimit(
+                    summary,
+                    selectedCellCount,
+                    HydrologyGenerationSettings.CreateDefault().MaximumCatchmentContributingCells),
+                Is.EqualTo(expected));
+
+            summary.Flags = HydrologyAggregationSummaryFlags.MultipleExits;
+            Assert.That(
+                DeterministicHydrologyAggregationSummary.CanAccumulateWithoutCrossingLimit(
+                    summary,
+                    selectedCellCount,
+                    HydrologyGenerationSettings.CreateDefault().MaximumCatchmentContributingCells),
+                Is.False);
         }
 
         /// <summary>
@@ -291,12 +617,18 @@ namespace Farmware.WorldGeneration.Tests
         /// 1,000／10,000／100,000セルでCPU時間、managed allocation、実経路長を記録します。
         /// 通常回帰を長時間化させず、キャッシュ導入の要否を実測から判断するため明示実行だけに分離します。
         /// </summary>
-        [Test, Explicit("TERRAIN-01C3-Bの1k/10k/100k下流探索を同じ入力で比較する局所性能計測です。製品性能の合格判定には使いません。")]
+        [Test]
+        [Explicit("TERRAIN-01C3-Bの1k/10k/100k下流探索を同じ入力で比較する局所性能計測です。製品性能の合格判定には使いません。")]
+        [Timeout(600000)]
         public void DownstreamResolution_ReportsScalingComparison()
         {
             const int seedCount = 10;
             const int samplesPerScale = 3;
             var settingsBySeed = new WorldGenerationSettings[seedCount];
+            using var catchmentFrontier = new NativeArray<HydrologyUpstreamCandidate>(
+                DeterministicHydrologyCatchmentResolver.MaximumFrontierCapacity,
+                Allocator.Persistent,
+                NativeArrayOptions.UninitializedMemory);
             for (int seedIndex = 0; seedIndex < settingsBySeed.Length; seedIndex++)
             {
                 // Seedごとに離れた座標領域を使い、原点周辺だけに偏った経路長を一般化しないようにします。
@@ -316,7 +648,12 @@ namespace Farmware.WorldGeneration.Tests
                         out _),
                     Is.True);
                 Assert.That(
-                    DeterministicHydrologyGenerator.TryGenerateCell(settings, cellX, cellY, out _),
+                    DeterministicHydrologyGenerator.TryGenerateCell(
+                        settings,
+                        cellX,
+                        cellY,
+                        catchmentFrontier,
+                        out _),
                     Is.True);
             }
 
@@ -350,6 +687,7 @@ namespace Farmware.WorldGeneration.Tests
                         MeasureDownstreamResolution(
                             cellCount,
                             settingsBySeed,
+                            catchmentFrontier,
                             stopwatch,
                             ref downstreamMilliseconds,
                             ref downstreamAllocatedBytes,
@@ -365,6 +703,7 @@ namespace Farmware.WorldGeneration.Tests
                         MeasureDownstreamResolution(
                             cellCount,
                             settingsBySeed,
+                            catchmentFrontier,
                             stopwatch,
                             ref downstreamMilliseconds,
                             ref downstreamAllocatedBytes,
@@ -402,6 +741,216 @@ namespace Farmware.WorldGeneration.Tests
                     + $"marine={marineCount / samplesPerScale}, closedBasin={closedBasinCount / samplesPerScale}, "
                     + $"longDrainage={longDrainageCount / samplesPerScale}");
             }
+        }
+
+        /// <summary>
+        /// 256セルの固定作業集合を先に温め、基準経路とSummaryキャッシュ経路を1,000／10,000／100,000要求で比較します。
+        /// 続いて16論理チャンク・1,024水文セルを両経路で生成し、CPU時間、managed allocation、キャッシュ統計、全固定値を記録します。
+        /// </summary>
+        [Test]
+        [Explicit("TERRAIN-01C3-C2の集約Summaryと現行基準経路を同じ入力で比較する局所性能計測です。製品性能の合格判定には使いません。")]
+        [Timeout(600000)]
+        public void AggregatedCatchment_ReportsScalingAndChunkGenerationComparison()
+        {
+            const int workingSetCellCount = 256;
+            const int measuredChunkCount = 16;
+            WorldGenerationSettings settings = CreateSettings("hydrology-aggregation-benchmark");
+            using var baselineFrontier = new NativeArray<HydrologyUpstreamCandidate>(
+                DeterministicHydrologyCatchmentResolver.MaximumFrontierCapacity,
+                Allocator.Persistent,
+                NativeArrayOptions.UninitializedMemory);
+            using var cache = new HydrologyAggregationSummaryCache(settings, 2048);
+            using var baselineChunkCells = new NativeArray<GeneratedHydrologyCell>(
+                DeterministicHydrologyGenerator.CellsPerChunk,
+                Allocator.Persistent,
+                NativeArrayOptions.UninitializedMemory);
+            var stopwatch = new Stopwatch();
+
+            // 両経路のJITと、集約側の256セル作業集合を測定前に準備します。以後の比較はキャッシュ命中時の再利用費用です。
+            for (int index = 0; index < workingSetCellCount; index++)
+            {
+                GetAggregationBenchmarkInput(index, out int cellX, out int cellY);
+                Assert.That(
+                    DeterministicHydrologyGenerator.TryGenerateCell(
+                        settings,
+                        cellX,
+                        cellY,
+                        baselineFrontier,
+                        out GeneratedHydrologyCell baseline),
+                    Is.True);
+                Assert.That(
+                    DeterministicHydrologyAggregatedCatchmentResolver.TryGenerateCell(
+                        cache,
+                        cellX,
+                        cellY,
+                        out GeneratedHydrologyCell aggregated,
+                        out _),
+                    Is.True);
+                AssertCellEqual(baseline, aggregated);
+            }
+
+            foreach (int cellCount in new[] { 1000, 10000, 100000 })
+            {
+                int baselineFailures = 0;
+                int aggregatedFailures = 0;
+                ulong baselineChecksum = 0UL;
+                ulong aggregatedChecksum = 0UL;
+                long baselineAllocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+                stopwatch.Restart();
+                for (int index = 0; index < cellCount; index++)
+                {
+                    GetAggregationBenchmarkInput(index, out int cellX, out int cellY);
+                    if (!DeterministicHydrologyGenerator.TryGenerateCell(
+                        settings,
+                        cellX,
+                        cellY,
+                        baselineFrontier,
+                        out GeneratedHydrologyCell cell))
+                    {
+                        baselineFailures++;
+                        continue;
+                    }
+
+                    baselineChecksum = AccumulateHydrologyChecksum(baselineChecksum, cell);
+                }
+                stopwatch.Stop();
+                double baselineMilliseconds = stopwatch.Elapsed.TotalMilliseconds;
+                long baselineAllocatedBytes = GC.GetAllocatedBytesForCurrentThread() - baselineAllocatedBefore;
+
+                long aggregatedSummaryCount = 0L;
+                long decomposedSummaryCount = 0L;
+                long cacheHitCount = 0L;
+                long cacheMissCount = 0L;
+                long baselineFallbackCount = 0L;
+                long aggregatedAllocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+                stopwatch.Restart();
+                for (int index = 0; index < cellCount; index++)
+                {
+                    GetAggregationBenchmarkInput(index, out int cellX, out int cellY);
+                    if (!DeterministicHydrologyAggregatedCatchmentResolver.TryGenerateCell(
+                        cache,
+                        cellX,
+                        cellY,
+                        out GeneratedHydrologyCell cell,
+                        out HydrologyAggregatedCatchmentStatistics statistics))
+                    {
+                        aggregatedFailures++;
+                        continue;
+                    }
+
+                    aggregatedChecksum = AccumulateHydrologyChecksum(aggregatedChecksum, cell);
+                    aggregatedSummaryCount += statistics.AggregatedSummaryCount;
+                    decomposedSummaryCount += statistics.DecomposedSummaryCount;
+                    cacheHitCount += statistics.CacheHitCount;
+                    cacheMissCount += statistics.CacheMissCount;
+                    baselineFallbackCount += statistics.BaselineFallbackCount;
+                }
+                stopwatch.Stop();
+                double aggregatedMilliseconds = stopwatch.Elapsed.TotalMilliseconds;
+                long aggregatedAllocatedBytes = GC.GetAllocatedBytesForCurrentThread() - aggregatedAllocatedBefore;
+
+                Assert.That(baselineFailures, Is.Zero);
+                Assert.That(aggregatedFailures, Is.Zero);
+                Assert.That(aggregatedChecksum, Is.EqualTo(baselineChecksum));
+                UnityEngine.Debug.Log(
+                    $"HYDROLOGY_AGGREGATION cells={cellCount}, workingSet={workingSetCellCount}, "
+                    + $"baselineMs={baselineMilliseconds:F6}, aggregatedMs={aggregatedMilliseconds:F6}, "
+                    + $"ratio={aggregatedMilliseconds / baselineMilliseconds:F3}, "
+                    + $"baselineManagedBytes={baselineAllocatedBytes}, aggregatedManagedBytes={aggregatedAllocatedBytes}, "
+                    + $"aggregatedSummaries={aggregatedSummaryCount}, decomposedSummaries={decomposedSummaryCount}, "
+                    + $"cacheHits={cacheHitCount}, cacheMisses={cacheMissCount}, "
+                    + $"baselineFallbacks={baselineFallbackCount}, cachedSummaryCount={cache.SummaryCount}");
+            }
+
+            long baselineChunkAllocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+            int baselineChunkFailures = 0;
+            stopwatch.Restart();
+            for (int chunkIndex = 0; chunkIndex < measuredChunkCount; chunkIndex++)
+            {
+                GetAggregationBenchmarkChunk(chunkIndex, out int chunkX, out int chunkY);
+                if (!DeterministicHydrologyGenerator.TryGenerateChunkCells(
+                        settings,
+                        chunkX,
+                        chunkY,
+                        baselineChunkCells,
+                        baselineFrontier))
+                {
+                    baselineChunkFailures++;
+                }
+            }
+            stopwatch.Stop();
+            double baselineChunkMilliseconds = stopwatch.Elapsed.TotalMilliseconds;
+            long baselineChunkAllocatedBytes = GC.GetAllocatedBytesForCurrentThread() - baselineChunkAllocatedBefore;
+
+            long aggregatedChunkAllocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+            int aggregatedChunkFailures = 0;
+            stopwatch.Restart();
+            for (int chunkIndex = 0; chunkIndex < measuredChunkCount; chunkIndex++)
+            {
+                GetAggregationBenchmarkChunk(chunkIndex, out int chunkX, out int chunkY);
+                int firstCellX = chunkX * DeterministicHydrologyGenerator.CellsPerChunkAxis;
+                int firstCellY = chunkY * DeterministicHydrologyGenerator.CellsPerChunkAxis;
+                for (int localY = 0; localY < DeterministicHydrologyGenerator.CellsPerChunkAxis; localY++)
+                {
+                    for (int localX = 0; localX < DeterministicHydrologyGenerator.CellsPerChunkAxis; localX++)
+                    {
+                        if (!DeterministicHydrologyAggregatedCatchmentResolver.TryGenerateCell(
+                                cache,
+                                firstCellX + localX,
+                                firstCellY + localY,
+                                out _,
+                                out _))
+                        {
+                            aggregatedChunkFailures++;
+                        }
+                    }
+                }
+            }
+            stopwatch.Stop();
+            double aggregatedChunkMilliseconds = stopwatch.Elapsed.TotalMilliseconds;
+            long aggregatedChunkAllocatedBytes = GC.GetAllocatedBytesForCurrentThread() - aggregatedChunkAllocatedBefore;
+            Assert.That(baselineChunkFailures, Is.Zero);
+            Assert.That(aggregatedChunkFailures, Is.Zero);
+
+            // 時間計測後に同じ16チャンクを再生成して全フィールドを比較し、Assert費用を上の時間へ混ぜません。
+            for (int chunkIndex = 0; chunkIndex < measuredChunkCount; chunkIndex++)
+            {
+                GetAggregationBenchmarkChunk(chunkIndex, out int chunkX, out int chunkY);
+                Assert.That(
+                    DeterministicHydrologyGenerator.TryGenerateChunkCells(
+                        settings,
+                        chunkX,
+                        chunkY,
+                        baselineChunkCells,
+                        baselineFrontier),
+                    Is.True);
+                int firstCellX = chunkX * DeterministicHydrologyGenerator.CellsPerChunkAxis;
+                int firstCellY = chunkY * DeterministicHydrologyGenerator.CellsPerChunkAxis;
+                for (int localY = 0; localY < DeterministicHydrologyGenerator.CellsPerChunkAxis; localY++)
+                {
+                    for (int localX = 0; localX < DeterministicHydrologyGenerator.CellsPerChunkAxis; localX++)
+                    {
+                        int index = (localY * DeterministicHydrologyGenerator.CellsPerChunkAxis) + localX;
+                        Assert.That(
+                            DeterministicHydrologyAggregatedCatchmentResolver.TryGenerateCell(
+                                cache,
+                                firstCellX + localX,
+                                firstCellY + localY,
+                                out GeneratedHydrologyCell aggregated,
+                                out _),
+                            Is.True);
+                        AssertCellEqual(baselineChunkCells[index], aggregated);
+                    }
+                }
+            }
+
+            UnityEngine.Debug.Log(
+                $"HYDROLOGY_AGGREGATION_CHUNKS chunks={measuredChunkCount}, "
+                + $"hydrologyCells={measuredChunkCount * DeterministicHydrologyGenerator.CellsPerChunk}, "
+                + $"baselineMs={baselineChunkMilliseconds:F6}, aggregatedMs={aggregatedChunkMilliseconds:F6}, "
+                + $"ratio={aggregatedChunkMilliseconds / baselineChunkMilliseconds:F3}, "
+                + $"baselineManagedBytes={baselineChunkAllocatedBytes}, "
+                + $"aggregatedManagedBytes={aggregatedChunkAllocatedBytes}, cachedSummaryCount={cache.SummaryCount}");
         }
 
         /// <summary>
@@ -814,6 +1363,52 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// 集約性能の計測番号を16×16セルへ循環割当し、全件数で同じ256セルの温まったキャッシュを共有します。
+        /// </summary>
+        /// <param name="index">0から始まる計測要求番号です。</param>
+        /// <param name="cellX">要求番号に対応する水平絶対水文座標です。</param>
+        /// <param name="cellY">要求番号に対応する垂直絶対水文座標です。</param>
+        private static void GetAggregationBenchmarkInput(int index, out int cellX, out int cellY)
+        {
+            const int axisLength = 16;
+            int localIndex = index % (axisLength * axisLength);
+            cellX = (localIndex % axisLength) - (axisLength / 2);
+            cellY = (localIndex / axisLength) - (axisLength / 2);
+        }
+
+        /// <summary>
+        /// 16チャンクの計測番号を原点周囲の4×4論理チャンクへ割り当てます。
+        /// </summary>
+        /// <param name="index">0〜15の論理チャンク計測番号です。</param>
+        /// <param name="chunkX">番号に対応する水平論理チャンク座標です。</param>
+        /// <param name="chunkY">番号に対応する垂直論理チャンク座標です。</param>
+        private static void GetAggregationBenchmarkChunk(int index, out int chunkX, out int chunkY)
+        {
+            const int axisLength = 4;
+            chunkX = (index % axisLength) - (axisLength / 2);
+            chunkY = (index / axisLength) - (axisLength / 2);
+        }
+
+        /// <summary>
+        /// 性能ループの生成結果が最適化で捨てられないよう、主要固定値を順序付き64bit検査値へ加えます。
+        /// この値はセーブ互換性や製品状態ハッシュではなく、同じ計測入力同士の比較だけに使用します。
+        /// </summary>
+        /// <param name="current">一つ前のセルまでを反映した計測用検査値です。</param>
+        /// <param name="cell">今回反映する固定水文セルです。</param>
+        /// <returns>座標、集水数、湿度合計、接続フラグを混合した次の検査値です。</returns>
+        private static ulong AccumulateHydrologyChecksum(ulong current, in GeneratedHydrologyCell cell)
+        {
+            unchecked
+            {
+                ulong coordinate = (uint)cell.CellX | ((ulong)(uint)cell.CellY << 32);
+                ulong catchment = cell.CatchmentAreaCells | ((ulong)(ushort)cell.ConnectionFlags << 32);
+                current = WorldSeedUtility.Mix64(current ^ coordinate);
+                current = WorldSeedUtility.Mix64(current ^ catchment);
+                return WorldSeedUtility.Mix64(current ^ (ulong)cell.RunoffMoistureSum);
+            }
+        }
+
+        /// <summary>
         /// 局所計測の通し番号を、10 Seed・各100×100セルの離れた絶対座標へ変換します。
         /// 件数を増やしても先頭入力が同じになるため、1k／10k／100kのスケーリングを比較できます。
         /// </summary>
@@ -881,6 +1476,7 @@ namespace Farmware.WorldGeneration.Tests
         /// </summary>
         /// <param name="cellCount">今回測る水文セル数です。</param>
         /// <param name="settingsBySeed">計測用の固定ワールド設定です。</param>
+        /// <param name="catchmentFrontier">全セルで再利用し、セルごとのNative確保を測定から除く上流Heap配列です。</param>
         /// <param name="stopwatch">呼出元で再利用する計時器です。</param>
         /// <param name="totalMilliseconds">全サンプルの経過時間合計です。</param>
         /// <param name="totalAllocatedBytes">全サンプルのmanaged allocation合計です。</param>
@@ -893,6 +1489,7 @@ namespace Farmware.WorldGeneration.Tests
         private static void MeasureDownstreamResolution(
             int cellCount,
             WorldGenerationSettings[] settingsBySeed,
+            NativeArray<HydrologyUpstreamCandidate> catchmentFrontier,
             Stopwatch stopwatch,
             ref double totalMilliseconds,
             ref long totalAllocatedBytes,
@@ -912,6 +1509,7 @@ namespace Farmware.WorldGeneration.Tests
                         settings,
                         cellX,
                         cellY,
+                        catchmentFrontier,
                         out GeneratedHydrologyCell cell))
                 {
                     failureCount++;
@@ -936,6 +1534,115 @@ namespace Farmware.WorldGeneration.Tests
             stopwatch.Stop();
             totalMilliseconds += stopwatch.Elapsed.TotalMilliseconds;
             totalAllocatedBytes += GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+        }
+
+        /// <summary>
+        /// 指定Levelで一括利用できる実生成Summaryを有限範囲から探します。
+        /// テストを特定Seedの一座標へ過度に固定せず、見つからない場合も無限探索しないため±32セルへ限定します。
+        /// </summary>
+        /// <param name="settings">固定ワールド生成設定です。</param>
+        /// <param name="level">探す空間Summary Levelです。</param>
+        /// <param name="cells">領域セル用の再利用配列です。</param>
+        /// <param name="distances">内部距離用の再利用配列です。</param>
+        /// <param name="entrances">外部入口用の再利用配列です。</param>
+        /// <param name="summary">成功時に見つかった集約可能Summaryです。</param>
+        /// <returns>有限探索範囲内に集約可能Summaryがあればtrueです。</returns>
+        private static bool TryFindAggregatableSummary(
+            in WorldGenerationSettings settings,
+            int level,
+            NativeArray<GeneratedHydrologyCell> cells,
+            NativeArray<ushort> distances,
+            NativeArray<HydrologyCatchmentExternalEntrance> entrances,
+            out HydrologyCatchmentAggregationSummary summary)
+        {
+            summary = default;
+            for (int cellY = -32; cellY <= 32; cellY++)
+            {
+                for (int cellX = -32; cellX <= 32; cellX++)
+                {
+                    if (!DeterministicHydrologyAggregationSummary.TryBuildAligned(
+                            settings,
+                            cellX,
+                            cellY,
+                            level,
+                            cells,
+                            distances,
+                            entrances,
+                            out summary))
+                    {
+                        return false;
+                    }
+
+                    if (summary.CanAggregate)
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>Summaryの有効な外部入口範囲だけをmanaged Listへ複製し、次の再構築後も比較できるようにします。</summary>
+        private static List<HydrologyCatchmentExternalEntrance> CopyExternalEntrances(
+            in HydrologyCatchmentAggregationSummary summary,
+            NativeArray<HydrologyCatchmentExternalEntrance> entrances)
+        {
+            var result = new List<HydrologyCatchmentExternalEntrance>(summary.ExternalEntranceCount);
+            for (int index = 0; index < summary.ExternalEntranceCount; index++)
+            {
+                result.Add(entrances[index]);
+            }
+
+            return result;
+        }
+
+        /// <summary>再構築した空間Summaryの全固定値を比較し、構築順による差を明確にします。</summary>
+        private static void AssertAggregationSummaryEqual(
+            in HydrologyCatchmentAggregationSummary expected,
+            in HydrologyCatchmentAggregationSummary actual)
+        {
+            Assert.That(actual.MinimumCellX, Is.EqualTo(expected.MinimumCellX));
+            Assert.That(actual.MinimumCellY, Is.EqualTo(expected.MinimumCellY));
+            Assert.That(actual.OutletCellX, Is.EqualTo(expected.OutletCellX));
+            Assert.That(actual.OutletCellY, Is.EqualTo(expected.OutletCellY));
+            Assert.That(actual.DownstreamCellX, Is.EqualTo(expected.DownstreamCellX));
+            Assert.That(actual.DownstreamCellY, Is.EqualTo(expected.DownstreamCellY));
+            Assert.That(actual.CellCount, Is.EqualTo(expected.CellCount));
+            Assert.That(actual.RunoffMoistureSum, Is.EqualTo(expected.RunoffMoistureSum));
+            Assert.That(actual.MaximumDistanceToOutlet, Is.EqualTo(expected.MaximumDistanceToOutlet));
+            Assert.That(actual.ExternalEntranceCount, Is.EqualTo(expected.ExternalEntranceCount));
+            Assert.That(actual.Level, Is.EqualTo(expected.Level));
+            Assert.That(actual.Flags, Is.EqualTo(expected.Flags));
+        }
+
+        /// <summary>基準経路と集約経路の全固定集水値を比較し、キャッシュ由来の差を明確にします。</summary>
+        private static void AssertCatchmentResultEqual(
+            in HydrologyCatchmentResult expected,
+            in HydrologyCatchmentResult actual)
+        {
+            Assert.That(actual.CatchmentAreaCells, Is.EqualTo(expected.CatchmentAreaCells));
+            Assert.That(actual.RunoffMoistureSum, Is.EqualTo(expected.RunoffMoistureSum));
+            Assert.That(actual.RunoffEquivalentCells, Is.EqualTo(expected.RunoffEquivalentCells));
+            Assert.That(actual.TargetHydrologyMoisture, Is.EqualTo(expected.TargetHydrologyMoisture));
+            Assert.That(actual.MaximumContributingDistance, Is.EqualTo(expected.MaximumContributingDistance));
+            Assert.That(actual.CatchmentFlags, Is.EqualTo(expected.CatchmentFlags));
+            Assert.That(actual.SurfaceWaterConnectionFlags, Is.EqualTo(expected.SurfaceWaterConnectionFlags));
+        }
+
+        /// <summary>再構築した外部入口の座標、距離、FlowKey、湿度を比較し、境界情報の欠落を明確にします。</summary>
+        private static void AssertExternalEntranceEqual(
+            in HydrologyCatchmentExternalEntrance expected,
+            in HydrologyCatchmentExternalEntrance actual)
+        {
+            Assert.That(actual.CellX, Is.EqualTo(expected.CellX));
+            Assert.That(actual.CellY, Is.EqualTo(expected.CellY));
+            Assert.That(actual.InternalCellX, Is.EqualTo(expected.InternalCellX));
+            Assert.That(actual.InternalCellY, Is.EqualTo(expected.InternalCellY));
+            Assert.That(actual.DistanceToOutlet, Is.EqualTo(expected.DistanceToOutlet));
+            Assert.That(actual.HydrologyHeight, Is.EqualTo(expected.HydrologyHeight));
+            Assert.That(actual.HydrologyMoisture, Is.EqualTo(expected.HydrologyMoisture));
+            Assert.That(actual.PlateauRank, Is.EqualTo(expected.PlateauRank));
         }
 
         /// <summary>下流選択の優先順位だけを検証するため、必要な固定値を持つ水文セルを作ります。</summary>

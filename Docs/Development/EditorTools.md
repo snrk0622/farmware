@@ -5,7 +5,7 @@
 
 ## 1. 用途
 
-本書のメニュー・設定・表示は、TERRAIN-01C2-BまでのdevelopとTERRAIN-01C3-C1の現行実装境界を説明する。C3-A〜C1は固定水文の基礎格子、D8流向、固定下流終端、集水面積、自然流出をSimulation Bufferへ追加するが、Editorメニュー、Debug Visualization、Map Viewerの水文モードは追加しない。流向・下流終端・集水・河川・湖の可視化と分布監査はC3-Dでまとめて接続する。2026-10-19の[改訂マップ仕様](../GameSpecification/RandomMapGenerationSpecification.md)の可変Block、最終18Biome、水中文脈表示もまだツールに実装されていない。文書改訂やC3-A〜C1の非表示データ追加だけで以下のメニューの機能が増えたとは扱わない。
+本書のメニュー・設定・表示は、TERRAIN-01C2-BまでのdevelopとTERRAIN-01C3-C2の現行実装境界を説明する。C3-A〜C2は固定水文の基礎格子、D8流向、固定下流終端、集水面積、自然流出、Level 0〜6集約SummaryをSimulation側へ追加するが、Editorメニュー、Debug Visualization、Map Viewerの水文モードは追加しない。集約Summaryの利用・分解・キャッシュ統計も性能テストだけで記録し、Editor表示へはまだ渡さない。流向・下流終端・集水・河川・湖の可視化と分布監査はC3-Dでまとめて接続する。2026-10-19の[改訂マップ仕様](../GameSpecification/RandomMapGenerationSpecification.md)の可変Block、最終18Biome、水中文脈表示もまだツールに実装されていない。文書改訂やC3-A〜C2の非表示データ追加だけで以下のメニューの機能が増えたとは扱わない。
 
 開発者専用のUnity Editorツールは、ワールド生成結果の調査、調整前後の比較、確認用Sceneとフォールバック素材の構築に使用する。
 これらは製品版のプレイヤー操作へ含めず、ランタイムのゲーム状態を変更するデバッグ操作にも使用しない。
