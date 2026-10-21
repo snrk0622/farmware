@@ -500,7 +500,7 @@ namespace Farmware.WorldGeneration
         /// <param name="maximumTileY">対象チャンクの上端タイルYです。</param>
         /// <param name="surfaceWater">対象チャンクの行優先出力配列です。</param>
         /// <returns>候補が範囲外で無関係、または標高生成と優先適用を完了できた場合はtrueです。</returns>
-        private static bool TryApplyChannelTile(
+        internal static bool TryApplyChannelTile(
             in WorldGenerationSettings settings,
             int worldTileX,
             int worldTileY,
@@ -541,13 +541,13 @@ namespace Farmware.WorldGeneration
             SurfaceWaterTileType candidateType = isRiver
                 ? SurfaceWaterTileType.River
                 : SurfaceWaterTileType.Stream;
+            bool existingIsChannel = existing.Type == SurfaceWaterTileType.Stream
+                || existing.Type == SurfaceWaterTileType.River;
             if (!ShouldReplaceChannel(existing, candidateType, sourceCell))
             {
-                // 同じ代表河道の幅と中心線が重なった場合は、種類や供給元を変えず中心線フラグだけを保存します。
-                if (isCenterLine
-                    && existing.Type == candidateType
-                    && existing.SourceCellX == sourceCell.CellX
-                    && existing.SourceCellY == sourceCell.CellY)
+                // 中心線は代表河道の種類・供給元とは独立した属性です。
+                // 弱い別河道の中心線が既存の強い河道幅と交差しても、代表値を変えず中心線情報だけを残します。
+                if (isCenterLine && existingIsChannel)
                 {
                     existing.Flags |= SurfaceWaterTileFlags.ChannelCenterLine;
                     surfaceWater[tileIndex] = existing;
@@ -561,6 +561,10 @@ namespace Farmware.WorldGeneration
                 Flags = SurfaceWaterTileFlags.RechargeCandidate
                     | SurfaceWaterTileFlags.NaturalSurfaceWater
                     | SurfaceWaterTileFlags.FreshwaterConnected
+                    // 既存中心線を別河道の幅が代表として置き換えても、交差した事実は失わせません。
+                    | (existingIsChannel
+                        ? existing.Flags & SurfaceWaterTileFlags.ChannelCenterLine
+                        : SurfaceWaterTileFlags.None)
                     | (isCenterLine
                         ? SurfaceWaterTileFlags.ChannelCenterLine
                         : SurfaceWaterTileFlags.None),

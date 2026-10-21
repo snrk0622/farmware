@@ -187,6 +187,115 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// 別供給元の河川幅と渓流中心線を両方の適用順で重ね、代表河道の優先順位と中心線属性を独立して保持することを保証します。
+        /// </summary>
+        [Test]
+        public void ChannelOverlap_PreservesAnyCenterLineWithoutChangingRepresentative()
+        {
+            WorldGenerationSettings settings = CreateSettings("surface-water-center-line-overlap");
+            Assert.That(
+                TryFindEligibleTile(settings, out int worldTileX, out int worldTileY),
+                Is.True);
+            ChunkCoordinate owner = WorldGrid.ToChunkCoordinate(worldTileX, worldTileY);
+            int minimumTileX = WorldGrid.ToWorldTileX(owner.X, 0);
+            int minimumTileY = WorldGrid.ToWorldTileY(owner.Y, 0);
+            int maximumTileX = WorldGrid.ToWorldTileX(
+                owner.X,
+                WorldGridConstants.LogicalChunkSize - 1);
+            int maximumTileY = WorldGrid.ToWorldTileY(
+                owner.Y,
+                WorldGridConstants.LogicalChunkSize - 1);
+            var strongerRiver = new GeneratedHydrologyCell
+            {
+                CellX = 10,
+                CellY = 20,
+                RunoffEquivalentCells = 128
+            };
+            var weakerStream = new GeneratedHydrologyCell
+            {
+                CellX = -10,
+                CellY = -20,
+                RunoffEquivalentCells = 16
+            };
+
+            using var riverThenStream = new NativeArray<GeneratedSurfaceWaterTile>(
+                WorldGridConstants.TilesPerChunk,
+                Allocator.Temp,
+                NativeArrayOptions.ClearMemory);
+            Assert.That(
+                DeterministicSurfaceWaterGenerator.TryApplyChannelTile(
+                    settings,
+                    worldTileX,
+                    worldTileY,
+                    false,
+                    true,
+                    strongerRiver,
+                    minimumTileX,
+                    minimumTileY,
+                    maximumTileX,
+                    maximumTileY,
+                    riverThenStream),
+                Is.True);
+            Assert.That(
+                DeterministicSurfaceWaterGenerator.TryApplyChannelTile(
+                    settings,
+                    worldTileX,
+                    worldTileY,
+                    true,
+                    false,
+                    weakerStream,
+                    minimumTileX,
+                    minimumTileY,
+                    maximumTileX,
+                    maximumTileY,
+                    riverThenStream),
+                Is.True);
+            AssertRepresentativeRiverWithCenterLine(
+                riverThenStream,
+                worldTileX - minimumTileX,
+                worldTileY - minimumTileY,
+                strongerRiver);
+
+            using var streamThenRiver = new NativeArray<GeneratedSurfaceWaterTile>(
+                WorldGridConstants.TilesPerChunk,
+                Allocator.Temp,
+                NativeArrayOptions.ClearMemory);
+            Assert.That(
+                DeterministicSurfaceWaterGenerator.TryApplyChannelTile(
+                    settings,
+                    worldTileX,
+                    worldTileY,
+                    true,
+                    false,
+                    weakerStream,
+                    minimumTileX,
+                    minimumTileY,
+                    maximumTileX,
+                    maximumTileY,
+                    streamThenRiver),
+                Is.True);
+            Assert.That(
+                DeterministicSurfaceWaterGenerator.TryApplyChannelTile(
+                    settings,
+                    worldTileX,
+                    worldTileY,
+                    false,
+                    true,
+                    strongerRiver,
+                    minimumTileX,
+                    minimumTileY,
+                    maximumTileX,
+                    maximumTileY,
+                    streamThenRiver),
+                Is.True);
+            AssertRepresentativeRiverWithCenterLine(
+                streamThenRiver,
+                worldTileX - minimumTileX,
+                worldTileY - minimumTileY,
+                strongerRiver);
+        }
+
+        /// <summary>
         /// 負座標チャンクを2回生成し、4096件の全固定値が一致し、表流水が海面未満へ置かれないことを保証します。
         /// </summary>
         [Test]
@@ -493,6 +602,60 @@ namespace Farmware.WorldGeneration.Tests
                 DeterministicSurfaceWaterPathGenerator.MaximumSearchNodeCount,
                 Allocator.Temp,
                 NativeArrayOptions.UninitializedMemory);
+        }
+
+        /// <summary>有限範囲から海面以上の1タイルを探し、重複河道テストの固定入力として返します。</summary>
+        /// <param name="settings">連続標高と海面を生成する固定設定です。</param>
+        /// <param name="worldTileX">成功時の水平絶対タイル座標です。</param>
+        /// <param name="worldTileY">成功時の垂直絶対タイル座標です。</param>
+        /// <returns>海面以上かつ標高生成可能なタイルを発見できた場合はtrueです。</returns>
+        private static bool TryFindEligibleTile(
+            in WorldGenerationSettings settings,
+            out int worldTileX,
+            out int worldTileY)
+        {
+            for (int candidateY = -64; candidateY <= 64; candidateY++)
+            {
+                for (int candidateX = -64; candidateX <= 64; candidateX++)
+                {
+                    if (!DeterministicEnvironmentGenerator.TryGenerateBaseClimate(
+                            settings,
+                            candidateX,
+                            candidateY,
+                            out GeneratedEnvironmentData environment)
+                        || environment.Elevation < settings.SeaLevelThreshold)
+                    {
+                        continue;
+                    }
+
+                    worldTileX = candidateX;
+                    worldTileY = candidateY;
+                    return true;
+                }
+            }
+
+            worldTileX = default;
+            worldTileY = default;
+            return false;
+        }
+
+        /// <summary>重複後の代表値が強い河川を維持し、中心線フラグも残ったことを検証します。</summary>
+        /// <param name="tiles">重複候補を適用済みの4096件表流水です。</param>
+        /// <param name="localTileX">検証するチャンク内水平タイル座標です。</param>
+        /// <param name="localTileY">検証するチャンク内垂直タイル座標です。</param>
+        /// <param name="expectedSource">代表として残る強い河川の水文セルです。</param>
+        private static void AssertRepresentativeRiverWithCenterLine(
+            NativeArray<GeneratedSurfaceWaterTile> tiles,
+            int localTileX,
+            int localTileY,
+            in GeneratedHydrologyCell expectedSource)
+        {
+            GeneratedSurfaceWaterTile actual = tiles[WorldGrid.ToTileIndex(localTileX, localTileY)];
+            Assert.That(actual.Type, Is.EqualTo(SurfaceWaterTileType.River));
+            Assert.That(actual.SourceAmount, Is.EqualTo(expectedSource.RunoffEquivalentCells));
+            Assert.That(actual.SourceCellX, Is.EqualTo(expectedSource.CellX));
+            Assert.That(actual.SourceCellY, Is.EqualTo(expectedSource.CellY));
+            Assert.That(actual.Flags & SurfaceWaterTileFlags.ChannelCenterLine, Is.Not.Zero);
         }
 
         /// <summary>単一チャンクの水文と全固定作業配列を準備し、製品と同じ表流水純粋生成を実行します。</summary>
