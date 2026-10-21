@@ -1732,6 +1732,13 @@ namespace Farmware.WorldGeneration.Tests
                     out GeneratedHydrologyCell expectedFirstHydrology),
                 Is.True);
             Assert.That(hydrology[0].HydrologyHeight, Is.EqualTo(expectedFirstHydrology.HydrologyHeight));
+            Assert.That(hydrology[0].HydrologyMoisture, Is.EqualTo(expectedFirstHydrology.HydrologyMoisture));
+            Assert.That(hydrology[0].CatchmentAreaCells, Is.EqualTo(expectedFirstHydrology.CatchmentAreaCells));
+            Assert.That(hydrology[0].RunoffMoistureSum, Is.EqualTo(expectedFirstHydrology.RunoffMoistureSum));
+            Assert.That(hydrology[0].RunoffEquivalentCells, Is.EqualTo(expectedFirstHydrology.RunoffEquivalentCells));
+            Assert.That(
+                hydrology[0].MaximumContributingDistance,
+                Is.EqualTo(expectedFirstHydrology.MaximumContributingDistance));
             Assert.That(hydrology[0].PlateauRank, Is.EqualTo(expectedFirstHydrology.PlateauRank));
             Assert.That(hydrology[0].FlowDirection, Is.EqualTo(expectedFirstHydrology.FlowDirection));
             Assert.That(
@@ -1744,6 +1751,7 @@ namespace Farmware.WorldGeneration.Tests
                 hydrology[0].DownstreamEdgeCount,
                 Is.EqualTo(expectedFirstHydrology.DownstreamEdgeCount));
             Assert.That(hydrology[0].ConnectionFlags, Is.EqualTo(expectedFirstHydrology.ConnectionFlags));
+            Assert.That(hydrology[0].CatchmentFlags, Is.EqualTo(expectedFirstHydrology.CatchmentFlags));
 
             // 地形・資源は先頭だけでなく全4096タイルを直接計算と比較し、作業配列への切替で結果が変わらないことを保証します。
             for (int index = 0; index < WorldGridConstants.TilesPerChunk; index++)

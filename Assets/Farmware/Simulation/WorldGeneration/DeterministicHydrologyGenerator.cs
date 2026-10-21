@@ -1,5 +1,5 @@
-// このファイルは、TERRAIN-01C3-A/Bの8×8水文セル、D8流向、最大4,096辺の下流終端を決定論的に生成します。
-// ChunkGenerationSystem、状態ハッシュ、後続の集水・湖処理が同じ純粋計算を共有し、ロード順や表示状態による差を防ぎます。
+// このファイルは、TERRAIN-01C3-A〜Cの8×8水文セル、D8流向、下流終端、集水・自然流出を決定論的に生成します。
+// ChunkGenerationSystem、状態ハッシュ、後続の湖処理が同じ純粋計算を共有し、ロード順や表示状態による差を防ぎます。
 
 using System;
 using Unity.Collections;
@@ -25,10 +25,22 @@ namespace Farmware.WorldGeneration
         /// <summary>Downstream Summaryの最大Levelです。Level 12が4,096辺を表します。</summary>
         public int MaximumDownstreamSummaryLevel;
 
+        /// <summary>1対象セルへ寄与させる上流水文セル数の固定上限です。対象セル自身を含みます。</summary>
+        public int MaximumCatchmentContributingCells;
+
+        /// <summary>空間集約Summaryの最大Levelです。Level 6が64×64水文セルを表します。</summary>
+        public int MaximumAggregationSummaryLevel;
+
+        /// <summary>固定の渓流・小川と判定する最小RunoffEquivalentCellsです。</summary>
+        public ushort StreamRunoffEquivalentThreshold;
+
+        /// <summary>固定の河川と判定する最小RunoffEquivalentCellsです。RiverはStreamも必ず伴います。</summary>
+        public ushort RiverRunoffEquivalentThreshold;
+
         /// <summary>
-        /// TERRAIN-01C3-A/Bの確定値を持つ既定設定を作ります。
+        /// TERRAIN-01C3-A〜Cの確定値を持つ既定設定を作ります。
         /// </summary>
-        /// <returns>8×8セル、9点サンプル、最大4,096辺・Level 12を持つ設定です。</returns>
+        /// <returns>8×8セル、9点サンプル、下流・上流各4,096件と固定流出閾値を持つ設定です。</returns>
         public static HydrologyGenerationSettings CreateDefault()
         {
             return new HydrologyGenerationSettings
@@ -36,7 +48,11 @@ namespace Farmware.WorldGeneration
                 CellSizeInTiles = 8,
                 RepresentativeSampleOffsetInTiles = 3,
                 MaximumDownstreamEdges = 4096,
-                MaximumDownstreamSummaryLevel = 12
+                MaximumDownstreamSummaryLevel = 12,
+                MaximumCatchmentContributingCells = 4096,
+                MaximumAggregationSummaryLevel = 6,
+                StreamRunoffEquivalentThreshold = 16,
+                RiverRunoffEquivalentThreshold = 128
             };
         }
     }
@@ -90,8 +106,49 @@ namespace Farmware.WorldGeneration
     }
 
     /// <summary>
+    /// D8下流候補の比較に必要な値だけを保持する小型の一時値です。
+    /// 集水・終端結果を含むGeneratedHydrologyCell全体を8件複製せず、固定512 bytes内で比較するために使用します。
+    /// </summary>
+    public struct HydrologyFlowCandidate
+    {
+        /// <summary>候補水文セルの水平絶対座標です。</summary>
+        public int CellX;
+
+        /// <summary>候補水文セルの垂直絶対座標です。</summary>
+        public int CellY;
+
+        /// <summary>同標高面の安定全順序を作る64bit順位です。</summary>
+        public ulong PlateauRank;
+
+        /// <summary>FlowKeyの先頭となる固定9地点の代表標高です。</summary>
+        public ushort HydrologyHeight;
+
+        /// <summary>海洋流出口かを比較時に判定する固定セル特性です。</summary>
+        public HydrologyCellFlags Flags;
+
+        /// <summary>
+        /// この候補が中心タイルの陸海判定による海洋流出口かを返します。
+        /// </summary>
+        public bool IsOceanOutlet => (Flags & HydrologyCellFlags.OceanOutlet) != 0;
+    }
+
+    /// <summary>
+    /// 集水域の有限探索で確定した補助状態をビット単位で保持します。
+    /// 現在の降雨やロード済み範囲ではなく、固定生成結果だけを表します。
+    /// </summary>
+    [Flags]
+    public enum HydrologyCatchmentFlags : byte
+    {
+        /// <summary>上流集合をすべて列挙でき、件数上限による打切りがない状態です。</summary>
+        None = 0,
+
+        /// <summary>4,096件の選択後も未選択の上流候補があり、固定上限で集計を打ち切った状態です。</summary>
+        Truncated = 1 << 0
+    }
+
+    /// <summary>
     /// 固定水文が持つ自然接続を重複可能なビットとして表します。
-    /// C3-Bでは下流終端3種だけを書き込み、河川・湖・地下水は後続PRで同じ値へ追加します。
+    /// C3-Cでは下流終端3種にStream・Riverを追加し、湖・地下水は後続PRで同じ値へ追加します。
     /// </summary>
     [Flags]
     public enum HydrologyConnectionFlags : ushort
@@ -146,14 +203,32 @@ namespace Farmware.WorldGeneration
         /// <summary>終端到達時は終端セル、LongDrainage時は4,096辺進んだセルの垂直絶対座標です。</summary>
         public int DownstreamReachCellY;
 
+        /// <summary>同じ代表標高の平坦面を循環なく並べる、Seed・版・座標・専用Salt由来の64bit順位です。</summary>
+        public ulong PlateauRank;
+
+        /// <summary>
+        /// 同じ上流集合に含む各HydrologyMoistureの符号付き64bit合計です。最大268,431,360です。
+        /// 仕様上の集約演算型を保ち、将来のSummary合成でも32bit型へ暗黙に狭めません。
+        /// </summary>
+        public long RunoffMoistureSum;
+
+        /// <summary>正規化済み上流集合に含む水文セル数です。対象セル自身を含み、最大4,096です。</summary>
+        public uint CatchmentAreaCells;
+
         /// <summary>中心からX・Yとも-3、0、+3にある固定9標高の整数平均です。</summary>
         public ushort HydrologyHeight;
 
         /// <summary>中心タイルだけの標高です。海面閾値との比較に使用し、9点平均で置き換えません。</summary>
         public ushort CenterElevation;
 
-        /// <summary>同じ代表標高の平坦面を循環なく並べる、Seed・版・座標・専用Salt由来の64bit順位です。</summary>
-        public ulong PlateauRank;
+        /// <summary>代表標高と同じ固定9地点で求めた基礎湿度の整数平均です。</summary>
+        public ushort HydrologyMoisture;
+
+        /// <summary>RunoffMoistureSumを65,535で整数除算した流出寄与セル相当値です。</summary>
+        public ushort RunoffEquivalentCells;
+
+        /// <summary>選択した上流セルのうち、対象セルから最も遠いD8辺数です。</summary>
+        public ushort MaximumContributingDistance;
 
         /// <summary>自身から終端または4,096辺上限までに実際に進んだD8辺数です。</summary>
         public ushort DownstreamEdgeCount;
@@ -166,6 +241,9 @@ namespace Farmware.WorldGeneration
 
         /// <summary>中心タイル由来の海洋流出口など、C3-Aで確定した特性です。</summary>
         public HydrologyCellFlags Flags;
+
+        /// <summary>上流集合が4,096件上限で打ち切られたかなど、C3-Cの集水補助状態です。</summary>
+        public HydrologyCatchmentFlags CatchmentFlags;
 
         /// <summary>
         /// このセルが中心タイルの陸海判定による海洋流出口かを返します。
@@ -184,6 +262,11 @@ namespace Farmware.WorldGeneration
             & (HydrologyConnectionFlags.Marine
                 | HydrologyConnectionFlags.ClosedBasin
                 | HydrologyConnectionFlags.LongDrainage);
+
+        /// <summary>
+        /// 上流集合に未選択候補が残り、固定上限で打ち切られたかを返します。
+        /// </summary>
+        public bool CatchmentTruncated => (CatchmentFlags & HydrologyCatchmentFlags.Truncated) != 0;
     }
 
     /// <summary>
@@ -199,10 +282,16 @@ namespace Farmware.WorldGeneration
         public const int CellsPerChunk = CellsPerChunkAxis * CellsPerChunkAxis;
 
         /// <summary>
-        /// 水文設定が確定した8×8格子と9点サンプルを表すか検証します。
+        /// 8行を並列生成するときに各行へ独立した上流Heapを貸すための、1チャンク分の固定作業要素数です。
+        /// </summary>
+        internal const int ParallelChunkFrontierCapacity =
+            CellsPerChunkAxis * DeterministicHydrologyCatchmentResolver.MaximumFrontierCapacity;
+
+        /// <summary>
+        /// 水文設定が確定した8×8格子、9点サンプル、有限の下流・上流上限を表すか検証します。
         /// </summary>
         /// <param name="settings">検証する固定水文設定です。</param>
-        /// <returns>暗黙補正せずC3-A/Bの生成へ使用できる場合はtrueです。</returns>
+        /// <returns>暗黙補正せずC3-A〜C1の生成へ使用できる場合はtrueです。</returns>
         public static bool ValidateSettings(in HydrologyGenerationSettings settings)
         {
             return settings.CellSizeInTiles == 8
@@ -210,6 +299,13 @@ namespace Farmware.WorldGeneration
                 && settings.MaximumDownstreamEdges == 4096
                 && settings.MaximumDownstreamSummaryLevel == 12
                 && (1 << settings.MaximumDownstreamSummaryLevel) == settings.MaximumDownstreamEdges
+                && settings.MaximumCatchmentContributingCells == 4096
+                && settings.MaximumAggregationSummaryLevel == 6
+                && (1 << (settings.MaximumAggregationSummaryLevel * 2))
+                    == settings.MaximumCatchmentContributingCells
+                && settings.StreamRunoffEquivalentThreshold == 16
+                && settings.RiverRunoffEquivalentThreshold == 128
+                && settings.StreamRunoffEquivalentThreshold < settings.RiverRunoffEquivalentThreshold
                 && WorldGridConstants.LogicalChunkSize % settings.CellSizeInTiles == 0
                 && WorldGridConstants.LogicalChunkSize / settings.CellSizeInTiles == CellsPerChunkAxis;
         }
@@ -252,7 +348,7 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>
-        /// 1水文セルの代表標高、中心標高、平坦面順位、D8下流、最大4,096辺の終端を生成します。
+        /// 1水文セルの代表値、D8下流、固定終端、最大4,096セルの集水・自然流出を生成します。
         /// </summary>
         /// <param name="settings">Seed、GeneratorVersion、標高、水文設定を持つワールド設定です。</param>
         /// <param name="cellX">水平の絶対水文セル座標です。</param>
@@ -265,22 +361,80 @@ namespace Farmware.WorldGeneration
             int cellY,
             out GeneratedHydrologyCell cell)
         {
+            using NativeArray<HydrologyUpstreamCandidate> frontier =
+                new NativeArray<HydrologyUpstreamCandidate>(
+                    DeterministicHydrologyCatchmentResolver.MaximumFrontierCapacity,
+                    Allocator.Temp,
+                    NativeArrayOptions.UninitializedMemory);
+            return TryGenerateCell(settings, cellX, cellY, frontier, out cell);
+        }
+
+        /// <summary>
+        /// 呼出元が再利用する上流フロンティアを使い、1水文セルの全固定値をmanaged allocationなしで生成します。
+        /// 単一セルAPIと直列Chunk経路は同じ配列を順番に再利用し、セルごとの大容量確保を避けます。
+        /// </summary>
+        /// <param name="settings">固定ワールド生成設定です。</param>
+        /// <param name="cellX">水平の絶対水文セル座標です。</param>
+        /// <param name="cellY">垂直の絶対水文セル座標です。</param>
+        /// <param name="frontier">呼出元が所有する上流候補Heap用配列です。</param>
+        /// <param name="cell">成功時の下流・上流を含む固定水文結果です。</param>
+        /// <returns>設定、座標、全下流辺、全逆辺を固定上限内で検証できた場合はtrueです。</returns>
+        internal static bool TryGenerateCell(
+            in WorldGenerationSettings settings,
+            int cellX,
+            int cellY,
+            NativeArray<HydrologyUpstreamCandidate> frontier,
+            out GeneratedHydrologyCell cell)
+        {
+            return TryGenerateCell(settings, cellX, cellY, frontier, 0, out cell);
+        }
+
+        /// <summary>
+        /// 呼出元配列内の専用Heap領域を使い、並列の別行と作業メモリを共有せず1水文セルを生成します。
+        /// </summary>
+        /// <param name="settings">固定ワールド生成設定です。</param>
+        /// <param name="cellX">水平の絶対水文セル座標です。</param>
+        /// <param name="cellY">垂直の絶対水文セル座標です。</param>
+        /// <param name="frontier">一つ以上の上流候補Heap領域を持つ作業配列です。</param>
+        /// <param name="frontierStartIndex">この呼出しだけが使用する固定容量領域の先頭添字です。</param>
+        /// <param name="cell">成功時の下流・上流を含む固定水文結果です。</param>
+        /// <returns>設定、座標、下流辺、逆辺を固定上限内で検証できた場合はtrueです。</returns>
+        internal static bool TryGenerateCell(
+            in WorldGenerationSettings settings,
+            int cellX,
+            int cellY,
+            NativeArray<HydrologyUpstreamCandidate> frontier,
+            int frontierStartIndex,
+            out GeneratedHydrologyCell cell)
+        {
             cell = default;
             if (!DeterministicHydrologyDownstreamResolver.TryResolveWithStartCell(
                     settings,
                     cellX,
                     cellY,
                     out cell,
-                    out HydrologyDownstreamResult downstreamResult))
+                    out HydrologyDownstreamResult downstreamResult)
+                || !DeterministicHydrologyCatchmentResolver.TryResolveWithStartCell(
+                    settings,
+                    cell,
+                    frontier,
+                    frontierStartIndex,
+                    out HydrologyCatchmentResult catchmentResult))
             {
                 return false;
             }
 
-            // 一辺の流向と終端分類を同じBuffer要素へ揃え、後続Systemが部分的な水文状態を読まないようにします。
+            // 下流と上流の両計算が成功してから同じBuffer要素へ揃え、部分的なHydrologyStateを公開しません。
             cell.DownstreamReachCellX = downstreamResult.ReachedCellX;
             cell.DownstreamReachCellY = downstreamResult.ReachedCellY;
             cell.DownstreamEdgeCount = downstreamResult.EdgeCount;
-            cell.ConnectionFlags = downstreamResult.Terminal;
+            cell.HydrologyMoisture = catchmentResult.TargetHydrologyMoisture;
+            cell.CatchmentAreaCells = catchmentResult.CatchmentAreaCells;
+            cell.RunoffMoistureSum = catchmentResult.RunoffMoistureSum;
+            cell.RunoffEquivalentCells = catchmentResult.RunoffEquivalentCells;
+            cell.MaximumContributingDistance = catchmentResult.MaximumContributingDistance;
+            cell.ConnectionFlags = downstreamResult.Terminal | catchmentResult.SurfaceWaterConnectionFlags;
+            cell.CatchmentFlags = catchmentResult.CatchmentFlags;
             return true;
         }
 
@@ -316,7 +470,8 @@ namespace Farmware.WorldGeneration
                 return true;
             }
 
-            FixedList512Bytes<GeneratedHydrologyCell> neighbors = default;
+            // 下流選択に不要な集水・終端結果を複製せず、小型候補8件を固定512 bytes内へ収めます。
+            FixedList512Bytes<HydrologyFlowCandidate> neighbors = default;
             for (int directionIndex = 1; directionIndex <= 8; directionIndex++)
             {
                 GetDirectionOffset((HydrologyFlowDirection)directionIndex, out int offsetX, out int offsetY);
@@ -327,10 +482,10 @@ namespace Farmware.WorldGeneration
                     return false;
                 }
 
-                neighbors.Add(neighbor);
+                neighbors.Add(CreateFlowCandidate(neighbor));
             }
 
-            if (!TrySelectDownstream(cell, neighbors, out GeneratedHydrologyCell selected))
+            if (!TrySelectDownstream(cell, neighbors, out HydrologyFlowCandidate selected))
             {
                 // 海でもなく、自身より小さい安定キーもないセルは閉鎖流域候補として下流なしにします。
                 cell.DownstreamCellX = cell.CellX;
@@ -357,8 +512,8 @@ namespace Farmware.WorldGeneration
         /// <returns>海洋流出口または自身より小さい陸上Flow順が見つかった場合はtrueです。</returns>
         public static bool TrySelectDownstream(
             in GeneratedHydrologyCell current,
-            in FixedList512Bytes<GeneratedHydrologyCell> neighbors,
-            out GeneratedHydrologyCell selected)
+            in FixedList512Bytes<HydrologyFlowCandidate> neighbors,
+            out HydrologyFlowCandidate selected)
         {
             selected = default;
             if (current.IsOceanOutlet || neighbors.Length != 8)
@@ -367,11 +522,12 @@ namespace Farmware.WorldGeneration
             }
 
             bool foundDownstream = false;
+            HydrologyFlowCandidate currentCandidate = CreateFlowCandidate(current);
 
             // 海岸の9点平均が高くても排水を妨げないよう、海洋流出口だけを標高比較より先に選びます。
             for (int index = 0; index < neighbors.Length; index++)
             {
-                GeneratedHydrologyCell candidate = neighbors[index];
+                HydrologyFlowCandidate candidate = neighbors[index];
                 if (candidate.IsOceanOutlet
                     && (!foundDownstream || CompareFlowOrder(candidate, selected) < 0))
                 {
@@ -387,8 +543,8 @@ namespace Farmware.WorldGeneration
 
             for (int index = 0; index < neighbors.Length; index++)
             {
-                GeneratedHydrologyCell candidate = neighbors[index];
-                if (candidate.IsOceanOutlet || CompareFlowOrder(candidate, current) >= 0)
+                HydrologyFlowCandidate candidate = neighbors[index];
+                if (candidate.IsOceanOutlet || CompareFlowOrder(candidate, currentCandidate) >= 0)
                 {
                     // 陸上同士は代表標高、平坦面順位、衝突時座標が必ず小さくなる辺だけを許可します。
                     continue;
@@ -431,6 +587,40 @@ namespace Farmware.WorldGeneration
             return xComparison != 0 ? xComparison : first.CellY.CompareTo(second.CellY);
         }
 
+        /// <summary>D8選択用の小型候補二つを、代表標高、順位、座標の安定順で比較します。</summary>
+        private static int CompareFlowOrder(
+            in HydrologyFlowCandidate first,
+            in HydrologyFlowCandidate second)
+        {
+            int heightComparison = first.HydrologyHeight.CompareTo(second.HydrologyHeight);
+            if (heightComparison != 0)
+            {
+                return heightComparison;
+            }
+
+            int rankComparison = first.PlateauRank.CompareTo(second.PlateauRank);
+            if (rankComparison != 0)
+            {
+                return rankComparison;
+            }
+
+            int xComparison = first.CellX.CompareTo(second.CellX);
+            return xComparison != 0 ? xComparison : first.CellY.CompareTo(second.CellY);
+        }
+
+        /// <summary>完全な水文セルから、D8比較に必要な固定値だけを小型候補へコピーします。</summary>
+        private static HydrologyFlowCandidate CreateFlowCandidate(in GeneratedHydrologyCell cell)
+        {
+            return new HydrologyFlowCandidate
+            {
+                CellX = cell.CellX,
+                CellY = cell.CellY,
+                PlateauRank = cell.PlateauRank,
+                HydrologyHeight = cell.HydrologyHeight,
+                Flags = cell.Flags
+            };
+        }
+
         /// <summary>
         /// 1論理チャンクの中心所有8×8水文セルを、行優先のNativeArrayへ生成します。
         /// </summary>
@@ -446,6 +636,36 @@ namespace Farmware.WorldGeneration
             NativeArray<GeneratedHydrologyCell> cells)
         {
             if (!cells.IsCreated || cells.Length < CellsPerChunk)
+            {
+                return false;
+            }
+
+            using NativeArray<HydrologyUpstreamCandidate> frontier =
+                new NativeArray<HydrologyUpstreamCandidate>(
+                    DeterministicHydrologyCatchmentResolver.MaximumFrontierCapacity,
+                    Allocator.Temp,
+                    NativeArrayOptions.UninitializedMemory);
+            return TryGenerateChunkCells(settings, chunkX, chunkY, cells, frontier);
+        }
+
+        /// <summary>
+        /// 1論理チャンクの64水文セルを、呼出元が所有する上流探索配列を再利用して生成します。
+        /// </summary>
+        /// <param name="settings">固定ワールド生成設定です。</param>
+        /// <param name="chunkX">水平の論理チャンク座標です。</param>
+        /// <param name="chunkY">垂直の論理チャンク座標です。</param>
+        /// <param name="cells">呼出元が所有する64件以上の出力配列です。</param>
+        /// <param name="frontier">64セルで順次再利用する上流候補Heap用配列です。</param>
+        /// <returns>全64件を生成できた場合はtrueです。失敗時は部分値を公開しないでください。</returns>
+        internal static bool TryGenerateChunkCells(
+            in WorldGenerationSettings settings,
+            int chunkX,
+            int chunkY,
+            NativeArray<GeneratedHydrologyCell> cells,
+            NativeArray<HydrologyUpstreamCandidate> frontier)
+        {
+            if (!cells.IsCreated || cells.Length < CellsPerChunk
+                || !DeterministicHydrologyCatchmentResolver.HasRequiredFrontierCapacity(frontier))
             {
                 return false;
             }
@@ -469,6 +689,7 @@ namespace Farmware.WorldGeneration
                         settings,
                         (int)firstCellX + localX,
                         (int)firstCellY + localY,
+                        frontier,
                         out GeneratedHydrologyCell cell))
                     {
                         return false;
@@ -476,6 +697,64 @@ namespace Farmware.WorldGeneration
 
                     cells[index] = cell;
                 }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// 1論理チャンクの指定した水文1行だけを生成し、8行を独立Jobとして並列化できるようにします。
+        /// </summary>
+        /// <param name="settings">固定ワールド生成設定です。</param>
+        /// <param name="chunkX">水平の論理チャンク座標です。</param>
+        /// <param name="chunkY">垂直の論理チャンク座標です。</param>
+        /// <param name="localY">チャンク内の水文行です。0以上8未満に限定します。</param>
+        /// <param name="cells">全8行が互いに異なる範囲へ書き込む64件以上の出力配列です。</param>
+        /// <param name="frontier">各行へ固定容量ずつ割り当てた、8領域分の上流Heap配列です。</param>
+        /// <returns>指定行の8セルをすべて生成できた場合はtrueです。</returns>
+        internal static bool TryGenerateChunkCellRow(
+            in WorldGenerationSettings settings,
+            int chunkX,
+            int chunkY,
+            int localY,
+            NativeArray<GeneratedHydrologyCell> cells,
+            NativeArray<HydrologyUpstreamCandidate> frontier)
+        {
+            if (localY < 0 || localY >= CellsPerChunkAxis
+                || !cells.IsCreated || cells.Length < CellsPerChunk
+                || !frontier.IsCreated || frontier.Length < ParallelChunkFrontierCapacity)
+            {
+                return false;
+            }
+
+            long firstCellX = (long)chunkX * CellsPerChunkAxis;
+            long firstCellY = (long)chunkY * CellsPerChunkAxis;
+            long rowCellY = firstCellY + localY;
+            long lastCellX = firstCellX + CellsPerChunkAxis - 1L;
+            if (firstCellX < int.MinValue || lastCellX > int.MaxValue
+                || rowCellY < int.MinValue || rowCellY > int.MaxValue)
+            {
+                return false;
+            }
+
+            // 行ごとに別Heap領域を使うため、Workerが同時に別行を処理しても候補値が混ざりません。
+            int frontierStartIndex =
+                localY * DeterministicHydrologyCatchmentResolver.MaximumFrontierCapacity;
+            for (int localX = 0; localX < CellsPerChunkAxis; localX++)
+            {
+                int index = (localY * CellsPerChunkAxis) + localX;
+                if (!TryGenerateCell(
+                        settings,
+                        (int)firstCellX + localX,
+                        (int)rowCellY,
+                        frontier,
+                        frontierStartIndex,
+                        out GeneratedHydrologyCell cell))
+                {
+                    return false;
+                }
+
+                cells[index] = cell;
             }
 
             return true;
@@ -493,6 +772,11 @@ namespace Farmware.WorldGeneration
             ChunkCoordinate chunkCoordinate,
             ulong currentHash)
         {
+            using NativeArray<HydrologyUpstreamCandidate> frontier =
+                new NativeArray<HydrologyUpstreamCandidate>(
+                    DeterministicHydrologyCatchmentResolver.MaximumFrontierCapacity,
+                    Allocator.Temp,
+                    NativeArrayOptions.UninitializedMemory);
             long firstCellX = (long)chunkCoordinate.X * CellsPerChunkAxis;
             long firstCellY = (long)chunkCoordinate.Y * CellsPerChunkAxis;
             for (int localY = 0; localY < CellsPerChunkAxis; localY++)
@@ -507,6 +791,7 @@ namespace Farmware.WorldGeneration
                             settings,
                             (int)candidateX,
                             (int)candidateY,
+                            frontier,
                             out GeneratedHydrologyCell cell))
                     {
                         // 不正設定や座標端を通常セルと同じdefault値へ潰さず、失敗自体を比較可能にします。
@@ -583,6 +868,54 @@ namespace Farmware.WorldGeneration
                     ? HydrologyCellFlags.OceanOutlet
                     : HydrologyCellFlags.None
             };
+            return true;
+        }
+
+        /// <summary>
+        /// 代表標高と同じ固定9地点の基礎湿度を64bit合計し、整数平均を返します。
+        /// 現在の降雨や土壌水分を混ぜず、上流集合の固定流出寄与だけに使用します。
+        /// </summary>
+        /// <param name="settings">固定ワールド生成設定です。</param>
+        /// <param name="cellX">水平の絶対水文セル座標です。</param>
+        /// <param name="cellY">垂直の絶対水文セル座標です。</param>
+        /// <param name="moisture">成功時の0〜65,535の固定9地点平均です。</param>
+        /// <returns>中心と全9サンプル座標が有効で、基礎気候を生成できた場合はtrueです。</returns>
+        internal static bool TrySampleHydrologyMoisture(
+            in WorldGenerationSettings settings,
+            int cellX,
+            int cellY,
+            out ushort moisture)
+        {
+            moisture = default;
+            if (!TryGetCellCenter(settings.Hydrology, cellX, cellY, out int centerX, out int centerY))
+            {
+                return false;
+            }
+
+            int sampleOffset = settings.Hydrology.RepresentativeSampleOffsetInTiles;
+            long moistureTotal = 0L;
+            for (int sampleYIndex = -1; sampleYIndex <= 1; sampleYIndex++)
+            {
+                for (int sampleXIndex = -1; sampleXIndex <= 1; sampleXIndex++)
+                {
+                    long sampleX = (long)centerX + (sampleXIndex * sampleOffset);
+                    long sampleY = (long)centerY + (sampleYIndex * sampleOffset);
+                    if (sampleX < int.MinValue || sampleX > int.MaxValue
+                        || sampleY < int.MinValue || sampleY > int.MaxValue
+                        || !DeterministicEnvironmentGenerator.TryGenerateBaseClimate(
+                            settings,
+                            (int)sampleX,
+                            (int)sampleY,
+                            out GeneratedEnvironmentData environment))
+                    {
+                        return false;
+                    }
+
+                    moistureTotal += environment.BaseMoisture;
+                }
+            }
+
+            moisture = (ushort)(moistureTotal / 9L);
             return true;
         }
 
@@ -682,13 +1015,22 @@ namespace Farmware.WorldGeneration
                 values |= (ulong)(byte)cell.Flags << 40;
                 ulong downstreamState = cell.DownstreamEdgeCount;
                 downstreamState |= (ulong)(ushort)cell.ConnectionFlags << 16;
+                downstreamState |= (ulong)(byte)cell.CatchmentFlags << 32;
+                ulong catchmentCount = cell.CatchmentAreaCells;
+                ulong runoffMoistureSum = (ulong)cell.RunoffMoistureSum;
+                ulong catchmentValues = cell.HydrologyMoisture;
+                catchmentValues |= (ulong)cell.RunoffEquivalentCells << 16;
+                catchmentValues |= (ulong)cell.MaximumContributingDistance << 32;
 
                 ulong coordinateHash = WorldSeedUtility.Mix64(currentHash ^ coordinate);
                 ulong downstreamHash = WorldSeedUtility.Mix64(coordinateHash ^ downstream);
                 ulong reachHash = WorldSeedUtility.Mix64(downstreamHash ^ downstreamReach);
                 ulong valuesHash = WorldSeedUtility.Mix64(reachHash ^ values);
                 valuesHash = WorldSeedUtility.Mix64(valuesHash ^ downstreamState);
-                return WorldSeedUtility.Mix64(valuesHash ^ cell.PlateauRank);
+                ulong catchmentHash = WorldSeedUtility.Mix64(valuesHash ^ catchmentCount);
+                catchmentHash = WorldSeedUtility.Mix64(catchmentHash ^ runoffMoistureSum);
+                catchmentHash = WorldSeedUtility.Mix64(catchmentHash ^ catchmentValues);
+                return WorldSeedUtility.Mix64(catchmentHash ^ cell.PlateauRank);
             }
         }
     }

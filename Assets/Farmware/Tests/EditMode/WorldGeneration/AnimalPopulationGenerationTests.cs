@@ -570,6 +570,63 @@ namespace Farmware.WorldGeneration.Tests
             }
         }
 
+        /// <summary>
+        /// 個体群Worldの通常フレームでは生成Jobを先行投入する一方、固定Tick入口までは結果を公開しないことを保証します。
+        /// </summary>
+        [Test]
+        public void GenerationSystem_PreSchedulesRunningWorldAndPublishesOnlyAtFixedTickBoundary()
+        {
+            BlobAssetReference<DefinitionCatalogBlob> definitions = default;
+            BlobAssetReference<AnimalSpeciesCatalogBlob> animals = default;
+            try
+            {
+                CreateCatalogs(out definitions, out animals);
+                using World world = new World("Chunk generation pre-schedule boundary test");
+                EntityManager manager = world.EntityManager;
+                PrepareWorldSingletons(world, animals);
+                Entity configuration = manager.CreateEntity();
+                manager.AddComponentData(configuration, WorldGenerationSettings.CreateDefault(123456789UL, 1));
+                manager.AddComponentData(configuration, ResourceGenerationSettings.CreateDefault());
+                manager.AddComponentData(configuration, ChunkStreamingSettings.CreateDefault());
+                manager.AddComponentData(configuration, new SimulationPauseState());
+
+                Entity chunk = CreateReadyChunk(manager, -4, -4);
+                manager.SetComponentData(chunk, new ChunkGenerationStatus { Phase = ChunkGenerationPhase.Queued });
+                manager.AddComponent<ChunkGenerationRequest>(chunk);
+                manager.GetBuffer<GeneratedTile>(chunk).Clear();
+                manager.GetBuffer<GeneratedResourceTile>(chunk).Clear();
+
+                SystemHandle generation = world.GetOrCreateSystem<ChunkGenerationSystem>();
+                SystemHandle boundary = world.GetOrCreateSystem<ChunkGenerationFixedTickPublicationSystem>();
+
+                // 通常フレームでは重い計算をWorkerへ渡しますが、Simulationが参照するBufferはまだ空のままにします。
+                generation.Update(world.Unmanaged);
+                Assert.That(
+                    manager.GetComponentData<ChunkGenerationStatus>(chunk).Phase,
+                    Is.EqualTo(ChunkGenerationPhase.GeneratingData));
+                Assert.That(manager.IsComponentEnabled<ChunkGenerationRequest>(chunk), Is.False);
+                Assert.That(manager.GetBuffer<GeneratedTile>(chunk).Length, Is.Zero);
+                Assert.That(manager.GetBuffer<GeneratedResourceTile>(chunk).Length, Is.Zero);
+                Assert.That(manager.GetBuffer<GeneratedHydrologyCell>(chunk).Length, Is.Zero);
+
+                // 固定Tick入口は先行Jobだけを待って一括公開し、地形・資源・水文を同じ境界で可視化可能にします。
+                boundary.Update(world.Unmanaged);
+                Assert.That(
+                    manager.GetComponentData<ChunkGenerationStatus>(chunk).Phase,
+                    Is.EqualTo(ChunkGenerationPhase.ReadyToApply));
+                Assert.That(manager.GetBuffer<GeneratedTile>(chunk).Length,
+                    Is.EqualTo(WorldGridConstants.TilesPerChunk));
+                Assert.That(manager.GetBuffer<GeneratedResourceTile>(chunk).Length,
+                    Is.EqualTo(WorldGridConstants.TilesPerChunk));
+                Assert.That(manager.GetBuffer<GeneratedHydrologyCell>(chunk).Length,
+                    Is.EqualTo(DeterministicHydrologyGenerator.CellsPerChunk));
+            }
+            finally
+            {
+                DisposeCatalogs(definitions, animals);
+            }
+        }
+
         /// <summary>最初から同じ4要求を作り、描画フレーム更新と実物の固定Tick Groupを通したハッシュを返します。</summary>
         /// <param name="catalog">各比較Worldで共通に使う動物種Blobです。</param>
         /// <param name="frameDeltas">合計0.2秒となる描画フレーム幅です。固定Tickは手動加算しません。</param>

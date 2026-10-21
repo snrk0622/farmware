@@ -1,5 +1,5 @@
-// このファイルは、TERRAIN-01C3-A/Bの水文基礎格子、D8流向、Level 0〜12 Summary、最大4,096辺の終端分類を検証します。
-// 集水面積、流出、湖は後続枝番の責務とし、ここでは下流結果が決定論的かつ有限になることを保証します。
+// このファイルは、TERRAIN-01C3-A〜Cの水文格子、D8流向、下流終端、集水面積、自然流出を検証します。
+// 湖と診断表示は後続枝番の責務とし、ここでは下流・上流結果が決定論的かつ有限になることを保証します。
 
 using System;
 using System.Collections.Generic;
@@ -11,7 +11,7 @@ using Unity.Collections.LowLevel.Unsafe;
 namespace Farmware.WorldGeneration.Tests
 {
     /// <summary>
-    /// 固定8×8格子、D8辺、下流Summaryと終端分類をSceneやGameObjectなしで検証するEditModeテストです。
+    /// 固定8×8格子、D8辺、下流終端、集水・自然流出をSceneやGameObjectなしで検証するEditModeテストです。
     /// 純粋GeneratorとChunkGenerationSystemが共有する入力・出力契約を対象にします。
     /// </summary>
     public sealed class DeterministicHydrologyGeneratorTests
@@ -20,7 +20,7 @@ namespace Farmware.WorldGeneration.Tests
         /// 製品既定値を準備し、8タイル格子、3タイルサンプル、1チャンク64セルが確定仕様と一致することを保証します。
         /// </summary>
         [Test]
-        public void DefaultSettings_MatchTerrain01C3BContract()
+        public void DefaultSettings_MatchTerrain01C3CContract()
         {
             WorldGenerationSettings settings = CreateSettings("hydrology-defaults");
 
@@ -29,18 +29,112 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(settings.Hydrology.RepresentativeSampleOffsetInTiles, Is.EqualTo(3));
             Assert.That(settings.Hydrology.MaximumDownstreamEdges, Is.EqualTo(4096));
             Assert.That(settings.Hydrology.MaximumDownstreamSummaryLevel, Is.EqualTo(12));
+            Assert.That(settings.Hydrology.MaximumCatchmentContributingCells, Is.EqualTo(4096));
+            Assert.That(settings.Hydrology.MaximumAggregationSummaryLevel, Is.EqualTo(6));
+            Assert.That(settings.Hydrology.StreamRunoffEquivalentThreshold, Is.EqualTo(16));
+            Assert.That(settings.Hydrology.RiverRunoffEquivalentThreshold, Is.EqualTo(128));
             Assert.That(DeterministicHydrologyGenerator.CellsPerChunkAxis, Is.EqualTo(8));
             Assert.That(DeterministicHydrologyGenerator.CellsPerChunk, Is.EqualTo(64));
         }
 
         /// <summary>
-        /// ECS Bufferと生成作業枠の容量見積もりが、終端結果を含むUnityレイアウト48 bytesと一致することを保証します。
+        /// ECS Bufferと生成作業枠の容量見積もりが、集水・流出結果を含むUnityレイアウト64 bytesと一致することを保証します。
         /// 後続PRでフィールドを追加した場合に、性能文書と容量見積もりの更新漏れを検出します。
         /// </summary>
         [Test]
         public void GeneratedHydrologyCell_SizeMatchesCapacityDocumentation()
         {
-            Assert.That(UnsafeUtility.SizeOf<GeneratedHydrologyCell>(), Is.EqualTo(48));
+            Assert.That(UnsafeUtility.SizeOf<GeneratedHydrologyCell>(), Is.EqualTo(64));
+            Assert.That(
+                typeof(GeneratedHydrologyCell).GetField(nameof(GeneratedHydrologyCell.RunoffMoistureSum))?.FieldType,
+                Is.EqualTo(typeof(long)));
+            Assert.That(UnsafeUtility.SizeOf<HydrologyFlowCandidate>(), Is.EqualTo(24));
+
+            FixedList512Bytes<HydrologyFlowCandidate> candidates = default;
+            Assert.That(candidates.Capacity, Is.GreaterThanOrEqualTo(8));
+        }
+
+        /// <summary>
+        /// 渓流・河川境界の直前と直後を入力し、0〜15は未固定、16〜127はStream、128以上はStreamとRiverになることを保証します。
+        /// </summary>
+        [TestCase(15, HydrologyConnectionFlags.None)]
+        [TestCase(16, HydrologyConnectionFlags.Stream)]
+        [TestCase(127, HydrologyConnectionFlags.Stream)]
+        [TestCase(128, HydrologyConnectionFlags.Stream | HydrologyConnectionFlags.River)]
+        [TestCase(4096, HydrologyConnectionFlags.Stream | HydrologyConnectionFlags.River)]
+        public void SurfaceWaterClassification_UsesFixedRunoffBoundaries(
+            int runoffEquivalentCells,
+            HydrologyConnectionFlags expected)
+        {
+            HydrologyGenerationSettings settings = HydrologyGenerationSettings.CreateDefault();
+
+            Assert.That(
+                DeterministicHydrologyCatchmentResolver.ClassifySurfaceWaterConnection(
+                    settings,
+                    (ushort)runoffEquivalentCells),
+                Is.EqualTo(expected));
+        }
+
+        /// <summary>
+        /// 同じ対象セルの集水を2回生成し、対象自身を含む件数、湿度合計、整数流出値、打切り状態が再現することを保証します。
+        /// </summary>
+        [Test]
+        public void CatchmentResolution_IsFiniteAndDeterministic()
+        {
+            WorldGenerationSettings settings = CreateSettings("hydrology-catchment-deterministic");
+
+            Assert.That(
+                DeterministicHydrologyCatchmentResolver.TryResolve(settings, -37, 52, out HydrologyCatchmentResult first),
+                Is.True);
+            Assert.That(
+                DeterministicHydrologyCatchmentResolver.TryResolve(settings, -37, 52, out HydrologyCatchmentResult repeated),
+                Is.True);
+
+            Assert.That(first.CatchmentAreaCells, Is.InRange(1u, 4096u));
+            Assert.That(first.RunoffMoistureSum, Is.GreaterThanOrEqualTo(first.TargetHydrologyMoisture));
+            Assert.That(first.RunoffMoistureSum, Is.LessThanOrEqualTo(4096L * ushort.MaxValue));
+            Assert.That(first.RunoffEquivalentCells, Is.EqualTo(first.RunoffMoistureSum / ushort.MaxValue));
+            Assert.That(first.CatchmentAreaCells, Is.EqualTo(repeated.CatchmentAreaCells));
+            Assert.That(first.RunoffMoistureSum, Is.EqualTo(repeated.RunoffMoistureSum));
+            Assert.That(first.RunoffEquivalentCells, Is.EqualTo(repeated.RunoffEquivalentCells));
+            Assert.That(first.MaximumContributingDistance, Is.EqualTo(repeated.MaximumContributingDistance));
+            Assert.That(first.CatchmentFlags, Is.EqualTo(repeated.CatchmentFlags));
+            Assert.That(first.SurfaceWaterConnectionFlags, Is.EqualTo(repeated.SurfaceWaterConnectionFlags));
+        }
+
+        /// <summary>
+        /// 水文セル中心の固定9地点をテスト側でも基礎気候から平均し、製品HydrologyMoistureが同じ整数値を使うことを保証します。
+        /// </summary>
+        [Test]
+        public void HydrologyMoisture_AveragesTheFixedNineBaseMoistureSamples()
+        {
+            WorldGenerationSettings settings = CreateSettings("hydrology-moisture-nine-samples");
+            const int cellX = -9;
+            const int cellY = 14;
+            int centerX = cellX * settings.Hydrology.CellSizeInTiles;
+            int centerY = cellY * settings.Hydrology.CellSizeInTiles;
+            long expectedTotal = 0L;
+
+            for (int sampleYIndex = -1; sampleYIndex <= 1; sampleYIndex++)
+            {
+                for (int sampleXIndex = -1; sampleXIndex <= 1; sampleXIndex++)
+                {
+                    Assert.That(
+                        DeterministicEnvironmentGenerator.TryGenerateBaseClimate(
+                            settings,
+                            centerX + (sampleXIndex * settings.Hydrology.RepresentativeSampleOffsetInTiles),
+                            centerY + (sampleYIndex * settings.Hydrology.RepresentativeSampleOffsetInTiles),
+                            out GeneratedEnvironmentData environment),
+                        Is.True);
+                    expectedTotal += environment.BaseMoisture;
+                }
+            }
+
+            Assert.That(
+                DeterministicHydrologyGenerator.TryGenerateCell(settings, cellX, cellY, out GeneratedHydrologyCell cell),
+                Is.True);
+            Assert.That(cell.HydrologyMoisture, Is.EqualTo((ushort)(expectedTotal / 9L)));
+            Assert.That(cell.RunoffMoistureSum, Is.GreaterThanOrEqualTo(cell.HydrologyMoisture));
         }
 
         /// <summary>
@@ -398,16 +492,16 @@ namespace Farmware.WorldGeneration.Tests
             GeneratedHydrologyCell current = CreateSyntheticCell(0, 0, 10000, 500, false);
             GeneratedHydrologyCell expectedOcean = CreateSyntheticCell(-1, 0, 50000, 100, true);
             GeneratedHydrologyCell otherOcean = CreateSyntheticCell(1, 0, 60000, 200, true);
-            FixedList512Bytes<GeneratedHydrologyCell> forward = default;
-            forward.Add(CreateSyntheticCell(1, 1, 1000, 1, false));
-            forward.Add(otherOcean);
-            forward.Add(CreateSyntheticCell(0, 1, 2000, 2, false));
-            forward.Add(expectedOcean);
-            forward.Add(CreateSyntheticCell(-1, -1, 3000, 3, false));
-            forward.Add(CreateSyntheticCell(0, -1, 4000, 4, false));
-            forward.Add(CreateSyntheticCell(1, -1, 5000, 5, false));
-            forward.Add(CreateSyntheticCell(-1, 1, 6000, 6, false));
-            FixedList512Bytes<GeneratedHydrologyCell> reverse = default;
+            FixedList512Bytes<HydrologyFlowCandidate> forward = CreateNeighborList(
+                CreateSyntheticCell(1, 1, 1000, 1, false),
+                otherOcean,
+                CreateSyntheticCell(0, 1, 2000, 2, false),
+                expectedOcean,
+                CreateSyntheticCell(-1, -1, 3000, 3, false),
+                CreateSyntheticCell(0, -1, 4000, 4, false),
+                CreateSyntheticCell(1, -1, 5000, 5, false),
+                CreateSyntheticCell(-1, 1, 6000, 6, false));
+            FixedList512Bytes<HydrologyFlowCandidate> reverse = default;
 
             // 同じ8候補を逆順にし、先に見つかった候補を採用する実装へ退行していないことを確認します。
             for (int index = forward.Length - 1; index >= 0; index--)
@@ -419,13 +513,13 @@ namespace Farmware.WorldGeneration.Tests
                 DeterministicHydrologyGenerator.TrySelectDownstream(
                     current,
                     forward,
-                    out GeneratedHydrologyCell forwardSelected),
+                    out HydrologyFlowCandidate forwardSelected),
                 Is.True);
             Assert.That(
                 DeterministicHydrologyGenerator.TrySelectDownstream(
                     current,
                     reverse,
-                    out GeneratedHydrologyCell reverseSelected),
+                    out HydrologyFlowCandidate reverseSelected),
                 Is.True);
             Assert.That(forwardSelected.CellX, Is.EqualTo(expectedOcean.CellX));
             Assert.That(forwardSelected.CellY, Is.EqualTo(expectedOcean.CellY));
@@ -443,7 +537,7 @@ namespace Farmware.WorldGeneration.Tests
             GeneratedHydrologyCell current = CreateSyntheticCell(0, 0, 100, 500, false);
             GeneratedHydrologyCell lower = CreateSyntheticCell(1, 0, 90, 900, false);
             GeneratedHydrologyCell equalLowerRank = CreateSyntheticCell(0, 1, 100, 10, false);
-            FixedList512Bytes<GeneratedHydrologyCell> withLower = CreateNeighborList(
+            FixedList512Bytes<HydrologyFlowCandidate> withLower = CreateNeighborList(
                 lower,
                 equalLowerRank,
                 CreateSyntheticCell(-1, 0, 101, 1, false),
@@ -454,12 +548,12 @@ namespace Farmware.WorldGeneration.Tests
                 CreateSyntheticCell(1, -1, 106, 6, false));
 
             Assert.That(
-                DeterministicHydrologyGenerator.TrySelectDownstream(current, withLower, out GeneratedHydrologyCell selectedLower),
+                DeterministicHydrologyGenerator.TrySelectDownstream(current, withLower, out HydrologyFlowCandidate selectedLower),
                 Is.True);
             Assert.That(selectedLower.CellX, Is.EqualTo(lower.CellX));
             Assert.That(selectedLower.CellY, Is.EqualTo(lower.CellY));
 
-            FixedList512Bytes<GeneratedHydrologyCell> equalPlateau = CreateNeighborList(
+            FixedList512Bytes<HydrologyFlowCandidate> equalPlateau = CreateNeighborList(
                 equalLowerRank,
                 CreateSyntheticCell(1, 0, 100, 600, false),
                 CreateSyntheticCell(-1, 0, 101, 1, false),
@@ -470,12 +564,12 @@ namespace Farmware.WorldGeneration.Tests
                 CreateSyntheticCell(1, -1, 106, 6, false));
 
             Assert.That(
-                DeterministicHydrologyGenerator.TrySelectDownstream(current, equalPlateau, out GeneratedHydrologyCell selectedEqual),
+                DeterministicHydrologyGenerator.TrySelectDownstream(current, equalPlateau, out HydrologyFlowCandidate selectedEqual),
                 Is.True);
             Assert.That(selectedEqual.CellX, Is.EqualTo(equalLowerRank.CellX));
             Assert.That(selectedEqual.CellY, Is.EqualTo(equalLowerRank.CellY));
 
-            FixedList512Bytes<GeneratedHydrologyCell> blocked = CreateNeighborList(
+            FixedList512Bytes<HydrologyFlowCandidate> blocked = CreateNeighborList(
                 CreateSyntheticCell(1, 0, 100, 600, false),
                 CreateSyntheticCell(0, 1, 100, 700, false),
                 CreateSyntheticCell(-1, 0, 101, 1, false),
@@ -871,16 +965,24 @@ namespace Farmware.WorldGeneration.Tests
         /// </summary>
         /// <param name="neighbors">基準セルのD8位置として用意した8候補です。</param>
         /// <returns>候補順の不変性や優先順位を検証する値型Listです。</returns>
-        private static FixedList512Bytes<GeneratedHydrologyCell> CreateNeighborList(
+        private static FixedList512Bytes<HydrologyFlowCandidate> CreateNeighborList(
             params GeneratedHydrologyCell[] neighbors)
         {
             Assert.That(neighbors, Has.Length.EqualTo(8));
-            FixedList512Bytes<GeneratedHydrologyCell> result = default;
+            FixedList512Bytes<HydrologyFlowCandidate> result = default;
 
             // 製品APIは長さ8だけを受け付けるため、テスト入力の不足や過剰を上のAssertで先に明示します。
             for (int index = 0; index < neighbors.Length; index++)
             {
-                result.Add(neighbors[index]);
+                GeneratedHydrologyCell neighbor = neighbors[index];
+                result.Add(new HydrologyFlowCandidate
+                {
+                    CellX = neighbor.CellX,
+                    CellY = neighbor.CellY,
+                    PlateauRank = neighbor.PlateauRank,
+                    HydrologyHeight = neighbor.HydrologyHeight,
+                    Flags = neighbor.Flags
+                });
             }
 
             return result;
@@ -899,11 +1001,17 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(actual.DownstreamReachCellY, Is.EqualTo(expected.DownstreamReachCellY));
             Assert.That(actual.HydrologyHeight, Is.EqualTo(expected.HydrologyHeight));
             Assert.That(actual.CenterElevation, Is.EqualTo(expected.CenterElevation));
+            Assert.That(actual.HydrologyMoisture, Is.EqualTo(expected.HydrologyMoisture));
+            Assert.That(actual.CatchmentAreaCells, Is.EqualTo(expected.CatchmentAreaCells));
+            Assert.That(actual.RunoffMoistureSum, Is.EqualTo(expected.RunoffMoistureSum));
+            Assert.That(actual.RunoffEquivalentCells, Is.EqualTo(expected.RunoffEquivalentCells));
+            Assert.That(actual.MaximumContributingDistance, Is.EqualTo(expected.MaximumContributingDistance));
             Assert.That(actual.PlateauRank, Is.EqualTo(expected.PlateauRank));
             Assert.That(actual.DownstreamEdgeCount, Is.EqualTo(expected.DownstreamEdgeCount));
             Assert.That(actual.ConnectionFlags, Is.EqualTo(expected.ConnectionFlags));
             Assert.That(actual.FlowDirection, Is.EqualTo(expected.FlowDirection));
             Assert.That(actual.Flags, Is.EqualTo(expected.Flags));
+            Assert.That(actual.CatchmentFlags, Is.EqualTo(expected.CatchmentFlags));
         }
 
         /// <summary>合成境界のテスト入力として、指定した全固定値を持つDownstream Summaryを作ります。</summary>
