@@ -1,8 +1,8 @@
 # TERRAIN-01C3 表面水系 実装記録
 
 - 更新日: 2026-10-21
-- 対象PR: TERRAIN-01C3-A/B/C1
-- 状態: C3-A/B/C1完了、C3-C2未着手
+- 対象PR: TERRAIN-01C3-A/B/C1/C2
+- 状態: C3-A/B/C1/C2のAI実装・自動検証完了、C3-C2人間確認待ち、C3-D未着手
 
 ## 1. この変更単位の範囲
 
@@ -14,7 +14,7 @@ TERRAIN-01C3全体は、基礎格子、下流終端、集水・流出、閉鎖�
 - C3-C2: Level 0〜6の集約Summary、外部入口と分解条件、キャッシュ同値性、局所・Chunk生成性能比較。
 - C3-D: 閉鎖流域、基礎湖面、流域境界、複数Seed監査、Debug Visualization、Map Viewer。
 
-C3-C1までで流向グラフの一辺、固定下流終端、集水面積、基礎湿度由来の`Stream`・`River`接続を確定する。Level 0〜6集約Summary、湖、地下水、自然冠水・飽和、最終18Biome、河川のタイル細分化はまだ生成しない。既存の旧`River`・`Pond`タイル生成と表示も、この変更単位では置き換えない。
+C3-C2までで流向グラフの一辺、固定下流終端、集水面積、基礎湿度由来の`Stream`・`River`接続、Level 0〜6集約Summaryと比較用キャッシュ経路を確定する。集約経路は性能判断用のMain Thread実装で、既定のBurst Chunk生成Jobへは接続しない。湖、地下水、自然冠水・飽和、最終18Biome、河川のタイル細分化はまだ生成しない。既存の旧`River`・`Pond`タイル生成と表示も、この変更単位では置き換えない。
 
 ## 2. 固定水文セルと代表値
 
@@ -92,9 +92,17 @@ Gameビュー、Map Viewer、分布監査の水文モードはC3-Dで追加す�
 
 `GeneratedHydrologyCell`は64 bytesとなり、集水・流出の全固定値を状態ハッシュへ追加した。初回実装ではChunk生成作業枠が32,768件の上流候補配列を所有し、64セルで順次再利用した。チャンク越境時の待ち改善では、8行が同時使用できる262,144件へ拡張し、各行は自分の32,768件領域を8セルで順次再利用する。所有SystemはJob完了後まで配列を保持し、World終了時に破棄する。容量と境界待ちの比較は[性能計測](./Map02DPerformanceReport.md#terrain-01c3-c1後の生成配列容量)へ記録した。
 
-## 8. 性能と残る確認
+## 8. C3-C2の空間集約Summaryとキャッシュ境界
 
-水文要素48 bytes×64件は1チャンク3,072 bytesである。生成作業枠の増加、ECS Buffer容量、1,000／10,000／100,000セルの局所比較は[性能計測](./Map02DPerformanceReport.md#terrain-01c3-b後の生成配列容量)へ記録する。C3-Bの基準経路は各開始セルから最大4,096辺を有限に進み、無限水系やロード済み全チャンクを走査しない。固定10 Seedの計測では最大実辺数30で、4,096辺が連続する事例を再現しなかったため、共有Summaryキャッシュは常駐させない。将来追加する場合も、具体的な長経路入力を固定し、分類結果を変えないことを二分合成テストで保証する。
+`HydrologyCatchmentAggregationSummary`は、Level 0の1×1からLevel 6の64×64まで、2の累乗へ整列した正方形領域を表す。固定入力から領域セルを行優先で再生成し、セル数、基礎湿度合計、領域外へ流れる唯一の出口、出口までの最大内部距離、外周1セル帯から内部へ直接流入する外部入口を保持する。外部入口には入口座標、最初の内部セル、出口までの距離、代表標高、基礎湿度、`PlateauRank`を持たせ、Summary境界を越えてもC3-C1と同じ優先度付き上流探索を継続できるようにした。
+
+領域内終端、複数出口、領域外へ出た下流の再進入、4,096辺で再進入なしを確定できない不完全経路は、親Summaryを一括利用しない明示的な分解理由として保持する。集水上限4,096セルをまたぐSummaryも下位Levelへ分解し、選択数がちょうど4,096へ達する場合はC3-C1基準Resolverで全体を再計算する。これにより、外部入口や別枝が残る境界で集約順を打切り判定へ混ぜず、4,095／4,096／4,097件の正規化順と`CatchmentTruncated`を基準経路へ一致させる。
+
+`HydrologyAggregationSummaryCache`はSeed・GeneratorVersion・生成設定を寿命中固定し、絶対座標とLevelをキーにSummaryと外部入口を保持する。構築作業配列、現在入口List、上流HeapはPersistentで一度だけ確保し、呼出しごとのmanaged allocationを避ける。Disposeが全Nativeコンテナの破棄責任を持つ。比較用Resolverは空キャッシュ、命中済みキャッシュ、逆順構築キャッシュのいずれでも基準結果と一致する。キャッシュはECS状態の正ではなく、Job間でmutableコンテナを共有しないMain Thread比較実装である。
+
+## 9. 性能と残る確認
+
+水文要素はC3-C1以降64 bytes×64件、1チャンク4,096 bytesである。既定のChunk生成は8行の独立Heapを維持し、集約キャッシュは接続していない。C3-C2の比較用キャッシュは、最大4,096セル・260外部入口の構築作業領域と、指定容量分のSummary・入口HashMapを追加で所有するため、常駐採用時にはCPU短縮と引換えにNativeメモリが増える。局所比較の結果と制約は[性能計測](./Map02DPerformanceReport.md#terrain-01c3-c2の集約summary比較)へ記録した。
 
 製品最大Viewport、対象機器、正式なFPS・メモリ合格値は未決定である。今回の局所比較はmanaged C#をEditorで測った診断値であり、生成Job全体、Burst、Development Playerの性能合格を意味しない。具体的なSeed・設定で長経路やフレームスパイクが再現した場合は、その入力を固定してキャッシュ案を同条件比較する。人間の確認ではSampleSceneをPlayし、チャンク生成・カメラ移動・負座標越境でConsoleエラーがないことを確認する。C3-Bは非表示データのため、水文の色分けや終端表示がないことは未実装ではない。
 
@@ -102,4 +110,6 @@ Gameビュー、Map Viewer、分布監査の水文モードはC3-Dで追加す�
 
 C3-C1の初回AI確認では、Unity 6000.3.8f1でゲーム仕様どおり`RunoffMoistureSum`を符号付き64bitへ揃えた差分を再コンパイルし、エラー・警告0件を確認した。`DeterministicHydrologyGeneratorTests` 31件、`ChunkGenerationSystem_`回帰4件、World Generation EditMode Assembly 378件、PlayMode Assembly 56件がすべて成功した。
 
-その後のチャンク越境時の引っ掛かり調査では、同じ長距離移動PlayModeテストへ`ChunkGenerationBoundaryWait`を追加し、直列水文生成の最大59.804msを記録した。通常フレーム先行投入だけでは42.762msだったため、水文8行と地形・資源を9作業へ並列化した。並列化後は最大19.478msとなり、初期値比で約67.4%短縮した。生成値と公開順を変えないことは、水文31件、個体群境界23件、`WorldGenerationTests` 68件、World Generation EditMode Assembly 379件、PlayMode Assembly 56件の成功で確認した。全EditMode実行中の警告6件は既知のテスト用System Group順序属性2種類が各3回出たもので、エラーとコンパイル失敗は0件だった。2026-10-21に人間が通常EditorのSampleSceneで通常移動とShift移動によるチャンク越境を確認し、境界待ちは許容範囲と判断した。製品最大Viewport・対象機器・Development Playerの正式性能合格値は未決定であり、Editor PlayModeの単一実行値を製品保証にはしない。Level 0〜6集約Summaryとキャッシュ同値性、正式な1,000／10,000／100,000件比較はC3-C2へ残す。
+その後のチャンク越境時の引っ掛かり調査では、同じ長距離移動PlayModeテストへ`ChunkGenerationBoundaryWait`を追加し、直列水文生成の最大59.804msを記録した。通常フレーム先行投入だけでは42.762msだったため、水文8行と地形・資源を9作業へ並列化した。並列化後は最大19.478msとなり、初期値比で約67.4%短縮した。生成値と公開順を変えないことは、水文31件、個体群境界23件、`WorldGenerationTests` 68件、World Generation EditMode Assembly 379件、PlayMode Assembly 56件の成功で確認した。全EditMode実行中の警告6件は既知のテスト用System Group順序属性2種類が各3回出たもので、エラーとコンパイル失敗は0件だった。2026-10-21に人間が通常EditorのSampleSceneで通常移動とShift移動によるチャンク越境を確認し、境界待ちは許容範囲と判断した。製品最大Viewport・対象機器・Development Playerの正式性能合格値は未決定であり、Editor PlayModeの単一実行値を製品保証にはしない。
+
+C3-C2ではUnity 6000.3.8f1の一時複製プロジェクトでRuntime AssemblyとTest Assemblyを再コンパイルし、エラー・警告0件を確認した。集約関連の通常テスト9件と、通常回帰から分離した明示性能テスト1件が成功した。性能テストは256セルの固定作業集合を温め、1,000／10,000／100,000要求で基準経路と集約経路のチェックサムを一致させた。100,000要求は基準140,632.070ms、集約22,305.776ms、比率0.159、両方の現在Thread managed allocationは0 bytesだった。16 Chunk・1,024水文セルは基準2,003.252ms、集約954.973ms、比率0.477で、時間外の全セル比較も一致した。最終差分の全EditModeは484件中480件成功・失敗0件・明示4件除外で、うちWorld Generation Assemblyは392件中388件成功・明示4件除外だった。PlayMode Assemblyは56件すべて成功した。既存下流性能テストもPersistent Heap再利用後に単独1件成功し、一時Allocator枯渇がないことを確認した。これはEditor上の温め済みMain Thread比較であり、キャッシュ構築時間、Nativeコンテナ容量、Burst Job化、Development Player、対象機器を含む製品性能合格値ではない。既定Jobへ直ちに採用せず、C3-D以降で実際の生成待ちが再び問題になった場合に、所有権とメモリ上限を決めたうえで接続を判断する。

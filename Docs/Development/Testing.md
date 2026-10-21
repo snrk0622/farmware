@@ -76,7 +76,7 @@ WORLD-01Bの製品用`WorldLayer`と`WorldLayerWaterContract`を、Sceneを使�
 | 水域 | 気候による川・池の補正と、森林・湿地で池が確認できる分布を保証する。 |
 | マグマ | 火山のマグマ比率、陸地の残存、淡水抑制、岩地の希少マグマ、歪な輪郭を保証する。 |
 | 岩壁 | 水域上の抑制、適度な被覆率、チャンク境界、凹凸、通路を保証する。 |
-| 固定水文 | 8×8セル、固定9地点の標高・基礎湿度、中心タイルの海洋流出口、専用Saltの同点順、D8流向、負座標、循環拒否、最大4,096辺の下流終端、最大4,096セルの集水・自然流出、64件のECS Bufferと状態ハッシュを保証する。集約SummaryはC3-C2、閉鎖流域・湖はC3-Dで追加する。 |
+| 固定水文 | 8×8セル、固定9地点の標高・基礎湿度、中心タイルの海洋流出口、専用Saltの同点順、D8流向、負座標、循環拒否、最大4,096辺の下流終端、最大4,096セルの集水・自然流出、Level 0〜6の空間集約Summary、外部入口、分解条件、キャッシュ同値性、64件のECS Bufferと状態ハッシュを保証する。閉鎖流域・湖はC3-Dで追加する。 |
 | 地形配置属性 | 陸地は通常設備＋通常ベルト、水は橋、マグマは橋＋耐熱必須、岩壁と未知IDは配置不可になることを純粋計算で保証する。 |
 | 有効地形 | 組み込みBlock定義、TERRAIN-01C前のInspector追加地形定義の明示拒否、旧GroundTypeからの互換変換、明示除去を含む疎な差分、自然状態への復帰時削除、レイヤー分離、移動・建築の独立判定、地形定義・差分状態ハッシュの作成順非依存、Owner／Buffer片側欠落の拒否を保証する。 |
 | 資源 | 地形適性、最低間隔、群生半径、競合解決、決定性を保証する。 |
@@ -102,11 +102,11 @@ Authoring回帰では、Sceneへ保存済みの既存Inspector値から作る設
 
 #### `DeterministicHydrologyGeneratorTests`
 
-TERRAIN-01C3-A〜C1の8×8固定水文セル、中心から`-3`・`0`・`+3`タイルの固定9標高・基礎湿度平均、中心タイルによる海洋流出口、専用Saltの`PlateauRank`、D8流向、最大4,096辺の固定下流終端、最大4,096セルの集水・自然流出をSceneなしの純粋計算で検証する。セルの担当範囲`-4〜+3`、負座標の床方向除算、候補列挙順の不変、海洋流出口の標高非依存な優先、同標高・64bitハッシュ衝突時の座標順、陸上辺で安定全順序が必ず小さくなることを対象にする。
+TERRAIN-01C3-A〜C2の8×8固定水文セル、中心から`-3`・`0`・`+3`タイルの固定9標高・基礎湿度平均、中心タイルによる海洋流出口、専用Saltの`PlateauRank`、D8流向、最大4,096辺の固定下流終端、最大4,096セルの集水・自然流出、Level 0〜6の空間集約SummaryをSceneなしの純粋計算で検証する。セルの担当範囲`-4〜+3`、負座標の床方向除算、候補列挙順の不変、海洋流出口の標高非依存な優先、同標高・64bitハッシュ衝突時の座標順、陸上辺で安定全順序が必ず小さくなることを対象にする。
 
-実生成した49×49水文セルでは、海洋セルが`Marine`、陸上末端が`ClosedBasin`となり、その他も`LongDrainage`を含む3終端の一つだけを持つこと、全下流がD8隣接であること、陸上辺が上記全順序を減少させることを確認する。Level 0同士の合成と直接Level 1の一致、最大Levelの終端・打切り、不完全・不連続Downstream Summaryの拒否も対象にする。C3-C1では対象セルを含む有限集水、同入力の再現、9地点基礎湿度、湿度合計と65,535除算、`Stream`境界15／16、`River`境界127／128、RiverがStreamを伴うことを追加する。Level 0〜6 Aggregation Summary、人工4,095／4,096／4,097セル、キャッシュ同値性はC3-C2で追加する。複数の開始セルから有限に追跡して再訪を拒否し、1チャンク64件の行優先順と単一セルAPIの一致、Seed差を含む水文状態ハッシュ、設定不正と`int`座標端の明示失敗も保証する。`UnsafeUtility.SizeOf<GeneratedHydrologyCell>() = 64 bytes`を固定し、後続PRで要素を拡張した場合に性能文書の容量更新漏れを検出する。
+実生成した49×49水文セルでは、海洋セルが`Marine`、陸上末端が`ClosedBasin`となり、その他も`LongDrainage`を含む3終端の一つだけを持つこと、全下流がD8隣接であること、陸上辺が上記全順序を減少させることを確認する。Level 0同士の合成と直接Level 1の一致、最大Levelの終端・打切り、不完全・不連続Downstream Summaryの拒否も対象にする。C3-C1では対象セルを含む有限集水、同入力の再現、9地点基礎湿度、湿度合計と65,535除算、`Stream`境界15／16、`River`境界127／128、RiverがStreamを伴うことを追加した。C3-C2ではLevel 0〜6の整列正方形が保持するセル数・湿度合計・唯一の出口・最大内部距離・外部入口を直接集計と比較し、終端・複数出口・下流再進入・不完全経路を親Summaryの分解理由にする。人工4,095／4,096／4,097セルで上限判定を固定し、C3-C1基準経路、空キャッシュ、命中済みキャッシュ、逆順構築キャッシュの全結果を比較する。複数の開始セルから有限に追跡して再訪を拒否し、1チャンク64件の行優先順と単一セルAPIの一致、Seed差を含む水文状態ハッシュ、設定不正と`int`座標端の明示失敗も保証する。`UnsafeUtility.SizeOf<GeneratedHydrologyCell>() = 64 bytes`を固定し、後続PRで要素を拡張した場合に性能文書の容量更新漏れを検出する。
 
-既存`WorldGenerationTests`のChunk生成System回帰は、開始直後に地形・資源・水文の全Bufferが未公開であり、完成境界で4096地形、4096資源、64水文をまとめて公開することを確認する。先頭水文セルは終端座標、辺数、集水セル数、基礎湿度、湿度合計、流出相当値、接続・打切りフラグを含めて同じ純粋Generator結果と一致する。C3-C1ではLevel 0〜6集約Summary、湖、Debug Visualization、Map Viewerのテストを先行追加しない。
+既存`WorldGenerationTests`のChunk生成System回帰は、開始直後に地形・資源・水文の全Bufferが未公開であり、完成境界で4096地形、4096資源、64水文をまとめて公開することを確認する。先頭水文セルは終端座標、辺数、集水セル数、基礎湿度、湿度合計、流出相当値、接続・打切りフラグを含めて同じ純粋Generator結果と一致する。C3-C2の集約Resolverは比較用のMain Thread経路であり、既定のBurst `ChunkGenerationSystem`へ接続しない。湖、Debug Visualization、Map ViewerのテストはC3-Dまで先行追加しない。
 
 2026-10-21のUnity 6000.3.8f1によるC3-A AI確認は、`DeterministicHydrologyGeneratorTests` 21件、`ChunkGenerationSystem_`回帰 4件、`AnimalPopulationGenerationTests` 22件、Salt一意性とチャンクハッシュ順序不変の回帰 2件が全成功した。PlayMode Assemblyは56件中55件が成功し、残る1件は`-batchmode -nographics`で既存の`ChunkStreaming` Profiler Markerが0nsとなる計測環境差である。生成、表示、座標回復のAssertはそれより前に通過した。通常EditorのSampleSceneではカメラ移動と移動先チャンク表示を確認し、Play終了後のConsoleは情報・警告・エラー0件だった。Profiler Markerの自動テスト自体は、通常Editorでの人間確認に残す。
 
@@ -115,6 +115,10 @@ TERRAIN-01C3-A〜C1の8×8固定水文セル、中心から`-3`・`0`・`+3`タ�
 2026-10-21のC3-B AI確認はUnity 6000.3.8f1の接続済みEditorで行い、`DeterministicHydrologyGeneratorTests` 24件、`ChunkGenerationSystem_`回帰 4件、World Generation EditMode Assembly 371件、PlayMode Assembly 56件が全成功した。PlayModeにはSampleSceneの生成・再生成、チャンク越境、負座標横断、Profiler Marker回帰を含む。完了後のConsole現時点値はエラー0件・警告0件だった。同日に人間の通常Editor動作確認も完了し、PR #35としてdevelopへマージされた。
 
 2026-10-21のC3-C1最終AI確認では、Unity 6000.3.8f1で`RunoffMoistureSum`を符号付き64bitへ変更した最終差分を再コンパイルし、エラー・警告0件を確認した。`DeterministicHydrologyGeneratorTests` 31件、`ChunkGenerationSystem_`回帰4件、World Generation EditMode Assembly 378件、PlayMode Assembly 56件はすべて成功した。全EditModeは121.78秒、PlayModeは4.49秒だった。PlayModeにはSampleScene生成・再生成、チャンク越境、負座標横断、Profiler Marker回帰を含む。終了後Consoleの現時点値はエラー0件・警告0件であり、取得バッファに残る6件は既存のSystem Group順序属性警告2種類がテスト用World構築で各3回出たものである。通常EditorのSampleScene目視は人間確認へ残す。
+
+C3-C2の通常回帰は、各Levelの直接集計、Level 0外部入口、再構築・構築順、4,095／4,096／4,097件境界、基準・初回・命中・逆順キャッシュの同値性を対象にする。性能比較`AggregatedCatchment_ReportsScalingAndChunkGenerationComparison`は`Explicit`かつ10分上限で通常回帰から分離し、最大32,768件のHeapを`Allocator.Persistent`で再利用してUnityの一時Allocator上限を計測結果へ混ぜない。256セルを温めた後に1,000／10,000／100,000要求、続いて16 Chunk・1,024水文セルを測り、両経路のチェックサムと全セル固定値、現在Threadのmanaged allocation、Summary利用・分解・命中・基準フォールバック数を確認する。2026-10-21の結果と解釈は[性能計測](./Map02DPerformanceReport.md#terrain-01c3-c2の集約summary比較)へ記録した。
+
+2026-10-21のC3-C2最終AI確認は、開いているEditorへ影響しない一時複製プロジェクトをUnity 6000.3.8f1で実行した。Runtime AssemblyとTest AssemblyのC#再コンパイルはエラー・警告0件、全EditModeは484件中480件成功・失敗0件・`Explicit` 4件除外だった。この内訳は`Farmware.Tests.EditMode` 92件成功、`Farmware.WorldGeneration.Tests` 392件中388件成功・明示4件除外である。PlayMode Assemblyは56件すべて成功した。集約性能テスト1件は187.475秒で成功した。C3-C2で一時配列からPersistent再利用へ変更した既存下流性能テストも単独で553.613秒・1件成功し、1,000／10,000／100,000件すべてで現在Threadのmanaged allocation 0 bytes、生成失敗0件、最大実辺数23／29／30、`LongDrainage` 0件だった。実行環境差でCPU時間は過去の接続済みEditor記録より長いため、異なるセッション間の速度比較には使わない。
 
 下流探索の局所性能確認には、通常回帰から除外した明示実行テスト`DownstreamResolution_ReportsScalingComparison`を使う。同じ入力についてLevel 0の一辺Summaryと最大Levelの終端探索を交互に3回ずつ測り、1,000／10,000／100,000セルのCPU時間、現在Threadのmanaged allocation、平均・最大実辺数、終端内訳をConsoleへ記録する。入力は固定10 SeedとSeedごとに離した100×100セル領域であり、1,000件と10,000件は先頭Seed内、100,000件は10 Seed全体を使う。256セルのウォームアップ後に測定し、生成失敗、終端総数、実辺数上限もAssertする。この値は接続済みEditorのmanaged C#経路を比較する診断値であり、Burst JobやDevelopment Playerの製品性能合格値には使わない。
 
