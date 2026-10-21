@@ -1,5 +1,5 @@
-// このファイルは、TERRAIN-01C3-A〜C2の水文格子、D8流向、下流終端、集水面積、自然流出、空間集約Summaryを検証します。
-// 湖と診断表示は後続枝番の責務とし、ここでは下流・上流結果が決定論的かつ有限になることを保証します。
+// このファイルは、TERRAIN-01C3-A〜D1の水文格子、D8流向、下流終端、集水、自然流出、閉鎖流域、基礎湖面を検証します。
+// 診断表示は後続commitの責務とし、固定水文結果が決定論的かつ有限になることを保証します。
 
 using System;
 using System.Collections.Generic;
@@ -11,7 +11,7 @@ using Unity.Collections.LowLevel.Unsafe;
 namespace Farmware.WorldGeneration.Tests
 {
     /// <summary>
-    /// 固定8×8格子、D8辺、下流終端、集水・自然流出、Level 0〜6集約SummaryをSceneやGameObjectなしで検証するEditModeテストです。
+    /// 固定8×8格子、D8辺、下流終端、集水・自然流出、閉鎖流域、湖面、Level 0〜6集約Summaryを検証するEditModeテストです。
     /// 純粋GeneratorとChunkGenerationSystemが共有する入力・出力契約を対象にします。
     /// </summary>
     public sealed class DeterministicHydrologyGeneratorTests
@@ -20,7 +20,7 @@ namespace Farmware.WorldGeneration.Tests
         /// 製品既定値を準備し、8タイル格子、3タイルサンプル、1チャンク64セルが確定仕様と一致することを保証します。
         /// </summary>
         [Test]
-        public void DefaultSettings_MatchTerrain01C3CContract()
+        public void DefaultSettings_MatchTerrain01C3DContract()
         {
             WorldGenerationSettings settings = CreateSettings("hydrology-defaults");
 
@@ -33,22 +33,29 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(settings.Hydrology.MaximumAggregationSummaryLevel, Is.EqualTo(6));
             Assert.That(settings.Hydrology.StreamRunoffEquivalentThreshold, Is.EqualTo(16));
             Assert.That(settings.Hydrology.RiverRunoffEquivalentThreshold, Is.EqualTo(128));
+            Assert.That(settings.Hydrology.MinimumClosedBasinAreaCells, Is.EqualTo(4));
+            Assert.That(settings.Hydrology.LakeRunoffEquivalentThreshold, Is.EqualTo(8));
+            Assert.That(settings.Hydrology.LakeOverflowRunoffEquivalentThreshold, Is.EqualTo(32));
+            Assert.That(settings.Hydrology.LakeFillFractionMultiplier, Is.EqualTo(2048));
             Assert.That(DeterministicHydrologyGenerator.CellsPerChunkAxis, Is.EqualTo(8));
             Assert.That(DeterministicHydrologyGenerator.CellsPerChunk, Is.EqualTo(64));
         }
 
         /// <summary>
-        /// ECS Bufferと生成作業枠の容量見積もりが、集水・流出結果を含むUnityレイアウト64 bytesと一致することを保証します。
+        /// ECS Bufferと生成作業枠の容量見積もりが、集水・湖面結果を含むUnityレイアウト96 bytesと一致することを保証します。
         /// 後続PRでフィールドを追加した場合に、性能文書と容量見積もりの更新漏れを検出します。
         /// </summary>
         [Test]
         public void GeneratedHydrologyCell_SizeMatchesCapacityDocumentation()
         {
-            Assert.That(UnsafeUtility.SizeOf<GeneratedHydrologyCell>(), Is.EqualTo(64));
+            Assert.That(UnsafeUtility.SizeOf<GeneratedHydrologyCell>(), Is.EqualTo(96));
             Assert.That(
                 typeof(GeneratedHydrologyCell).GetField(nameof(GeneratedHydrologyCell.RunoffMoistureSum))?.FieldType,
                 Is.EqualTo(typeof(long)));
             Assert.That(UnsafeUtility.SizeOf<HydrologyFlowCandidate>(), Is.EqualTo(24));
+            Assert.That(UnsafeUtility.SizeOf<HydrologyUpstreamCandidate>(), Is.EqualTo(24));
+            Assert.That(UnsafeUtility.SizeOf<HydrologyBasinLookupSlot>(), Is.EqualTo(16));
+            Assert.That(UnsafeUtility.SizeOf<HydrologyLakeChunkWorkItem>(), Is.EqualTo(16));
 
             FixedList512Bytes<HydrologyFlowCandidate> candidates = default;
             Assert.That(candidates.Capacity, Is.GreaterThanOrEqualTo(8));
@@ -73,6 +80,96 @@ namespace Farmware.WorldGeneration.Tests
                     settings,
                     (ushort)runoffEquivalentCells),
                 Is.EqualTo(expected));
+        }
+
+        /// <summary>
+        /// 湖面充填率の境界直前・直後を準備し、8で約25%、16で約50%、32以上で最大へ飽和することを保証します。
+        /// </summary>
+        [TestCase(7, 14336)]
+        [TestCase(8, 16384)]
+        [TestCase(16, 32768)]
+        [TestCase(31, 63488)]
+        [TestCase(32, 65535)]
+        [TestCase(4096, 65535)]
+        public void LakeFillFraction_UsesFixedIntegerMultiplierAndSaturation(
+            int runoffEquivalentCells,
+            int expectedFillFraction)
+        {
+            HydrologyGenerationSettings settings = HydrologyGenerationSettings.CreateDefault();
+
+            Assert.That(
+                DeterministicHydrologyLakeResolver.CalculateFillFraction(
+                    settings,
+                    (ushort)runoffEquivalentCells),
+                Is.EqualTo(expectedFillFraction));
+        }
+
+        /// <summary>
+        /// 閉鎖流域の打切り、3／4セル、流出7／8・31／32、正の水深を入力し、除外理由と越流境界を保証します。
+        /// </summary>
+        [TestCase(4096u, true, 4096, 100, 200, HydrologyLakeFlags.BasinResolved | HydrologyLakeFlags.BasinTruncated)]
+        [TestCase(3u, false, 4096, 100, 200, HydrologyLakeFlags.BasinResolved | HydrologyLakeFlags.BasinTooSmall)]
+        [TestCase(4u, false, 7, 100, 200, HydrologyLakeFlags.BasinResolved | HydrologyLakeFlags.InsufficientRunoff)]
+        [TestCase(4u, false, 8, 100, 100, HydrologyLakeFlags.BasinResolved | HydrologyLakeFlags.NoPositiveDepth)]
+        [TestCase(4u, false, 8, 100, 200, HydrologyLakeFlags.BasinResolved | HydrologyLakeFlags.FixedLake)]
+        [TestCase(4u, false, 31, 100, 200, HydrologyLakeFlags.BasinResolved | HydrologyLakeFlags.FixedLake)]
+        [TestCase(4u, false, 32, 100, 200, HydrologyLakeFlags.BasinResolved | HydrologyLakeFlags.FixedLake | HydrologyLakeFlags.Overflow)]
+        public void LakeClassification_UsesFiniteBasinAndRunoffBoundaries(
+            uint basinAreaCells,
+            bool basinTruncated,
+            int runoffEquivalentCells,
+            int lakeBottomHeight,
+            int spillHeight,
+            HydrologyLakeFlags expected)
+        {
+            HydrologyGenerationSettings settings = HydrologyGenerationSettings.CreateDefault();
+
+            Assert.That(
+                DeterministicHydrologyLakeResolver.ClassifyBasin(
+                    settings,
+                    basinAreaCells,
+                    basinTruncated,
+                    (ushort)runoffEquivalentCells,
+                    (ushort)lakeBottomHeight,
+                    (ushort)spillHeight),
+                Is.EqualTo(expected));
+        }
+
+        /// <summary>
+        /// 同じ越流標高と外側FlowKeyを持つ候補を準備し、内側X・Yを外側座標より先に比較する仕様順を保証します。
+        /// </summary>
+        [Test]
+        public void SpillOrder_UsesOutsideFlowKeyThenInsideAndOutsideCoordinates()
+        {
+            var earlierInside = new DeterministicHydrologyLakeResolver.HydrologySpillCandidate
+            {
+                SpillHeight = 200,
+                OutsideHydrologyHeight = 180,
+                OutsidePlateauRank = 400,
+                InsideCellX = -5,
+                InsideCellY = 7,
+                OutsideCellX = 100,
+                OutsideCellY = 100
+            };
+            var earlierOutside = new DeterministicHydrologyLakeResolver.HydrologySpillCandidate
+            {
+                SpillHeight = 200,
+                OutsideHydrologyHeight = 180,
+                OutsidePlateauRank = 400,
+                InsideCellX = -4,
+                InsideCellY = 7,
+                OutsideCellX = -100,
+                OutsideCellY = -100
+            };
+            var sameInsideEarlierOutside = earlierInside;
+            sameInsideEarlierOutside.OutsideCellX = 99;
+
+            Assert.That(
+                DeterministicHydrologyLakeResolver.CompareSpillCandidates(earlierInside, earlierOutside),
+                Is.LessThan(0));
+            Assert.That(
+                DeterministicHydrologyLakeResolver.CompareSpillCandidates(sameInsideEarlierOutside, earlierInside),
+                Is.LessThan(0));
         }
 
         /// <summary>
@@ -648,11 +745,12 @@ namespace Farmware.WorldGeneration.Tests
                         out _),
                     Is.True);
                 Assert.That(
-                    DeterministicHydrologyGenerator.TryGenerateCell(
+                    DeterministicHydrologyGenerator.TryGenerateCellWithoutLake(
                         settings,
                         cellX,
                         cellY,
                         catchmentFrontier,
+                        0,
                         out _),
                     Is.True);
             }
@@ -771,11 +869,12 @@ namespace Farmware.WorldGeneration.Tests
             {
                 GetAggregationBenchmarkInput(index, out int cellX, out int cellY);
                 Assert.That(
-                    DeterministicHydrologyGenerator.TryGenerateCell(
+                    DeterministicHydrologyGenerator.TryGenerateCellWithoutLake(
                         settings,
                         cellX,
                         cellY,
                         baselineFrontier,
+                        0,
                         out GeneratedHydrologyCell baseline),
                     Is.True);
                 Assert.That(
@@ -800,11 +899,12 @@ namespace Farmware.WorldGeneration.Tests
                 for (int index = 0; index < cellCount; index++)
                 {
                     GetAggregationBenchmarkInput(index, out int cellX, out int cellY);
-                    if (!DeterministicHydrologyGenerator.TryGenerateCell(
+                    if (!DeterministicHydrologyGenerator.TryGenerateCellWithoutLake(
                         settings,
                         cellX,
                         cellY,
                         baselineFrontier,
+                        0,
                         out GeneratedHydrologyCell cell))
                     {
                         baselineFailures++;
@@ -868,7 +968,7 @@ namespace Farmware.WorldGeneration.Tests
             for (int chunkIndex = 0; chunkIndex < measuredChunkCount; chunkIndex++)
             {
                 GetAggregationBenchmarkChunk(chunkIndex, out int chunkX, out int chunkY);
-                if (!DeterministicHydrologyGenerator.TryGenerateChunkCells(
+                if (!TryGenerateChunkCellsWithoutLake(
                         settings,
                         chunkX,
                         chunkY,
@@ -917,7 +1017,7 @@ namespace Farmware.WorldGeneration.Tests
             {
                 GetAggregationBenchmarkChunk(chunkIndex, out int chunkX, out int chunkY);
                 Assert.That(
-                    DeterministicHydrologyGenerator.TryGenerateChunkCells(
+                    TryGenerateChunkCellsWithoutLake(
                         settings,
                         chunkX,
                         chunkY,
@@ -951,6 +1051,339 @@ namespace Farmware.WorldGeneration.Tests
                 + $"ratio={aggregatedChunkMilliseconds / baselineChunkMilliseconds:F3}, "
                 + $"baselineManagedBytes={baselineChunkAllocatedBytes}, "
                 + $"aggregatedManagedBytes={aggregatedChunkAllocatedBytes}, cachedSummaryCount={cache.SummaryCount}");
+        }
+
+        /// <summary>
+        /// C3-D1の製品セル経路へ1,000／10,000／100,000要求を渡し、固定ワーク領域でのCPU時間、
+        /// managed allocation、固定湖・湖面・打切り流域の件数を記録します。
+        /// 通常回帰を長時間化せず、将来の最適化を同じ入力で比較できるよう明示実行へ分離します。
+        /// </summary>
+        [Test]
+        [Explicit("TERRAIN-01C3-D1の閉鎖流域・湖面を1k/10k/100kセルで測る局所性能診断です。製品性能の合格判定には使いません。")]
+        [Timeout(900000)]
+        public void ClosedBasinResolution_ReportsScalingAndLakeDistribution()
+        {
+            WorldGenerationSettings settings = CreateSettings("hydrology-lake-benchmark");
+            using var frontier = new NativeArray<HydrologyUpstreamCandidate>(
+                DeterministicHydrologyCatchmentResolver.MaximumFrontierCapacity,
+                Allocator.Persistent,
+                NativeArrayOptions.UninitializedMemory);
+            using var basinMembers = new NativeArray<HydrologyUpstreamCandidate>(
+                DeterministicHydrologyLakeResolver.MaximumBasinMembers,
+                Allocator.Persistent,
+                NativeArrayOptions.UninitializedMemory);
+            using var basinLookup = new NativeArray<HydrologyBasinLookupSlot>(
+                DeterministicHydrologyLakeResolver.LookupCapacity,
+                Allocator.Persistent,
+                NativeArrayOptions.ClearMemory);
+            HydrologyLakeBasinCache cache = default;
+
+            // JITと最初の流域Hash表初期化を測定外へ出し、三つの桁で同じ10,000セル作業集合を使います。
+            for (int index = 0; index < 256; index++)
+            {
+                GetLakeBenchmarkInput(index, out int cellX, out int cellY);
+                Assert.That(
+                    DeterministicHydrologyGenerator.TryGenerateCell(
+                        settings,
+                        cellX,
+                        cellY,
+                        frontier,
+                        0,
+                        basinMembers,
+                        0,
+                        basinLookup,
+                        0,
+                        ref cache,
+                        out _),
+                    Is.True);
+            }
+
+            foreach (int cellCount in new[] { 1000, 10000, 100000 })
+            {
+                int failureCount = 0;
+                int fixedLakeCount = 0;
+                int surfaceCellCount = 0;
+                int truncatedBasinCount = 0;
+                ulong checksum = 0UL;
+                long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+                var stopwatch = Stopwatch.StartNew();
+
+                for (int index = 0; index < cellCount; index++)
+                {
+                    GetLakeBenchmarkInput(index, out int cellX, out int cellY);
+                    if (!DeterministicHydrologyGenerator.TryGenerateCell(
+                            settings,
+                            cellX,
+                            cellY,
+                            frontier,
+                            0,
+                            basinMembers,
+                            0,
+                            basinLookup,
+                            0,
+                            ref cache,
+                            out GeneratedHydrologyCell cell))
+                    {
+                        failureCount++;
+                        continue;
+                    }
+
+                    checksum = AccumulateHydrologyChecksum(checksum, cell);
+                    if ((cell.LakeFlags & HydrologyLakeFlags.FixedLake) != 0) fixedLakeCount++;
+                    if ((cell.LakeFlags & HydrologyLakeFlags.SurfaceCell) != 0) surfaceCellCount++;
+                    if ((cell.LakeFlags & HydrologyLakeFlags.BasinTruncated) != 0) truncatedBasinCount++;
+                }
+
+                stopwatch.Stop();
+                long allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+                Assert.That(failureCount, Is.Zero);
+                Assert.That(fixedLakeCount, Is.GreaterThan(0));
+                Assert.That(surfaceCellCount, Is.GreaterThan(0));
+                Assert.That(checksum, Is.Not.Zero);
+
+                // 文字列化とConsole出力は測定停止後に行い、計測対象のmanaged allocationへ混ぜません。
+                UnityEngine.Debug.Log(
+                    $"HYDROLOGY_LAKES cells={cellCount}, elapsedMs={stopwatch.Elapsed.TotalMilliseconds:F6}, "
+                    + $"managedBytes={allocatedBytes}, failures={failureCount}, fixedLakes={fixedLakeCount}, "
+                    + $"surfaceCells={surfaceCellCount}, truncatedBasins={truncatedBasinCount}, checksum={checksum}");
+            }
+        }
+
+        /// <summary>
+        /// 修正前の行別流域再構築と、製品Jobが使うチャンク単位の終端共有を同じ16チャンクで比較します。
+        /// 全固定値が一致することを保証しつつCPU時間と重複削減対象数を記録します。
+        /// </summary>
+        [Test]
+        [Explicit("TERRAIN-01C3-D1のチャンク境界待ち修正を、修正前相当の行別解決と同じ1,024セルで比較します。製品性能の合格判定には使いません。")]
+        [Timeout(300000)]
+        public void ChunkLakeBatching_ReportsComparisonWithRowLocalResolution()
+        {
+            WorldGenerationSettings settings = CreateSettings("hydrology-lake-invariants");
+            using var rowLocalCells = new NativeArray<GeneratedHydrologyCell>(
+                DeterministicHydrologyGenerator.CellsPerChunk,
+                Allocator.Persistent,
+                NativeArrayOptions.UninitializedMemory);
+            using var batchedCells = new NativeArray<GeneratedHydrologyCell>(
+                DeterministicHydrologyGenerator.CellsPerChunk,
+                Allocator.Persistent,
+                NativeArrayOptions.UninitializedMemory);
+            using var frontier = new NativeArray<HydrologyUpstreamCandidate>(
+                DeterministicHydrologyCatchmentResolver.MaximumFrontierCapacity,
+                Allocator.Persistent,
+                NativeArrayOptions.UninitializedMemory);
+            using var basinMembers = new NativeArray<HydrologyUpstreamCandidate>(
+                DeterministicHydrologyLakeResolver.MaximumBasinMembers,
+                Allocator.Persistent,
+                NativeArrayOptions.UninitializedMemory);
+            using var basinLookup = new NativeArray<HydrologyBasinLookupSlot>(
+                DeterministicHydrologyLakeResolver.LookupCapacity,
+                Allocator.Persistent,
+                NativeArrayOptions.ClearMemory);
+            var stopwatch = new Stopwatch();
+            double rowLocalMilliseconds = 0d;
+            double batchedMilliseconds = 0d;
+            int closedCellCount = 0;
+            int uniqueSinkCount = 0;
+
+            // 最初のJITとHash表初期化を測定外へ出し、比較する両経路に同じ作業領域を順番に貸します。
+            Assert.That(
+                TryGenerateChunkCellsWithRowLocalLakeCache(
+                    settings,
+                    0,
+                    0,
+                    rowLocalCells,
+                    frontier,
+                    basinMembers,
+                    basinLookup),
+                Is.True);
+            Assert.That(
+                DeterministicHydrologyGenerator.TryGenerateChunkCells(
+                    settings,
+                    0,
+                    0,
+                    batchedCells,
+                    frontier,
+                    basinMembers,
+                    basinLookup),
+                Is.True);
+
+            for (int chunkY = -2; chunkY <= 1; chunkY++)
+            {
+                for (int chunkX = -2; chunkX <= 1; chunkX++)
+                {
+                    stopwatch.Restart();
+                    Assert.That(
+                        TryGenerateChunkCellsWithRowLocalLakeCache(
+                            settings,
+                            chunkX,
+                            chunkY,
+                            rowLocalCells,
+                            frontier,
+                            basinMembers,
+                            basinLookup),
+                        Is.True);
+                    stopwatch.Stop();
+                    rowLocalMilliseconds += stopwatch.Elapsed.TotalMilliseconds;
+
+                    stopwatch.Restart();
+                    Assert.That(
+                        DeterministicHydrologyGenerator.TryGenerateChunkCells(
+                            settings,
+                            chunkX,
+                            chunkY,
+                            batchedCells,
+                            frontier,
+                            basinMembers,
+                            basinLookup),
+                        Is.True);
+                    stopwatch.Stop();
+                    batchedMilliseconds += stopwatch.Elapsed.TotalMilliseconds;
+
+                    var uniqueSinks = new HashSet<long>();
+                    for (int index = 0; index < DeterministicHydrologyGenerator.CellsPerChunk; index++)
+                    {
+                        AssertCellEqual(rowLocalCells[index], batchedCells[index]);
+                        GeneratedHydrologyCell cell = batchedCells[index];
+                        if (cell.DownstreamTerminal != HydrologyConnectionFlags.ClosedBasin)
+                        {
+                            continue;
+                        }
+
+                        closedCellCount++;
+                        long sinkKey = ((long)cell.DownstreamReachCellX << 32)
+                            ^ (uint)cell.DownstreamReachCellY;
+                        uniqueSinks.Add(sinkKey);
+                    }
+
+                    uniqueSinkCount += uniqueSinks.Count;
+                }
+            }
+
+            Assert.That(closedCellCount, Is.GreaterThan(0));
+            Assert.That(uniqueSinkCount, Is.GreaterThan(0));
+            UnityEngine.Debug.Log(
+                $"HYDROLOGY_LAKE_CHUNK_BATCHING chunks=16, cells=1024, "
+                + $"rowLocalMs={rowLocalMilliseconds:F6}, batchedMs={batchedMilliseconds:F6}, "
+                + $"ratio={batchedMilliseconds / rowLocalMilliseconds:F3}, "
+                + $"closedCells={closedCellCount}, uniqueChunkSinks={uniqueSinkCount}");
+        }
+
+        /// <summary>
+        /// 修正前の製品経路と同じく、水文行ごとにキャッシュを破棄して同じ閉鎖末端を別行で再構築します。
+        /// 性能比較専用であり、ゲーム側から呼び出しません。
+        /// </summary>
+        /// <param name="settings">固定ワールド生成設定です。</param>
+        /// <param name="chunkX">比較対象の水平論理チャンク座標です。</param>
+        /// <param name="chunkY">比較対象の垂直論理チャンク座標です。</param>
+        /// <param name="cells">修正前相当の64セル結果を受け取る再利用配列です。</param>
+        /// <param name="frontier">上流探索で再利用する固定Heapです。</param>
+        /// <param name="basinMembers">閉鎖流域セルを保持する固定作業配列です。</param>
+        /// <param name="basinLookup">座標が閉鎖流域に属するかを保持する固定Hash表です。</param>
+        /// <returns>修正前相当の行別処理で全64セルを生成できた場合はtrueです。</returns>
+        private static bool TryGenerateChunkCellsWithRowLocalLakeCache(
+            in WorldGenerationSettings settings,
+            int chunkX,
+            int chunkY,
+            NativeArray<GeneratedHydrologyCell> cells,
+            NativeArray<HydrologyUpstreamCandidate> frontier,
+            NativeArray<HydrologyUpstreamCandidate> basinMembers,
+            NativeArray<HydrologyBasinLookupSlot> basinLookup)
+        {
+            long firstCellX = (long)chunkX * DeterministicHydrologyGenerator.CellsPerChunkAxis;
+            long firstCellY = (long)chunkY * DeterministicHydrologyGenerator.CellsPerChunkAxis;
+            long lastCellX = firstCellX + DeterministicHydrologyGenerator.CellsPerChunkAxis - 1L;
+            long lastCellY = firstCellY + DeterministicHydrologyGenerator.CellsPerChunkAxis - 1L;
+            if (!cells.IsCreated || cells.Length < DeterministicHydrologyGenerator.CellsPerChunk
+                || firstCellX < int.MinValue || firstCellY < int.MinValue
+                || lastCellX > int.MaxValue || lastCellY > int.MaxValue)
+            {
+                return false;
+            }
+
+            for (int localY = 0; localY < DeterministicHydrologyGenerator.CellsPerChunkAxis; localY++)
+            {
+                // 旧Jobでは8行が別の作業領域を所有したため、行境界でキャッシュを引き継ぎませんでした。
+                HydrologyLakeBasinCache cache = default;
+                for (int localX = 0; localX < DeterministicHydrologyGenerator.CellsPerChunkAxis; localX++)
+                {
+                    int index = (localY * DeterministicHydrologyGenerator.CellsPerChunkAxis) + localX;
+                    if (!DeterministicHydrologyGenerator.TryGenerateCell(
+                            settings,
+                            (int)firstCellX + localX,
+                            (int)firstCellY + localY,
+                            frontier,
+                            0,
+                            basinMembers,
+                            0,
+                            basinLookup,
+                            0,
+                            ref cache,
+                            out GeneratedHydrologyCell cell))
+                    {
+                        return false;
+                    }
+
+                    cells[index] = cell;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// C3-C2性能比較用に、湖判定を含めず64個の基礎水文セルを行優先で生成します。
+        /// C3-D1の閉鎖流域探索費用を既存の集水Summary比較へ混ぜず、計測対象を維持するためのテスト補助です。
+        /// </summary>
+        /// <param name="settings">固定ワールド生成設定です。</param>
+        /// <param name="chunkX">比較対象の水平論理チャンク座標です。</param>
+        /// <param name="chunkY">比較対象の垂直論理チャンク座標です。</param>
+        /// <param name="cells">生成した64セルを受け取る、呼出元所有の再利用配列です。</param>
+        /// <param name="frontier">各セルの集水探索で順次再利用する固定Heap配列です。</param>
+        /// <returns>座標範囲が有効で、全64セルを生成できた場合はtrueです。</returns>
+        private static bool TryGenerateChunkCellsWithoutLake(
+            in WorldGenerationSettings settings,
+            int chunkX,
+            int chunkY,
+            NativeArray<GeneratedHydrologyCell> cells,
+            NativeArray<HydrologyUpstreamCandidate> frontier)
+        {
+            if (!cells.IsCreated || cells.Length < DeterministicHydrologyGenerator.CellsPerChunk)
+            {
+                return false;
+            }
+
+            long firstCellX = (long)chunkX * DeterministicHydrologyGenerator.CellsPerChunkAxis;
+            long firstCellY = (long)chunkY * DeterministicHydrologyGenerator.CellsPerChunkAxis;
+            long lastCellX = firstCellX + DeterministicHydrologyGenerator.CellsPerChunkAxis - 1L;
+            long lastCellY = firstCellY + DeterministicHydrologyGenerator.CellsPerChunkAxis - 1L;
+            if (firstCellX < int.MinValue || firstCellY < int.MinValue
+                || lastCellX > int.MaxValue || lastCellY > int.MaxValue)
+            {
+                return false;
+            }
+
+            // 製品チャンクと同じ行優先順を保ち、差分比較時に配列Indexの意味が変わらないようにします。
+            for (int localY = 0; localY < DeterministicHydrologyGenerator.CellsPerChunkAxis; localY++)
+            {
+                for (int localX = 0; localX < DeterministicHydrologyGenerator.CellsPerChunkAxis; localX++)
+                {
+                    int index = (localY * DeterministicHydrologyGenerator.CellsPerChunkAxis) + localX;
+                    if (!DeterministicHydrologyGenerator.TryGenerateCellWithoutLake(
+                            settings,
+                            (int)firstCellX + localX,
+                            (int)firstCellY + localY,
+                            frontier,
+                            0,
+                            out GeneratedHydrologyCell cell))
+                    {
+                        return false;
+                    }
+
+                    cells[index] = cell;
+                }
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -1155,6 +1588,11 @@ namespace Farmware.WorldGeneration.Tests
         public void GeneratedFlow_UsesOnlyOceanOrStrictlyDescendingD8Edges()
         {
             WorldGenerationSettings settings = CreateSettings("hydrology-d8-invariants");
+            using NativeArray<HydrologyUpstreamCandidate> frontier =
+                new NativeArray<HydrologyUpstreamCandidate>(
+                    DeterministicHydrologyCatchmentResolver.MaximumFrontierCapacity,
+                    Allocator.Temp,
+                    NativeArrayOptions.UninitializedMemory);
             int oceanCount = 0;
             int landEdgeCount = 0;
             int closedBasinCount = 0;
@@ -1164,10 +1602,12 @@ namespace Farmware.WorldGeneration.Tests
                 for (int cellX = -24; cellX <= 24; cellX++)
                 {
                     Assert.That(
-                        DeterministicHydrologyGenerator.TryGenerateCell(
+                        DeterministicHydrologyGenerator.TryGenerateCellWithoutLake(
                             settings,
                             cellX,
                             cellY,
+                            frontier,
+                            0,
                             out GeneratedHydrologyCell cell),
                         Is.True);
 
@@ -1207,10 +1647,12 @@ namespace Farmware.WorldGeneration.Tests
                     Assert.That(System.Math.Abs(cell.DownstreamCellX - cell.CellX), Is.LessThanOrEqualTo(1));
                     Assert.That(System.Math.Abs(cell.DownstreamCellY - cell.CellY), Is.LessThanOrEqualTo(1));
                     Assert.That(
-                        DeterministicHydrologyGenerator.TryGenerateCell(
+                        DeterministicHydrologyGenerator.TryGenerateCellWithoutLake(
                             settings,
                             cell.DownstreamCellX,
                             cell.DownstreamCellY,
+                            frontier,
+                            0,
                             out GeneratedHydrologyCell downstream),
                         Is.True);
 
@@ -1226,6 +1668,165 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(oceanCount, Is.GreaterThan(0));
             Assert.That(landEdgeCount, Is.GreaterThan(0));
             Assert.That(closedBasinCount, Is.GreaterThan(0));
+        }
+
+        /// <summary>
+        /// 複数チャンクを製品と同じ再利用ワーク領域で生成し、閉鎖流域の除外理由、固定湖面、越流状態が整合することを保証します。
+        /// </summary>
+        [Test]
+        public void GeneratedLakes_UseResolvedBasinAndConnectedSurfaceState()
+        {
+            WorldGenerationSettings settings = CreateSettings("hydrology-lake-invariants");
+            using NativeArray<GeneratedHydrologyCell> cells = new NativeArray<GeneratedHydrologyCell>(
+                DeterministicHydrologyGenerator.CellsPerChunk,
+                Allocator.Temp);
+            int closedBasinCount = 0;
+            int fixedLakeBasinCellCount = 0;
+            int surfaceCellCount = 0;
+
+            // 原点周囲の4×4チャンクを有限に調べます。チャンクごとに固定ワーク領域を再利用し、
+            // 単発APIの一時配列確保を分布走査へ持ち込まないための製品経路回帰でもあります。
+            for (int chunkY = -2; chunkY <= 1; chunkY++)
+            {
+                for (int chunkX = -2; chunkX <= 1; chunkX++)
+                {
+                    Assert.That(
+                        DeterministicHydrologyGenerator.TryGenerateChunkCells(
+                            settings,
+                            chunkX,
+                            chunkY,
+                            cells),
+                        Is.True);
+
+                    for (int index = 0; index < cells.Length; index++)
+                    {
+                        GeneratedHydrologyCell cell = cells[index];
+                        if (cell.DownstreamTerminal != HydrologyConnectionFlags.ClosedBasin)
+                        {
+                            Assert.That(cell.LakeFlags, Is.EqualTo(HydrologyLakeFlags.None));
+                            Assert.That(
+                                cell.ConnectionFlags & HydrologyConnectionFlags.Lake,
+                                Is.EqualTo(HydrologyConnectionFlags.None));
+                            continue;
+                        }
+
+                        closedBasinCount++;
+                        Assert.That(cell.LakeFlags & HydrologyLakeFlags.BasinResolved, Is.Not.Zero);
+                        Assert.That(cell.BasinAreaCells, Is.GreaterThanOrEqualTo(1u));
+                        AssertLakeStateIsConsistent(cell);
+                        if ((cell.LakeFlags & HydrologyLakeFlags.FixedLake) != 0)
+                        {
+                            fixedLakeBasinCellCount++;
+                        }
+                        if ((cell.LakeFlags & HydrologyLakeFlags.SurfaceCell) != 0)
+                        {
+                            surfaceCellCount++;
+                        }
+                    }
+                }
+            }
+
+            Assert.That(closedBasinCount, Is.GreaterThan(0));
+            Assert.That(fixedLakeBasinCellCount, Is.GreaterThan(0));
+            Assert.That(surfaceCellCount, Is.GreaterThan(0));
+        }
+
+        /// <summary>
+        /// 製品Jobと同じ閉鎖末端作業一覧と8つの専用領域を準備し、各担当を実行した結果が逐次チャンク生成と一致することを保証します。
+        /// </summary>
+        [Test]
+        public void ParallelLakeWorkItems_PartitionCellsAndMatchSequentialChunkResolution()
+        {
+            WorldGenerationSettings settings = CreateSettings("hydrology-parallel-lake-work-items");
+            using var expectedCells = new NativeArray<GeneratedHydrologyCell>(
+                DeterministicHydrologyGenerator.CellsPerChunk,
+                Allocator.Persistent,
+                NativeArrayOptions.UninitializedMemory);
+            using var actualCells = new NativeArray<GeneratedHydrologyCell>(
+                DeterministicHydrologyGenerator.CellsPerChunk,
+                Allocator.Persistent,
+                NativeArrayOptions.UninitializedMemory);
+            using var frontier = new NativeArray<HydrologyUpstreamCandidate>(
+                DeterministicHydrologyGenerator.ParallelChunkFrontierCapacity,
+                Allocator.Persistent,
+                NativeArrayOptions.UninitializedMemory);
+            using var basinMembers = new NativeArray<HydrologyUpstreamCandidate>(
+                DeterministicHydrologyGenerator.ParallelChunkBasinMemberCapacity,
+                Allocator.Persistent,
+                NativeArrayOptions.UninitializedMemory);
+            using var basinLookup = new NativeArray<HydrologyBasinLookupSlot>(
+                DeterministicHydrologyGenerator.ParallelChunkBasinLookupCapacity,
+                Allocator.Persistent,
+                NativeArrayOptions.ClearMemory);
+            using var workItems = new NativeArray<HydrologyLakeChunkWorkItem>(
+                DeterministicHydrologyGenerator.CellsPerChunk,
+                Allocator.Persistent,
+                NativeArrayOptions.UninitializedMemory);
+
+            Assert.That(
+                DeterministicHydrologyGenerator.TryGenerateChunkCells(
+                    settings,
+                    -2,
+                    -2,
+                    expectedCells),
+                Is.True);
+            Assert.That(
+                TryGenerateChunkCellsWithoutLake(
+                    settings,
+                    -2,
+                    -2,
+                    actualCells,
+                    frontier),
+                Is.True);
+            Assert.That(
+                DeterministicHydrologyGenerator.TryBuildChunkLakeWorkItems(
+                    actualCells,
+                    workItems,
+                    out int workItemCount),
+                Is.True);
+            Assert.That(workItemCount, Is.GreaterThan(0));
+
+            ulong combinedMask = 0UL;
+            for (int workItemIndex = 0; workItemIndex < workItemCount; workItemIndex++)
+            {
+                HydrologyLakeChunkWorkItem workItem = workItems[workItemIndex];
+                // 同じセルを複数担当へ渡すと並列書込競合になるため、Maskの重複を結果比較とは別に検出します。
+                Assert.That(combinedMask & workItem.CellMask, Is.Zero);
+                combinedMask |= workItem.CellMask;
+            }
+
+            ulong expectedClosedBasinMask = 0UL;
+            for (int cellIndex = 0; cellIndex < actualCells.Length; cellIndex++)
+            {
+                if (actualCells[cellIndex].DownstreamTerminal == HydrologyConnectionFlags.ClosedBasin)
+                {
+                    expectedClosedBasinMask |= 1UL << cellIndex;
+                }
+            }
+            Assert.That(combinedMask, Is.EqualTo(expectedClosedBasinMask));
+
+            for (int laneIndex = 0;
+                laneIndex < DeterministicHydrologyGenerator.CellsPerChunkAxis;
+                laneIndex++)
+            {
+                Assert.That(
+                    DeterministicHydrologyGenerator.TryApplyChunkLakeWorkItemsLane(
+                        settings,
+                        actualCells,
+                        workItems,
+                        workItemCount,
+                        laneIndex,
+                        DeterministicHydrologyGenerator.CellsPerChunkAxis,
+                        frontier,
+                        basinMembers,
+                        basinLookup),
+                    Is.True);
+            }
+
+            for (int cellIndex = 0; cellIndex < actualCells.Length; cellIndex++)
+            {
+                AssertCellEqual(expectedCells[cellIndex], actualCells[cellIndex]);
+            }
         }
 
         /// <summary>
@@ -1249,7 +1850,7 @@ namespace Farmware.WorldGeneration.Tests
                     long coordinateKey = ((long)currentX << 32) ^ (uint)currentY;
                     Assert.That(visited.Add(coordinateKey), Is.True, $"循環座標: ({currentX}, {currentY})");
                     Assert.That(
-                        DeterministicHydrologyGenerator.TryGenerateCell(
+                        DeterministicHydrologyGenerator.TryGenerateFlowCell(
                             settings,
                             currentX,
                             currentY,
@@ -1345,15 +1946,40 @@ namespace Farmware.WorldGeneration.Tests
                     validSettings,
                     int.MaxValue,
                     0,
-                    out _),
+                    out GeneratedHydrologyCell maximumCoordinateCell),
                 Is.False);
+            Assert.That(maximumCoordinateCell, Is.EqualTo(default(GeneratedHydrologyCell)));
             Assert.That(
                 DeterministicHydrologyGenerator.TryGenerateCell(
                     validSettings,
                     int.MinValue,
                     0,
-                    out _),
+                    out GeneratedHydrologyCell minimumCoordinateCell),
                 Is.False);
+            Assert.That(minimumCoordinateCell, Is.EqualTo(default(GeneratedHydrologyCell)));
+        }
+
+        /// <summary>
+        /// 下流判定だけが成功しても、集水Heap容量が不足した部分結果を成功として公開しないことを保証します。
+        /// </summary>
+        [Test]
+        public void Generation_IncompleteCatchmentWorkspaceFailsWithoutPartialResult()
+        {
+            WorldGenerationSettings settings = CreateSettings("hydrology-incomplete-workspace");
+            using var insufficientFrontier = new NativeArray<HydrologyUpstreamCandidate>(
+                1,
+                Allocator.Temp,
+                NativeArrayOptions.UninitializedMemory);
+
+            Assert.That(
+                DeterministicHydrologyGenerator.TryGenerateCell(
+                    settings,
+                    0,
+                    0,
+                    insufficientFrontier,
+                    out GeneratedHydrologyCell cell),
+                Is.False);
+            Assert.That(cell, Is.EqualTo(default(GeneratedHydrologyCell)));
         }
 
         /// <summary>テスト名から安定Seedを作り、製品既定値と同じGeneratorVersion 1の設定を返します。</summary>
@@ -1371,6 +1997,20 @@ namespace Farmware.WorldGeneration.Tests
         private static void GetAggregationBenchmarkInput(int index, out int cellX, out int cellY)
         {
             const int axisLength = 16;
+            int localIndex = index % (axisLength * axisLength);
+            cellX = (localIndex % axisLength) - (axisLength / 2);
+            cellY = (localIndex / axisLength) - (axisLength / 2);
+        }
+
+        /// <summary>
+        /// 湖性能の要求番号を原点周囲100×100セルへ循環割当し、各桁で同じ固定作業集合を再利用します。
+        /// </summary>
+        /// <param name="index">0から始まるセル生成要求番号です。</param>
+        /// <param name="cellX">要求番号に対応する水平絶対水文座標です。</param>
+        /// <param name="cellY">要求番号に対応する垂直絶対水文座標です。</param>
+        private static void GetLakeBenchmarkInput(int index, out int cellX, out int cellY)
+        {
+            const int axisLength = 100;
             int localIndex = index % (axisLength * axisLength);
             cellX = (localIndex % axisLength) - (axisLength / 2);
             cellY = (localIndex / axisLength) - (axisLength / 2);
@@ -1395,15 +2035,18 @@ namespace Farmware.WorldGeneration.Tests
         /// </summary>
         /// <param name="current">一つ前のセルまでを反映した計測用検査値です。</param>
         /// <param name="cell">今回反映する固定水文セルです。</param>
-        /// <returns>座標、集水数、湿度合計、接続フラグを混合した次の検査値です。</returns>
+        /// <returns>座標、集水数、湿度合計、接続、湖面を混合した次の検査値です。</returns>
         private static ulong AccumulateHydrologyChecksum(ulong current, in GeneratedHydrologyCell cell)
         {
             unchecked
             {
                 ulong coordinate = (uint)cell.CellX | ((ulong)(uint)cell.CellY << 32);
                 ulong catchment = cell.CatchmentAreaCells | ((ulong)(ushort)cell.ConnectionFlags << 32);
+                ulong lake = cell.BasinAreaCells | ((ulong)(byte)cell.LakeFlags << 32);
+                lake |= (ulong)cell.LakeSurfaceHeight << 40;
                 current = WorldSeedUtility.Mix64(current ^ coordinate);
                 current = WorldSeedUtility.Mix64(current ^ catchment);
+                current = WorldSeedUtility.Mix64(current ^ lake);
                 return WorldSeedUtility.Mix64(current ^ (ulong)cell.RunoffMoistureSum);
             }
         }
@@ -1505,11 +2148,12 @@ namespace Farmware.WorldGeneration.Tests
             for (int index = 0; index < cellCount; index++)
             {
                 GetBenchmarkInput(index, settingsBySeed, out WorldGenerationSettings settings, out int cellX, out int cellY);
-                if (!DeterministicHydrologyGenerator.TryGenerateCell(
+                if (!DeterministicHydrologyGenerator.TryGenerateCellWithoutLake(
                         settings,
                         cellX,
                         cellY,
                         catchmentFrontier,
+                        0,
                         out GeneratedHydrologyCell cell))
                 {
                     failureCount++;
@@ -1716,9 +2360,53 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(actual.PlateauRank, Is.EqualTo(expected.PlateauRank));
             Assert.That(actual.DownstreamEdgeCount, Is.EqualTo(expected.DownstreamEdgeCount));
             Assert.That(actual.ConnectionFlags, Is.EqualTo(expected.ConnectionFlags));
+            Assert.That(actual.BasinAreaCells, Is.EqualTo(expected.BasinAreaCells));
+            Assert.That(actual.SpillInsideCellX, Is.EqualTo(expected.SpillInsideCellX));
+            Assert.That(actual.SpillInsideCellY, Is.EqualTo(expected.SpillInsideCellY));
+            Assert.That(actual.SpillOutsideCellX, Is.EqualTo(expected.SpillOutsideCellX));
+            Assert.That(actual.SpillOutsideCellY, Is.EqualTo(expected.SpillOutsideCellY));
+            Assert.That(actual.LakeBottomHeight, Is.EqualTo(expected.LakeBottomHeight));
+            Assert.That(actual.SpillHeight, Is.EqualTo(expected.SpillHeight));
+            Assert.That(actual.LakeFillFraction, Is.EqualTo(expected.LakeFillFraction));
+            Assert.That(actual.LakeSurfaceHeight, Is.EqualTo(expected.LakeSurfaceHeight));
             Assert.That(actual.FlowDirection, Is.EqualTo(expected.FlowDirection));
             Assert.That(actual.Flags, Is.EqualTo(expected.Flags));
             Assert.That(actual.CatchmentFlags, Is.EqualTo(expected.CatchmentFlags));
+            Assert.That(actual.LakeFlags, Is.EqualTo(expected.LakeFlags));
+        }
+
+        /// <summary>
+        /// 実生成セルの湖面フラグ、標高、接続を検査し、除外理由と固定湖面が同時に成立しないことを保証します。
+        /// </summary>
+        /// <param name="cell">閉鎖流域へ到達する生成済み水文セルです。</param>
+        private static void AssertLakeStateIsConsistent(in GeneratedHydrologyCell cell)
+        {
+            bool fixedLake = (cell.LakeFlags & HydrologyLakeFlags.FixedLake) != 0;
+            bool surfaceCell = (cell.LakeFlags & HydrologyLakeFlags.SurfaceCell) != 0;
+            bool excluded = (cell.LakeFlags
+                & (HydrologyLakeFlags.BasinTruncated
+                    | HydrologyLakeFlags.BasinTooSmall
+                    | HydrologyLakeFlags.InsufficientRunoff
+                    | HydrologyLakeFlags.NoPositiveDepth)) != 0;
+
+            Assert.That(fixedLake && excluded, Is.False);
+            Assert.That(surfaceCell, Is.EqualTo((cell.ConnectionFlags & HydrologyConnectionFlags.Lake) != 0));
+            Assert.That(surfaceCell && !fixedLake, Is.False);
+            if (fixedLake)
+            {
+                Assert.That(cell.BasinAreaCells, Is.GreaterThanOrEqualTo(4u));
+                Assert.That(cell.LakeFillFraction, Is.GreaterThanOrEqualTo(16384));
+                Assert.That(cell.SpillHeight, Is.GreaterThan(cell.LakeBottomHeight));
+                Assert.That(cell.LakeSurfaceHeight, Is.GreaterThan(cell.LakeBottomHeight));
+                Assert.That(cell.LakeSurfaceHeight, Is.LessThanOrEqualTo(cell.SpillHeight));
+            }
+
+            if ((cell.LakeFlags & HydrologyLakeFlags.Overflow) != 0)
+            {
+                Assert.That(fixedLake, Is.True);
+                Assert.That(cell.LakeFillFraction, Is.EqualTo(ushort.MaxValue));
+                Assert.That(cell.LakeSurfaceHeight, Is.EqualTo(cell.SpillHeight));
+            }
         }
 
         /// <summary>合成境界のテスト入力として、指定した全固定値を持つDownstream Summaryを作ります。</summary>

@@ -1,5 +1,5 @@
 // このファイルは、描画フレーム時間を固定間隔へ変換し、Farmwareのゲームルールを一定回数だけ更新するECS System Groupを定義します。
-// FarmwareSimulationSystemGroupの子として動き、固定Tick設定、一時停止状態、現在TickのSingletonと連携します。
+// 固定Tick設定、一時停止、現在Tick、非同期チャンク生成の準備状態を読み、重いJobを描画スレッドで待たず論理Tickだけを延期します。
 
 using System;
 using Unity.Core;
@@ -41,7 +41,7 @@ namespace Farmware.Simulation
 
     /// <summary>
     /// 描画フレームの経過時間を固定Tickへ変換する、FarmwareFixedTickSimulationSystemGroup専用のRate Managerです。
-    /// Worldごとに所有され、一時停止中の時間と追いつき上限を超えた整数Tickを蓄積しません。
+    /// Worldごとに所有され、一時停止中、非同期準備中、追いつき上限を超えた整数Tickを無制限に蓄積しません。
     /// </summary>
     internal sealed class FarmwareFixedTickRateManager : IRateManager, IDisposable
     {
@@ -58,6 +58,9 @@ namespace Farmware.Simulation
 
         // 一時停止状態を毎描画フレーム読み取るQueryです。停止中は経過時間をaccumulatedSecondsへ加えません。
         private EntityQuery pauseStateQuery;
+
+        // Chunk生成が未完了かを読む任意Singleton Queryです。存在しない最小テストWorldは準備完了として扱います。
+        private EntityQuery readinessStateQuery;
 
         // Queryを同じWorldに対して一度だけ作成したかを表します。Worldをまたいだ再利用は行いません。
         private bool queriesCreated;
@@ -79,6 +82,10 @@ namespace Farmware.Simulation
 
         // 現在の描画フレームで、この後に実行する予定の固定Tick数です。
         private uint remainingTicksThisFrame;
+
+        // 生成待ちに入った時点で到来済みだったTickを1件だけ保持し、準備完了後に同じ論理順で再開します。
+        // 2件目以降の壁時計遅延は捨て、生成完了直後に大量追いつきが起きないようにします。
+        private bool deferredTickPending;
 
         // 固定Tick Groupへ一時的なWorld.TimeをPushしているかを表し、次の判定時に必ずPopするために使います。
         private bool timePushed;
@@ -116,6 +123,15 @@ namespace Farmware.Simulation
                 group.World.PopTime();
                 timePushed = false;
 
+                // 直前Tickの公開Systemが次の生成バッチを投入した場合、残りの追いつきTickを同じフレームで
+                // 実行すると再び同期点へ到達します。到来済みTickを1件だけ延期し、描画へ制御を返します。
+                if (IsFixedTickBlocked())
+                {
+                    CaptureOneDeferredTickAndDropAdditionalBacklog();
+                    remainingTicksThisFrame = 0;
+                    return false;
+                }
+
                 if (remainingTicksThisFrame > 0)
                 {
                     return PushNextTickTime(group);
@@ -146,6 +162,23 @@ namespace Farmware.Simulation
                 accumulatedSeconds += frameDeltaTime;
             }
 
+            if (IsFixedTickBlocked())
+            {
+                // Workerの完了をMain Threadで待たず、この描画フレームはGame ViewとPresentationへ返します。
+                // 到来済みTickは1件だけ保持し、生成中の長い壁時計時間を後で一括追いつきしません。
+                CaptureOneDeferredTickAndDropAdditionalBacklog();
+                remainingTicksThisFrame = 0;
+                return false;
+            }
+
+            if (deferredTickPending)
+            {
+                // 延期Tick分の時間はaccumulatedSecondsへ1 Tick残してあるため、通常と同じPush処理で消費します。
+                deferredTickPending = false;
+                remainingTicksThisFrame = 1;
+                return PushNextTickTime(group);
+            }
+
             PlanTicksForCurrentFrame();
             if (remainingTicksThisFrame == 0)
             {
@@ -169,6 +202,7 @@ namespace Farmware.Simulation
             configurationQuery.Dispose();
             tickStateQuery.Dispose();
             pauseStateQuery.Dispose();
+            readinessStateQuery.Dispose();
             queriesCreated = false;
         }
 
@@ -189,7 +223,37 @@ namespace Farmware.Simulation
                 ComponentType.ReadOnly<SimulationTickState>());
             pauseStateQuery = group.EntityManager.CreateEntityQuery(
                 ComponentType.ReadOnly<SimulationPauseState>());
+            readinessStateQuery = group.EntityManager.CreateEntityQuery(
+                ComponentType.ReadOnly<FixedTickReadinessState>());
             queriesCreated = true;
+        }
+
+        /// <summary>
+        /// 任意の準備状態Singletonを読み、Chunk生成中なら固定Tickを開始しないようにします。
+        /// </summary>
+        /// <returns>Singletonが1件あり、Chunk生成Jobの完了待ちを示している場合はtrueです。</returns>
+        private bool IsFixedTickBlocked()
+        {
+            // 古いテストWorldや機能単体WorldにSingletonが無い場合は、後方互換のため準備完了として扱います。
+            return readinessStateQuery.CalculateEntityCount() == 1
+                && readinessStateQuery.GetSingleton<FixedTickReadinessState>().IsBlocked;
+        }
+
+        /// <summary>
+        /// 現在までに到来した整数Tickを最大1件だけ延期し、それを超える生成待ち時間を破棄します。
+        /// </summary>
+        private void CaptureOneDeferredTickAndDropAdditionalBacklog()
+        {
+            double availableTickCount = Math.Floor(
+                (accumulatedSeconds + TickBoundaryTolerance) / fixedDeltaTimeSeconds);
+            if (availableTickCount < 1d)
+            {
+                return;
+            }
+
+            deferredTickPending = true;
+            // 延期した1 Tick分は残します。許容誤差でわずかに先行した負債も、通常経路と同じく端数へ保持します。
+            accumulatedSeconds -= (availableTickCount - 1d) * fixedDeltaTimeSeconds;
         }
 
         /// <summary>

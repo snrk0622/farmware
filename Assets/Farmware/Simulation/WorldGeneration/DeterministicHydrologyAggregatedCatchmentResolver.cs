@@ -351,6 +351,8 @@ namespace Farmware.WorldGeneration
             cell.MaximumContributingDistance = catchmentResult.MaximumContributingDistance;
             cell.ConnectionFlags = downstreamResult.Terminal | catchmentResult.SurfaceWaterConnectionFlags;
             cell.CatchmentFlags = catchmentResult.CatchmentFlags;
+            // このResolverはC3-C2の集水Summary比較専用です。C3-D1の閉鎖流域解決を混ぜると、
+            // 集水キャッシュだけの効果を測る既存ベンチマークへ湖探索時間が混入するため、ここでは基礎水文値だけを返します。
             return true;
         }
 

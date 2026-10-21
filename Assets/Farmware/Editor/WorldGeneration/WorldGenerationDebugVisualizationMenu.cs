@@ -110,6 +110,26 @@ namespace Farmware.WorldGeneration.Editor
         private const string AnimalPopulationMenuPath =
             "Farmware/World Generation/Debug Visualization/Animal Population";
 
+        /// <summary>固定D8流向表示へ切り替えるメニューパスです。</summary>
+        private const string HydrologyFlowDirectionMenuPath =
+            "Farmware/World Generation/Debug Visualization/Hydrology/Flow Direction";
+
+        /// <summary>下流終端分類表示へ切り替えるメニューパスです。</summary>
+        private const string HydrologyTerminalMenuPath =
+            "Farmware/World Generation/Debug Visualization/Hydrology/Terminal";
+
+        /// <summary>集水面積と打切り状態表示へ切り替えるメニューパスです。</summary>
+        private const string HydrologyCatchmentMenuPath =
+            "Farmware/World Generation/Debug Visualization/Hydrology/Catchment";
+
+        /// <summary>固定Stream・River接続表示へ切り替えるメニューパスです。</summary>
+        private const string HydrologySurfaceWaterMenuPath =
+            "Farmware/World Generation/Debug Visualization/Hydrology/Surface Water";
+
+        /// <summary>閉鎖流域・固定湖・打切り流域表示へ切り替えるメニューパスです。</summary>
+        private const string HydrologyLakeMenuPath =
+            "Farmware/World Generation/Debug Visualization/Hydrology/Lake";
+
         /// <summary>地上レイヤーを診断対象にするメニューパスです。</summary>
         private const string SurfaceLayerMenuPath =
             "Farmware/World Generation/Debug Visualization/Layer/Surface";
@@ -295,6 +315,41 @@ namespace Farmware.WorldGeneration.Editor
         private static void SelectAnimalPopulation()
         {
             SelectMode(WorldGenerationDebugVisualizationMode.AnimalPopulation);
+        }
+
+        /// <summary>PlayMode中の8方向固定流向と終端を固定色で表示します。</summary>
+        [MenuItem(HydrologyFlowDirectionMenuPath, false, 227)]
+        private static void SelectHydrologyFlowDirection()
+        {
+            SelectMode(WorldGenerationDebugVisualizationMode.HydrologyFlowDirection);
+        }
+
+        /// <summary>PlayMode中のMarine・ClosedBasin・LongDrainage終端を固定色で表示します。</summary>
+        [MenuItem(HydrologyTerminalMenuPath, false, 228)]
+        private static void SelectHydrologyTerminal()
+        {
+            SelectMode(WorldGenerationDebugVisualizationMode.HydrologyTerminal);
+        }
+
+        /// <summary>PlayMode中の集水面積と4,096件上限打切りを色分けします。</summary>
+        [MenuItem(HydrologyCatchmentMenuPath, false, 229)]
+        private static void SelectHydrologyCatchment()
+        {
+            SelectMode(WorldGenerationDebugVisualizationMode.HydrologyCatchment);
+        }
+
+        /// <summary>PlayMode中の固定Stream・River接続を色分けします。</summary>
+        [MenuItem(HydrologySurfaceWaterMenuPath, false, 230)]
+        private static void SelectHydrologySurfaceWater()
+        {
+            SelectMode(WorldGenerationDebugVisualizationMode.HydrologySurfaceWater);
+        }
+
+        /// <summary>PlayMode中の閉鎖流域、固定湖、湖面、越流、打切りを色分けします。</summary>
+        [MenuItem(HydrologyLakeMenuPath, false, 231)]
+        private static void SelectHydrologyLake()
+        {
+            SelectMode(WorldGenerationDebugVisualizationMode.HydrologyLake);
         }
 
         /// <summary>PlayMode中の診断検索を地上レイヤーへ切り替えます。</summary>
@@ -546,6 +601,56 @@ namespace Farmware.WorldGeneration.Editor
             return ValidateMode(
                 AnimalPopulationMenuPath,
                 WorldGenerationDebugVisualizationMode.AnimalPopulation);
+        }
+
+        /// <summary>Hydrology Flow Direction項目の有効状態とチェック表示を更新します。</summary>
+        /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
+        [MenuItem(HydrologyFlowDirectionMenuPath, true)]
+        private static bool ValidateHydrologyFlowDirection()
+        {
+            return ValidateMode(
+                HydrologyFlowDirectionMenuPath,
+                WorldGenerationDebugVisualizationMode.HydrologyFlowDirection);
+        }
+
+        /// <summary>Hydrology Terminal項目の有効状態とチェック表示を更新します。</summary>
+        /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
+        [MenuItem(HydrologyTerminalMenuPath, true)]
+        private static bool ValidateHydrologyTerminal()
+        {
+            return ValidateMode(
+                HydrologyTerminalMenuPath,
+                WorldGenerationDebugVisualizationMode.HydrologyTerminal);
+        }
+
+        /// <summary>Hydrology Catchment項目の有効状態とチェック表示を更新します。</summary>
+        /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
+        [MenuItem(HydrologyCatchmentMenuPath, true)]
+        private static bool ValidateHydrologyCatchment()
+        {
+            return ValidateMode(
+                HydrologyCatchmentMenuPath,
+                WorldGenerationDebugVisualizationMode.HydrologyCatchment);
+        }
+
+        /// <summary>Hydrology Surface Water項目の有効状態とチェック表示を更新します。</summary>
+        /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
+        [MenuItem(HydrologySurfaceWaterMenuPath, true)]
+        private static bool ValidateHydrologySurfaceWater()
+        {
+            return ValidateMode(
+                HydrologySurfaceWaterMenuPath,
+                WorldGenerationDebugVisualizationMode.HydrologySurfaceWater);
+        }
+
+        /// <summary>Hydrology Lake項目の有効状態とチェック表示を更新します。</summary>
+        /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
+        [MenuItem(HydrologyLakeMenuPath, true)]
+        private static bool ValidateHydrologyLake()
+        {
+            return ValidateMode(
+                HydrologyLakeMenuPath,
+                WorldGenerationDebugVisualizationMode.HydrologyLake);
         }
 
         /// <summary>Surfaceレイヤー項目の有効状態とチェック表示を更新します。</summary>

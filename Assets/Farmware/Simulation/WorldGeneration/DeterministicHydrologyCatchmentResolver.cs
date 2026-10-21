@@ -152,11 +152,81 @@ namespace Farmware.WorldGeneration
             int frontierStartIndex,
             out HydrologyCatchmentResult result)
         {
+            return TryResolveWithStartCellCore(
+                settings,
+                startCell,
+                frontier,
+                frontierStartIndex,
+                default,
+                0,
+                false,
+                out result);
+        }
+
+        /// <summary>
+        /// 集水結果に加え、同じ安定順で選択した全上流セルを呼出元配列へ保存します。
+        /// 閉鎖流域Resolverが境界と連続湖面を求めるときだけ使用し、通常の集水生成では追加配列へ書きません。
+        /// </summary>
+        /// <param name="settings">固定ワールド生成設定です。</param>
+        /// <param name="startCell">流域末端となる代表値とD8一辺です。</param>
+        /// <param name="frontier">優先度付き候補Heapとして再利用する呼出元配列です。</param>
+        /// <param name="frontierStartIndex">この探索へ割り当てたHeap領域の先頭添字です。</param>
+        /// <param name="selectedCells">選択した最大4,096件を順に保存する呼出元配列です。</param>
+        /// <param name="selectedStartIndex">この探索へ割り当てた選択セル領域の先頭添字です。</param>
+        /// <param name="result">成功時の集水面積、流出寄与、打切り状態です。</param>
+        /// <returns>全逆辺を検証し、結果と選択セルを同時に確定できた場合はtrueです。</returns>
+        internal static bool TryResolveWithStartCellAndMembers(
+            in WorldGenerationSettings settings,
+            in GeneratedHydrologyCell startCell,
+            NativeArray<HydrologyUpstreamCandidate> frontier,
+            int frontierStartIndex,
+            NativeArray<HydrologyUpstreamCandidate> selectedCells,
+            int selectedStartIndex,
+            out HydrologyCatchmentResult result)
+        {
+            return TryResolveWithStartCellCore(
+                settings,
+                startCell,
+                frontier,
+                frontierStartIndex,
+                selectedCells,
+                selectedStartIndex,
+                true,
+                out result);
+        }
+
+        /// <summary>
+        /// 通常集水と閉鎖流域列挙で同じ優先度、上限、4,096件目の逆辺検査を共有する内部実装です。
+        /// </summary>
+        /// <param name="settings">固定ワールド生成設定です。</param>
+        /// <param name="startCell">集水対象となる代表値とD8一辺です。</param>
+        /// <param name="frontier">優先度付き候補Heapとして再利用する呼出元配列です。</param>
+        /// <param name="frontierStartIndex">この探索へ割り当てたHeap領域の先頭添字です。</param>
+        /// <param name="selectedCells">必要な場合だけ選択済み上流セルを保存する呼出元配列です。</param>
+        /// <param name="selectedStartIndex">選択済みセル領域の先頭添字です。</param>
+        /// <param name="collectSelectedCells">集水値に加えて全選択セルを保存する場合はtrueです。</param>
+        /// <param name="result">成功時の集水面積、流出寄与、打切り状態です。</param>
+        /// <returns>設定と作業領域が有効で、固定上限まで逆辺を検査できた場合はtrueです。</returns>
+        private static bool TryResolveWithStartCellCore(
+            in WorldGenerationSettings settings,
+            in GeneratedHydrologyCell startCell,
+            NativeArray<HydrologyUpstreamCandidate> frontier,
+            int frontierStartIndex,
+            NativeArray<HydrologyUpstreamCandidate> selectedCells,
+            int selectedStartIndex,
+            bool collectSelectedCells,
+            out HydrologyCatchmentResult result)
+        {
             result = default;
             if (!DeterministicHydrologyGenerator.ValidateSettings(settings.Hydrology)
                 || !frontier.IsCreated
                 || frontierStartIndex < 0
                 || frontierStartIndex > frontier.Length - MaximumFrontierCapacity
+                || (collectSelectedCells
+                    && (!selectedCells.IsCreated
+                        || selectedStartIndex < 0
+                        || selectedStartIndex > selectedCells.Length
+                            - settings.Hydrology.MaximumCatchmentContributingCells))
                 || !TryCreateCandidate(
                     settings,
                     startCell,
@@ -181,6 +251,11 @@ namespace Farmware.WorldGeneration
             while (frontierLength > 0 && selectedCount < maximumCells)
             {
                 HydrologyUpstreamCandidate current = Pop(frontier, frontierStartIndex, ref frontierLength);
+                if (collectSelectedCells)
+                {
+                    // selectedCountは追加前なので、0始まりの保存添字としてそのまま使用できます。
+                    selectedCells[selectedStartIndex + (int)selectedCount] = current;
+                }
                 selectedCount++;
                 moistureSum += current.HydrologyMoisture;
                 if (current.FlowDistanceFromTarget > maximumDistance)

@@ -550,7 +550,7 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 同じ4要求と0.2秒を1・2・4描画フレームへ分け、実物のRate Managerで2 Tick後の保存状態が一致することを保証します。
+        /// 同じ4要求を1・2・4描画フレームへ分け、非同期延期を含む実物のRate Managerで2 Tick後の保存状態が一致することを保証します。
         /// </summary>
         [Test]
         public void GenerationBoundary_MatchesAcrossFramePartitionsAndRequestCreationOrder()
@@ -609,7 +609,10 @@ namespace Farmware.WorldGeneration.Tests
                 Assert.That(manager.GetBuffer<GeneratedResourceTile>(chunk).Length, Is.Zero);
                 Assert.That(manager.GetBuffer<GeneratedHydrologyCell>(chunk).Length, Is.Zero);
 
-                // 固定Tick入口は先行Jobだけを待って一括公開し、地形・資源・水文を同じ境界で可視化可能にします。
+                // Worker完了をテスト側で確定し、固定Tick入口が待機せず一括公開できる状態を作ります。
+                CompleteAllGenerationSlots(world, generation);
+
+                // 固定Tick入口は完成済みHandleだけを確定し、地形・資源・水文を同じ境界で可視化可能にします。
                 boundary.Update(world.Unmanaged);
                 Assert.That(
                     manager.GetComponentData<ChunkGenerationStatus>(chunk).Phase,
@@ -629,7 +632,7 @@ namespace Farmware.WorldGeneration.Tests
 
         /// <summary>最初から同じ4要求を作り、描画フレーム更新と実物の固定Tick Groupを通したハッシュを返します。</summary>
         /// <param name="catalog">各比較Worldで共通に使う動物種Blobです。</param>
-        /// <param name="frameDeltas">合計0.2秒となる描画フレーム幅です。固定Tickは手動加算しません。</param>
+        /// <param name="frameDeltas">最初に与える合計0.2秒の描画フレーム幅です。延期時は2 Tick到達まで通常フレームを追加します。</param>
         /// <param name="reverseCreation">Entity作成順を逆転し、Query順ではなく座標順でバッチを選ぶか確認します。</param>
         /// <returns>初期化Tick・個体ID・群れID・抽選状態・次回IDを含む保存状態ハッシュです。</returns>
         private static SimulationStateHash RunFramePartitionedGeneration(
@@ -660,7 +663,8 @@ namespace Farmware.WorldGeneration.Tests
             var root = world.GetOrCreateSystemManaged<FarmwareSimulationSystemGroup>();
             var fixedTicks = world.GetOrCreateSystemManaged<FarmwareFixedTickSimulationSystemGroup>();
             var gameplay = world.GetOrCreateSystemManaged<FarmwareFixedTickGameplaySystemGroup>();
-            root.AddSystemToUpdateList(world.GetOrCreateSystem<ChunkGenerationSystem>());
+            SystemHandle generation = world.GetOrCreateSystem<ChunkGenerationSystem>();
+            root.AddSystemToUpdateList(generation);
             root.AddSystemToUpdateList(fixedTicks);
             fixedTicks.AddSystemToUpdateList(world.GetOrCreateSystem<SimulationTickAdvanceSystem>());
             fixedTicks.AddSystemToUpdateList(world.GetOrCreateSystem<ChunkGenerationFixedTickPublicationSystem>());
@@ -669,11 +673,27 @@ namespace Farmware.WorldGeneration.Tests
             root.SortSystems(); fixedTicks.SortSystems(); gameplay.SortSystems();
             foreach (float delta in frameDeltas)
             {
-                world.PushTime(new TimeData(world.Time.ElapsedTime + delta, delta));
-                try { root.Update(); }
-                finally { world.PopTime(); }
+                UpdateRootGroup(world, root, delta);
+
+                // 実時間sleepに依存せずWorker完了だけを確定し、次の描画フレームで延期Tickを再開させます。
+                CompleteAllGenerationSlots(world, generation);
+                UpdateRootGroup(world, root, 0f);
+                CompleteAllGenerationSlots(world, generation);
             }
 
+            // 0.2秒を単一フレームで渡した場合、生成中に2件目以降の追いつきTickを意図的に捨てます。
+            // 比較対象を同じ論理Tickへそろえるため、通常の0.1秒フレームを追加してTick 2まで進めます。
+            int safetyFrameCount = 0;
+            while (GetSimulationTick(manager) < 2ul && safetyFrameCount < 8)
+            {
+                UpdateRootGroup(world, root, 0.1f);
+                CompleteAllGenerationSlots(world, generation);
+                UpdateRootGroup(world, root, 0f);
+                CompleteAllGenerationSlots(world, generation);
+                safetyFrameCount++;
+            }
+
+            Assert.That(GetSimulationTick(manager), Is.EqualTo(2ul), "非同期生成を完了させれば有限フレーム内にTick 2へ到達します。");
             Assert.That(CountRegionStates(manager), Is.EqualTo(4), "追いつき2 Tickでも各2地域を処理します。");
             using EntityQuery regions = manager.CreateEntityQuery(typeof(AnimalPopulationRegionState));
             using NativeArray<AnimalPopulationRegionState> states = regions.ToComponentDataArray<AnimalPopulationRegionState>(Allocator.Temp);
@@ -754,12 +774,23 @@ namespace Farmware.WorldGeneration.Tests
 
                 // 固定Tickへ入る前に通常の描画フレーム更新があっても、一方だけが公開されてはいけません。
                 generation.Update(world.Unmanaged);
-                ChunkGenerationPhase expectedPhase = isPaused
-                    ? ChunkGenerationPhase.ReadyToApply : ChunkGenerationPhase.GeneratingData;
-                Assert.That(manager.GetComponentData<ChunkGenerationStatus>(first).Phase, Is.EqualTo(expectedPhase));
-                Assert.That(manager.GetComponentData<ChunkGenerationStatus>(second).Phase, Is.EqualTo(expectedPhase));
+                ChunkGenerationPhase firstPhase = manager.GetComponentData<ChunkGenerationStatus>(first).Phase;
+                ChunkGenerationPhase secondPhase = manager.GetComponentData<ChunkGenerationStatus>(second).Phase;
+                Assert.That(secondPhase, Is.EqualTo(firstPhase), "同じ有限バッチの一部だけを先に公開してはいけません。");
                 Assert.That(CountRegionStates(manager), Is.EqualTo(batchIndex * 2));
                 Assert.That(GetAllocatorState(manager).NextId, Is.EqualTo(nextIdBeforePublication));
+
+                // 固定Tick境界は未完了Jobを待たないため、残りのWorker処理をテスト側で完了させます。
+                CompleteAllGenerationSlots(world, generation);
+                if (isPaused)
+                {
+                    // 停止中はTickが来ないので、完成済みバッチを次の描画更新で公開します。
+                    generation.Update(world.Unmanaged);
+                    Assert.That(manager.GetComponentData<ChunkGenerationStatus>(first).Phase,
+                        Is.EqualTo(ChunkGenerationPhase.ReadyToApply));
+                    Assert.That(manager.GetComponentData<ChunkGenerationStatus>(second).Phase,
+                        Is.EqualTo(ChunkGenerationPhase.ReadyToApply));
+                }
 
                 // 停止中の公開自体はTickもIDも進めず、再開した固定Tickから初めて個体群を確定します。
                 manager.SetComponentData(configuration, new SimulationPauseState { Value = 0 });
@@ -807,6 +838,54 @@ namespace Farmware.WorldGeneration.Tests
             object slot = slots.GetType().GetProperty("Item").GetValue(slots, new object[] { slotIndex });
             JobHandle handle = (JobHandle)slot.GetType().GetField("Handle").GetValue(slot);
             handle.Complete();
+        }
+
+        /// <summary>
+        /// 生成Systemが所有する全作業枠のJobを完了させ、次の更新がMain Thread待機なしで公開できる状態を作ります。
+        /// </summary>
+        /// <param name="world">生成Jobを所有するテストWorldです。</param>
+        /// <param name="generation">このWorldの生成Systemです。</param>
+        private static void CompleteAllGenerationSlots(World world, SystemHandle generation)
+        {
+            // 本番コードへテスト専用同期APIを追加しないため、既存の作業枠数だけを反射で読み取ります。
+            object generator = world.Unmanaged.GetUnsafeSystemRef<ChunkGenerationSystem>(generation);
+            object slots = typeof(ChunkGenerationSystem).GetField("slots", BindingFlags.NonPublic | BindingFlags.Instance)
+                .GetValue(generator);
+            int slotCount = (int)slots.GetType().GetProperty("Length").GetValue(slots);
+            for (int slotIndex = 0; slotIndex < slotCount; slotIndex++)
+            {
+                CompleteGenerationSlot(world, generation, slotIndex);
+            }
+        }
+
+        /// <summary>描画フレーム相当の時間を一時設定し、本番Root Groupを1回更新します。</summary>
+        /// <param name="world">時間を所有するテストWorldです。</param>
+        /// <param name="root">通常フレームと固定Tickを順に更新するRoot Groupです。</param>
+        /// <param name="frameDeltaTime">今回だけ加える描画時間です。秒単位です。</param>
+        private static void UpdateRootGroup(
+            World world,
+            FarmwareSimulationSystemGroup root,
+            float frameDeltaTime)
+        {
+            world.PushTime(new TimeData(world.Time.ElapsedTime + frameDeltaTime, frameDeltaTime));
+            try
+            {
+                root.Update();
+            }
+            finally
+            {
+                world.PopTime();
+            }
+        }
+
+        /// <summary>現在のSimulationTickState Singletonから論理Tick番号を読み取ります。</summary>
+        /// <param name="manager">現在Tickを所有するテストWorldのEntityManagerです。</param>
+        /// <returns>固定Tick Groupが開始済みのTick番号です。</returns>
+        private static ulong GetSimulationTick(EntityManager manager)
+        {
+            using EntityQuery tickQuery = manager.CreateEntityQuery(
+                ComponentType.ReadOnly<SimulationTickState>());
+            return tickQuery.GetSingleton<SimulationTickState>().CurrentTick;
         }
 
         /// <summary>
@@ -1140,7 +1219,7 @@ namespace Farmware.WorldGeneration.Tests
             return records;
         }
 
-        /// <summary>Systemが必要とする4つのSingletonをテストWorldへ1件ずつ準備します。</summary>
+        /// <summary>Systemが必要とするSingletonと、既定で準備完了の固定Tick状態をテストWorldへ1件ずつ準備します。</summary>
         private static void PrepareWorldSingletons(
             World world,
             BlobAssetReference<AnimalSpeciesCatalogBlob> animalCatalog)
@@ -1158,6 +1237,9 @@ namespace Farmware.WorldGeneration.Tests
             world.EntityManager.AddComponentData(
                 singletonEntity,
                 new SimulationTickState { CurrentTick = 12 });
+            world.EntityManager.AddComponentData(
+                singletonEntity,
+                new FixedTickReadinessState { ChunkGenerationPending = 0 });
         }
 
         /// <summary>全面草原陸地で生成完了済みのストリーミング用チャンクEntityを作ります。</summary>
