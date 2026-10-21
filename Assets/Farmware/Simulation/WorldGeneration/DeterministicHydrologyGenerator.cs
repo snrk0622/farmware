@@ -1,5 +1,5 @@
-// このファイルは、TERRAIN-01C3-Aの8×8水文セル、代表標高、海洋流出口、D8流向を決定論的に生成します。
-// ChunkGenerationSystem、状態ハッシュ、後続の下流・集水処理が同じ純粋計算を共有し、ロード順や表示状態による差を防ぎます。
+// このファイルは、TERRAIN-01C3-A/Bの8×8水文セル、D8流向、最大4,096辺の下流終端を決定論的に生成します。
+// ChunkGenerationSystem、状態ハッシュ、後続の集水・湖処理が同じ純粋計算を共有し、ロード順や表示状態による差を防ぎます。
 
 using System;
 using Unity.Collections;
@@ -8,7 +8,7 @@ using Unity.Entities;
 namespace Farmware.WorldGeneration
 {
     /// <summary>
-    /// 固定水文の基礎格子と代表標高サンプルを再計算するため、ワールド寿命中に固定する設定です。
+    /// 固定水文の基礎格子、代表標高、下流探索上限を再計算するため、ワールド寿命中に固定する設定です。
     /// WorldGenerationSettingsへ値として含め、GeneratorVersionと一緒に保存対象とします。
     /// </summary>
     public struct HydrologyGenerationSettings
@@ -19,16 +19,24 @@ namespace Farmware.WorldGeneration
         /// <summary>代表標高の中心から正負へ離す固定サンプル距離です。単位はタイルです。</summary>
         public int RepresentativeSampleOffsetInTiles;
 
+        /// <summary>1セルの下流終端を確定するために進める最大辺数です。C3-Bでは4,096辺に固定します。</summary>
+        public int MaximumDownstreamEdges;
+
+        /// <summary>Downstream Summaryの最大Levelです。Level 12が4,096辺を表します。</summary>
+        public int MaximumDownstreamSummaryLevel;
+
         /// <summary>
-        /// TERRAIN-01C3-Aの確定値を持つ既定設定を作ります。
+        /// TERRAIN-01C3-A/Bの確定値を持つ既定設定を作ります。
         /// </summary>
-        /// <returns>8×8セルと中心から3タイル離れた9点サンプルを持つ設定です。</returns>
+        /// <returns>8×8セル、9点サンプル、最大4,096辺・Level 12を持つ設定です。</returns>
         public static HydrologyGenerationSettings CreateDefault()
         {
             return new HydrologyGenerationSettings
             {
                 CellSizeInTiles = 8,
-                RepresentativeSampleOffsetInTiles = 3
+                RepresentativeSampleOffsetInTiles = 3,
+                MaximumDownstreamEdges = 4096,
+                MaximumDownstreamSummaryLevel = 12
             };
         }
     }
@@ -82,7 +90,39 @@ namespace Farmware.WorldGeneration
     }
 
     /// <summary>
-    /// 1つの8×8水文セルについて生成した固定の代表値とD8流向です。
+    /// 固定水文が持つ自然接続を重複可能なビットとして表します。
+    /// C3-Bでは下流終端3種だけを書き込み、河川・湖・地下水は後続PRで同じ値へ追加します。
+    /// </summary>
+    [Flags]
+    public enum HydrologyConnectionFlags : ushort
+    {
+        /// <summary>確定した自然接続がまだない状態です。</summary>
+        None = 0,
+
+        /// <summary>固定表面流出が渓流・小川の条件を満たす接続です。C3-Cで使用します。</summary>
+        Stream = 1 << 0,
+
+        /// <summary>固定表面流出が河川の条件を満たす接続です。C3-Cで使用します。</summary>
+        River = 1 << 1,
+
+        /// <summary>固定湖面へ属する接続です。C3-Dで使用します。</summary>
+        Lake = 1 << 2,
+
+        /// <summary>固定地下水へ接続する状態です。C4で使用します。</summary>
+        Groundwater = 1 << 3,
+
+        /// <summary>4,096辺以内で陸上の流向なしセルへ到達する下流終端です。</summary>
+        ClosedBasin = 1 << 4,
+
+        /// <summary>4,096辺以内で海洋流出口へ到達する下流終端です。</summary>
+        Marine = 1 << 5,
+
+        /// <summary>4,096辺を進んでも海洋・閉鎖流域の終端へ到達しなかった固定分類です。</summary>
+        LongDrainage = 1 << 6
+    }
+
+    /// <summary>
+    /// 1つの8×8水文セルについて生成した固定の代表値、D8流向、下流終端です。
     /// 1論理チャンクEntityへ中心座標が属する8×8件を行優先で格納し、タイルBufferや現在水位とは分離します。
     /// </summary>
     [InternalBufferCapacity(0)]
@@ -100,6 +140,12 @@ namespace Farmware.WorldGeneration
         /// <summary>下流水文セルの垂直絶対座標です。下流なしの場合は自身のCellYを保持します。</summary>
         public int DownstreamCellY;
 
+        /// <summary>終端到達時は終端セル、LongDrainage時は4,096辺進んだセルの水平絶対座標です。</summary>
+        public int DownstreamReachCellX;
+
+        /// <summary>終端到達時は終端セル、LongDrainage時は4,096辺進んだセルの垂直絶対座標です。</summary>
+        public int DownstreamReachCellY;
+
         /// <summary>中心からX・Yとも-3、0、+3にある固定9標高の整数平均です。</summary>
         public ushort HydrologyHeight;
 
@@ -108,6 +154,12 @@ namespace Farmware.WorldGeneration
 
         /// <summary>同じ代表標高の平坦面を循環なく並べる、Seed・版・座標・専用Salt由来の64bit順位です。</summary>
         public ulong PlateauRank;
+
+        /// <summary>自身から終端または4,096辺上限までに実際に進んだD8辺数です。</summary>
+        public ushort DownstreamEdgeCount;
+
+        /// <summary>C3-Bの相互排他的な下流終端と、後続PRで追加する自然接続を保持します。</summary>
+        public HydrologyConnectionFlags ConnectionFlags;
 
         /// <summary>隣接8セルのどちらへ流れるか、または下流なしを表す安定値です。</summary>
         public HydrologyFlowDirection FlowDirection;
@@ -124,6 +176,14 @@ namespace Farmware.WorldGeneration
         /// このセルがD8の下流セルを持つかを返します。
         /// </summary>
         public bool HasDownstream => FlowDirection != HydrologyFlowDirection.None;
+
+        /// <summary>
+        /// C3-Bで確定するMarine、ClosedBasin、LongDrainageのいずれか一つを返します。
+        /// </summary>
+        public HydrologyConnectionFlags DownstreamTerminal => ConnectionFlags
+            & (HydrologyConnectionFlags.Marine
+                | HydrologyConnectionFlags.ClosedBasin
+                | HydrologyConnectionFlags.LongDrainage);
     }
 
     /// <summary>
@@ -142,11 +202,14 @@ namespace Farmware.WorldGeneration
         /// 水文設定が確定した8×8格子と9点サンプルを表すか検証します。
         /// </summary>
         /// <param name="settings">検証する固定水文設定です。</param>
-        /// <returns>暗黙補正せずC3-Aの生成へ使用できる場合はtrueです。</returns>
+        /// <returns>暗黙補正せずC3-A/Bの生成へ使用できる場合はtrueです。</returns>
         public static bool ValidateSettings(in HydrologyGenerationSettings settings)
         {
             return settings.CellSizeInTiles == 8
                 && settings.RepresentativeSampleOffsetInTiles == 3
+                && settings.MaximumDownstreamEdges == 4096
+                && settings.MaximumDownstreamSummaryLevel == 12
+                && (1 << settings.MaximumDownstreamSummaryLevel) == settings.MaximumDownstreamEdges
                 && WorldGridConstants.LogicalChunkSize % settings.CellSizeInTiles == 0
                 && WorldGridConstants.LogicalChunkSize / settings.CellSizeInTiles == CellsPerChunkAxis;
         }
@@ -189,14 +252,48 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>
-        /// 1水文セルの代表標高、中心標高、平坦面順位、D8下流を生成します。
+        /// 1水文セルの代表標高、中心標高、平坦面順位、D8下流、最大4,096辺の終端を生成します。
         /// </summary>
         /// <param name="settings">Seed、GeneratorVersion、標高、水文設定を持つワールド設定です。</param>
         /// <param name="cellX">水平の絶対水文セル座標です。</param>
         /// <param name="cellY">垂直の絶対水文セル座標です。</param>
         /// <param name="cell">成功時の固定水文セル結果です。</param>
-        /// <returns>設定、中心、9サンプル、全D8隣接座標が有効ならtrueです。</returns>
+        /// <returns>設定、中心、9サンプル、全D8隣接座標、下流経路が有効ならtrueです。</returns>
         public static bool TryGenerateCell(
+            in WorldGenerationSettings settings,
+            int cellX,
+            int cellY,
+            out GeneratedHydrologyCell cell)
+        {
+            cell = default;
+            if (!DeterministicHydrologyDownstreamResolver.TryResolveWithStartCell(
+                    settings,
+                    cellX,
+                    cellY,
+                    out cell,
+                    out HydrologyDownstreamResult downstreamResult))
+            {
+                return false;
+            }
+
+            // 一辺の流向と終端分類を同じBuffer要素へ揃え、後続Systemが部分的な水文状態を読まないようにします。
+            cell.DownstreamReachCellX = downstreamResult.ReachedCellX;
+            cell.DownstreamReachCellY = downstreamResult.ReachedCellY;
+            cell.DownstreamEdgeCount = downstreamResult.EdgeCount;
+            cell.ConnectionFlags = downstreamResult.Terminal;
+            return true;
+        }
+
+        /// <summary>
+        /// 1セルの代表値とD8一辺だけを生成し、下流終端の再帰計算を行わない内部APIです。
+        /// Downstream Resolverが経路上のセルを有限回たどるために使用します。
+        /// </summary>
+        /// <param name="settings">固定ワールド生成設定です。</param>
+        /// <param name="cellX">水平の絶対水文セル座標です。</param>
+        /// <param name="cellY">垂直の絶対水文セル座標です。</param>
+        /// <param name="cell">成功時の代表値とD8一辺です。終端集約フィールドは未設定です。</param>
+        /// <returns>設定、中心、9サンプル、全D8隣接座標が有効ならtrueです。</returns>
+        internal static bool TryGenerateFlowCell(
             in WorldGenerationSettings settings,
             int cellX,
             int cellY,
@@ -577,14 +674,20 @@ namespace Farmware.WorldGeneration
                 coordinate |= (ulong)(uint)cell.CellY << 32;
                 ulong downstream = (uint)cell.DownstreamCellX;
                 downstream |= (ulong)(uint)cell.DownstreamCellY << 32;
+                ulong downstreamReach = (uint)cell.DownstreamReachCellX;
+                downstreamReach |= (ulong)(uint)cell.DownstreamReachCellY << 32;
                 ulong values = cell.HydrologyHeight;
                 values |= (ulong)cell.CenterElevation << 16;
                 values |= (ulong)(byte)cell.FlowDirection << 32;
                 values |= (ulong)(byte)cell.Flags << 40;
+                ulong downstreamState = cell.DownstreamEdgeCount;
+                downstreamState |= (ulong)(ushort)cell.ConnectionFlags << 16;
 
                 ulong coordinateHash = WorldSeedUtility.Mix64(currentHash ^ coordinate);
                 ulong downstreamHash = WorldSeedUtility.Mix64(coordinateHash ^ downstream);
-                ulong valuesHash = WorldSeedUtility.Mix64(downstreamHash ^ values);
+                ulong reachHash = WorldSeedUtility.Mix64(downstreamHash ^ downstreamReach);
+                ulong valuesHash = WorldSeedUtility.Mix64(reachHash ^ values);
+                valuesHash = WorldSeedUtility.Mix64(valuesHash ^ downstreamState);
                 return WorldSeedUtility.Mix64(valuesHash ^ cell.PlateauRank);
             }
         }

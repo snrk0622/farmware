@@ -1,7 +1,9 @@
-// このファイルは、TERRAIN-01C3-Aの水文セル座標、9点代表標高、海洋終端、D8流向、ECS用チャンク配列を検証します。
-// 下流4,096辺、集水面積、流出、湖は後続枝番の責務とし、ここでは基礎グラフが決定論的で非循環になることを保証します。
+// このファイルは、TERRAIN-01C3-A/Bの水文基礎格子、D8流向、Level 0〜12 Summary、最大4,096辺の終端分類を検証します。
+// 集水面積、流出、湖は後続枝番の責務とし、ここでは下流結果が決定論的かつ有限になることを保証します。
 
+using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using NUnit.Framework;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
@@ -9,7 +11,7 @@ using Unity.Collections.LowLevel.Unsafe;
 namespace Farmware.WorldGeneration.Tests
 {
     /// <summary>
-    /// 固定8×8格子とD8辺をSceneやGameObjectなしで検証するEditModeテストです。
+    /// 固定8×8格子、D8辺、下流Summaryと終端分類をSceneやGameObjectなしで検証するEditModeテストです。
     /// 純粋GeneratorとChunkGenerationSystemが共有する入力・出力契約を対象にします。
     /// </summary>
     public sealed class DeterministicHydrologyGeneratorTests
@@ -18,25 +20,294 @@ namespace Farmware.WorldGeneration.Tests
         /// 製品既定値を準備し、8タイル格子、3タイルサンプル、1チャンク64セルが確定仕様と一致することを保証します。
         /// </summary>
         [Test]
-        public void DefaultSettings_MatchTerrain01C3AContract()
+        public void DefaultSettings_MatchTerrain01C3BContract()
         {
             WorldGenerationSettings settings = CreateSettings("hydrology-defaults");
 
             Assert.That(DeterministicHydrologyGenerator.ValidateSettings(settings.Hydrology), Is.True);
             Assert.That(settings.Hydrology.CellSizeInTiles, Is.EqualTo(8));
             Assert.That(settings.Hydrology.RepresentativeSampleOffsetInTiles, Is.EqualTo(3));
+            Assert.That(settings.Hydrology.MaximumDownstreamEdges, Is.EqualTo(4096));
+            Assert.That(settings.Hydrology.MaximumDownstreamSummaryLevel, Is.EqualTo(12));
             Assert.That(DeterministicHydrologyGenerator.CellsPerChunkAxis, Is.EqualTo(8));
             Assert.That(DeterministicHydrologyGenerator.CellsPerChunk, Is.EqualTo(64));
         }
 
         /// <summary>
-        /// ECS Bufferと生成作業枠の容量見積もりが、実際のUnityレイアウト40 bytesと一致することを保証します。
+        /// ECS Bufferと生成作業枠の容量見積もりが、終端結果を含むUnityレイアウト48 bytesと一致することを保証します。
         /// 後続PRでフィールドを追加した場合に、性能文書と容量見積もりの更新漏れを検出します。
         /// </summary>
         [Test]
         public void GeneratedHydrologyCell_SizeMatchesCapacityDocumentation()
         {
-            Assert.That(UnsafeUtility.SizeOf<GeneratedHydrologyCell>(), Is.EqualTo(40));
+            Assert.That(UnsafeUtility.SizeOf<GeneratedHydrologyCell>(), Is.EqualTo(48));
+        }
+
+        /// <summary>
+        /// 連続するLevel 0要約を準備し、二つをLevel 1へ連結して辺数・到達座標・後半の終端を保持することを保証します。
+        /// 不連続座標や前半終端を持つ要約は、経路を飛び越して合成しないことも確認します。
+        /// </summary>
+        [Test]
+        public void DownstreamSummary_CombineRequiresContiguousCompleteHalves()
+        {
+            HydrologyDownstreamSummary first = CreateSyntheticSummary(
+                10,
+                -4,
+                11,
+                -4,
+                1,
+                0,
+                HydrologyConnectionFlags.None);
+            HydrologyDownstreamSummary second = CreateSyntheticSummary(
+                11,
+                -4,
+                12,
+                -5,
+                1,
+                0,
+                HydrologyConnectionFlags.Marine);
+
+            Assert.That(
+                DeterministicHydrologyDownstreamResolver.TryCombine(first, second, out HydrologyDownstreamSummary combined),
+                Is.True);
+            Assert.That(combined.StartCellX, Is.EqualTo(10));
+            Assert.That(combined.StartCellY, Is.EqualTo(-4));
+            Assert.That(combined.ReachedCellX, Is.EqualTo(12));
+            Assert.That(combined.ReachedCellY, Is.EqualTo(-5));
+            Assert.That(combined.EdgeCount, Is.EqualTo(2));
+            Assert.That(combined.Level, Is.EqualTo(1));
+            Assert.That(combined.Terminal, Is.EqualTo(HydrologyConnectionFlags.Marine));
+
+            HydrologyDownstreamSummary disconnected = second;
+            disconnected.StartCellX = 99;
+            Assert.That(
+                DeterministicHydrologyDownstreamResolver.TryCombine(first, disconnected, out _),
+                Is.False);
+
+            first.Terminal = HydrologyConnectionFlags.ClosedBasin;
+            Assert.That(
+                DeterministicHydrologyDownstreamResolver.TryCombine(first, second, out _),
+                Is.False);
+        }
+
+        /// <summary>
+        /// 最大Levelの終端あり・終端なしSummaryを準備し、前者は到達済み分類、後者は固定LongDrainageになることを保証します。
+        /// 最大辺数未満なのに終端がない不完全Summaryをロード不足として受理しないことも確認します。
+        /// </summary>
+        [Test]
+        public void DownstreamSummary_MaximumLevelClassifiesTerminalOrLongDrainage()
+        {
+            HydrologyGenerationSettings settings = HydrologyGenerationSettings.CreateDefault();
+            HydrologyDownstreamSummary marine = CreateSyntheticSummary(
+                0,
+                0,
+                7,
+                -3,
+                19,
+                12,
+                HydrologyConnectionFlags.Marine);
+            HydrologyDownstreamSummary longDrainage = CreateSyntheticSummary(
+                0,
+                0,
+                4096,
+                0,
+                4096,
+                12,
+                HydrologyConnectionFlags.None);
+
+            Assert.That(
+                DeterministicHydrologyDownstreamResolver.TryClassifySummary(settings, marine, out HydrologyDownstreamResult marineResult),
+                Is.True);
+            Assert.That(marineResult.Terminal, Is.EqualTo(HydrologyConnectionFlags.Marine));
+            Assert.That(marineResult.EdgeCount, Is.EqualTo(19));
+
+            Assert.That(
+                DeterministicHydrologyDownstreamResolver.TryClassifySummary(
+                    settings,
+                    longDrainage,
+                    out HydrologyDownstreamResult longResult),
+                Is.True);
+            Assert.That(longResult.Terminal, Is.EqualTo(HydrologyConnectionFlags.LongDrainage));
+            Assert.That(longResult.EdgeCount, Is.EqualTo(4096));
+
+            longDrainage.EdgeCount = 4095;
+            Assert.That(
+                DeterministicHydrologyDownstreamResolver.TryClassifySummary(settings, longDrainage, out _),
+                Is.False);
+        }
+
+        /// <summary>
+        /// 実生成経路から連続するLevel 0要約を探し、直接作ったLevel 1要約と二分合成結果が完全一致することを保証します。
+        /// これによりSummaryキャッシュを使う場合とLevel 0まで展開する場合で結果が変わらないことを確認します。
+        /// </summary>
+        [Test]
+        public void DownstreamSummary_DirectBuildMatchesLevelZeroComposition()
+        {
+            WorldGenerationSettings settings = CreateSettings("hydrology-summary-composition");
+            bool foundTwoEdgePath = false;
+
+            for (int cellY = -24; cellY <= 24 && !foundTwoEdgePath; cellY++)
+            {
+                for (int cellX = -24; cellX <= 24; cellX++)
+                {
+                    Assert.That(
+                        DeterministicHydrologyDownstreamResolver.TryBuildSummary(
+                            settings,
+                            cellX,
+                            cellY,
+                            1,
+                            out HydrologyDownstreamSummary direct),
+                        Is.True);
+                    if (direct.EdgeCount != 2)
+                    {
+                        continue;
+                    }
+
+                    Assert.That(
+                        DeterministicHydrologyDownstreamResolver.TryBuildSummary(
+                            settings,
+                            cellX,
+                            cellY,
+                            0,
+                            out HydrologyDownstreamSummary first),
+                        Is.True);
+                    Assert.That(first.HasTerminal, Is.False);
+                    Assert.That(
+                        DeterministicHydrologyDownstreamResolver.TryBuildSummary(
+                            settings,
+                            first.ReachedCellX,
+                            first.ReachedCellY,
+                            0,
+                            out HydrologyDownstreamSummary second),
+                        Is.True);
+                    Assert.That(
+                        DeterministicHydrologyDownstreamResolver.TryCombine(first, second, out HydrologyDownstreamSummary combined),
+                        Is.True);
+                    AssertSummaryEqual(direct, combined);
+                    foundTwoEdgePath = true;
+                    break;
+                }
+            }
+
+            Assert.That(foundTwoEdgePath, Is.True);
+        }
+
+        /// <summary>
+        /// 同じSeed・座標を使って一辺Summaryと最大4,096辺の終端探索を比較し、
+        /// 1,000／10,000／100,000セルでCPU時間、managed allocation、実経路長を記録します。
+        /// 通常回帰を長時間化させず、キャッシュ導入の要否を実測から判断するため明示実行だけに分離します。
+        /// </summary>
+        [Test, Explicit("TERRAIN-01C3-Bの1k/10k/100k下流探索を同じ入力で比較する局所性能計測です。製品性能の合格判定には使いません。")]
+        public void DownstreamResolution_ReportsScalingComparison()
+        {
+            const int seedCount = 10;
+            const int samplesPerScale = 3;
+            var settingsBySeed = new WorldGenerationSettings[seedCount];
+            for (int seedIndex = 0; seedIndex < settingsBySeed.Length; seedIndex++)
+            {
+                // Seedごとに離れた座標領域を使い、原点周辺だけに偏った経路長を一般化しないようにします。
+                settingsBySeed[seedIndex] = CreateSettings($"hydrology-downstream-benchmark-{seedIndex}");
+            }
+
+            // JITと初回型初期化を測定外へ出します。両方式へ同じ256セルを渡して条件を揃えます。
+            for (int warmupIndex = 0; warmupIndex < 256; warmupIndex++)
+            {
+                GetBenchmarkInput(warmupIndex, settingsBySeed, out WorldGenerationSettings settings, out int cellX, out int cellY);
+                Assert.That(
+                    DeterministicHydrologyDownstreamResolver.TryBuildSummary(
+                        settings,
+                        cellX,
+                        cellY,
+                        0,
+                        out _),
+                    Is.True);
+                Assert.That(
+                    DeterministicHydrologyGenerator.TryGenerateCell(settings, cellX, cellY, out _),
+                    Is.True);
+            }
+
+            foreach (int cellCount in new[] { 1000, 10000, 100000 })
+            {
+                double oneEdgeMilliseconds = 0d;
+                double downstreamMilliseconds = 0d;
+                long oneEdgeAllocatedBytes = 0L;
+                long downstreamAllocatedBytes = 0L;
+                long totalEdges = 0L;
+                int maximumEdges = 0;
+                int marineCount = 0;
+                int closedBasinCount = 0;
+                int longDrainageCount = 0;
+                int oneEdgeFailures = 0;
+                int downstreamFailures = 0;
+                var stopwatch = new Stopwatch();
+
+                for (int sampleIndex = 0; sampleIndex < samplesPerScale; sampleIndex++)
+                {
+                    // 一辺Summaryを先に測る回と後に測る回を交互にし、時間経過による片側だけの偏りを抑えます。
+                    if ((sampleIndex & 1) == 0)
+                    {
+                        MeasureOneEdgeSummaries(
+                            cellCount,
+                            settingsBySeed,
+                            stopwatch,
+                            ref oneEdgeMilliseconds,
+                            ref oneEdgeAllocatedBytes,
+                            ref oneEdgeFailures);
+                        MeasureDownstreamResolution(
+                            cellCount,
+                            settingsBySeed,
+                            stopwatch,
+                            ref downstreamMilliseconds,
+                            ref downstreamAllocatedBytes,
+                            ref downstreamFailures,
+                            ref totalEdges,
+                            ref maximumEdges,
+                            ref marineCount,
+                            ref closedBasinCount,
+                            ref longDrainageCount);
+                    }
+                    else
+                    {
+                        MeasureDownstreamResolution(
+                            cellCount,
+                            settingsBySeed,
+                            stopwatch,
+                            ref downstreamMilliseconds,
+                            ref downstreamAllocatedBytes,
+                            ref downstreamFailures,
+                            ref totalEdges,
+                            ref maximumEdges,
+                            ref marineCount,
+                            ref closedBasinCount,
+                            ref longDrainageCount);
+                        MeasureOneEdgeSummaries(
+                            cellCount,
+                            settingsBySeed,
+                            stopwatch,
+                            ref oneEdgeMilliseconds,
+                            ref oneEdgeAllocatedBytes,
+                            ref oneEdgeFailures);
+                    }
+                }
+
+                int measuredCellCount = cellCount * samplesPerScale;
+                Assert.That(oneEdgeFailures, Is.Zero);
+                Assert.That(downstreamFailures, Is.Zero);
+                Assert.That(marineCount + closedBasinCount + longDrainageCount, Is.EqualTo(measuredCellCount));
+                Assert.That(maximumEdges, Is.InRange(0, settingsBySeed[0].Hydrology.MaximumDownstreamEdges));
+
+                // 文字列化とConsole出力は測定後だけに行い、計測対象のmanaged allocationへ混ぜません。
+                UnityEngine.Debug.Log(
+                    $"HYDROLOGY_DOWNSTREAM cells={cellCount}, samples={samplesPerScale}, "
+                    + $"oneEdgeMeanMs={oneEdgeMilliseconds / samplesPerScale:F6}, "
+                    + $"downstreamMeanMs={downstreamMilliseconds / samplesPerScale:F6}, "
+                    + $"ratio={downstreamMilliseconds / oneEdgeMilliseconds:F3}, "
+                    + $"oneEdgeManagedBytes={oneEdgeAllocatedBytes / samplesPerScale}, "
+                    + $"downstreamManagedBytes={downstreamAllocatedBytes / samplesPerScale}, "
+                    + $"meanEdges={(double)totalEdges / measuredCellCount:F3}, maximumEdges={maximumEdges}, "
+                    + $"marine={marineCount / samplesPerScale}, closedBasin={closedBasinCount / samplesPerScale}, "
+                    + $"longDrainage={longDrainageCount / samplesPerScale}");
+            }
         }
 
         /// <summary>
@@ -243,6 +514,7 @@ namespace Farmware.WorldGeneration.Tests
             WorldGenerationSettings settings = CreateSettings("hydrology-d8-invariants");
             int oceanCount = 0;
             int landEdgeCount = 0;
+            int closedBasinCount = 0;
 
             for (int cellY = -24; cellY <= 24; cellY++)
             {
@@ -262,15 +534,33 @@ namespace Farmware.WorldGeneration.Tests
                         Assert.That(cell.HasDownstream, Is.False);
                         Assert.That(cell.DownstreamCellX, Is.EqualTo(cell.CellX));
                         Assert.That(cell.DownstreamCellY, Is.EqualTo(cell.CellY));
+                        Assert.That(cell.DownstreamTerminal, Is.EqualTo(HydrologyConnectionFlags.Marine));
+                        Assert.That(cell.DownstreamEdgeCount, Is.Zero);
+                        Assert.That(cell.DownstreamReachCellX, Is.EqualTo(cell.CellX));
+                        Assert.That(cell.DownstreamReachCellY, Is.EqualTo(cell.CellY));
                         continue;
                     }
 
                     if (!cell.HasDownstream)
                     {
+                        closedBasinCount++;
+                        Assert.That(cell.DownstreamTerminal, Is.EqualTo(HydrologyConnectionFlags.ClosedBasin));
+                        Assert.That(cell.DownstreamEdgeCount, Is.Zero);
                         continue;
                     }
 
                     landEdgeCount++;
+                    Assert.That(
+                        cell.DownstreamTerminal,
+                        Is.EqualTo(HydrologyConnectionFlags.Marine)
+                            .Or.EqualTo(HydrologyConnectionFlags.ClosedBasin)
+                            .Or.EqualTo(HydrologyConnectionFlags.LongDrainage));
+                    Assert.That(cell.DownstreamEdgeCount, Is.GreaterThan(0));
+                    Assert.That(cell.DownstreamEdgeCount, Is.LessThanOrEqualTo(4096));
+                    if (cell.DownstreamTerminal == HydrologyConnectionFlags.LongDrainage)
+                    {
+                        Assert.That(cell.DownstreamEdgeCount, Is.EqualTo(4096));
+                    }
                     Assert.That(System.Math.Abs(cell.DownstreamCellX - cell.CellX), Is.LessThanOrEqualTo(1));
                     Assert.That(System.Math.Abs(cell.DownstreamCellY - cell.CellY), Is.LessThanOrEqualTo(1));
                     Assert.That(
@@ -292,6 +582,7 @@ namespace Farmware.WorldGeneration.Tests
 
             Assert.That(oceanCount, Is.GreaterThan(0));
             Assert.That(landEdgeCount, Is.GreaterThan(0));
+            Assert.That(closedBasinCount, Is.GreaterThan(0));
         }
 
         /// <summary>
@@ -428,6 +719,131 @@ namespace Farmware.WorldGeneration.Tests
             return WorldGenerationSettings.CreateDefault(WorldSeedUtility.FromString(seedText), 1);
         }
 
+        /// <summary>
+        /// 局所計測の通し番号を、10 Seed・各100×100セルの離れた絶対座標へ変換します。
+        /// 件数を増やしても先頭入力が同じになるため、1k／10k／100kのスケーリングを比較できます。
+        /// </summary>
+        /// <param name="index">0から始まる計測セル番号です。</param>
+        /// <param name="settingsBySeed">計測前に作成した10個の固定設定です。</param>
+        /// <param name="settings">番号に対応する固定ワールド設定です。</param>
+        /// <param name="cellX">番号に対応する水平水文セル座標です。</param>
+        /// <param name="cellY">番号に対応する垂直水文セル座標です。</param>
+        private static void GetBenchmarkInput(
+            int index,
+            WorldGenerationSettings[] settingsBySeed,
+            out WorldGenerationSettings settings,
+            out int cellX,
+            out int cellY)
+        {
+            const int cellsPerSeed = 10000;
+            const int axisLength = 100;
+            int seedIndex = (index / cellsPerSeed) % settingsBySeed.Length;
+            int localIndex = index % cellsPerSeed;
+            int coordinateOffset = seedIndex * cellsPerSeed;
+            settings = settingsBySeed[seedIndex];
+            cellX = (localIndex % axisLength) - (axisLength / 2) + coordinateOffset;
+            cellY = (localIndex / axisLength) - (axisLength / 2) - coordinateOffset;
+        }
+
+        /// <summary>
+        /// 指定件数のLevel 0 Summaryを生成し、最大一辺を調べる比較側のCPU時間とmanaged allocationを加算します。
+        /// </summary>
+        /// <param name="cellCount">今回測る水文セル数です。</param>
+        /// <param name="settingsBySeed">計測用の固定ワールド設定です。</param>
+        /// <param name="stopwatch">呼出元で再利用する計時器です。</param>
+        /// <param name="totalMilliseconds">全サンプルの経過時間合計です。</param>
+        /// <param name="totalAllocatedBytes">全サンプルのmanaged allocation合計です。</param>
+        /// <param name="failureCount">生成失敗件数の合計です。</param>
+        private static void MeasureOneEdgeSummaries(
+            int cellCount,
+            WorldGenerationSettings[] settingsBySeed,
+            Stopwatch stopwatch,
+            ref double totalMilliseconds,
+            ref long totalAllocatedBytes,
+            ref int failureCount)
+        {
+            long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+            stopwatch.Restart();
+            for (int index = 0; index < cellCount; index++)
+            {
+                GetBenchmarkInput(index, settingsBySeed, out WorldGenerationSettings settings, out int cellX, out int cellY);
+                if (!DeterministicHydrologyDownstreamResolver.TryBuildSummary(
+                        settings,
+                        cellX,
+                        cellY,
+                        0,
+                        out _))
+                {
+                    failureCount++;
+                }
+            }
+            stopwatch.Stop();
+            totalMilliseconds += stopwatch.Elapsed.TotalMilliseconds;
+            totalAllocatedBytes += GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+        }
+
+        /// <summary>
+        /// 指定件数の最大Level終端を生成し、CPU時間、managed allocation、実辺数、終端内訳を加算します。
+        /// </summary>
+        /// <param name="cellCount">今回測る水文セル数です。</param>
+        /// <param name="settingsBySeed">計測用の固定ワールド設定です。</param>
+        /// <param name="stopwatch">呼出元で再利用する計時器です。</param>
+        /// <param name="totalMilliseconds">全サンプルの経過時間合計です。</param>
+        /// <param name="totalAllocatedBytes">全サンプルのmanaged allocation合計です。</param>
+        /// <param name="failureCount">生成失敗件数の合計です。</param>
+        /// <param name="totalEdges">成功した全セルの実辺数合計です。</param>
+        /// <param name="maximumEdges">成功したセルの最大実辺数です。</param>
+        /// <param name="marineCount">海洋終端件数です。</param>
+        /// <param name="closedBasinCount">閉鎖流域終端件数です。</param>
+        /// <param name="longDrainageCount">4,096辺打切り件数です。</param>
+        private static void MeasureDownstreamResolution(
+            int cellCount,
+            WorldGenerationSettings[] settingsBySeed,
+            Stopwatch stopwatch,
+            ref double totalMilliseconds,
+            ref long totalAllocatedBytes,
+            ref int failureCount,
+            ref long totalEdges,
+            ref int maximumEdges,
+            ref int marineCount,
+            ref int closedBasinCount,
+            ref int longDrainageCount)
+        {
+            long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+            stopwatch.Restart();
+            for (int index = 0; index < cellCount; index++)
+            {
+                GetBenchmarkInput(index, settingsBySeed, out WorldGenerationSettings settings, out int cellX, out int cellY);
+                if (!DeterministicHydrologyGenerator.TryGenerateCell(
+                        settings,
+                        cellX,
+                        cellY,
+                        out GeneratedHydrologyCell cell))
+                {
+                    failureCount++;
+                    continue;
+                }
+
+                totalEdges += cell.DownstreamEdgeCount;
+                maximumEdges = Math.Max(maximumEdges, cell.DownstreamEdgeCount);
+                switch (cell.DownstreamTerminal)
+                {
+                    case HydrologyConnectionFlags.Marine:
+                        marineCount++;
+                        break;
+                    case HydrologyConnectionFlags.ClosedBasin:
+                        closedBasinCount++;
+                        break;
+                    case HydrologyConnectionFlags.LongDrainage:
+                        longDrainageCount++;
+                        break;
+                }
+            }
+            stopwatch.Stop();
+            totalMilliseconds += stopwatch.Elapsed.TotalMilliseconds;
+            totalAllocatedBytes += GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+        }
+
         /// <summary>下流選択の優先順位だけを検証するため、必要な固定値を持つ水文セルを作ります。</summary>
         private static GeneratedHydrologyCell CreateSyntheticCell(
             int cellX,
@@ -479,11 +895,51 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(actual.CellY, Is.EqualTo(expected.CellY));
             Assert.That(actual.DownstreamCellX, Is.EqualTo(expected.DownstreamCellX));
             Assert.That(actual.DownstreamCellY, Is.EqualTo(expected.DownstreamCellY));
+            Assert.That(actual.DownstreamReachCellX, Is.EqualTo(expected.DownstreamReachCellX));
+            Assert.That(actual.DownstreamReachCellY, Is.EqualTo(expected.DownstreamReachCellY));
             Assert.That(actual.HydrologyHeight, Is.EqualTo(expected.HydrologyHeight));
             Assert.That(actual.CenterElevation, Is.EqualTo(expected.CenterElevation));
             Assert.That(actual.PlateauRank, Is.EqualTo(expected.PlateauRank));
+            Assert.That(actual.DownstreamEdgeCount, Is.EqualTo(expected.DownstreamEdgeCount));
+            Assert.That(actual.ConnectionFlags, Is.EqualTo(expected.ConnectionFlags));
             Assert.That(actual.FlowDirection, Is.EqualTo(expected.FlowDirection));
             Assert.That(actual.Flags, Is.EqualTo(expected.Flags));
+        }
+
+        /// <summary>合成境界のテスト入力として、指定した全固定値を持つDownstream Summaryを作ります。</summary>
+        private static HydrologyDownstreamSummary CreateSyntheticSummary(
+            int startCellX,
+            int startCellY,
+            int reachedCellX,
+            int reachedCellY,
+            int edgeCount,
+            int level,
+            HydrologyConnectionFlags terminal)
+        {
+            return new HydrologyDownstreamSummary
+            {
+                StartCellX = startCellX,
+                StartCellY = startCellY,
+                ReachedCellX = reachedCellX,
+                ReachedCellY = reachedCellY,
+                EdgeCount = (ushort)edgeCount,
+                Level = (byte)level,
+                Terminal = terminal
+            };
+        }
+
+        /// <summary>直接構築と二分合成のSummary全フィールドを比較し、キャッシュ経路の差を明確にします。</summary>
+        private static void AssertSummaryEqual(
+            in HydrologyDownstreamSummary expected,
+            in HydrologyDownstreamSummary actual)
+        {
+            Assert.That(actual.StartCellX, Is.EqualTo(expected.StartCellX));
+            Assert.That(actual.StartCellY, Is.EqualTo(expected.StartCellY));
+            Assert.That(actual.ReachedCellX, Is.EqualTo(expected.ReachedCellX));
+            Assert.That(actual.ReachedCellY, Is.EqualTo(expected.ReachedCellY));
+            Assert.That(actual.EdgeCount, Is.EqualTo(expected.EdgeCount));
+            Assert.That(actual.Level, Is.EqualTo(expected.Level));
+            Assert.That(actual.Terminal, Is.EqualTo(expected.Terminal));
         }
     }
 }

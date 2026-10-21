@@ -1734,6 +1734,16 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(hydrology[0].HydrologyHeight, Is.EqualTo(expectedFirstHydrology.HydrologyHeight));
             Assert.That(hydrology[0].PlateauRank, Is.EqualTo(expectedFirstHydrology.PlateauRank));
             Assert.That(hydrology[0].FlowDirection, Is.EqualTo(expectedFirstHydrology.FlowDirection));
+            Assert.That(
+                hydrology[0].DownstreamReachCellX,
+                Is.EqualTo(expectedFirstHydrology.DownstreamReachCellX));
+            Assert.That(
+                hydrology[0].DownstreamReachCellY,
+                Is.EqualTo(expectedFirstHydrology.DownstreamReachCellY));
+            Assert.That(
+                hydrology[0].DownstreamEdgeCount,
+                Is.EqualTo(expectedFirstHydrology.DownstreamEdgeCount));
+            Assert.That(hydrology[0].ConnectionFlags, Is.EqualTo(expectedFirstHydrology.ConnectionFlags));
 
             // 地形・資源は先頭だけでなく全4096タイルを直接計算と比較し、作業配列への切替で結果が変わらないことを保証します。
             for (int index = 0; index < WorldGridConstants.TilesPerChunk; index++)
