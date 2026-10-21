@@ -4,6 +4,7 @@
 using System;
 using Unity.Burst;
 using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Entities;
 using Unity.Jobs;
 using Unity.Mathematics;
@@ -16,7 +17,7 @@ namespace Farmware.WorldGeneration
     /// <summary>
     /// 有効なChunkGenerationRequestを持つチャンクだけを生成し、同じ座標の地形・資源・固定水文を対応付けるECS Systemです。
     /// 開始時に要求を無効化します。動物個体群があるWorldでは固定Tick境界で一括公開し、Job完了順を論理状態へ持ち込みません。
-    /// 個体群Worldでは投入と公開を固定Tick入口へ揃え、追いつきTickでも同じバッチ数を処理します。
+    /// 個体群Worldでは通常フレームで先行投入し、公開だけを固定Tick入口へ揃えて追いつきTickでも同じバッチ数を処理します。
     /// </summary>
     [UpdateInGroup(typeof(FarmwareSimulationSystemGroup))]
     [UpdateAfter(typeof(ChunkStreamingSystem))]
@@ -58,8 +59,8 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>
-        /// 地形単独Worldと停止中だけ描画フレームで要求を投入します。個体群Worldの稼働中は投入も固定Tickへ委ねます。
-        /// 停止中は前回投入したバッチを全件公開し、Tickを進めずカメラ周辺の表示を更新します。
+        /// 描画フレームで次の有限バッチを先行投入し、Workerが固定Tickまで計算できる時間を確保します。
+        /// 個体群Worldの公開は固定Tickへ限定し、停止中だけ前フレームの完成結果をTickを進めず公開します。
         /// </summary>
         /// <param name="state">SystemのQuery、依存関係、Worldへアクセスする状態です。</param>
         public void OnUpdate(ref SystemState state)
@@ -70,13 +71,13 @@ namespace Farmware.WorldGeneration
                 && pauseState.IsPaused;
             if (fixedTickPublication)
             {
-                // 通常フレームで先に投入すると、1フレームに複数Tickがある場合だけ次バッチが不足します。
-                // 稼働中は要求をQueuedのまま残し、各Tickが同じ上限と座標順で投入・公開します。
-                if (!isPaused)
+                if (isPaused)
                 {
-                    return;
+                    // 停止中は固定Tickが来ないため、前フレームまでに投入した有限バッチだけを待って表示へ渡します。
+                    CompleteAndPublishBatch(state.EntityManager);
                 }
-                CompleteAndPublishBatch(state.EntityManager);
+                // 通常進行中はここで公開しません。固定Tick側も未投入時には同じ座標順で補完投入するため、
+                // 1フレームに複数Tickを追いつく場合も2 Tick目以降のバッチを欠かしません。
             }
             else
             {
@@ -147,6 +148,7 @@ namespace Farmware.WorldGeneration
                 slot.Tiles.Dispose();
                 slot.Resources.Dispose();
                 slot.HydrologyCells.Dispose();
+                slot.HydrologyCatchmentFrontier.Dispose();
                 slot.GenerationFailed.Dispose();
             }
 
@@ -182,7 +184,19 @@ namespace Farmware.WorldGeneration
                         && coordinate.Y == slot.Coordinate.Y
                         && status.Phase == ChunkGenerationPhase.GeneratingData)
                     {
-                        if (slot.GenerationFailed[0] != 0)
+                        bool generationFailed = false;
+                        for (int workItemIndex = 0;
+                            workItemIndex < slot.GenerationFailed.Length;
+                            workItemIndex++)
+                        {
+                            if (slot.GenerationFailed[workItemIndex] != 0)
+                            {
+                                generationFailed = true;
+                                break;
+                            }
+                        }
+
+                        if (generationFailed)
                         {
                             // 固定半径サンプルがワールド座標域を越えた場合は、不完全なBufferを公開せず明示的な失敗へ進めます。
                             status.GeneratedWithVersion = 0;
@@ -259,7 +273,13 @@ namespace Farmware.WorldGeneration
                 slot.Coordinate = manager.GetComponentData<ChunkCoordinateComponent>(entity);
                 slot.GeneratorVersion = settings.GeneratorVersion;
                 slot.Running = true;
-                slot.GenerationFailed[0] = 0;
+                // 8水文行と地形1件がそれぞれ自分の失敗欄へ書くため、再利用前に全9件を初期化します。
+                for (int workItemIndex = 0;
+                    workItemIndex < slot.GenerationFailed.Length;
+                    workItemIndex++)
+                {
+                    slot.GenerationFailed[workItemIndex] = 0;
+                }
                 GenerateChunkJob job = new GenerateChunkJob
                 {
                     Settings = settings,
@@ -268,12 +288,13 @@ namespace Farmware.WorldGeneration
                     Tiles = slot.Tiles,
                     Resources = slot.Resources,
                     HydrologyCells = slot.HydrologyCells,
+                    HydrologyCatchmentFrontier = slot.HydrologyCatchmentFrontier,
                     GenerationFailed = slot.GenerationFailed
                 };
 
                 // JobはECSへ一切触れず入力も値コピーです。Dependencyへ連結すると表示側が再び待つため、
                 // このSystemが専用Handleを保持して完了確認と破棄を管理します。
-                slot.Handle = job.Schedule();
+                slot.Handle = job.Schedule(GenerateChunkJob.WorkItemCount, 1);
                 slots[slotIndex] = slot;
                 status.Phase = ChunkGenerationPhase.GeneratingData;
                 manager.SetComponentData(entity, status);
@@ -334,7 +355,14 @@ namespace Farmware.WorldGeneration
                     DeterministicHydrologyGenerator.CellsPerChunk,
                     Allocator.Persistent,
                     NativeArrayOptions.UninitializedMemory),
-                GenerationFailed = new NativeArray<byte>(1, Allocator.Persistent, NativeArrayOptions.ClearMemory)
+                HydrologyCatchmentFrontier = new NativeArray<HydrologyUpstreamCandidate>(
+                    DeterministicHydrologyGenerator.ParallelChunkFrontierCapacity,
+                    Allocator.Persistent,
+                    NativeArrayOptions.UninitializedMemory),
+                GenerationFailed = new NativeArray<byte>(
+                    GenerateChunkJob.WorkItemCount,
+                    Allocator.Persistent,
+                    NativeArrayOptions.ClearMemory)
             });
             return slots.Length - 1;
         }
@@ -358,7 +386,11 @@ namespace Farmware.WorldGeneration
             public NativeArray<GeneratedResourceTile> Resources;
             /// <summary>中心がチャンク内に属する固定水文64件の作業配列です。枠の再利用中は保持します。</summary>
             public NativeArray<GeneratedHydrologyCell> HydrologyCells;
-            /// <summary>1件でも環境軸を生成できなかった場合に1となる、Jobと公開処理の失敗通知領域です。</summary>
+            /// <summary>
+            /// 8水文行へ1領域ずつ貸す上流候補Heapです。行同士は領域を共有せず、System終了時に破棄します。
+            /// </summary>
+            public NativeArray<HydrologyUpstreamCandidate> HydrologyCatchmentFrontier;
+            /// <summary>8水文行と地形の各作業が失敗時に自分の添字へ1を書く、公開処理への通知領域です。</summary>
             public NativeArray<byte> GenerationFailed;
         }
 
@@ -366,8 +398,17 @@ namespace Farmware.WorldGeneration
         /// 値コピーの設定と絶対座標だけから、専用配列へ1チャンクを生成するBurst Jobです。
         /// </summary>
         [BurstCompile]
-        private struct GenerateChunkJob : IJob
+        private struct GenerateChunkJob : IJobParallelFor
         {
+            /// <summary>並列に生成する水文行の数です。チャンク内の8行と一致します。</summary>
+            private const int HydrologyRowWorkItemCount = DeterministicHydrologyGenerator.CellsPerChunkAxis;
+
+            /// <summary>地形・資源4096件を担当する作業添字です。水文行の0〜7と重複させません。</summary>
+            private const int TerrainWorkItemIndex = HydrologyRowWorkItemCount;
+
+            /// <summary>1チャンクの8水文行と地形・資源1件を合計した並列作業数です。</summary>
+            public const int WorkItemCount = HydrologyRowWorkItemCount + 1;
+
             /// <summary>WorldのSingletonから値コピーした、Job実行中は読み取り専用の生成設定です。</summary>
             public WorldGenerationSettings Settings;
 
@@ -377,31 +418,56 @@ namespace Farmware.WorldGeneration
             /// <summary>生成する絶対チャンク座標です。Jobの実行中は変化しません。</summary>
             public ChunkCoordinateComponent Coordinate;
 
-            /// <summary>このJobだけが全件上書きし、完了後にSystemへ返す地形配列です。</summary>
+            // IJobParallelForは通常、自分と同じ添字だけへの書込を許可します。このJobは地形担当が全4096件、
+            // 水文担当が行ごとの8件と専用Heap領域へ書くため制限を明示的に外します。担当範囲は重ならず、
+            // 全作業のHandle完了後だけ公開するので、同じ要素への競合や途中結果の読み取りは発生しません。
+            /// <summary>地形担当の作業添字だけが全件上書きし、完了後にSystemへ返す地形配列です。</summary>
+            [NativeDisableParallelForRestriction]
             public NativeArray<GeneratedTile> Tiles;
 
-            /// <summary>地形と同じ位置に対応し、完了後にSystemへ返す資源配列です。</summary>
+            /// <summary>地形担当だけが書く、地形と同じ位置に対応した資源配列です。</summary>
+            [NativeDisableParallelForRestriction]
             public NativeArray<GeneratedResourceTile> Resources;
 
-            /// <summary>チャンク中心所有の8×8固定水文を行優先で保持し、完了後にSystemへ返す配列です。</summary>
+            /// <summary>8つの水文行担当が互いに異なる8要素へ書く、行優先の固定水文配列です。</summary>
+            [NativeDisableParallelForRestriction]
             public NativeArray<GeneratedHydrologyCell> HydrologyCells;
 
-            /// <summary>座標範囲外や不正設定を検出した場合に1を書き、公開処理へチャンク失敗を伝えます。</summary>
+            /// <summary>
+            /// 各水文行へ固定容量ずつ割り当てたHeapです。行担当は自分の領域だけを8セルで再利用します。
+            /// </summary>
+            [NativeDisableParallelForRestriction]
+            public NativeArray<HydrologyUpstreamCandidate> HydrologyCatchmentFrontier;
+
+            /// <summary>各作業が座標範囲外や不正設定を検出した場合、自分と同じ添字へ1を書きます。</summary>
             public NativeArray<byte> GenerationFailed;
 
             /// <summary>
-            /// Worker上で固定水文64セルと地形・資源4096タイルを生成します。ECSの状態やBufferへはアクセスしません。
+            /// Worker上で指定添字の水文1行、または地形・資源4096タイルを生成します。ECSへはアクセスしません。
             /// </summary>
-            public void Execute()
+            /// <param name="workItemIndex">0〜7は水文行、8は地形・資源を表す固定作業添字です。</param>
+            public void Execute(int workItemIndex)
             {
-                if (!DeterministicHydrologyGenerator.TryGenerateChunkCells(
-                    Settings,
-                    Coordinate.X,
-                    Coordinate.Y,
-                    HydrologyCells))
+                if (workItemIndex < HydrologyRowWorkItemCount)
                 {
-                    // 水文が部分生成になった場合も地形とまとめて失敗させ、未完成Bufferを公開しません。
-                    GenerationFailed[0] = 1;
+                    if (!DeterministicHydrologyGenerator.TryGenerateChunkCellRow(
+                            Settings,
+                            Coordinate.X,
+                            Coordinate.Y,
+                            workItemIndex,
+                            HydrologyCells,
+                            HydrologyCatchmentFrontier))
+                    {
+                        // 1行でも失敗したチャンクは、他行が成功していても部分的な水文を公開しません。
+                        GenerationFailed[workItemIndex] = 1;
+                    }
+                    return;
+                }
+
+                // 8以外はSchedule件数の不整合です。未初期化配列を公開せず、明示的な失敗として扱います。
+                if (workItemIndex != TerrainWorkItemIndex)
+                {
+                    GenerationFailed[workItemIndex] = 1;
                     return;
                 }
 
@@ -429,8 +495,8 @@ namespace Farmware.WorldGeneration
                                 out terrainTile);
                         if (!generated)
                         {
-                            // IJobは単一Workerで順に実行するため原子的操作は不要です。残りも初期化して未定義配列を残しません。
-                            GenerationFailed[0] = 1;
+                            // 地形担当は1作業だけなので原子的操作は不要です。残りも初期化して未定義配列を残しません。
+                            GenerationFailed[workItemIndex] = 1;
                             Tiles[tileIndex] = default;
                             Resources[tileIndex] = default;
                             continue;
@@ -484,8 +550,8 @@ namespace Farmware.WorldGeneration
             int limit = SystemAPI.TryGetSingleton(out ChunkStreamingSettings streamingSettings)
                 ? streamingSettings.MaximumConcurrentGenerations
                 : ChunkStreamingSettings.CreateDefault().MaximumConcurrentGenerations;
-            // 毎Tickの先頭で同じ上限まで投入し、そのTick内で全件を確定します。
-            // 追いつき2 Tickでも描画フレームを待たず、2バッチを同じ順序で進めます。
+            // 通常フレームの先行投入がまだ無い場合だけ、毎Tickの先頭で同じ上限まで補完投入します。
+            // 追いつき2 Tickでは1件目を公開後、2 Tick目が次バッチをここで投入するため処理数を変えません。
             generator.ScheduleBatch(state.EntityManager, SystemAPI.GetSingleton<WorldGenerationSettings>(),
                 SystemAPI.GetSingleton<ResourceGenerationSettings>(), limit);
             generator.CompleteAndPublishBatch(state.EntityManager);

@@ -76,7 +76,7 @@ WORLD-01Bの製品用`WorldLayer`と`WorldLayerWaterContract`を、Sceneを使�
 | 水域 | 気候による川・池の補正と、森林・湿地で池が確認できる分布を保証する。 |
 | マグマ | 火山のマグマ比率、陸地の残存、淡水抑制、岩地の希少マグマ、歪な輪郭を保証する。 |
 | 岩壁 | 水域上の抑制、適度な被覆率、チャンク境界、凹凸、通路を保証する。 |
-| 固定水文 | 8×8セル、固定9標高、中心タイルの海洋流出口、専用Saltの同点順、D8流向、負座標、循環拒否、最大4,096辺の下流終端、64件のECS Bufferと状態ハッシュを保証する。集水・流出はC3-C、閉鎖流域・湖はC3-Dで追加する。 |
+| 固定水文 | 8×8セル、固定9地点の標高・基礎湿度、中心タイルの海洋流出口、専用Saltの同点順、D8流向、負座標、循環拒否、最大4,096辺の下流終端、最大4,096セルの集水・自然流出、64件のECS Bufferと状態ハッシュを保証する。集約SummaryはC3-C2、閉鎖流域・湖はC3-Dで追加する。 |
 | 地形配置属性 | 陸地は通常設備＋通常ベルト、水は橋、マグマは橋＋耐熱必須、岩壁と未知IDは配置不可になることを純粋計算で保証する。 |
 | 有効地形 | 組み込みBlock定義、TERRAIN-01C前のInspector追加地形定義の明示拒否、旧GroundTypeからの互換変換、明示除去を含む疎な差分、自然状態への復帰時削除、レイヤー分離、移動・建築の独立判定、地形定義・差分状態ハッシュの作成順非依存、Owner／Buffer片側欠落の拒否を保証する。 |
 | 資源 | 地形適性、最低間隔、群生半径、競合解決、決定性を保証する。 |
@@ -102,17 +102,19 @@ Authoring回帰では、Sceneへ保存済みの既存Inspector値から作る設
 
 #### `DeterministicHydrologyGeneratorTests`
 
-TERRAIN-01C3-A/Bの8×8固定水文セル、中心から`-3`・`0`・`+3`タイルの固定9標高平均、中心タイルによる海洋流出口、専用Saltの`PlateauRank`、D8流向、最大4,096辺の固定下流終端をSceneなしの純粋計算で検証する。セルの担当範囲`-4〜+3`、負座標の床方向除算、候補列挙順の不変、海洋流出口の標高非依存な優先、同標高・64bitハッシュ衝突時の座標順、陸上辺で安定全順序が必ず小さくなることを対象にする。
+TERRAIN-01C3-A〜C1の8×8固定水文セル、中心から`-3`・`0`・`+3`タイルの固定9標高・基礎湿度平均、中心タイルによる海洋流出口、専用Saltの`PlateauRank`、D8流向、最大4,096辺の固定下流終端、最大4,096セルの集水・自然流出をSceneなしの純粋計算で検証する。セルの担当範囲`-4〜+3`、負座標の床方向除算、候補列挙順の不変、海洋流出口の標高非依存な優先、同標高・64bitハッシュ衝突時の座標順、陸上辺で安定全順序が必ず小さくなることを対象にする。
 
-実生成した49×49水文セルでは、海洋セルが`Marine`、陸上末端が`ClosedBasin`となり、その他も`LongDrainage`を含む3終端の一つだけを持つこと、全下流がD8隣接であること、陸上辺が上記全順序を減少させることを確認する。Level 0同士の合成と直接Level 1の一致、最大Levelの終端・打切り、不完全・不連続Summaryの拒否も対象にする。複数の開始セルから有限に追跡して再訪を拒否し、1チャンク64件の行優先順と単一セルAPIの一致、Seed差を含む水文状態ハッシュ、設定不正と`int`座標端の明示失敗も保証する。`UnsafeUtility.SizeOf<GeneratedHydrologyCell>() = 48 bytes`を固定し、後続PRで要素を拡張した場合に性能文書の容量更新漏れを検出する。
+実生成した49×49水文セルでは、海洋セルが`Marine`、陸上末端が`ClosedBasin`となり、その他も`LongDrainage`を含む3終端の一つだけを持つこと、全下流がD8隣接であること、陸上辺が上記全順序を減少させることを確認する。Level 0同士の合成と直接Level 1の一致、最大Levelの終端・打切り、不完全・不連続Downstream Summaryの拒否も対象にする。C3-C1では対象セルを含む有限集水、同入力の再現、9地点基礎湿度、湿度合計と65,535除算、`Stream`境界15／16、`River`境界127／128、RiverがStreamを伴うことを追加する。Level 0〜6 Aggregation Summary、人工4,095／4,096／4,097セル、キャッシュ同値性はC3-C2で追加する。複数の開始セルから有限に追跡して再訪を拒否し、1チャンク64件の行優先順と単一セルAPIの一致、Seed差を含む水文状態ハッシュ、設定不正と`int`座標端の明示失敗も保証する。`UnsafeUtility.SizeOf<GeneratedHydrologyCell>() = 64 bytes`を固定し、後続PRで要素を拡張した場合に性能文書の容量更新漏れを検出する。
 
-既存`WorldGenerationTests`のChunk生成System回帰は、開始直後に地形・資源・水文の全Bufferが未公開であり、完成境界で4096地形、4096資源、64水文をまとめて公開することを確認する。先頭水文セルは終端座標、辺数、接続フラグを含めて同じ純粋Generator結果と一致する。C3-Bでは最大4,096上流集合、河川・湖、Debug Visualization、Map Viewerのテストを先行追加しない。
+既存`WorldGenerationTests`のChunk生成System回帰は、開始直後に地形・資源・水文の全Bufferが未公開であり、完成境界で4096地形、4096資源、64水文をまとめて公開することを確認する。先頭水文セルは終端座標、辺数、集水セル数、基礎湿度、湿度合計、流出相当値、接続・打切りフラグを含めて同じ純粋Generator結果と一致する。C3-C1ではLevel 0〜6集約Summary、湖、Debug Visualization、Map Viewerのテストを先行追加しない。
 
 2026-10-21のUnity 6000.3.8f1によるC3-A AI確認は、`DeterministicHydrologyGeneratorTests` 21件、`ChunkGenerationSystem_`回帰 4件、`AnimalPopulationGenerationTests` 22件、Salt一意性とチャンクハッシュ順序不変の回帰 2件が全成功した。PlayMode Assemblyは56件中55件が成功し、残る1件は`-batchmode -nographics`で既存の`ChunkStreaming` Profiler Markerが0nsとなる計測環境差である。生成、表示、座標回復のAssertはそれより前に通過した。通常EditorのSampleSceneではカメラ移動と移動先チャンク表示を確認し、Play終了後のConsoleは情報・警告・エラー0件だった。Profiler Markerの自動テスト自体は、通常Editorでの人間確認に残す。
 
 2026-10-21に人間が通常EditorでSampleScene、チャンク越境、負座標側の表示、対象PlayModeテスト、Consoleを確認し、C3-Aの動作確認を完了した。
 
-2026-10-21のC3-B AI確認はUnity 6000.3.8f1の接続済みEditorで行い、`DeterministicHydrologyGeneratorTests` 24件、`ChunkGenerationSystem_`回帰 4件、World Generation EditMode Assembly 371件、PlayMode Assembly 56件が全成功した。PlayModeにはSampleSceneの生成・再生成、チャンク越境、負座標横断、Profiler Marker回帰を含む。完了後のConsole現時点値はエラー0件・警告0件だった。C3-Bの人間による通常Editor動作確認は未実施である。
+2026-10-21のC3-B AI確認はUnity 6000.3.8f1の接続済みEditorで行い、`DeterministicHydrologyGeneratorTests` 24件、`ChunkGenerationSystem_`回帰 4件、World Generation EditMode Assembly 371件、PlayMode Assembly 56件が全成功した。PlayModeにはSampleSceneの生成・再生成、チャンク越境、負座標横断、Profiler Marker回帰を含む。完了後のConsole現時点値はエラー0件・警告0件だった。同日に人間の通常Editor動作確認も完了し、PR #35としてdevelopへマージされた。
+
+2026-10-21のC3-C1最終AI確認では、Unity 6000.3.8f1で`RunoffMoistureSum`を符号付き64bitへ変更した最終差分を再コンパイルし、エラー・警告0件を確認した。`DeterministicHydrologyGeneratorTests` 31件、`ChunkGenerationSystem_`回帰4件、World Generation EditMode Assembly 378件、PlayMode Assembly 56件はすべて成功した。全EditModeは121.78秒、PlayModeは4.49秒だった。PlayModeにはSampleScene生成・再生成、チャンク越境、負座標横断、Profiler Marker回帰を含む。終了後Consoleの現時点値はエラー0件・警告0件であり、取得バッファに残る6件は既存のSystem Group順序属性警告2種類がテスト用World構築で各3回出たものである。通常EditorのSampleScene目視は人間確認へ残す。
 
 下流探索の局所性能確認には、通常回帰から除外した明示実行テスト`DownstreamResolution_ReportsScalingComparison`を使う。同じ入力についてLevel 0の一辺Summaryと最大Levelの終端探索を交互に3回ずつ測り、1,000／10,000／100,000セルのCPU時間、現在Threadのmanaged allocation、平均・最大実辺数、終端内訳をConsoleへ記録する。入力は固定10 SeedとSeedごとに離した100×100セル領域であり、1,000件と10,000件は先頭Seed内、100,000件は10 Seed全体を使う。256セルのウォームアップ後に測定し、生成失敗、終端総数、実辺数上限もAssertする。この値は接続済みEditorのmanaged C#経路を比較する診断値であり、Burst JobやDevelopment Playerの製品性能合格値には使わない。
 
@@ -157,7 +159,11 @@ WORLD-01Cでは、同じSeed・地域X/YでもLayerが異なれば独立した�
 
 `GenerationBoundary_KeepsPopulationIndependentOfWorkerCompletion`は、実際のBurst地形Jobを2件ずつ2バッチ投入し、片方を先に完了・もう片方を先に完了・強制完了なしの3条件を、通常進行と一時停止で比較する。sleepによるタイミング推測はせず、反射は実物JobのHandle読取に限り、本番の公開経路と固定Tick境界を実行する。通常フレームでは完成枠だけを公開せず、停止中もバッチ全件を公開してから枠を解放すること、IDはその時点で消費されないこと、Tick 12・13の各地域の初期化時刻と、全個体ID・群れID・抽選状態・次回IDを含むハッシュが一致することを保証する。`GenerationBoundary_RunsAtFixedTickEntry`は、公開Systemの所属とTick加算後・Command前の順序属性を確認する。地形単独Worldの既存非同期テストは引き続き通常回帰へ含める。
 
+`GenerationSystem_PreSchedulesRunningWorldAndPublishesOnlyAtFixedTickBoundary`は、個体群Worldの通常フレームで要求が`GeneratingData`へ進み、要求が無効化されても地形・資源・水文Bufferは空のままであることを確認する。その後に固定Tick公開Systemを実行し、地形4096件・資源4096件・水文64件が同じ境界で`ReadyToApply`へ進むことを保証する。これにより、Job開始を早める性能変更とSimulation結果の公開時点を分離して回帰検出する。
+
 再レビューのフレーム分割反例には`GenerationBoundary_MatchesAcrossFramePartitionsAndRequestCreationOrder`を追加した。最初から4つの同じ生成要求を用意し、親Simulation Groupと実物のRate Managerを通して0.2秒×1フレーム・0.1秒×2フレーム・0.05秒×4フレームを比較する。最後の条件では要求Entity作成順も逆転する。各条件で2 Tick後に4地域が揃い、座標順の先頭2地域がTick 1・残り2地域がTick 2に初期化され、ID・群れID・抽選状態を含むハッシュが一致することを保証する。修正前は単一フレーム条件で期待4地域に対し2地域となる失敗を確認した。
+
+C3-C1の水文生成は、8水文行と地形・資源を9つの`IJobParallelFor`作業へ分ける。各行は出力配列の異なる8要素と上流Heapの異なる32,768要素だけを書き、9作業の失敗通知をすべて確認してから一括公開する。水文純粋計算31件、個体群境界23件、`WorldGenerationTests` 68件、PlayMode 56件を関連回帰とし、長距離PlayModeでは`ChunkGenerationBoundaryWait`の変更前59.804ms、先行投入後42.762ms、行並列化後19.478msを同じEditorセッションで記録した。これは単一実行の診断値であり、製品のFPS合格値にはしない。
 
 #### `AnimalPositionViewportCacheTests`
 
@@ -230,7 +236,7 @@ Sprite Packer ModeがV2であること、土地Atlasが7バイオームの本番
 | Windowbox | 480×270の整数倍表示と黒帯内の描画矩形を保証する。 |
 | F3 | 現在座標、サブチャンク座標、ECSのBiome・GeneratorVersion・ワールドシード、記録済み初期スポーン座標を保証する。初期スポーン探索失敗時は探索中表示を残さず、Scene保存位置を使用中であることを示すHUD文字列も検証する。 |
 | F4 | 初期スポーンの赤いTile・Chunk表示と、縦横グリッド線の矩形計算を保証する。32bit絶対タイル座標域の正負端では、最大タイルの外周を含む境界線数を64bitで有限に求め、整数周回による終了しない描画ループを起こさないことも確認する。 |
-| Floating Origin | 初期スポーンと明示的な絶対座標移動では所属する64タイル境界を表示原点に選び、負座標では床方向の境界を選ぶことを保証する。Cameraの相対Viewportへ表示原点を加えたObserverが正しい絶対可視チャンク範囲を要求し、SampleSceneの遠方移動では新しい相対Tilemapセルへ地形が表示され、旧原点の資源セルが残らないことも確認する。正負の遠方表示原点では開発者用可視化の絶対Viewport範囲、中央絶対タイル、Tilemapセル、色面が一致する。通常移動では512タイル未満で原点を維持し、閾値到達時は正負とも所属チャンク境界へ自動更新して絶対Camera位置とObserver範囲を維持する。旧原点セルの分割消去が、新原点側の同じ論理チャンクを消さないことも単独テストで保証する。MAP-02Eでは複数回の自動原点変更、東西往復、0境界横断、保持範囲外からの再訪を一つの通常PlayModeテストで継続し、同一座標Entityの非重複、再生成した地形・資源の代表セル一致、生成設定・初期スポーンの不変性を確認する。最大ズームアウトと高速パン時の無停止性は自動テストだけで合否を決めず、ProfilerとGameビューで追加確認する。 |
+| Floating Origin | 初期スポーンと明示的な絶対座標移動では所属する64タイル境界を表示原点に選び、負座標では床方向の境界を選ぶことを保証する。Cameraの相対Viewportへ表示原点を加えたObserverが正しい絶対可視チャンク範囲を要求し、SampleSceneの遠方移動では新しい相対Tilemapセルへ地形が表示され、旧原点の資源セルが残らないことも確認する。正負の遠方表示原点では開発者用可視化の絶対Viewport範囲、中央絶対タイル、Tilemapセル、色面が一致する。通常移動では512タイル未満で原点を維持し、閾値到達時は正負とも所属チャンク境界へ自動更新して絶対Camera位置とObserver範囲を維持する。旧原点セルの分割消去が、新原点側の同じ論理チャンクを消さないことも単独テストで保証する。MAP-02Eでは複数回の自動原点変更、東西往復、0境界横断、保持範囲外からの再訪を一つの通常PlayModeテストで継続し、同一座標Entityの非重複、再生成した地形・資源の代表セル一致、生成設定・初期スポーンの不変性を確認する。同じ移動区間で`ChunkStreaming`、`TilemapPresentation`、`FloatingOriginRebase`、`ChunkGenerationBoundaryWait`の最大値を記録し、生成待ちを表示処理の値だけで見落とさない。最大ズームアウトと高速パン時の無停止性は自動テストだけで合否を決めず、ProfilerとGameビューで追加確認する。 |
 | 初期スポーン失敗 | Scene保存位置を維持し、失敗状態の確定後にチャンクストリーミングを開始できることを保証する。 |
 | Presentation寿命 | Camera GameObjectを維持したDefault World再作成時に新しい初期スポーンを再適用する。Camera Bridgeは新Worldの初期スポーン探索中でも旧WorldのObserverを直ちに破棄し、初期位置の確定前は新Observerを作らず、確定後に1件だけ作り直す。同一Worldでカメラ制御を再有効化した場合はプレイヤーの移動後位置を保つ。正負座標のGrid 64タイル境界へViewport右上端が一致しても、上限側の面積を持たない隣接チャンクを要求しない。Tilemap PresenterがWorld切替または無効化時に表示済み・反映途中・消去途中の旧表示を残さないことも保証する。 |
 | 開発者用可視化 | バイオーム、Soil、水域、岩壁、マグマ、資源、TERRAIN-01C1の8連続環境表示、共通配置APIの判定結果を使う地形配置マトリクスの色写像がSimulationを変更しないことを保証する。正負の遠方表示原点でも、相対Viewportから得た絶対範囲と中央タイルを検索し、絶対タイルを正しい相対セルへ投影することを確認する。旧`Weirdness`と`Biome Transition`の色判定は削除済みであり、新しい回帰へ含めない。 |

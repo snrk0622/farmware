@@ -2000,6 +2000,12 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 ProfilerCategory.Scripts,
                 "Farmware.WorldGeneration.FloatingOriginRebase",
                 LongDistanceProfilerSampleCapacity);
+            // C3-C1以降は水文生成Jobの完了待ちがチャンク越境時のフレーム停止へ直結します。
+            // StreamingやTilemapだけでは見落とすため、固定Tick境界の同期時間も同じ移動区間で記録します。
+            using ProfilerRecorder boundaryWaitRecorder = ProfilerRecorder.StartNew(
+                ProfilerCategory.Scripts,
+                "Farmware.WorldGeneration.ChunkGenerationBoundaryWait",
+                LongDistanceProfilerSampleCapacity);
 
             try
             {
@@ -2115,18 +2121,22 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Assert.That(streamingRecorder.Valid, Is.True, "ChunkStreaming Markerを記録できませんでした。");
                 Assert.That(presentationRecorder.Valid, Is.True, "TilemapPresentation Markerを記録できませんでした。");
                 Assert.That(rebaseRecorder.Valid, Is.True, "FloatingOriginRebase Markerを記録できませんでした。");
+                Assert.That(boundaryWaitRecorder.Valid, Is.True, "ChunkGenerationBoundaryWait Markerを記録できませんでした。");
 
                 long streamingMaximumNanoseconds = GetMaximumProfilerValue(streamingRecorder);
                 long presentationMaximumNanoseconds = GetMaximumProfilerValue(presentationRecorder);
                 long rebaseMaximumNanoseconds = GetMaximumProfilerValue(rebaseRecorder);
+                long boundaryWaitMaximumNanoseconds = GetMaximumProfilerValue(boundaryWaitRecorder);
                 Assert.That(streamingMaximumNanoseconds, Is.GreaterThan(0L));
                 Assert.That(presentationMaximumNanoseconds, Is.GreaterThan(0L));
                 Assert.That(rebaseMaximumNanoseconds, Is.GreaterThan(0L));
+                Assert.That(boundaryWaitMaximumNanoseconds, Is.GreaterThan(0L));
                 Debug.Log(
                     "MAP-02E Profiler記録: "
                     + $"ChunkStreaming最大={streamingMaximumNanoseconds / 1000000d:F3}ms, "
                     + $"TilemapPresentation最大={presentationMaximumNanoseconds / 1000000d:F3}ms, "
                     + $"FloatingOriginRebase最大={rebaseMaximumNanoseconds / 1000000d:F3}ms, "
+                    + $"ChunkGenerationBoundaryWait最大={boundaryWaitMaximumNanoseconds / 1000000d:F3}ms, "
                     + $"再訪チャンク数={revisitedChunkCount}, 表示原点数={visitedDisplayOrigins.Count}");
             }
             finally
