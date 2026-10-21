@@ -76,7 +76,7 @@ WORLD-01Bの製品用`WorldLayer`と`WorldLayerWaterContract`を、Sceneを使�
 | 水域 | 気候による川・池の補正と、森林・湿地で池が確認できる分布を保証する。 |
 | マグマ | 火山のマグマ比率、陸地の残存、淡水抑制、岩地の希少マグマ、歪な輪郭を保証する。 |
 | 岩壁 | 水域上の抑制、適度な被覆率、チャンク境界、凹凸、通路を保証する。 |
-| 固定水文 | 8×8セル、固定9標高、中心タイルの海洋流出口、専用Saltの同点順、D8流向、負座標、循環拒否、64件のECS Bufferと状態ハッシュを保証する。下流終端・集水・湖はC3-B以降で追加する。 |
+| 固定水文 | 8×8セル、固定9標高、中心タイルの海洋流出口、専用Saltの同点順、D8流向、負座標、循環拒否、最大4,096辺の下流終端、64件のECS Bufferと状態ハッシュを保証する。集水・流出はC3-C、閉鎖流域・湖はC3-Dで追加する。 |
 | 地形配置属性 | 陸地は通常設備＋通常ベルト、水は橋、マグマは橋＋耐熱必須、岩壁と未知IDは配置不可になることを純粋計算で保証する。 |
 | 有効地形 | 組み込みBlock定義、TERRAIN-01C前のInspector追加地形定義の明示拒否、旧GroundTypeからの互換変換、明示除去を含む疎な差分、自然状態への復帰時削除、レイヤー分離、移動・建築の独立判定、地形定義・差分状態ハッシュの作成順非依存、Owner／Buffer片側欠落の拒否を保証する。 |
 | 資源 | 地形適性、最低間隔、群生半径、競合解決、決定性を保証する。 |
@@ -113,6 +113,10 @@ TERRAIN-01C3-A/Bの8×8固定水文セル、中心から`-3`・`0`・`+3`タイ�
 2026-10-21に人間が通常EditorでSampleScene、チャンク越境、負座標側の表示、対象PlayModeテスト、Consoleを確認し、C3-Aの動作確認を完了した。
 
 2026-10-21のC3-B AI確認はUnity 6000.3.8f1の接続済みEditorで行い、`DeterministicHydrologyGeneratorTests` 24件、`ChunkGenerationSystem_`回帰 4件、World Generation EditMode Assembly 371件、PlayMode Assembly 56件が全成功した。PlayModeにはSampleSceneの生成・再生成、チャンク越境、負座標横断、Profiler Marker回帰を含む。完了後のConsole現時点値はエラー0件・警告0件だった。C3-Bの人間による通常Editor動作確認は未実施である。
+
+下流探索の局所性能確認には、通常回帰から除外した明示実行テスト`DownstreamResolution_ReportsScalingComparison`を使う。同じ入力についてLevel 0の一辺Summaryと最大Levelの終端探索を交互に3回ずつ測り、1,000／10,000／100,000セルのCPU時間、現在Threadのmanaged allocation、平均・最大実辺数、終端内訳をConsoleへ記録する。入力は固定10 SeedとSeedごとに離した100×100セル領域であり、1,000件と10,000件は先頭Seed内、100,000件は10 Seed全体を使う。256セルのウォームアップ後に測定し、生成失敗、終端総数、実辺数上限もAssertする。この値は接続済みEditorのmanaged C#経路を比較する診断値であり、Burst JobやDevelopment Playerの製品性能合格値には使わない。
+
+レビュー対応後の再実行では、明示実行テスト1件、通常の水文回帰24件、World Generation EditMode Assembly 371件がすべて成功した。全Assembly実行中に、`AnimalPopulationGenerationTests`のテスト用World構築から既存のSystem Group順序属性警告2種類が各3回、合計6件出た。同じ警告は変更前の全Assembly実行ログにもあり、今回変更した水文性能テストからの新規警告ではない。Consoleエラーとコンパイル失敗は0件だった。
 
 #### `TerrainNeighborHaloUtilityTests`
 

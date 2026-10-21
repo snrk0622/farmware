@@ -71,12 +71,12 @@ Gameビュー、Map Viewer、分布監査の水文モードはC3-Dで追加す�
 
 2026-10-21のC3-A AI確認では、Unity 6000.3.8f1の一時複製プロジェクトで最新差分をコンパイルし、C#エラーと警告がないことを確認した。`DeterministicHydrologyGeneratorTests`は21件、`ChunkGenerationSystem_`回帰は4件、`AnimalPopulationGenerationTests`は22件、Salt一意性とチャンクハッシュ順序不変の既存回帰は2件がすべて成功した。PlayMode Assemblyは56件中55件が成功し、不成功1件は生成・再表示・再訪の確認後に、`-batchmode -nographics`の`ProfilerRecorder`が`ChunkStreaming`の最大値0nsを返した既存`SampleScene_RepeatedAutomaticRebasesPreserveStreamingAcrossRoundTripAndNegativeCrossing`である。単独再実行でも同じProfiler値のみ不成功した。通常EditorではSampleSceneのPlay、カメラ移動、移動先チャンク表示を確認し、Play終了後もConsoleは情報・警告・エラー0件だった。Profiler Markerの自動テスト自体は、通常Editorでの人間確認に残す。
 
-2026-10-21のC3-B AI確認では、Unity 6000.3.8f1の接続済みEditorでコンパイルエラーがないことを確認した。`DeterministicHydrologyGeneratorTests`は24件、`ChunkGenerationSystem_`回帰は4件、World Generation EditMode Assemblyは371件、PlayMode Assemblyは56件がすべて成功した。PlayModeにはSampleSceneの生成・再生成、チャンク越境、負座標横断、Profiler Marker回帰を含む。完了後のConsole現時点値はエラー0件・警告0件だった。
+2026-10-21のC3-B AI確認では、Unity 6000.3.8f1の接続済みEditorでコンパイルエラーがないことを確認した。`DeterministicHydrologyGeneratorTests`は24件、`ChunkGenerationSystem_`回帰は4件、World Generation EditMode Assemblyは371件、PlayMode Assemblyは56件がすべて成功した。PlayModeにはSampleSceneの生成・再生成、チャンク越境、負座標横断、Profiler Marker回帰を含む。レビュー対応で追加した明示実行の局所性能テストも1件成功し、1,000／10,000／100,000セルで最大実辺数23／29／30、現在Threadのmanaged allocation 0 bytes、`LongDrainage` 0件を記録した。レビュー対応後のWorld Generation EditMode Assembly再実行も371件すべて成功し、Consoleエラーとコンパイル失敗は0件だった。全Assembly実行中には変更前から存在するSystem Group順序属性警告2種類が各3回出たが、今回変更した水文性能テスト単独および通常水文回帰からの新規警告はなかった。
 
 ## 7. 性能と残る確認
 
-水文要素48 bytes×64件は1チャンク3,072 bytesである。生成作業枠の増加とECS Buffer容量は[性能計測](./Map02DPerformanceReport.md#terrain-01c3-b後の生成配列容量)へ記録する。C3-Bの基準経路は各開始セルから最大4,096辺を有限に進み、無限水系やロード済み全チャンクを走査しない。共有Summaryキャッシュはまだ常駐させず、将来追加する場合も分類結果を変えないことを二分合成テストで固定する。
+水文要素48 bytes×64件は1チャンク3,072 bytesである。生成作業枠の増加、ECS Buffer容量、1,000／10,000／100,000セルの局所比較は[性能計測](./Map02DPerformanceReport.md#terrain-01c3-b後の生成配列容量)へ記録する。C3-Bの基準経路は各開始セルから最大4,096辺を有限に進み、無限水系やロード済み全チャンクを走査しない。固定10 Seedの計測では最大実辺数30で、4,096辺が連続する事例を再現しなかったため、共有Summaryキャッシュは常駐させない。将来追加する場合も、具体的な長経路入力を固定し、分類結果を変えないことを二分合成テストで保証する。
 
-製品最大Viewport、対象機器、正式なFPS・メモリ合格値は未決定である。C3-Bでは決定性、有限処理、コンパイル、自動回帰を確認し、最大経路が多発する人工入力のDevelopment Player比較は性能合格値の合意後に行う。人間の確認ではSampleSceneをPlayし、チャンク生成・カメラ移動・負座標越境でConsoleエラーがないことを確認する。C3-Bは非表示データのため、水文の色分けや終端表示がないことは未実装ではない。
+製品最大Viewport、対象機器、正式なFPS・メモリ合格値は未決定である。今回の局所比較はmanaged C#をEditorで測った診断値であり、生成Job全体、Burst、Development Playerの性能合格を意味しない。具体的なSeed・設定で長経路やフレームスパイクが再現した場合は、その入力を固定してキャッシュ案を同条件比較する。人間の確認ではSampleSceneをPlayし、チャンク生成・カメラ移動・負座標越境でConsoleエラーがないことを確認する。C3-Bは非表示データのため、水文の色分けや終端表示がないことは未実装ではない。
 
 2026-10-21に人間がC3-AのSampleSceneのPlay、チャンク越境、負座標側の表示、対象PlayModeテスト、Consoleを確認し、動作確認完了と判断した。C3-Bの人間確認は未実施である。

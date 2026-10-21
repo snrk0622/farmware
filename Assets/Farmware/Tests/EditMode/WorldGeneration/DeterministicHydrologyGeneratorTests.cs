@@ -1,7 +1,9 @@
 // このファイルは、TERRAIN-01C3-A/Bの水文基礎格子、D8流向、Level 0〜12 Summary、最大4,096辺の終端分類を検証します。
 // 集水面積、流出、湖は後続枝番の責務とし、ここでは下流結果が決定論的かつ有限になることを保証します。
 
+using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using NUnit.Framework;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
@@ -188,6 +190,124 @@ namespace Farmware.WorldGeneration.Tests
             }
 
             Assert.That(foundTwoEdgePath, Is.True);
+        }
+
+        /// <summary>
+        /// 同じSeed・座標を使って一辺Summaryと最大4,096辺の終端探索を比較し、
+        /// 1,000／10,000／100,000セルでCPU時間、managed allocation、実経路長を記録します。
+        /// 通常回帰を長時間化させず、キャッシュ導入の要否を実測から判断するため明示実行だけに分離します。
+        /// </summary>
+        [Test, Explicit("TERRAIN-01C3-Bの1k/10k/100k下流探索を同じ入力で比較する局所性能計測です。製品性能の合格判定には使いません。")]
+        public void DownstreamResolution_ReportsScalingComparison()
+        {
+            const int seedCount = 10;
+            const int samplesPerScale = 3;
+            var settingsBySeed = new WorldGenerationSettings[seedCount];
+            for (int seedIndex = 0; seedIndex < settingsBySeed.Length; seedIndex++)
+            {
+                // Seedごとに離れた座標領域を使い、原点周辺だけに偏った経路長を一般化しないようにします。
+                settingsBySeed[seedIndex] = CreateSettings($"hydrology-downstream-benchmark-{seedIndex}");
+            }
+
+            // JITと初回型初期化を測定外へ出します。両方式へ同じ256セルを渡して条件を揃えます。
+            for (int warmupIndex = 0; warmupIndex < 256; warmupIndex++)
+            {
+                GetBenchmarkInput(warmupIndex, settingsBySeed, out WorldGenerationSettings settings, out int cellX, out int cellY);
+                Assert.That(
+                    DeterministicHydrologyDownstreamResolver.TryBuildSummary(
+                        settings,
+                        cellX,
+                        cellY,
+                        0,
+                        out _),
+                    Is.True);
+                Assert.That(
+                    DeterministicHydrologyGenerator.TryGenerateCell(settings, cellX, cellY, out _),
+                    Is.True);
+            }
+
+            foreach (int cellCount in new[] { 1000, 10000, 100000 })
+            {
+                double oneEdgeMilliseconds = 0d;
+                double downstreamMilliseconds = 0d;
+                long oneEdgeAllocatedBytes = 0L;
+                long downstreamAllocatedBytes = 0L;
+                long totalEdges = 0L;
+                int maximumEdges = 0;
+                int marineCount = 0;
+                int closedBasinCount = 0;
+                int longDrainageCount = 0;
+                int oneEdgeFailures = 0;
+                int downstreamFailures = 0;
+                var stopwatch = new Stopwatch();
+
+                for (int sampleIndex = 0; sampleIndex < samplesPerScale; sampleIndex++)
+                {
+                    // 一辺Summaryを先に測る回と後に測る回を交互にし、時間経過による片側だけの偏りを抑えます。
+                    if ((sampleIndex & 1) == 0)
+                    {
+                        MeasureOneEdgeSummaries(
+                            cellCount,
+                            settingsBySeed,
+                            stopwatch,
+                            ref oneEdgeMilliseconds,
+                            ref oneEdgeAllocatedBytes,
+                            ref oneEdgeFailures);
+                        MeasureDownstreamResolution(
+                            cellCount,
+                            settingsBySeed,
+                            stopwatch,
+                            ref downstreamMilliseconds,
+                            ref downstreamAllocatedBytes,
+                            ref downstreamFailures,
+                            ref totalEdges,
+                            ref maximumEdges,
+                            ref marineCount,
+                            ref closedBasinCount,
+                            ref longDrainageCount);
+                    }
+                    else
+                    {
+                        MeasureDownstreamResolution(
+                            cellCount,
+                            settingsBySeed,
+                            stopwatch,
+                            ref downstreamMilliseconds,
+                            ref downstreamAllocatedBytes,
+                            ref downstreamFailures,
+                            ref totalEdges,
+                            ref maximumEdges,
+                            ref marineCount,
+                            ref closedBasinCount,
+                            ref longDrainageCount);
+                        MeasureOneEdgeSummaries(
+                            cellCount,
+                            settingsBySeed,
+                            stopwatch,
+                            ref oneEdgeMilliseconds,
+                            ref oneEdgeAllocatedBytes,
+                            ref oneEdgeFailures);
+                    }
+                }
+
+                int measuredCellCount = cellCount * samplesPerScale;
+                Assert.That(oneEdgeFailures, Is.Zero);
+                Assert.That(downstreamFailures, Is.Zero);
+                Assert.That(marineCount + closedBasinCount + longDrainageCount, Is.EqualTo(measuredCellCount));
+                Assert.That(maximumEdges, Is.InRange(0, settingsBySeed[0].Hydrology.MaximumDownstreamEdges));
+
+                // 文字列化とConsole出力は測定後だけに行い、計測対象のmanaged allocationへ混ぜません。
+                UnityEngine.Debug.Log(
+                    $"HYDROLOGY_DOWNSTREAM cells={cellCount}, samples={samplesPerScale}, "
+                    + $"oneEdgeMeanMs={oneEdgeMilliseconds / samplesPerScale:F6}, "
+                    + $"downstreamMeanMs={downstreamMilliseconds / samplesPerScale:F6}, "
+                    + $"ratio={downstreamMilliseconds / oneEdgeMilliseconds:F3}, "
+                    + $"oneEdgeManagedBytes={oneEdgeAllocatedBytes / samplesPerScale}, "
+                    + $"downstreamManagedBytes={downstreamAllocatedBytes / samplesPerScale}, "
+                    + $"meanEdges={(double)totalEdges / measuredCellCount:F3}, maximumEdges={maximumEdges}, "
+                    + $"marine={marineCount / samplesPerScale}, closedBasin={closedBasinCount / samplesPerScale}, "
+                    + $"longDrainage={longDrainageCount / samplesPerScale}");
+            }
         }
 
         /// <summary>
@@ -597,6 +717,131 @@ namespace Farmware.WorldGeneration.Tests
         private static WorldGenerationSettings CreateSettings(string seedText)
         {
             return WorldGenerationSettings.CreateDefault(WorldSeedUtility.FromString(seedText), 1);
+        }
+
+        /// <summary>
+        /// 局所計測の通し番号を、10 Seed・各100×100セルの離れた絶対座標へ変換します。
+        /// 件数を増やしても先頭入力が同じになるため、1k／10k／100kのスケーリングを比較できます。
+        /// </summary>
+        /// <param name="index">0から始まる計測セル番号です。</param>
+        /// <param name="settingsBySeed">計測前に作成した10個の固定設定です。</param>
+        /// <param name="settings">番号に対応する固定ワールド設定です。</param>
+        /// <param name="cellX">番号に対応する水平水文セル座標です。</param>
+        /// <param name="cellY">番号に対応する垂直水文セル座標です。</param>
+        private static void GetBenchmarkInput(
+            int index,
+            WorldGenerationSettings[] settingsBySeed,
+            out WorldGenerationSettings settings,
+            out int cellX,
+            out int cellY)
+        {
+            const int cellsPerSeed = 10000;
+            const int axisLength = 100;
+            int seedIndex = (index / cellsPerSeed) % settingsBySeed.Length;
+            int localIndex = index % cellsPerSeed;
+            int coordinateOffset = seedIndex * cellsPerSeed;
+            settings = settingsBySeed[seedIndex];
+            cellX = (localIndex % axisLength) - (axisLength / 2) + coordinateOffset;
+            cellY = (localIndex / axisLength) - (axisLength / 2) - coordinateOffset;
+        }
+
+        /// <summary>
+        /// 指定件数のLevel 0 Summaryを生成し、最大一辺を調べる比較側のCPU時間とmanaged allocationを加算します。
+        /// </summary>
+        /// <param name="cellCount">今回測る水文セル数です。</param>
+        /// <param name="settingsBySeed">計測用の固定ワールド設定です。</param>
+        /// <param name="stopwatch">呼出元で再利用する計時器です。</param>
+        /// <param name="totalMilliseconds">全サンプルの経過時間合計です。</param>
+        /// <param name="totalAllocatedBytes">全サンプルのmanaged allocation合計です。</param>
+        /// <param name="failureCount">生成失敗件数の合計です。</param>
+        private static void MeasureOneEdgeSummaries(
+            int cellCount,
+            WorldGenerationSettings[] settingsBySeed,
+            Stopwatch stopwatch,
+            ref double totalMilliseconds,
+            ref long totalAllocatedBytes,
+            ref int failureCount)
+        {
+            long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+            stopwatch.Restart();
+            for (int index = 0; index < cellCount; index++)
+            {
+                GetBenchmarkInput(index, settingsBySeed, out WorldGenerationSettings settings, out int cellX, out int cellY);
+                if (!DeterministicHydrologyDownstreamResolver.TryBuildSummary(
+                        settings,
+                        cellX,
+                        cellY,
+                        0,
+                        out _))
+                {
+                    failureCount++;
+                }
+            }
+            stopwatch.Stop();
+            totalMilliseconds += stopwatch.Elapsed.TotalMilliseconds;
+            totalAllocatedBytes += GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+        }
+
+        /// <summary>
+        /// 指定件数の最大Level終端を生成し、CPU時間、managed allocation、実辺数、終端内訳を加算します。
+        /// </summary>
+        /// <param name="cellCount">今回測る水文セル数です。</param>
+        /// <param name="settingsBySeed">計測用の固定ワールド設定です。</param>
+        /// <param name="stopwatch">呼出元で再利用する計時器です。</param>
+        /// <param name="totalMilliseconds">全サンプルの経過時間合計です。</param>
+        /// <param name="totalAllocatedBytes">全サンプルのmanaged allocation合計です。</param>
+        /// <param name="failureCount">生成失敗件数の合計です。</param>
+        /// <param name="totalEdges">成功した全セルの実辺数合計です。</param>
+        /// <param name="maximumEdges">成功したセルの最大実辺数です。</param>
+        /// <param name="marineCount">海洋終端件数です。</param>
+        /// <param name="closedBasinCount">閉鎖流域終端件数です。</param>
+        /// <param name="longDrainageCount">4,096辺打切り件数です。</param>
+        private static void MeasureDownstreamResolution(
+            int cellCount,
+            WorldGenerationSettings[] settingsBySeed,
+            Stopwatch stopwatch,
+            ref double totalMilliseconds,
+            ref long totalAllocatedBytes,
+            ref int failureCount,
+            ref long totalEdges,
+            ref int maximumEdges,
+            ref int marineCount,
+            ref int closedBasinCount,
+            ref int longDrainageCount)
+        {
+            long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+            stopwatch.Restart();
+            for (int index = 0; index < cellCount; index++)
+            {
+                GetBenchmarkInput(index, settingsBySeed, out WorldGenerationSettings settings, out int cellX, out int cellY);
+                if (!DeterministicHydrologyGenerator.TryGenerateCell(
+                        settings,
+                        cellX,
+                        cellY,
+                        out GeneratedHydrologyCell cell))
+                {
+                    failureCount++;
+                    continue;
+                }
+
+                totalEdges += cell.DownstreamEdgeCount;
+                maximumEdges = Math.Max(maximumEdges, cell.DownstreamEdgeCount);
+                switch (cell.DownstreamTerminal)
+                {
+                    case HydrologyConnectionFlags.Marine:
+                        marineCount++;
+                        break;
+                    case HydrologyConnectionFlags.ClosedBasin:
+                        closedBasinCount++;
+                        break;
+                    case HydrologyConnectionFlags.LongDrainage:
+                        longDrainageCount++;
+                        break;
+                }
+            }
+            stopwatch.Stop();
+            totalMilliseconds += stopwatch.Elapsed.TotalMilliseconds;
+            totalAllocatedBytes += GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
         }
 
         /// <summary>下流選択の優先順位だけを検証するため、必要な固定値を持つ水文セルを作ります。</summary>
