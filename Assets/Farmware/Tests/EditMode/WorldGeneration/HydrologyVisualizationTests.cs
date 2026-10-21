@@ -64,6 +64,45 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// 越流する流域内の高所セルを準備し、湖面でないセルが越流色ではなく固定湖候補色になることを保証します。
+        /// Overflowは流域全体へ共有されるため、SurfaceCellとの組み合わせを描画側で確認する退行テストです。
+        /// </summary>
+        [Test]
+        public void LakeColor_OverflowWithoutSurfaceCellUsesFixedLakeColor()
+        {
+            GeneratedHydrologyCell fixedLake = new GeneratedHydrologyCell
+            {
+                LakeFlags = HydrologyLakeFlags.FixedLake
+            };
+            GeneratedHydrologyCell dryOverflowBasinCell = new GeneratedHydrologyCell
+            {
+                LakeFlags = HydrologyLakeFlags.FixedLake | HydrologyLakeFlags.Overflow
+            };
+            GeneratedHydrologyCell overflowingSurface = new GeneratedHydrologyCell
+            {
+                LakeFlags = HydrologyLakeFlags.FixedLake
+                    | HydrologyLakeFlags.SurfaceCell
+                    | HydrologyLakeFlags.Overflow
+            };
+
+            Color fixedColor = WorldGenerationDebugVisualizationOverlay
+                .GetHydrologyVisualizationColor(
+                    WorldGenerationDebugVisualizationMode.HydrologyLake,
+                    fixedLake);
+            Color dryOverflowBasinColor = WorldGenerationDebugVisualizationOverlay
+                .GetHydrologyVisualizationColor(
+                    WorldGenerationDebugVisualizationMode.HydrologyLake,
+                    dryOverflowBasinCell);
+            Color overflowingSurfaceColor = WorldGenerationDebugVisualizationOverlay
+                .GetHydrologyVisualizationColor(
+                    WorldGenerationDebugVisualizationMode.HydrologyLake,
+                    overflowingSurface);
+
+            Assert.That(dryOverflowBasinColor, Is.EqualTo(fixedColor));
+            Assert.That(dryOverflowBasinColor, Is.Not.EqualTo(overflowingSurfaceColor));
+        }
+
+        /// <summary>
         /// Map Viewerの5水文モードがGameビューとRGBを共有し、背景Texture向けに不透明化されることを保証します。
         /// </summary>
         [Test]

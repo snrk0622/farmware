@@ -114,9 +114,11 @@ C3-D2の複数Seed分布監査について、最小の1 Seed・1 ChunkをMain Th
 
 #### `HydrologyVisualizationTests`
 
-C3-D2のGameビューとMap Viewerが共有する水文色写像を検証する。打切り流域、固定湖候補、実湖面、越流が相互に異なる色であり、5水文モードのMap Viewer RGBがOverlayと一致して不透明になることを保証する。小さい3×2画像の各代表タイルを直接生成した固定水文セルと比較し、実Window同様のThreadPoolでも画像を完成できること、最大64サンプル制限でも2:1のViewport縦横比を維持することを確認する。
+C3-D2のGameビューとMap Viewerが共有する水文色写像を検証する。打切り流域、固定湖候補、実湖面、越流が相互に異なる色であり、流域共通の`Overflow`だけを持つ非湖面セルは越流色にせず固定湖候補色を保つこと、5水文モードのMap Viewer RGBがOverlayと一致して不透明になることを保証する。小さい3×2画像の各代表タイルを直接生成した固定水文セルと比較し、実Window同様のThreadPoolでも画像を完成できること、最大64サンプル制限でも2:1のViewport縦横比を維持することを確認する。
 
 2026-10-21のC3-D2 AI確認はUnity 6000.3.8f1の接続済みEditorで行い、コンパイルエラー0、`HydrologyDistributionAuditTests` 1件、`HydrologyVisualizationTests` 5件、`WorldGenerationMapViewerTests` 51件が成功した。World Generation EditMode Assemblyは130.74秒で411件すべて成功した。全Assembly中の警告6件は変更前からあるテスト用WorldのSystem Group順序属性2種類が各3回出たもので、D2のAllocator・Job安全性警告ではない。既定3 Seed・各5×5チャンクの監査も4,800セルを完走し、実Map ViewerとSampleSceneのGameビューでHydrology Lakeの凡例・色面・中央情報を表示後、Consoleエラー0・警告0を確認した。初回実UI確認で検出したバックグラウンド処理のTemp Allocator違反は、所有者が`Allocator.Persistent`作業領域を`using`で破棄する方式へ修正し、ThreadPoolテストと実UIで再発しないことを確認した。2026-10-21に人間が水文表示とMap Viewerを確認し、問題なしと判断した。Pipeline 0.8.0-exp.1はPlayMode 56件を一覧取得できるが`run_tests`では0件となるため、全PlayMode Assemblyの自動再実行は未検証事項として残す。
+
+PR #38のレビュー対応では、Map Viewerの描画・リサイズ・カーソル中心ズームでモード別最大解像度を共有する回帰テストと、`Overflow`を持つ非湖面セルを越流色にしない回帰テストを追加した。Unity 6000.3.8f1で再コンパイルエラー・警告0を確認し、通常EditorのTest Runnerで`HydrologyVisualizationTests` 6件、`WorldGenerationMapViewerTests` 52件がすべて成功した。Play Mode中の最初のEditMode実行はTest Runnerが`EditorSceneManager.NewScene`を使用できず失敗したため、Play Modeを停止してから同じ対象を再実行した結果を採用する。
 
 2026-10-21のUnity 6000.3.8f1によるC3-A AI確認は、`DeterministicHydrologyGeneratorTests` 21件、`ChunkGenerationSystem_`回帰 4件、`AnimalPopulationGenerationTests` 22件、Salt一意性とチャンクハッシュ順序不変の回帰 2件が全成功した。PlayMode Assemblyは56件中55件が成功し、残る1件は`-batchmode -nographics`で既存の`ChunkStreaming` Profiler Markerが0nsとなる計測環境差である。生成、表示、座標回復のAssertはそれより前に通過した。通常EditorのSampleSceneではカメラ移動と移動先チャンク表示を確認し、Play終了後のConsoleは情報・警告・エラー0件だった。Profiler Markerの自動テスト自体は、通常Editorでの人間確認に残す。
 
@@ -215,7 +217,7 @@ Map Viewerの全ピクセルが同じ座標へ直接`DeterministicChunkGenerator
 TERRAIN-01C1では、標高、基礎気温、地形気温、基礎湿度、木本植生ポテンシャル、地形起伏、海洋影響、火山活動度の値域両端がそれぞれ異なる不透明色になり、GameビューのDebug Visualizationと同じRGBを使うことを確認する。Dropdownの`int`選択Indexは`byte`基底の表示モードへ型を合わせてから検証し、定義値を保持しつつ未選択・範囲外値を`Terrain`へ戻すことも保証する。
 TERRAIN-01C2-Bでは、地質3特性の値域両端、8分類、Definitionフラグ、異なる支配サイト、サイト内部・境界が不透明な別色になることを確認する。支配サイト診断は固定Seedの広域格子で同じ座標の`DeterministicGeologyGenerator`結果と一致し、上下左右のサイト差から少なくとも1つの境界を検出できることを保証する。Dropdownの有効上限も`Geology Site Boundary`まで拡張し、その次の値は`Terrain`へ戻す。
 初回レイアウトの`NaN`、無限大、最小寸法未満では生成を開始せず、解像度計算も非有限値を拒否することを確認する。サンプラーの行進捗が100%に到達し、進捗通知の有無で画像が変わらないこと、初回生成案内のUXML要素と画像適用後の案内非表示も回帰対象とする。
-あわせて、負座標とY反転を含むPointer座標変換、同じ表示ピクセル内のPointerが同じ代表タイルを返すこと、生成TextureとCanvasの表示解像度が異なるときの縦横比維持とリサイズ後の再生成判定、Pointer・パン・グリッド用座標変換とカーソル中心ズーム、ツールバーの＋・－Buttonによる中心座標不変のズーム、偶数寸法Textureを再生成した直後のHoverがSide Panelと同じ中心タイルを示すこと、奇数・偶数Textureでのグリッド・原点と地形サンプル境界の一致、Bakerと共有するAuthoring設定Snapshotのシード変換、新規・旧丸め値のどちらでもAuthoringと純粋計算の主要な既定気候閾値が一致することを検証する。湿度閾値をInspector上限へ設定した場合にも、乾燥・森林・湿地の境界が厳密な昇順を保つことを保証する。
+あわせて、負座標とY反転を含むPointer座標変換、同じ表示ピクセル内のPointerが同じ代表タイルを返すこと、生成TextureとCanvasの表示解像度が異なるときの縦横比維持とリサイズ後の再生成判定、Pointer・パン・グリッド用座標変換とカーソル中心ズーム、描画・リサイズ・ズームが共有する通常768／水文64のモード別上限、ツールバーの＋・－Buttonによる中心座標不変のズーム、偶数寸法Textureを再生成した直後のHoverがSide Panelと同じ中心タイルを示すこと、奇数・偶数Textureでのグリッド・原点と地形サンプル境界の一致、Bakerと共有するAuthoring設定Snapshotのシード変換、新規・旧丸め値のどちらでもAuthoringと純粋計算の主要な既定気候閾値が一致することを検証する。湿度閾値をInspector上限へ設定した場合にも、乾燥・森林・湿地の境界が厳密な昇順を保つことを保証する。
 
 #### `TerrainLayerPresentationUtilityTests`
 

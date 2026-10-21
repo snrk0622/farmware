@@ -349,9 +349,7 @@ namespace Farmware.WorldGeneration.Editor
                         displayedSample.Height,
                         mapCanvas.contentRect.width,
                         mapCanvas.contentRect.height,
-                        WorldGenerationMapSampler.IsHydrologyViewMode(serializedViewMode)
-                            ? WorldGenerationMapSampler.MaximumHydrologyResolution
-                            : WorldGenerationMapSampler.MaximumResolution)))
+                        GetMaximumSampleResolution(serializedViewMode))))
             {
                 // リサイズを元の比率へ戻した場合は、直前のGeometryChangedEventで予約した不要な再生成を取り消します。
                 resizeRenderSchedule?.Pause();
@@ -407,6 +405,19 @@ namespace Farmware.WorldGeneration.Editor
                 && height >= MinimumViewportSize
                 && !float.IsInfinity(width)
                 && !float.IsInfinity(height);
+        }
+
+        /// <summary>
+        /// 表示モードに応じて、Map Viewerが1辺へ生成してよい最大サンプル数を返します。
+        /// 水文生成は1サンプルごとの探索負荷が大きいため、描画・リサイズ・ズームの全経路で同じ低い上限を共有します。
+        /// </summary>
+        /// <param name="viewMode">生成負荷を判定する現在の表示モードです。</param>
+        /// <returns>通常モードは768、水文モードは64の最大サンプル数です。状態は変更しません。</returns>
+        private static int GetMaximumSampleResolution(WorldGenerationMapViewMode viewMode)
+        {
+            return WorldGenerationMapSampler.IsHydrologyViewMode(viewMode)
+                ? WorldGenerationMapSampler.MaximumHydrologyResolution
+                : WorldGenerationMapSampler.MaximumResolution;
         }
 
         /// <summary>
@@ -492,13 +503,10 @@ namespace Farmware.WorldGeneration.Editor
             int requestId = ++renderRequestId;
 
             WorldGenerationMapViewMode viewMode = serializedViewMode;
-            int maximumResolution = WorldGenerationMapSampler.IsHydrologyViewMode(viewMode)
-                ? WorldGenerationMapSampler.MaximumHydrologyResolution
-                : WorldGenerationMapSampler.MaximumResolution;
             WorldGenerationMapSampler.CalculateSampleResolution(
                 mapCanvas.contentRect.width,
                 mapCanvas.contentRect.height,
-                maximumResolution,
+                GetMaximumSampleResolution(viewMode),
                 out int width,
                 out int height);
             int centerTileX = serializedCenterTileX;
@@ -753,9 +761,11 @@ namespace Farmware.WorldGeneration.Editor
 
             int currentCenterX = displayedSample?.CenterTileX ?? serializedCenterTileX;
             int currentCenterY = displayedSample?.CenterTileY ?? serializedCenterTileY;
+            // 次に生成するTextureと同じ上限を使わないと、伸張表示中のPointer位置を未描画の解像度で逆算してしまいます。
             WorldGenerationMapSampler.CalculateSampleResolution(
                 mapCanvas.contentRect.width,
                 mapCanvas.contentRect.height,
+                GetMaximumSampleResolution(serializedViewMode),
                 out int requestedSampleWidth,
                 out int requestedSampleHeight);
             int oldSampleWidth = displayedSample?.Width ?? requestedSampleWidth;

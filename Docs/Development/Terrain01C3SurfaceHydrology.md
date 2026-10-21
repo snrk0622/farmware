@@ -148,10 +148,12 @@ Gameビューは生成済み`GeneratedHydrologyCell` Bufferだけを読み、現
 
 Map Viewerは同じRGB色写像を共有し、選択した代表タイルに対応する固定水文セルを純粋Generatorで生成する。同じ8×8セルは描画またはHover中のキャッシュで再利用する。バックグラウンド生成ではMain Thread限定か4フレーム制限を持つTemp系Allocatorの簡易APIを避け、Editor Assemblyだけがアクセスできる内部Resolverへ`Allocator.Persistent`の上流Heap・流域セル・Hash表を渡し、1回の画像生成中に再利用して`using`で最後に破棄する。複数Seed監査も同じ所有方式でチャンク間の作業領域を再利用する。1サンプルが最大4,096セルの集水・流域探索を伴うため、水文5モードだけ生成Textureを最大64サンプルへ制限し、通常モードの最大768サンプルは変更しない。縮小時も縦横共通の比率を使い、Viewportの縦横比と正方形グリッドを維持する。
 
-自動テストは、監査の64セル集計・分類不変条件・署名再現性、打切り流域と固定湖候補・実湖面・越流の色分離、GameビューとMap ViewerのRGB一致、小画像の直接Generator結果一致、64サンプル制限での縦横比を対象にする。GameビューとMap Viewerの実際の凡例、中央・Hover情報、チャンク境界、負座標、操作応答性は通常Editorで人間が確認する。
+自動テストは、監査の64セル集計・分類不変条件・署名再現性、打切り流域と固定湖候補・実湖面・越流の色分離、流域共通`Overflow`を持つ非湖面セルの固定湖候補色維持、GameビューとMap ViewerのRGB一致、小画像の直接Generator結果一致、64サンプル制限での縦横比、描画・リサイズ・カーソル中心ズームが共有するモード別上限を対象にする。GameビューとMap Viewerの実際の凡例、中央・Hover情報、チャンク境界、負座標、操作応答性は通常Editorで人間が確認する。
 
 2026-10-21のUnity 6000.3.8f1接続済みEditorでは、Runtime・Editor・Test Assemblyをコンパイルエラー0で再読み込みし、`HydrologyDistributionAuditTests` 1件、`HydrologyVisualizationTests` 5件、`WorldGenerationMapViewerTests` 51件が成功した。World Generation EditMode Assemblyは130.74秒で411件すべて成功した。全Assembly中の警告6件は変更前からあるテスト用WorldのSystem Group順序属性2種類が各3回出たもので、D2のAllocator・Job安全性警告ではない。既定3 Seed・各5×5チャンクの監査も21秒で4,800セルを完走し、署名`0x82F06B77D1BB8E48`、海洋終端1,930、閉鎖流域2,870、渓流237、河川11、解決済み流域46、固定湖候補流域46、湖面271セルを記録した。これは分布比較値であり合否閾値ではない。
 
 実Map ViewerはHydrology Lakeを64×28＝1,792サンプル、2.77秒で生成し、打切り流域を固定湖候補と別色・別文言にした凡例、中央セルの流向・終端・集水・湖情報、正方形グリッドを確認した。SampleSceneのGameビューでもHydrology Lakeの2段凡例、8×8セル色面、中央HUDを確認し、両確認後のConsoleはエラー0・警告0だった。初回実UI確認でThreadPoolからMain Thread限定`Allocator.Temp`を呼ぶエラーと、4フレームを超えた`Allocator.TempJob`寿命警告を検出したため、最終差分はEditor Assemblyから内部Resolverへ`Allocator.Persistent`作業領域を渡して`using`で破棄する方式へ修正し、ThreadPoolテストと実UIを再実行した。
 
 Pipeline 0.8.0-exp.1はPlayMode 56件を一覧取得できる一方、`run_tests`がPlayMode対象を0件として終了したため、全PlayMode Assemblyの自動再実行は未検証である。D2で変更したGameビュー経路は通常EditorのSampleScene PlayとConsoleでAI確認し、2026-10-21に人間が各水文モード、チャンク境界、負座標移動、Map Viewerを確認して問題なしと判断した。
+
+PR #38のレビュー対応では、水文モードのカーソル中心ズームだけが通常768サンプルを使う不一致を、描画・リサイズ・ズームで共有するモード別上限へ統一した。また、流域共通の`Overflow`を持つ高所セルはシアンにせず、`SurfaceCell`も持つ実湖面だけを越流色にした。Unity 6000.3.8f1の再コンパイルはエラー・警告0で、通常EditorのTest Runnerでは追加回帰を含む`HydrologyVisualizationTests` 6件と`WorldGenerationMapViewerTests` 52件がすべて成功した。

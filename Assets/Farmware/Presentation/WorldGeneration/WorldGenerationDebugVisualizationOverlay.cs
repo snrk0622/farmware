@@ -810,7 +810,11 @@ namespace Farmware.WorldGeneration.Presentation
                         return new Color32(220, 70, 210, 244);
                     }
 
-                    if ((cell.LakeFlags & HydrologyLakeFlags.Overflow) != 0)
+                    // Overflowは流域共通フラグなので、実際に水面となるセルだけを越流色にします。
+                    // この条件がないと、湖面より高い乾いた上流セルまでシアンで塗られてしまいます。
+                    if ((cell.LakeFlags
+                            & (HydrologyLakeFlags.SurfaceCell | HydrologyLakeFlags.Overflow))
+                        == (HydrologyLakeFlags.SurfaceCell | HydrologyLakeFlags.Overflow))
                     {
                         return new Color32(58, 228, 238, 246);
                     }

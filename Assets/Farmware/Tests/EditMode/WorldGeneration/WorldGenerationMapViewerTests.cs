@@ -678,6 +678,31 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// Map Viewerのモード別上限判定を直接呼び、水文モードだけが64サンプルへ制限されることを保証します。
+        /// 描画・リサイズ・ホイールズームが共有する判定を対象にし、ズーム時だけ通常上限へ戻る退行を防ぎます。
+        /// </summary>
+        [Test]
+        public void GetMaximumSampleResolution_HydrologyUsesReducedLimit()
+        {
+            MethodInfo getMaximumSampleResolution = typeof(WorldGenerationMapViewerWindow).GetMethod(
+                "GetMaximumSampleResolution",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.That(getMaximumSampleResolution, Is.Not.Null);
+
+            int terrainLimit = (int)getMaximumSampleResolution.Invoke(
+                null,
+                new object[] { WorldGenerationMapViewMode.Terrain });
+            int hydrologyLimit = (int)getMaximumSampleResolution.Invoke(
+                null,
+                new object[] { WorldGenerationMapViewMode.HydrologyLake });
+
+            Assert.That(terrainLimit, Is.EqualTo(WorldGenerationMapSampler.MaximumResolution));
+            Assert.That(
+                hydrologyLimit,
+                Is.EqualTo(WorldGenerationMapSampler.MaximumHydrologyResolution));
+        }
+
+        /// <summary>
         /// レイアウト前のNaN、無限大、縮小されたCanvas、最小寸法を準備し、実寸確定前の1×1生成を防ぐことを保証します。
         /// </summary>
         /// <param name="width">Canvasの横幅です。単位はEditorポイントです。</param>
