@@ -26,6 +26,40 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// 64×64チャンクの正側末尾4タイルを9個目の水文セルが担当し、河道供給元はさらに1セル外側まで走査することを保証します。
+        /// </summary>
+        [Test]
+        public void HydrologyScanBounds_IncludePositiveEdgeLakeOwnersAndOuterChannelSources()
+        {
+            WorldGenerationSettings settings = CreateSettings("surface-water-scan-bounds");
+            Assert.That(
+                DeterministicSurfaceWaterGenerator.TryGetHydrologyScanBounds(
+                    settings.Hydrology,
+                    0,
+                    0,
+                    WorldGridConstants.LogicalChunkSize - 1,
+                    WorldGridConstants.LogicalChunkSize - 1,
+                    out int minimumIntersectingCellX,
+                    out int minimumIntersectingCellY,
+                    out int maximumIntersectingCellX,
+                    out int maximumIntersectingCellY,
+                    out int minimumChannelSourceCellX,
+                    out int minimumChannelSourceCellY,
+                    out int maximumChannelSourceCellX,
+                    out int maximumChannelSourceCellY),
+                Is.True);
+
+            Assert.That(minimumIntersectingCellX, Is.EqualTo(0));
+            Assert.That(minimumIntersectingCellY, Is.EqualTo(0));
+            Assert.That(maximumIntersectingCellX, Is.EqualTo(8));
+            Assert.That(maximumIntersectingCellY, Is.EqualTo(8));
+            Assert.That(minimumChannelSourceCellX, Is.EqualTo(-1));
+            Assert.That(minimumChannelSourceCellY, Is.EqualTo(-1));
+            Assert.That(maximumChannelSourceCellX, Is.EqualTo(9));
+            Assert.That(maximumChannelSourceCellY, Is.EqualTo(9));
+        }
+
+        /// <summary>
         /// 同じ1本のD8辺をStreamとして描き、海面以上の中心線だけが渓流になり、幅を持たないことを保証します。
         /// </summary>
         [Test]

@@ -152,7 +152,21 @@ namespace Farmware.WorldGeneration
                 || !surfaceWater.IsCreated || surfaceWater.Length < WorldGridConstants.TilesPerChunk
                 || !TryGetChunkBounds(chunkX, chunkY, out int minimumTileX, out int minimumTileY,
                     out int maximumTileX, out int maximumTileY)
-                || !TryGetHydrologyBounds(chunkX, chunkY, out int firstCellX, out int firstCellY))
+                || !TryGetHydrologyBufferOrigin(chunkX, chunkY, out int firstCellX, out int firstCellY)
+                || !TryGetHydrologyScanBounds(
+                    settings.Hydrology,
+                    minimumTileX,
+                    minimumTileY,
+                    maximumTileX,
+                    maximumTileY,
+                    out int minimumIntersectingCellX,
+                    out int minimumIntersectingCellY,
+                    out int maximumIntersectingCellX,
+                    out int maximumIntersectingCellY,
+                    out int minimumChannelSourceCellX,
+                    out int minimumChannelSourceCellY,
+                    out int maximumChannelSourceCellX,
+                    out int maximumChannelSourceCellY))
             {
                 return false;
             }
@@ -163,43 +177,59 @@ namespace Farmware.WorldGeneration
                 surfaceWater[tileIndex] = default;
             }
 
-            // 河道中心線は隣接2セルの担当範囲を通るため、チャンク外1水文セルから入る辺も再生成します。
-            for (int sourceOffsetY = -1;
-                sourceOffsetY <= DeterministicHydrologyGenerator.CellsPerChunkAxis;
-                sourceOffsetY++)
+            // 河道中心線は隣接2セルの担当範囲を通ります。
+            // 正側末尾4タイルを所有する9個目のセルへ流入する辺も必要なため、担当セルのさらに外側まで再生成します。
+            // 64件Buffer外かつチャンクと交差する正側17セルは、後続の湖判定でも使うため固定長リストへ保持します。
+            FixedList4096Bytes<GeneratedHydrologyCell> haloIntersectingCells = default;
+            for (long sourceCellLongY = minimumChannelSourceCellY;
+                sourceCellLongY <= maximumChannelSourceCellY;
+                sourceCellLongY++)
             {
-                for (int sourceOffsetX = -1;
-                    sourceOffsetX <= DeterministicHydrologyGenerator.CellsPerChunkAxis;
-                    sourceOffsetX++)
+                for (long sourceCellLongX = minimumChannelSourceCellX;
+                    sourceCellLongX <= maximumChannelSourceCellX;
+                    sourceCellLongX++)
                 {
-                    long sourceCellLongX = (long)firstCellX + sourceOffsetX;
-                    long sourceCellLongY = (long)firstCellY + sourceOffsetY;
-                    if (sourceCellLongX < int.MinValue || sourceCellLongX > int.MaxValue
-                        || sourceCellLongY < int.MinValue || sourceCellLongY > int.MaxValue)
-                    {
-                        return false;
-                    }
-
+                    long sourceOffsetLongX = sourceCellLongX - firstCellX;
+                    long sourceOffsetLongY = sourceCellLongY - firstCellY;
                     GeneratedHydrologyCell sourceCell;
-                    bool isLocal = sourceOffsetX >= 0
-                        && sourceOffsetX < DeterministicHydrologyGenerator.CellsPerChunkAxis
-                        && sourceOffsetY >= 0
-                        && sourceOffsetY < DeterministicHydrologyGenerator.CellsPerChunkAxis;
+                    bool isLocal = sourceOffsetLongX >= 0
+                        && sourceOffsetLongX < DeterministicHydrologyGenerator.CellsPerChunkAxis
+                        && sourceOffsetLongY >= 0
+                        && sourceOffsetLongY < DeterministicHydrologyGenerator.CellsPerChunkAxis;
                     if (isLocal)
                     {
+                        int sourceOffsetX = (int)sourceOffsetLongX;
+                        int sourceOffsetY = (int)sourceOffsetLongY;
                         int cellIndex = (sourceOffsetY * DeterministicHydrologyGenerator.CellsPerChunkAxis)
                             + sourceOffsetX;
                         sourceCell = hydrologyCells[cellIndex];
                     }
-                    else if (!DeterministicHydrologyGenerator.TryGenerateCellWithoutLake(
-                        settings,
-                        (int)sourceCellLongX,
-                        (int)sourceCellLongY,
-                        frontier,
-                        0,
-                        out sourceCell))
+                    else
                     {
-                        return false;
+                        if (!DeterministicHydrologyGenerator.TryGenerateCellWithoutLake(
+                                settings,
+                                (int)sourceCellLongX,
+                                (int)sourceCellLongY,
+                                frontier,
+                                0,
+                                out sourceCell))
+                        {
+                            return false;
+                        }
+
+                        bool intersectsChunk = sourceCellLongX >= minimumIntersectingCellX
+                            && sourceCellLongX <= maximumIntersectingCellX
+                            && sourceCellLongY >= minimumIntersectingCellY
+                            && sourceCellLongY <= maximumIntersectingCellY;
+                        if (intersectsChunk)
+                        {
+                            if (haloIntersectingCells.Length >= haloIntersectingCells.Capacity)
+                            {
+                                return false;
+                            }
+
+                            haloIntersectingCells.Add(sourceCell);
+                        }
                     }
 
                     HydrologyConnectionFlags channel = sourceCell.ConnectionFlags
@@ -225,46 +255,101 @@ namespace Farmware.WorldGeneration
                 }
             }
 
-            // 同じ閉鎖末端を持つローカルセルは一つの湖なので、行優先で最初に現れたセルだけが流域全体を再構築します。
-            for (int representativeIndex = 0;
-                representativeIndex < DeterministicHydrologyGenerator.CellsPerChunk;
-                representativeIndex++)
+            // 1チャンクと交差する水文セルは8×8ではなく9×9です。
+            // 正側外周は64件Bufferに含まれないため、保持した基礎水文へ湖状態を追加し、末端座標で同じ湖を一度だけ処理します。
+            FixedList4096Bytes<long> processedLakeTerminalKeys = default;
+            HydrologyLakeBasinCache haloLakeCache = default;
+            for (long representativeCellLongY = minimumIntersectingCellY;
+                representativeCellLongY <= maximumIntersectingCellY;
+                representativeCellLongY++)
             {
-                GeneratedHydrologyCell representative = hydrologyCells[representativeIndex];
-                if ((representative.LakeFlags & HydrologyLakeFlags.FixedLake) == 0
-                    || HasEarlierLakeRepresentative(hydrologyCells, representativeIndex, representative))
+                for (long representativeCellLongX = minimumIntersectingCellX;
+                    representativeCellLongX <= maximumIntersectingCellX;
+                    representativeCellLongX++)
                 {
-                    continue;
-                }
+                    long representativeOffsetLongX = representativeCellLongX - firstCellX;
+                    long representativeOffsetLongY = representativeCellLongY - firstCellY;
+                    GeneratedHydrologyCell representative;
+                    bool isLocal = representativeOffsetLongX >= 0
+                        && representativeOffsetLongX < DeterministicHydrologyGenerator.CellsPerChunkAxis
+                        && representativeOffsetLongY >= 0
+                        && representativeOffsetLongY < DeterministicHydrologyGenerator.CellsPerChunkAxis;
+                    if (isLocal)
+                    {
+                        int representativeOffsetX = (int)representativeOffsetLongX;
+                        int representativeOffsetY = (int)representativeOffsetLongY;
+                        int representativeIndex =
+                            (representativeOffsetY * DeterministicHydrologyGenerator.CellsPerChunkAxis)
+                            + representativeOffsetX;
+                        representative = hydrologyCells[representativeIndex];
+                    }
+                    else
+                    {
+                        // 河道走査で生成済みの基礎水文を再利用し、湖状態だけを追加します。
+                        // これにより正側17セルの高コストな下流・集水探索を同一チャンク内で二重実行しません。
+                        if (!TryFindHydrologyCell(
+                                haloIntersectingCells,
+                                (int)representativeCellLongX,
+                                (int)representativeCellLongY,
+                                out representative)
+                            || !DeterministicHydrologyLakeResolver.TryApplyLakeState(
+                                settings,
+                                ref representative,
+                                frontier,
+                                0,
+                                basinMembers,
+                                0,
+                                basinLookup,
+                                0,
+                                ref haloLakeCache))
+                        {
+                            return false;
+                        }
+                    }
 
-                if (!DeterministicHydrologyLakeResolver.TryBuildBasin(
-                        settings,
+                    if ((representative.LakeFlags & HydrologyLakeFlags.FixedLake) == 0
+                        || ContainsLakeTerminal(processedLakeTerminalKeys, representative))
+                    {
+                        continue;
+                    }
+
+                    if (processedLakeTerminalKeys.Length >= processedLakeTerminalKeys.Capacity)
+                    {
+                        return false;
+                    }
+                    processedLakeTerminalKeys.Add(PackCellCoordinate(
                         representative.DownstreamReachCellX,
-                        representative.DownstreamReachCellY,
-                        frontier,
-                        0,
-                        basinMembers,
-                        0,
-                        basinLookup,
-                        0,
-                        out HydrologyLakeBasinResult basin)
-                    || !basin.HasFixedLake
-                    || basin.LakeSurfaceHeight != representative.LakeSurfaceHeight
-                    || basin.LakeFillFraction != representative.LakeFillFraction
-                    || !TryFillLakeCandidate(
-                        settings,
-                        basin,
-                        basinMembers,
-                        basinLookup,
-                        floodVisited,
-                        floodQueue,
-                        minimumTileX,
-                        minimumTileY,
-                        maximumTileX,
-                        maximumTileY,
-                        surfaceWater))
-                {
-                    return false;
+                        representative.DownstreamReachCellY));
+
+                    if (!DeterministicHydrologyLakeResolver.TryBuildBasin(
+                            settings,
+                            representative.DownstreamReachCellX,
+                            representative.DownstreamReachCellY,
+                            frontier,
+                            0,
+                            basinMembers,
+                            0,
+                            basinLookup,
+                            0,
+                            out HydrologyLakeBasinResult basin)
+                        || !basin.HasFixedLake
+                        || basin.LakeSurfaceHeight != representative.LakeSurfaceHeight
+                        || basin.LakeFillFraction != representative.LakeFillFraction
+                        || !TryFillLakeCandidate(
+                            settings,
+                            basin,
+                            basinMembers,
+                            basinLookup,
+                            floodVisited,
+                            floodQueue,
+                            minimumTileX,
+                            minimumTileY,
+                            maximumTileX,
+                            maximumTileY,
+                            surfaceWater))
+                    {
+                        return false;
+                    }
                 }
             }
 
@@ -520,27 +605,61 @@ namespace Farmware.WorldGeneration
             return candidateSource.CellX < existing.SourceCellX;
         }
 
-        /// <summary>同じ閉鎖末端を持つ固定湖が行優先の前方に既にあるかを調べます。</summary>
-        /// <param name="cells">対象チャンクの湖面解決済み64水文セルです。</param>
-        /// <param name="representativeIndex">現在調べている行優先添字です。</param>
-        /// <param name="representative">現在の固定湖セルです。</param>
-        /// <returns>同じ末端を持つ固定湖セルが前方にあればtrueです。</returns>
-        private static bool HasEarlierLakeRepresentative(
-            NativeArray<GeneratedHydrologyCell> cells,
-            int representativeIndex,
+        /// <summary>同じ閉鎖末端を持つ固定湖が今回の9×9走査ですでに処理済みかを調べます。</summary>
+        /// <param name="processedTerminalKeys">処理済み閉鎖末端のX・Yを詰めた固定長リストです。</param>
+        /// <param name="representative">現在調べている固定湖セルです。</param>
+        /// <returns>同じ閉鎖末端が前方の交差セルで処理済みならtrueです。</returns>
+        private static bool ContainsLakeTerminal(
+            in FixedList4096Bytes<long> processedTerminalKeys,
             in GeneratedHydrologyCell representative)
         {
-            for (int cellIndex = 0; cellIndex < representativeIndex; cellIndex++)
+            long terminalKey = PackCellCoordinate(
+                representative.DownstreamReachCellX,
+                representative.DownstreamReachCellY);
+            for (int index = 0; index < processedTerminalKeys.Length; index++)
             {
-                GeneratedHydrologyCell candidate = cells[cellIndex];
-                if ((candidate.LakeFlags & HydrologyLakeFlags.FixedLake) != 0
-                    && candidate.DownstreamReachCellX == representative.DownstreamReachCellX
-                    && candidate.DownstreamReachCellY == representative.DownstreamReachCellY)
+                if (processedTerminalKeys[index] == terminalKey)
                 {
                     return true;
                 }
             }
             return false;
+        }
+
+        /// <summary>河道走査時に保持した正側外周セルから、指定した絶対水文セルを取得します。</summary>
+        /// <param name="cells">チャンクと交差するが64件Buffer外にある、最大17件の基礎水文セルです。</param>
+        /// <param name="cellX">取得する水平絶対水文セル座標です。</param>
+        /// <param name="cellY">取得する垂直絶対水文セル座標です。</param>
+        /// <param name="cell">成功時に、湖状態をまだ適用していない基礎水文セルを受け取ります。</param>
+        /// <returns>同じX・Yのセルを固定長リスト内で発見できた場合はtrueです。</returns>
+        private static bool TryFindHydrologyCell(
+            in FixedList4096Bytes<GeneratedHydrologyCell> cells,
+            int cellX,
+            int cellY,
+            out GeneratedHydrologyCell cell)
+        {
+            for (int index = 0; index < cells.Length; index++)
+            {
+                GeneratedHydrologyCell candidate = cells[index];
+                if (candidate.CellX == cellX && candidate.CellY == cellY)
+                {
+                    cell = candidate;
+                    return true;
+                }
+            }
+
+            cell = default;
+            return false;
+        }
+
+        /// <summary>符号付き水文セルX・Yを、衝突しない単一の64bit比較値へ詰めます。</summary>
+        /// <param name="cellX">水平水文セル座標です。</param>
+        /// <param name="cellY">垂直水文セル座標です。</param>
+        /// <returns>Xを下位32bit、Yを上位32bitへ元のビット列のまま格納した値です。</returns>
+        private static long PackCellCoordinate(int cellX, int cellY)
+        {
+            ulong packed = (uint)cellX | ((ulong)(uint)cellY << 32);
+            return (long)packed;
         }
 
         /// <summary>流域末端の最低標高タイルから8近傍で到達できる湖面未満タイルだけを湖面候補へします。</summary>
@@ -883,13 +1002,13 @@ namespace Farmware.WorldGeneration
             return true;
         }
 
-        /// <summary>論理チャンク左下に中心を持つ水文セル座標を64bit中間計算から求めます。</summary>
+        /// <summary>64件の入力Buffer先頭に対応する水文セル座標を64bit中間計算から求めます。</summary>
         /// <param name="chunkX">水平論理チャンク座標です。</param>
         /// <param name="chunkY">垂直論理チャンク座標です。</param>
         /// <param name="firstCellX">成功時の左端水文セルXです。</param>
         /// <param name="firstCellY">成功時の下端水文セルYです。</param>
-        /// <returns>8倍した両座標と正側外周がint範囲内ならtrueです。</returns>
-        private static bool TryGetHydrologyBounds(
+        /// <returns>8倍した先頭座標とBuffer末尾座標がint範囲内ならtrueです。</returns>
+        private static bool TryGetHydrologyBufferOrigin(
             int chunkX,
             int chunkY,
             out int firstCellX,
@@ -897,10 +1016,10 @@ namespace Farmware.WorldGeneration
         {
             long firstLongX = (long)chunkX * DeterministicHydrologyGenerator.CellsPerChunkAxis;
             long firstLongY = (long)chunkY * DeterministicHydrologyGenerator.CellsPerChunkAxis;
-            long haloLastX = firstLongX + DeterministicHydrologyGenerator.CellsPerChunkAxis;
-            long haloLastY = firstLongY + DeterministicHydrologyGenerator.CellsPerChunkAxis;
-            if (firstLongX - 1L < int.MinValue || haloLastX > int.MaxValue
-                || firstLongY - 1L < int.MinValue || haloLastY > int.MaxValue)
+            long bufferLastX = firstLongX + DeterministicHydrologyGenerator.CellsPerChunkAxis - 1L;
+            long bufferLastY = firstLongY + DeterministicHydrologyGenerator.CellsPerChunkAxis - 1L;
+            if (firstLongX < int.MinValue || bufferLastX > int.MaxValue
+                || firstLongY < int.MinValue || bufferLastY > int.MaxValue)
             {
                 firstCellX = default;
                 firstCellY = default;
@@ -909,6 +1028,69 @@ namespace Farmware.WorldGeneration
 
             firstCellX = (int)firstLongX;
             firstCellY = (int)firstLongY;
+            return true;
+        }
+
+        /// <summary>
+        /// タイル境界を正として、交差する担当水文セルと、その担当範囲へ流入できる河道供給元の範囲を求めます。
+        /// </summary>
+        /// <param name="settings">中心-4〜+3の担当変換に使う水文設定です。</param>
+        /// <param name="minimumTileX">対象チャンクの左端タイルXです。</param>
+        /// <param name="minimumTileY">対象チャンクの下端タイルYです。</param>
+        /// <param name="maximumTileX">対象チャンクの右端タイルXです。</param>
+        /// <param name="maximumTileY">対象チャンクの上端タイルYです。</param>
+        /// <param name="minimumIntersectingCellX">成功時に左端タイルを担当する水文セルXです。</param>
+        /// <param name="minimumIntersectingCellY">成功時に下端タイルを担当する水文セルYです。</param>
+        /// <param name="maximumIntersectingCellX">成功時に右端タイルを担当する水文セルXです。</param>
+        /// <param name="maximumIntersectingCellY">成功時に上端タイルを担当する水文セルYです。</param>
+        /// <param name="minimumChannelSourceCellX">成功時に河道供給元として調べる最小セルXです。</param>
+        /// <param name="minimumChannelSourceCellY">成功時に河道供給元として調べる最小セルYです。</param>
+        /// <param name="maximumChannelSourceCellX">成功時に河道供給元として調べる最大セルXです。</param>
+        /// <param name="maximumChannelSourceCellY">成功時に河道供給元として調べる最大セルYです。</param>
+        /// <returns>担当セル変換と、その外側1セルの座標がint範囲内ならtrueです。</returns>
+        internal static bool TryGetHydrologyScanBounds(
+            in HydrologyGenerationSettings settings,
+            int minimumTileX,
+            int minimumTileY,
+            int maximumTileX,
+            int maximumTileY,
+            out int minimumIntersectingCellX,
+            out int minimumIntersectingCellY,
+            out int maximumIntersectingCellX,
+            out int maximumIntersectingCellY,
+            out int minimumChannelSourceCellX,
+            out int minimumChannelSourceCellY,
+            out int maximumChannelSourceCellX,
+            out int maximumChannelSourceCellY)
+        {
+            if (!DeterministicHydrologyGenerator.TryGetCellCoordinate(
+                    settings,
+                    minimumTileX,
+                    minimumTileY,
+                    out minimumIntersectingCellX,
+                    out minimumIntersectingCellY)
+                || !DeterministicHydrologyGenerator.TryGetCellCoordinate(
+                    settings,
+                    maximumTileX,
+                    maximumTileY,
+                    out maximumIntersectingCellX,
+                    out maximumIntersectingCellY)
+                || !TryAdd(minimumIntersectingCellX, -1, out minimumChannelSourceCellX)
+                || !TryAdd(minimumIntersectingCellY, -1, out minimumChannelSourceCellY)
+                || !TryAdd(maximumIntersectingCellX, 1, out maximumChannelSourceCellX)
+                || !TryAdd(maximumIntersectingCellY, 1, out maximumChannelSourceCellY))
+            {
+                minimumIntersectingCellX = default;
+                minimumIntersectingCellY = default;
+                maximumIntersectingCellX = default;
+                maximumIntersectingCellY = default;
+                minimumChannelSourceCellX = default;
+                minimumChannelSourceCellY = default;
+                maximumChannelSourceCellX = default;
+                maximumChannelSourceCellY = default;
+                return false;
+            }
+
             return true;
         }
 
