@@ -2,7 +2,7 @@
 
 - 更新日: 2026-10-22
 - 対象PR: TERRAIN-01C4-A/B/C/D/E
-- 状態: C4-A1「河道中心線」の実装・AI検証完了、人間確認・commit待ち
+- 状態: C4-A1はcommit `d1cc247`で完了。C4-A2「湖面候補・ECS接続」は実装・AI検証完了、人間確認・commit待ち
 - 作業ブランチ: `terrain-01c4-hydrology-foundation`
 
 ## 1. 目的と前提
@@ -35,6 +35,24 @@ TERRAIN-01C4は、TERRAIN-01C2の固定地質とTERRAIN-01C3の8×8水文セル�
 
 河道は水文セルのD8辺をタイルへ描き下ろすだけで、流向や集水結果を再計算しない。湖面候補は最大4,096水文セル・262,144タイルの固定上限内で流域末端から連結したタイルだけを採用する。途中まで生成した結果は公開しない。
 
+### 3.1 C4-A2の実装結果
+
+`GeneratedSurfaceWaterTile`は1タイル16 bytesで、次の値を保持する。
+
+- `Type`: `None`、`Stream`、`River`、`LakeCandidate`。後続C4-C用の恒久淡水湖、恒久塩湖、泉流も予約する。
+- `Flags`: 地下水涵養候補、確定自然表流水、淡水接続、河道中心線を独立したbitで保持する。C4-A2の渓流・河川は涵養候補・確定自然表流水・淡水接続を設定する。湖面候補は涵養候補だけを設定し、後続区分前に恒久水面や淡水と断定しない。
+- `SurfaceHeight`: 河道は対象タイルの連続標高、湖面候補は固定湖面標高を保持する。
+- `SourceAmount`: 河道は`RunoffEquivalentCells`、湖面候補は`LakeFillFraction`を保持する。
+- `SourceCellX`、`SourceCellY`: 重なり解決と監査に使う供給元水文セルの絶対座標を保持する。
+
+河道は対象チャンクを覆う水文セルに1セルのHaloを加え、境界外から流入する中心線と河川幅も同じ絶対座標規則で生成する。渓流は中心線だけ、河川は中心線と上下左右1タイルを候補にし、斜め角を埋めない。重なりは河川、流出寄与の大きい供給元、水文セルY、Xの昇順で一意に決める。元の連続標高が海面未満のタイルは淡水候補へしない。
+
+湖面候補はC3-D1と同じ流域集合と固定湖結果を再構築し、末端Anchorから8近傍Flood Fillする。流域外、湖面標高以上、海面未満へは進まず、同標高の飛び地を採用しない。対象チャンク内の候補数を先に数え、候補がない場合は全流域Flood Fillを省略する。訪問配列は条件外と到達済みを区別して連続標高の再計算を防ぎ、対象チャンク内の全候補へ到達した時点で終了する。固定上限または座標検証に失敗した場合は、途中結果をECSへ公開しない。
+
+`ChunkGenerationSystem`は基礎水文8行、閉鎖流域の準備、最大8担当の湖解決、タイル表流水の順に依存させ、地形・資源系列とは並列にする。既定2枠のPersistent作業配列へ、4096件の表流水結果、256件の経路ノードと経路、262,144件のFlood Fill状態とQueueを追加した。完了後は地形4096件、資源4096件、水文64件、表流水4096件の4 Bufferを同じ固定Tick公開境界で検証・コピーする。表流水生成の失敗を含む場合は4 Bufferのどれも公開しない。
+
+状態ハッシュは水文結果に続けて4096件の表流水結果を行優先で含める。単一チャンクAPIも製品Jobと同じ表流水生成器を使うため、生成順やロード状態に依存しない。
+
 ## 4. 局所地質補正
 
 亀裂、風化帯、粘土層、帯水層は別Saltの連続ポテンシャルとして生成する。補正値は地下水と自然土壌飽和だけが参照し、`GeneratedTile`の基礎透水性・地下水保持力、地質Definition、資源、Biomeへ書き戻さない。
@@ -50,4 +68,9 @@ TERRAIN-01C4は、TERRAIN-01C2の固定地質とTERRAIN-01C3の8×8水文セル�
 - Unityを使わない補助実行ではNativeArrayを確保しないAnchor 2件だけが成功した。NativeArrayを使う処理はUnity内部の`UnsafeUtility`を必要とするため、この補助経路では判定せず、次項のUnity Test Runner結果を正とする。
 - 2026-10-22にUnity CLIを`1.0.0-beta.14`へ更新し、起動中のUnity 6000.3.8f1 EditorがPipeline上で`ready`、Safe Modeではないことを確認した。Pipeline packageは既存の`0.8.0-exp.1`を維持し、今回の変更では更新していない。
 - Unity Editorの最終再コンパイルは警告0件・エラー0件だった。`Farmware.WorldGeneration.Tests.DeterministicSurfaceWaterPathGeneratorTests`をEditModeで実行し、最大標高同値化の反例を含む対象13件すべてが成功した（失敗・スキップ・未確定はいずれも0件、合計0.49秒）。続けて修正後ソースで`Farmware.WorldGeneration.Tests`一式426件もすべて成功した（失敗・スキップ・未確定はいずれも0件、合計130.10秒）。
-- C4-A1は表示、Scene、Prefab、ECS Bufferを変更しない純粋計算の変更である。C4-A2へ進む前に、変更内容の人間確認とcommit許可を待つ。
+- C4-A1は表示、Scene、Prefab、ECS Bufferを変更しない純粋計算の変更であり、2026-10-22にcommit `d1cc247`として完了した。
+- C4-A2では渓流中心線、河川の上下左右幅、実生成チャンクの再現性と海面未満除外、実Flood Fillによる湖面候補、チャンク境界を跨ぐ絶対タイル一致、構造体サイズを対象テストへ追加した。固定Tick公開テストも4 Bufferの同時公開へ更新した。
+- 2026-10-22のUnity 6000.3.8f1 Editor上で、同じチャンク列を交互に測る明示的性能テストを実行した。最終ソースで1／4／16チャンクの水文のみは257.766100／781.559400／3,225.841300ms、水文＋表流水は464.447000／1,453.817300／5,609.708800msだった。Main Thread上の純粋生成比較であり、Burst Job、ECS公開、描画、Development Player、対象機器の合格値ではない。
+- C4-A2後のPersistent作業配列は1枠9,679,886 bytes、既定2枠19,359,772 bytes（約18.46MiB）である。C3-D1から1枠1,390,593 bytes増え、ECS側にはロード済み1チャンク当たり65,536 bytesの表流水要素本体が加わる。コンテナ管理領域、Allocator余白、安全性情報、Dynamic Buffer管理領域は含めない。
+- 最終レビューでは、`int`最大端のチャンク走査を64×64ローカル添字へ変更し、湖面適格性と元地形生成失敗を分離した。修正後の再コンパイル、対象6件、World Generation EditMode Assembly 432件、PlayMode Assembly 56件はすべて成功した。EditMode中の警告6件は既知のテスト用System Group順序属性2種類×3回だけで、PlayMode完了後のConsole実状態はコンパイル失敗なし、エラー0件、警告0件だった。AIコードレビューのP0・P1ブロッカーは残っていない。
+- C4-A2はPresentation、Scene、Prefab、Debug Visualizationをまだ変更しない。最終Unityテストと差分レビュー後、SampleSceneで通常移動中の停止、境界往復後の生成継続、Consoleエラー、`ChunkGenerationSurfaceWaterWait`を人間が確認し、commit許可を得る。

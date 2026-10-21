@@ -3,7 +3,7 @@
 > 本書は当時の地形・カメラ・個体群実装の測定記録である。2026-10-19の仕様転換後も測定値・受け入れは保持するが、3層、直接操作、車両、可変地形の性能合格へ流用しない。今後のゲートは[現行ロードマップ](./ImplementationRoadmap.md#10-マイルストーンと横断性能ゲート)を参照する。
 
 - 計測日: 2026-10-17
-- 追補日: 2026-10-21（TERRAIN-01C3-C2の空間集約Summary比較を追記。ANIMAL-01Bの2026-10-19追補も保持）
+- 追補日: 2026-10-22（TERRAIN-01C4-A2の表流水生成比較を追記。ANIMAL-01Bの2026-10-19追補も保持）
 - 基準実装commit: `d283abaa`（自動Floating Originとちらつき修正）。内訳計測用Profiler Markerは本書と同じ変更に含める。
 - 状態: `1d05dd3f`の先行表示・既定ONを最終採用し、人間の通常・拡大表示確認と、追加の負方向・遠方・有限往復8,877前面フレーム（可視未完成0）を確認した。MAP-02Dの方式・予算決定と今回範囲の検証は完了と判断する。既存12条件・21,918フレームと先行表示後の通常・拡大ON3,799フレームも履歴として保持する。製品最大Viewport・Windows・8GB／16GB機での性能合格は意味しない。
 - 表示受け入れ: 影再利用後の黒いちらつき再報告は、下記の連続記録とユーザーによる再確認では再現していない。一方、原点変更時の一瞬の引っかかりは双方で確認した。黒抜けが恒久的に解消したとは断定せず、現在は再構築スパイクの改善を優先する。
@@ -1218,3 +1218,21 @@ C3-D1の初回閉鎖流域・湖面経路は、Persistentの上流Heap、流域�
 その後、人間確認でチャンク越境待ちが許容範囲外と報告された。修正前相当の行別キャッシュと、64セルを閉鎖末端ごとにまとめる新経路を同じ16 Chunk・1,024セルで交互に測定した。結果は行別8,404.443ms、チャンク一括3,084.233ms、比率0.367で、CPU時間は約63.3%減少した。閉鎖流域セル737件に対し、チャンクごとの一意な末端合計は42件だった。全1,024セルの固定値比較に差はない。越流辺の外側セルも、比較に不要なD8隣接生成を省き、代表標高とFlowKeyだけを生成する。製品Jobでは、独立した地形・資源生成を水文系列に重ね、異なる閉鎖流域を最大8担当で並列解決する。グラフィックス有効の隔離PlayMode横断テストでは、単一湖Jobの`ChunkGenerationBoundaryWait`最大38.565msに対し、並列湖Jobの3実行が31.249／37.170／33.717msだった。各実行は新しいEditorプロセスであり変動も大きいため、短縮量を製品保証にしない。通常Editorの体感、Development Player、対象機器の性能合格は人間確認へ残す。
 
 通常Editorでなお体感停止があったため待機内訳を追加し、修正前は`ChunkGenerationBoundaryWait`最大26.380ms、`ChunkGenerationHydrologyBaseWait`最大13.412ms、`ChunkGenerationLakeWait`最大12.951ms、`ChunkGenerationTerrainWait`最大0.004msを記録した。固定Tick入口で未完了Jobへ`Complete()`していた同期点を除き、生成中は`FixedTickReadinessState`で固定Tickを延期して描画へ戻す方式へ変更した。同じ接続済みUnity 6000.3.8f1 Editorの長距離往復テストでは、`ChunkStreaming`最大4.811ms、`TilemapPresentation`最大9.707ms、`FloatingOriginRebase`最大0.453ms、`ChunkGenerationBoundaryWait`最大0.149ms、基礎水文0.143ms、湖0.001ms、地形0.001msだった。テストは3.866秒で1件成功した。最終差分では全EditMode 498件と全PlayMode 56件が成功し、Console実状態はコンパイル失敗なし・エラー0・警告0だった。これは単一Editor実行であり、通常操作の体感、Development Player、対象機器の性能合格は人間確認へ残す。
+
+## TERRAIN-01C4-A2の表流水生成比較
+
+C4-A2では、1論理チャンク4096件の`GeneratedSurfaceWaterTile`を追加した。Unityレイアウトを固定するテスト上の要素本体は16 bytesで、ECS Bufferと生成結果配列は1チャンク65,536 bytesである。河道探索用の`SurfaceWaterPathNode`は48 bytes×256件で12,288 bytes、`SurfaceWaterPathTile`は8 bytes×256件で2,048 bytes、湖面Flood Fillの状態は1 byte×262,144件で262,144 bytes、Queueは4 bytes×262,144件で1,048,576 bytes、表流水失敗通知は1 byteである。
+
+C3-D1の1枠8,289,293 bytesへこれら1,390,593 bytesを加え、C4-A2のPersistent作業配列は1枠9,679,886 bytes、既定2枠19,359,772 bytes（約18.46MiB）となる。ロード済みチャンクごとの表流水要素本体は64KiB増える。ここにはコンテナ管理領域、Allocator余白、安全性情報、ECS Dynamic Buffer管理領域を含めない。
+
+2026-10-22にUnity 6000.3.8f1の接続済みEditorで、通常回帰から分離した明示実行テスト`SurfaceWaterGeneration_ReportsHydrologyComparison`を実行した。同じチャンク列を水文のみと水文＋表流水で交互に生成し、全呼出し成功と各経路内の固定チェックサム再現を確認した。計測値は次のとおりである。
+
+| 論理チャンク数 | 水文のみ | 水文＋表流水 | 追加時間 | 全体／水文 |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 257.766100 ms | 464.447000 ms | 206.680900 ms | 1.802倍 |
+| 4 | 781.559400 ms | 1,453.817300 ms | 672.257900 ms | 1.860倍 |
+| 16 | 3,225.841300 ms | 5,609.708800 ms | 2,383.867500 ms | 1.739倍 |
+
+この比較はMain Threadのmanaged C#経路で、基礎水文、閉鎖流域、タイル河道、必要な湖面Flood Fillを含む。Burst製品Job、8水文行と最大8湖担当の並列実行、ECS Buffer公開、描画は含まない。入力Seedでは対象チャンク内候補がない流域のFlood Fillを省略し、候補がある場合も対象チャンク内の全候補到達で終了する現在実装を測っている。製品最大Viewport、通常移動時の同時要求分布、Development Player、対象機器、正式なフレーム時間・メモリ上限は未決定なので、上記を性能合格値にはしない。
+
+製品Jobには`ChunkGenerationSurfaceWaterWait`を追加し、表流水Jobを並列湖Jobの後へ依存させる。固定Tick公開側は未完了Handleを待たず次フレームへ延期する既存方針を維持する。通常Editorでの体感、境界往復、Marker最大値、Consoleと、必要に応じたDevelopment Player比較は人間確認へ残す。

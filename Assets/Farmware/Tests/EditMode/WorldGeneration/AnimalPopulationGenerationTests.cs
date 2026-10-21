@@ -608,11 +608,12 @@ namespace Farmware.WorldGeneration.Tests
                 Assert.That(manager.GetBuffer<GeneratedTile>(chunk).Length, Is.Zero);
                 Assert.That(manager.GetBuffer<GeneratedResourceTile>(chunk).Length, Is.Zero);
                 Assert.That(manager.GetBuffer<GeneratedHydrologyCell>(chunk).Length, Is.Zero);
+                Assert.That(manager.GetBuffer<GeneratedSurfaceWaterTile>(chunk).Length, Is.Zero);
 
                 // Worker完了をテスト側で確定し、固定Tick入口が待機せず一括公開できる状態を作ります。
                 CompleteAllGenerationSlots(world, generation);
 
-                // 固定Tick入口は完成済みHandleだけを確定し、地形・資源・水文を同じ境界で可視化可能にします。
+                // 固定Tick入口は完成済みHandleだけを確定し、地形・資源・水文・表流水を同じ境界で可視化可能にします。
                 boundary.Update(world.Unmanaged);
                 Assert.That(
                     manager.GetComponentData<ChunkGenerationStatus>(chunk).Phase,
@@ -623,6 +624,8 @@ namespace Farmware.WorldGeneration.Tests
                     Is.EqualTo(WorldGridConstants.TilesPerChunk));
                 Assert.That(manager.GetBuffer<GeneratedHydrologyCell>(chunk).Length,
                     Is.EqualTo(DeterministicHydrologyGenerator.CellsPerChunk));
+                Assert.That(manager.GetBuffer<GeneratedSurfaceWaterTile>(chunk).Length,
+                    Is.EqualTo(WorldGridConstants.TilesPerChunk));
             }
             finally
             {
@@ -1264,7 +1267,8 @@ namespace Farmware.WorldGeneration.Tests
             entityManager.AddBuffer<GeneratedTile>(chunkEntity);
             entityManager.AddBuffer<GeneratedResourceTile>(chunkEntity);
             entityManager.AddBuffer<GeneratedHydrologyCell>(chunkEntity);
-            // Buffer追加は構造変更なので、3つを追加した後に参照を取り直してから既存の地形・資源初期値を書き込みます。
+            entityManager.AddBuffer<GeneratedSurfaceWaterTile>(chunkEntity);
+            // Buffer追加は構造変更なので、4つを追加した後に参照を取り直してから既存の地形・資源初期値を書き込みます。
             DynamicBuffer<GeneratedTile> tiles = entityManager.GetBuffer<GeneratedTile>(chunkEntity);
             DynamicBuffer<GeneratedResourceTile> resources =
                 entityManager.GetBuffer<GeneratedResourceTile>(chunkEntity);

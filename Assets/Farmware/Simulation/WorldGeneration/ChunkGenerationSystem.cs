@@ -1,4 +1,4 @@
-// このファイルは、地形・資源・固定水文をECSから独立した作業領域で生成し、完成結果だけをECSへ公開します。
+// このファイルは、地形・資源・固定水文・タイル表流水をECSから独立した作業領域で生成し、完成結果だけをECSへ公開します。
 // ChunkStreamingSystemが要求と寿命、Presentationが確定済みBufferの表示、固定Tick公開Systemが個体群の決定論境界を担当します。
 
 using System;
@@ -15,7 +15,7 @@ using Farmware.Simulation.Animals;
 namespace Farmware.WorldGeneration
 {
     /// <summary>
-    /// 有効なChunkGenerationRequestを持つチャンクだけを生成し、同じ座標の地形・資源・固定水文を対応付けるECS Systemです。
+    /// 有効なChunkGenerationRequestを持つチャンクだけを生成し、同じ座標の地形・資源・固定水文・表流水を対応付けるECS Systemです。
     /// 開始時に要求を無効化します。動物個体群があるWorldでは固定Tick境界で一括公開し、Job完了順を論理状態へ持ち込みません。
     /// 個体群Worldでは通常フレームで先行投入し、未完了中は固定Tickを延期して、完成バッチだけをTick入口で公開します。
     /// </summary>
@@ -46,6 +46,10 @@ namespace Farmware.WorldGeneration
         private static readonly ProfilerMarker LakeWaitProfilerMarker =
             new ProfilerMarker("Farmware.WorldGeneration.ChunkGenerationLakeWait");
 
+        // 完成確認済みの河道幅・湖面候補細分化Handleを安全に確定する時間です。
+        private static readonly ProfilerMarker SurfaceWaterWaitProfilerMarker =
+            new ProfilerMarker("Farmware.WorldGeneration.ChunkGenerationSurfaceWaterWait");
+
         // 完成確認済みの地形・資源Handleを安全に確定する時間です。
         private static readonly ProfilerMarker TerrainWaitProfilerMarker =
             new ProfilerMarker("Farmware.WorldGeneration.ChunkGenerationTerrainWait");
@@ -69,7 +73,8 @@ namespace Farmware.WorldGeneration
         {
             requestQuery = new EntityQueryBuilder(Allocator.Temp)
                 .WithAll<ChunkCoordinateComponent, ChunkGenerationStatus, ChunkGenerationRequest>()
-                .WithAll<GeneratedTile, GeneratedResourceTile, GeneratedHydrologyCell>()
+                .WithAll<GeneratedTile, GeneratedResourceTile, GeneratedHydrologyCell,
+                    GeneratedSurfaceWaterTile>()
                 .Build(ref state);
             fixedTickReadinessQuery = new EntityQueryBuilder(Allocator.Temp)
                 .WithAllRW<FixedTickReadinessState>()
@@ -161,6 +166,10 @@ namespace Farmware.WorldGeneration
                 {
                     CompleteRunningStage(GenerationStage.Lake);
                 }
+                using (SurfaceWaterWaitProfilerMarker.Auto())
+                {
+                    CompleteRunningStage(GenerationStage.SurfaceWater);
+                }
                 using (TerrainWaitProfilerMarker.Auto())
                 {
                     CompleteRunningStage(GenerationStage.Terrain);
@@ -234,6 +243,9 @@ namespace Farmware.WorldGeneration
                     case GenerationStage.Lake:
                         stageHandle = slot.LakeHandle;
                         break;
+                    case GenerationStage.SurfaceWater:
+                        stageHandle = slot.SurfaceWaterHandle;
+                        break;
                     default:
                         stageHandle = slot.TerrainHandle;
                         break;
@@ -264,8 +276,14 @@ namespace Farmware.WorldGeneration
                 slot.HydrologyBasinLookup.Dispose();
                 slot.HydrologyLakeWorkItems.Dispose();
                 slot.HydrologyLakeWorkItemCount.Dispose();
+                slot.SurfaceWater.Dispose();
+                slot.SurfaceWaterPathWorkspace.Dispose();
+                slot.SurfaceWaterPathTiles.Dispose();
+                slot.SurfaceWaterFloodVisited.Dispose();
+                slot.SurfaceWaterFloodQueue.Dispose();
                 slot.HydrologyGenerationFailed.Dispose();
                 slot.TerrainGenerationFailed.Dispose();
+                slot.SurfaceWaterGenerationFailed.Dispose();
             }
 
             // Systemだけが先に破棄されるテストWorldでも、存在しない生成Jobを理由に固定Tickを止め続けません。
@@ -273,7 +291,7 @@ namespace Farmware.WorldGeneration
             slots.Dispose();
         }
 
-        /// <summary>完成した作業枠だけを読み、存続する同じ要求Entityへ地形・資源・固定水文をまとめて公開します。</summary>
+        /// <summary>完成した作業枠だけを読み、存続する同じ要求Entityへ地形・資源・固定水文・表流水をまとめて公開します。</summary>
         /// <param name="manager">同じWorldの公開先です。所有Jobの専用配列から完成結果をコピーします。</param>
         private void PublishCompletedResults(EntityManager manager)
         {
@@ -293,7 +311,8 @@ namespace Farmware.WorldGeneration
                     && manager.HasComponent<ChunkGenerationStatus>(slot.Entity)
                     && manager.HasBuffer<GeneratedTile>(slot.Entity)
                     && manager.HasBuffer<GeneratedResourceTile>(slot.Entity)
-                    && manager.HasBuffer<GeneratedHydrologyCell>(slot.Entity))
+                    && manager.HasBuffer<GeneratedHydrologyCell>(slot.Entity)
+                    && manager.HasBuffer<GeneratedSurfaceWaterTile>(slot.Entity))
                 {
                     ChunkCoordinateComponent coordinate = manager.GetComponentData<ChunkCoordinateComponent>(slot.Entity);
                     ChunkGenerationStatus status = manager.GetComponentData<ChunkGenerationStatus>(slot.Entity);
@@ -314,6 +333,7 @@ namespace Farmware.WorldGeneration
                             }
                         }
                         generationFailed |= slot.TerrainGenerationFailed[0] != 0;
+                        generationFailed |= slot.SurfaceWaterGenerationFailed[0] != 0;
 
                         if (generationFailed)
                         {
@@ -323,10 +343,11 @@ namespace Farmware.WorldGeneration
                         }
                         else
                         {
-                            // 3つのBufferを確定してからReadyへ進め、半分だけ完成した結果を表示側へ渡さないようにします。
+                            // 4つのBufferを確定してからReadyへ進め、半分だけ完成した結果を表示側へ渡さないようにします。
                             manager.GetBuffer<GeneratedTile>(slot.Entity).CopyFrom(slot.Tiles);
                             manager.GetBuffer<GeneratedResourceTile>(slot.Entity).CopyFrom(slot.Resources);
                             manager.GetBuffer<GeneratedHydrologyCell>(slot.Entity).CopyFrom(slot.HydrologyCells);
+                            manager.GetBuffer<GeneratedSurfaceWaterTile>(slot.Entity).CopyFrom(slot.SurfaceWater);
                             status.GeneratedWithVersion = slot.GeneratorVersion;
                             status.Phase = ChunkGenerationPhase.ReadyToApply;
                         }
@@ -401,6 +422,7 @@ namespace Farmware.WorldGeneration
                     slot.HydrologyGenerationFailed[workItemIndex] = 0;
                 }
                 slot.TerrainGenerationFailed[0] = 0;
+                slot.SurfaceWaterGenerationFailed[0] = 0;
                 slot.HydrologyLakeWorkItemCount[0] = 0;
                 GenerateHydrologyRowsJob hydrologyJob = new GenerateHydrologyRowsJob
                 {
@@ -437,18 +459,36 @@ namespace Farmware.WorldGeneration
                     HydrologyLakeWorkItemCount = slot.HydrologyLakeWorkItemCount,
                     GenerationFailed = slot.HydrologyGenerationFailed
                 };
+                GenerateSurfaceWaterJob surfaceWaterJob = new GenerateSurfaceWaterJob
+                {
+                    Settings = settings,
+                    Coordinate = slot.Coordinate,
+                    HydrologyCells = slot.HydrologyCells,
+                    HydrologyCatchmentFrontier = slot.HydrologyCatchmentFrontier,
+                    HydrologyBasinMembers = slot.HydrologyBasinMembers,
+                    HydrologyBasinLookup = slot.HydrologyBasinLookup,
+                    PathWorkspace = slot.SurfaceWaterPathWorkspace,
+                    PathTiles = slot.SurfaceWaterPathTiles,
+                    FloodVisited = slot.SurfaceWaterFloodVisited,
+                    FloodQueue = slot.SurfaceWaterFloodQueue,
+                    SurfaceWater = slot.SurfaceWater,
+                    GenerationFailed = slot.SurfaceWaterGenerationFailed
+                };
 
                 // 基礎水文の完了後に閉鎖末端を一度分類し、異なる流域を最大8担当へ分けます。
                 // 湖系列全体を、独立した地形・資源Jobとは並行させます。
-                // 最終Handleを結合してから公開するため、3 Bufferの一括公開境界と決定論は変わりません。
+                // 湖面確定後に表流水を細分化し、地形・資源Jobは引き続き独立して並行させます。
+                // 最終Handleを結合してから公開するため、4 Bufferの一括公開境界と決定論は変わりません。
                 JobHandle hydrologyHandle = hydrologyJob.Schedule(HydrologyRowWorkItemCount, 1);
                 JobHandle prepareLakeHandle = prepareLakeJob.Schedule(hydrologyHandle);
                 JobHandle lakeHandle = lakeJob.Schedule(HydrologyRowWorkItemCount, 1, prepareLakeHandle);
+                JobHandle surfaceWaterHandle = surfaceWaterJob.Schedule(lakeHandle);
                 JobHandle terrainHandle = terrainJob.Schedule();
                 slot.HydrologyBaseHandle = hydrologyHandle;
                 slot.LakeHandle = lakeHandle;
+                slot.SurfaceWaterHandle = surfaceWaterHandle;
                 slot.TerrainHandle = terrainHandle;
-                slot.Handle = JobHandle.CombineDependencies(lakeHandle, terrainHandle);
+                slot.Handle = JobHandle.CombineDependencies(surfaceWaterHandle, terrainHandle);
                 slots[slotIndex] = slot;
                 status.Phase = ChunkGenerationPhase.GeneratingData;
                 manager.SetComponentData(entity, status);
@@ -489,7 +529,7 @@ namespace Farmware.WorldGeneration
             }
         }
 
-        /// <summary>空き枠を返し、不足時だけ地形・資源各4096件と固定水文64件のPersistent配列を追加確保します。</summary>
+        /// <summary>空き枠を返し、不足時だけ地形・資源・表流水各4096件と固定水文64件のPersistent配列を追加確保します。</summary>
         /// <returns>投入するJobの所有情報を書き込む枠の添字です。</returns>
         private int GetAvailableSlot()
         {
@@ -531,11 +571,35 @@ namespace Farmware.WorldGeneration
                     1,
                     Allocator.Persistent,
                     NativeArrayOptions.ClearMemory),
+                SurfaceWater = new NativeArray<GeneratedSurfaceWaterTile>(
+                    WorldGridConstants.TilesPerChunk,
+                    Allocator.Persistent,
+                    NativeArrayOptions.UninitializedMemory),
+                SurfaceWaterPathWorkspace = new NativeArray<SurfaceWaterPathSearchNode>(
+                    DeterministicSurfaceWaterPathGenerator.MaximumSearchNodeCount,
+                    Allocator.Persistent,
+                    NativeArrayOptions.UninitializedMemory),
+                SurfaceWaterPathTiles = new NativeArray<SurfaceWaterPathTile>(
+                    DeterministicSurfaceWaterPathGenerator.MaximumSearchNodeCount,
+                    Allocator.Persistent,
+                    NativeArrayOptions.UninitializedMemory),
+                SurfaceWaterFloodVisited = new NativeArray<byte>(
+                    DeterministicSurfaceWaterGenerator.MaximumFloodTileCount,
+                    Allocator.Persistent,
+                    NativeArrayOptions.UninitializedMemory),
+                SurfaceWaterFloodQueue = new NativeArray<int>(
+                    DeterministicSurfaceWaterGenerator.MaximumFloodTileCount,
+                    Allocator.Persistent,
+                    NativeArrayOptions.UninitializedMemory),
                 HydrologyGenerationFailed = new NativeArray<byte>(
                     HydrologyRowWorkItemCount,
                     Allocator.Persistent,
                     NativeArrayOptions.ClearMemory),
                 TerrainGenerationFailed = new NativeArray<byte>(
+                    1,
+                    Allocator.Persistent,
+                    NativeArrayOptions.ClearMemory),
+                SurfaceWaterGenerationFailed = new NativeArray<byte>(
                     1,
                     Allocator.Persistent,
                     NativeArrayOptions.ClearMemory)
@@ -560,6 +624,8 @@ namespace Farmware.WorldGeneration
             public JobHandle HydrologyBaseHandle;
             /// <summary>準備処理を含む閉鎖流域・湖面系列の完了待ちを計測するHandleです。</summary>
             public JobHandle LakeHandle;
+            /// <summary>河道幅と連続湖面候補を4096タイルへ細分化する系列の完了待ちを計測するHandleです。</summary>
+            public JobHandle SurfaceWaterHandle;
             /// <summary>水文と並行する地形・資源系列の完了待ちを計測するHandleです。</summary>
             public JobHandle TerrainHandle;
             /// <summary>地形4096件の作業配列です。枠の再利用中は保持し、System終了時にDisposeします。</summary>
@@ -580,10 +646,22 @@ namespace Farmware.WorldGeneration
             public NativeArray<HydrologyLakeChunkWorkItem> HydrologyLakeWorkItems;
             /// <summary>作業一覧内の有効な閉鎖末端数です。準備Jobだけが書き、湖Jobは読み取ります。</summary>
             public NativeArray<int> HydrologyLakeWorkItemCount;
+            /// <summary>河道、河川幅、湖面候補を行優先4096件で保持し、完成時にECSへコピーする配列です。</summary>
+            public NativeArray<GeneratedSurfaceWaterTile> SurfaceWater;
+            /// <summary>一つの最大16×16河道探索へ貸し、経路ごとに再利用する256ノード配列です。</summary>
+            public NativeArray<SurfaceWaterPathSearchNode> SurfaceWaterPathWorkspace;
+            /// <summary>一つの河道中心線を開始から終了まで一時保持する256タイル配列です。</summary>
+            public NativeArray<SurfaceWaterPathTile> SurfaceWaterPathTiles;
+            /// <summary>最大4,096セル×64タイルの湖Flood Fill訪問状態を保持する固定作業配列です。</summary>
+            public NativeArray<byte> SurfaceWaterFloodVisited;
+            /// <summary>最大262,144タイルの湖Flood Fill待ち行列を保持する固定作業配列です。</summary>
+            public NativeArray<int> SurfaceWaterFloodQueue;
             /// <summary>8水文行の各作業が失敗時に自分の添字へ1を書く、湖Jobと公開処理への通知領域です。</summary>
             public NativeArray<byte> HydrologyGenerationFailed;
             /// <summary>地形・資源Jobが失敗時に先頭へ1を書く、公開処理への独立通知領域です。</summary>
             public NativeArray<byte> TerrainGenerationFailed;
+            /// <summary>表流水細分化Jobが失敗時に先頭へ1を書き、4 Bufferすべての公開を止める通知領域です。</summary>
+            public NativeArray<byte> SurfaceWaterGenerationFailed;
         }
 
         /// <summary>固定Tick境界で残り時間を個別計測する生成Job系列です。</summary>
@@ -595,8 +673,11 @@ namespace Farmware.WorldGeneration
             /// <summary>閉鎖末端をまとめ、流域境界と湖面を確定する系列です。</summary>
             Lake = 1,
 
+            /// <summary>河道幅と湖面候補を4096タイルへ描き下ろす系列です。</summary>
+            SurfaceWater = 2,
+
             /// <summary>4,096タイルの地形と資源を作る独立系列です。</summary>
-            Terrain = 2
+            Terrain = 3
         }
 
         /// <summary>値コピーの設定と絶対座標だけから、8行の基礎水文を並列生成するBurst Jobです。</summary>
@@ -659,7 +740,7 @@ namespace Farmware.WorldGeneration
             /// <summary>このJobだけが書く、地形と同じ位置に対応した資源配列です。</summary>
             public NativeArray<GeneratedResourceTile> Resources;
 
-            /// <summary>生成失敗時に先頭へ1を書き、3 Bufferすべての公開を止める地形専用通知領域です。</summary>
+            /// <summary>生成失敗時に先頭へ1を書き、4 Bufferすべての公開を止める地形専用通知領域です。</summary>
             public NativeArray<byte> GenerationFailed;
 
             /// <summary>地質キャッシュを一度構築し、全タイルの地形と対応資源を順に生成します。</summary>
@@ -802,6 +883,72 @@ namespace Farmware.WorldGeneration
                         HydrologyBasinLookup))
                 {
                     GenerationFailed[laneIndex] = 1;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 湖面解決済みの固定水文を読み、河道幅と連続湖面候補を4096タイルへ細分化するBurst Jobです。
+        /// 湖Jobの作業配列を依存関係後に再利用し、Job実行中の追加確保とECSへの部分公開を避けます。
+        /// </summary>
+        [BurstCompile]
+        private struct GenerateSurfaceWaterJob : IJob
+        {
+            /// <summary>河道、湖面、海面、連続標高を同じSeedと版から再現する固定設定です。</summary>
+            public WorldGenerationSettings Settings;
+
+            /// <summary>生成対象となるSurface上の絶対論理チャンク座標です。</summary>
+            public ChunkCoordinateComponent Coordinate;
+
+            /// <summary>湖面解決まで完了した、対象チャンクの行優先64水文セルです。</summary>
+            [ReadOnly]
+            public NativeArray<GeneratedHydrologyCell> HydrologyCells;
+
+            /// <summary>外周河道の集水と湖流域再構築で先頭領域を再利用する上流候補Heapです。</summary>
+            public NativeArray<HydrologyUpstreamCandidate> HydrologyCatchmentFrontier;
+
+            /// <summary>湖Job完了後に先頭4,096件を一つの流域へ再利用する水文セル配列です。</summary>
+            public NativeArray<HydrologyUpstreamCandidate> HydrologyBasinMembers;
+
+            /// <summary>湖Job完了後に先頭8,192件を一つの流域へ再利用する固定Hash表です。</summary>
+            public NativeArray<HydrologyBasinLookupSlot> HydrologyBasinLookup;
+
+            /// <summary>最大16×16の河道探索で費用と直前位置を保持する256件の作業配列です。</summary>
+            public NativeArray<SurfaceWaterPathSearchNode> PathWorkspace;
+
+            /// <summary>河道中心線を開始から終了まで一時保持する256件の作業配列です。</summary>
+            public NativeArray<SurfaceWaterPathTile> PathTiles;
+
+            /// <summary>最大262,144湖候補タイルの訪問状態を流域ごとに再利用する配列です。</summary>
+            public NativeArray<byte> FloodVisited;
+
+            /// <summary>最大262,144湖候補タイルを一度ずつ処理する固定長FIFO配列です。</summary>
+            public NativeArray<int> FloodQueue;
+
+            /// <summary>成功時に4096件すべてを上書きし、最終Handle後にECSへ公開する表流水配列です。</summary>
+            public NativeArray<GeneratedSurfaceWaterTile> SurfaceWater;
+
+            /// <summary>生成失敗時に先頭へ1を書き、地形・資源・水文を含む4 Bufferの公開を止めます。</summary>
+            public NativeArray<byte> GenerationFailed;
+
+            /// <summary>固定長作業領域を純粋生成へ渡し、失敗時だけ公開停止フラグを設定します。</summary>
+            public void Execute()
+            {
+                if (!DeterministicSurfaceWaterGenerator.TryGenerateChunk(
+                        Settings,
+                        Coordinate.X,
+                        Coordinate.Y,
+                        HydrologyCells,
+                        HydrologyCatchmentFrontier,
+                        HydrologyBasinMembers,
+                        HydrologyBasinLookup,
+                        PathWorkspace,
+                        PathTiles,
+                        FloodVisited,
+                        FloodQueue,
+                        SurfaceWater))
+                {
+                    GenerationFailed[0] = 1;
                 }
             }
         }

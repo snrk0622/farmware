@@ -703,12 +703,12 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>
-        /// 指定チャンクの4096地形タイルと64固定水文セルを生成した場合の安定64bitハッシュを求めます。
-        /// 配列を確保せずに計算できるため、決定性テストと開発用比較表示に使用します。
+        /// 指定チャンクの4096地形タイル、64固定水文セル、4096固定表流水を生成した場合の安定64bitハッシュを求めます。
+        /// 水文と表流水の有限探索用一時配列を確保し、決定性テストと開発用比較表示に使用します。
         /// </summary>
         /// <param name="settings">ワールド生成設定です。</param>
         /// <param name="chunkCoordinate">生成結果を比較する論理チャンク座標です。</param>
-        /// <returns>地形タイル順序、全基礎値、水文セル順序と流向を反映した64bitハッシュです。</returns>
+        /// <returns>地形、水文セル、タイル表流水の順序と全固定値を反映した64bitハッシュです。</returns>
         public static ulong ComputeChunkHash(
             in WorldGenerationSettings settings,
             ChunkCoordinate chunkCoordinate)
@@ -743,7 +743,7 @@ namespace Farmware.WorldGeneration
                 }
             }
 
-            // 水文は4096タイルへ複製せず、同じ論理チャンクが所有する8×8セルを別順序で追加します。
+            // 水文64件と、そこから細分化した表流水4096件を同じ一括生成契約の順序で追加します。
             return DeterministicHydrologyGenerator.AppendChunkHash(
                 settings,
                 chunkCoordinate,
