@@ -2,7 +2,7 @@
 
 - 更新日: 2026-10-21
 - 対象PR: TERRAIN-01C3-A/B/C1/C2/D
-- 状態: C3-A/B/C1/C2はdevelopへマージ済み、C3-D1「閉鎖流域・基礎湖面」はAI実装・自動検証完了、人間確認待ち、C3-D2「監査・診断表示」は未着手
+- 状態: C3-A/B/C1/C2はdevelopへマージ済み、C3-D1「閉鎖流域・基礎湖面」は人間確認とcommit `7d398e9`まで完了、C3-D2「監査・診断表示」もAI実装・自動検証・人間確認まで完了
 
 ## 1. この変更単位の範囲
 
@@ -76,7 +76,7 @@ C3-A/Bの自動テストは次を対象にする。
 - 個体群Worldの生成Jobが未完了なら固定Tickを延期し、準備完了後に到来済みTickを最大1件だけ再開して、待機中の壁時計遅延を一括追いつきしないこと。
 - 水文8行の並列生成後も、単一セルAPI、チャンクBuffer、状態ハッシュ、フレーム分割・要求作成順を変えた個体群状態が一致すること。
 
-Gameビュー、Map Viewer、分布監査の水文モードはC3-D2で追加する。C3-D1でも表示モードやEditorメニューを増やさないため、目視だけで閉鎖流域・湖面の正しさを判定せず純粋計算とECS Bufferを検証する。
+Gameビュー、Map Viewer、分布監査の水文モードはC3-D2で追加した。C3-D1の固定結果は引き続き純粋計算とECS Bufferを正とし、診断表示は生成結果を変更しないPresentationとして読み取る。
 
 2026-10-21のC3-A AI確認では、Unity 6000.3.8f1の一時複製プロジェクトで最新差分をコンパイルし、C#エラーと警告がないことを確認した。`DeterministicHydrologyGeneratorTests`は21件、`ChunkGenerationSystem_`回帰は4件、`AnimalPopulationGenerationTests`は22件、Salt一意性とチャンクハッシュ順序不変の既存回帰は2件がすべて成功した。PlayMode Assemblyは56件中55件が成功し、不成功1件は生成・再表示・再訪の確認後に、`-batchmode -nographics`の`ProfilerRecorder`が`ChunkStreaming`の最大値0nsを返した既存`SampleScene_RepeatedAutomaticRebasesPreserveStreamingAcrossRoundTripAndNegativeCrossing`である。単独再実行でも同じProfiler値のみ不成功した。通常EditorではSampleSceneのPlay、カメラ移動、移動先チャンク表示を確認し、Play終了後もConsoleは情報・警告・エラー0件だった。Profiler Markerの自動テスト自体は、通常Editorでの人間確認に残す。
 
@@ -135,3 +135,23 @@ C3-D1の明示負荷テストは415.097秒で成功した。同じ100×100セル
 並列湖Jobまで含む最終差分の全EditModeは159.586秒で503件中497件成功・失敗0件・明示6件除外だった。全PlayModeは6.315秒で56件中55件成功し、残る1件は生成・表示・再訪・負座標横断の状態確認後、既知の`-batchmode -nographics`でProfiler値0nsとなる2130行だけが失敗した。閉鎖末端Maskの排他性と逐次結果一致、湖面整合、Chunk生成Systemの実Job回帰は単独でも成功し、コンパイルエラー、新規C#警告、Job安全性エラーは0件だった。接続済み通常Editorはコンパイル失敗なし、Consoleエラー0件・警告0件だったが、Pipeline 0.8.0-exp.1の`run_tests`が一覧上の対象名を0件として終了したため、通常Editorの対象テストと体感確認は人間確認へ残す。
 
 並列化後も通常Editorで境界の引っ掛かりが残り、同一セッションの内訳計測では`ChunkGenerationBoundaryWait`最大26.380ms、基礎水文13.412ms、湖12.951ms、地形0.004msだった。この結果から、Worker処理量だけでなく固定Tick入口の`Complete()`同期が描画停止を作っていると判断した。修正後は`FixedTickReadinessState`に未完了状態を通知し、Rate Managerが固定Tickを延期して描画へ制御を返す。完成確認後だけHandleを確定し、公開後に次バッチを投入した場合も同一描画フレームの追加Tickを止める。接続済みUnity 6000.3.8f1 Editorの長距離往復PlayModeテストは1件成功し、`ChunkGenerationBoundaryWait`最大0.149ms、基礎水文0.143ms、湖0.001ms、地形0.001msだった。固定Tickテスト8件と個体群境界テスト23件も全成功した。最終差分の全EditModeは138秒で498件、全PlayModeは6.16秒で56件がすべて成功し、Console実状態はコンパイル失敗なし・エラー0・警告0だった。単一Editor実行の診断値であり、通常操作の体感、Development Player、対象機器の性能合格は人間確認へ残す。
+
+2026-10-21に人間が通常Editorでチャンク越境時の引っ掛かり解消を確認し、C3-D1をcommit `7d398e9`として完了した。D1とD2は同じPRへ含めるが、変更責務と人間確認地点を分けるためcommitは分離する。
+
+## 11. C3-D2の複数Seed監査と診断表示
+
+Editorメニュー`Farmware > World Generation > Analyze Hydrology Distribution`は、既定3 Seedの原点周囲5×5チャンクを実ゲームと同じ固定Generatorで生成し、4,800水文セルの流向、終端、集水打切り、渓流・河川、閉鎖流域、固定湖候補、実湖面、越流を集計する。解決済み・打切り・固定湖候補の流域数はSeedと下流終端座標で重複除去し、全固定分類から再実行比較用の64bit署名を作る。Editor停止を避けるためバックグラウンドで実行し、同じ監査の二重起動を拒否する。分布値は調整前後の比較材料であり、件数や面積率の合否閾値は設定しない。
+
+Gameビューの`Debug Visualization > Hydrology`とMap Viewerへ、`Flow Direction`、`Terminal`、`Catchment`、`Surface Water`、`Lake`の5モードを追加した。流向は8方向と終端、終端は`Marine`・`ClosedBasin`・`LongDrainage`、集水は1〜4,096セルの対数色と打切り、表流水は流れなし・`Stream`・`River`、湖は閉鎖流域外・解決済み乾燥流域・打切り流域・固定湖候補・実湖面・越流を個別表示する。打切り流域は固定湖候補ではないことを明示するマゼンタとし、固定湖候補の濃青、実湖面の青、越流のシアンと重ならない。
+
+Gameビューは生成済み`GeneratedHydrologyCell` Bufferだけを読み、現在のWorldLayerに属するロード済みチャンクを絶対水文セル座標へ索引化する。水文セルの担当範囲が中心から`-4〜+3`タイルで論理チャンク境界とずれるため、現在レイヤーの全ロード済みBufferをRepaint中だけ参照し、正端4タイルでも隣接チャンクのセルを表示できるようにする。中央HUDは固定水文セルの座標、代表標高、流向、下流座標、終端、辺数、集水面積、打切り、湿度、流出相当値、接続、流域・湖の全固定値を表示する。
+
+Map Viewerは同じRGB色写像を共有し、選択した代表タイルに対応する固定水文セルを純粋Generatorで生成する。同じ8×8セルは描画またはHover中のキャッシュで再利用する。バックグラウンド生成ではMain Thread限定か4フレーム制限を持つTemp系Allocatorの簡易APIを避け、Editor Assemblyだけがアクセスできる内部Resolverへ`Allocator.Persistent`の上流Heap・流域セル・Hash表を渡し、1回の画像生成中に再利用して`using`で最後に破棄する。複数Seed監査も同じ所有方式でチャンク間の作業領域を再利用する。1サンプルが最大4,096セルの集水・流域探索を伴うため、水文5モードだけ生成Textureを最大64サンプルへ制限し、通常モードの最大768サンプルは変更しない。縮小時も縦横共通の比率を使い、Viewportの縦横比と正方形グリッドを維持する。
+
+自動テストは、監査の64セル集計・分類不変条件・署名再現性、打切り流域と固定湖候補・実湖面・越流の色分離、GameビューとMap ViewerのRGB一致、小画像の直接Generator結果一致、64サンプル制限での縦横比を対象にする。GameビューとMap Viewerの実際の凡例、中央・Hover情報、チャンク境界、負座標、操作応答性は通常Editorで人間が確認する。
+
+2026-10-21のUnity 6000.3.8f1接続済みEditorでは、Runtime・Editor・Test Assemblyをコンパイルエラー0で再読み込みし、`HydrologyDistributionAuditTests` 1件、`HydrologyVisualizationTests` 5件、`WorldGenerationMapViewerTests` 51件が成功した。World Generation EditMode Assemblyは130.74秒で411件すべて成功した。全Assembly中の警告6件は変更前からあるテスト用WorldのSystem Group順序属性2種類が各3回出たもので、D2のAllocator・Job安全性警告ではない。既定3 Seed・各5×5チャンクの監査も21秒で4,800セルを完走し、署名`0x82F06B77D1BB8E48`、海洋終端1,930、閉鎖流域2,870、渓流237、河川11、解決済み流域46、固定湖候補流域46、湖面271セルを記録した。これは分布比較値であり合否閾値ではない。
+
+実Map ViewerはHydrology Lakeを64×28＝1,792サンプル、2.77秒で生成し、打切り流域を固定湖候補と別色・別文言にした凡例、中央セルの流向・終端・集水・湖情報、正方形グリッドを確認した。SampleSceneのGameビューでもHydrology Lakeの2段凡例、8×8セル色面、中央HUDを確認し、両確認後のConsoleはエラー0・警告0だった。初回実UI確認でThreadPoolからMain Thread限定`Allocator.Temp`を呼ぶエラーと、4フレームを超えた`Allocator.TempJob`寿命警告を検出したため、最終差分はEditor Assemblyから内部Resolverへ`Allocator.Persistent`作業領域を渡して`using`で破棄する方式へ修正し、ThreadPoolテストと実UIを再実行した。
+
+Pipeline 0.8.0-exp.1はPlayMode 56件を一覧取得できる一方、`run_tests`がPlayMode対象を0件として終了したため、全PlayMode Assemblyの自動再実行は未検証である。D2で変更したGameビュー経路は通常EditorのSampleScene PlayとConsoleでAI確認し、2026-10-21に人間が各水文モード、チャンク境界、負座標移動、Map Viewerを確認して問題なしと判断した。

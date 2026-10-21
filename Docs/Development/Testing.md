@@ -76,7 +76,7 @@ WORLD-01Bの製品用`WorldLayer`と`WorldLayerWaterContract`を、Sceneを使�
 | 水域 | 気候による川・池の補正と、森林・湿地で池が確認できる分布を保証する。 |
 | マグマ | 火山のマグマ比率、陸地の残存、淡水抑制、岩地の希少マグマ、歪な輪郭を保証する。 |
 | 岩壁 | 水域上の抑制、適度な被覆率、チャンク境界、凹凸、通路を保証する。 |
-| 固定水文 | 8×8セル、固定9地点の標高・基礎湿度、中心タイルの海洋流出口、専用Saltの同点順、D8流向、負座標、循環拒否、最大4,096辺の下流終端、最大4,096セルの集水・自然流出、Level 0〜6の空間集約Summary、外部入口、分解条件、キャッシュ同値性、閉鎖流域境界、越流辺、基礎湖面、64件のECS Bufferと状態ハッシュを保証する。複数Seed監査と診断表示はC3-D2で追加する。 |
+| 固定水文 | 8×8セル、固定9地点の標高・基礎湿度、中心タイルの海洋流出口、専用Saltの同点順、D8流向、負座標、循環拒否、最大4,096辺の下流終端、最大4,096セルの集水・自然流出、Level 0〜6の空間集約Summary、外部入口、分解条件、キャッシュ同値性、閉鎖流域境界、越流辺、基礎湖面、64件のECS Bufferと状態ハッシュに加え、複数Seed監査と診断表示の色写像を保証する。 |
 | 地形配置属性 | 陸地は通常設備＋通常ベルト、水は橋、マグマは橋＋耐熱必須、岩壁と未知IDは配置不可になることを純粋計算で保証する。 |
 | 有効地形 | 組み込みBlock定義、TERRAIN-01C前のInspector追加地形定義の明示拒否、旧GroundTypeからの互換変換、明示除去を含む疎な差分、自然状態への復帰時削除、レイヤー分離、移動・建築の独立判定、地形定義・差分状態ハッシュの作成順非依存、Owner／Buffer片側欠落の拒否を保証する。 |
 | 資源 | 地形適性、最低間隔、群生半径、競合解決、決定性を保証する。 |
@@ -106,7 +106,17 @@ TERRAIN-01C3-A〜D1の8×8固定水文セル、中心から`-3`・`0`・`+3`タ�
 
 実生成した49×49水文セルでは、海洋セルが`Marine`、陸上末端が`ClosedBasin`となり、その他も`LongDrainage`を含む3終端の一つだけを持つこと、全下流がD8隣接であること、陸上辺が上記全順序を減少させることを確認する。Level 0同士の合成と直接Level 1の一致、最大Levelの終端・打切り、不完全・不連続Downstream Summaryの拒否も対象にする。C3-C1では対象セルを含む有限集水、同入力の再現、9地点基礎湿度、湿度合計と65,535除算、`Stream`境界15／16、`River`境界127／128、RiverがStreamを伴うことを追加した。C3-C2ではLevel 0〜6の整列正方形が保持するセル数・湿度合計・唯一の出口・最大内部距離・外部入口を直接集計と比較し、終端・複数出口・下流再進入・不完全経路を親Summaryの分解理由にする。人工4,095／4,096／4,097セルで上限判定を固定し、C3-C1基準経路、空キャッシュ、命中済みキャッシュ、逆順構築キャッシュの全結果を比較する。C3-D1では流域最低数4、流出寄与7／8・16・31／32、充填率の飽和、打切り流域の固定湖除外、正の水深、湖面セルと`Lake`接続の一致、最大充填時の越流辺を追加する。複数の開始セルから有限に追跡して再訪を拒否し、1チャンク64件の行優先順と単一セルAPIの一致、Seed差を含む水文状態ハッシュ、設定不正と`int`座標端の明示失敗も保証する。`UnsafeUtility.SizeOf<GeneratedHydrologyCell>() = 96 bytes`、`HydrologyUpstreamCandidate = 24 bytes`、`HydrologyBasinLookupSlot = 16 bytes`を固定し、性能文書の容量更新漏れを検出する。
 
-既存`WorldGenerationTests`のChunk生成System回帰は、開始直後に地形・資源・水文の全Bufferが未公開であり、完成境界で4096地形、4096資源、64水文をまとめて公開することを確認する。先頭水文セルは終端座標、辺数、集水セル数、基礎湿度、湿度合計、流出相当値、接続・打切りフラグ、閉鎖流域・湖面結果を含めて同じ純粋Generator結果と一致する。C3-C2の集約Resolverは比較用のMain Thread経路であり、既定のBurst `ChunkGenerationSystem`へ接続しない。Debug Visualization、Map Viewer、複数Seed分布監査のテストは同じPRのC3-D2で追加する。
+既存`WorldGenerationTests`のChunk生成System回帰は、開始直後に地形・資源・水文の全Bufferが未公開であり、完成境界で4096地形、4096資源、64水文をまとめて公開することを確認する。先頭水文セルは終端座標、辺数、集水セル数、基礎湿度、湿度合計、流出相当値、接続・打切りフラグ、閉鎖流域・湖面結果を含めて同じ純粋Generator結果と一致する。C3-C2の集約Resolverは比較用のMain Thread経路であり、既定のBurst `ChunkGenerationSystem`へ接続しない。
+
+#### `HydrologyDistributionAuditTests`
+
+C3-D2の複数Seed分布監査について、最小の1 Seed・1 ChunkをMain Threadと実メニュー同様のThreadPoolで集計する。総数64セル、流向・終端件数の合計、河川が渓流以下、湖面が固定湖候補以下、固定湖流域が解決済み流域以下、集水面積の範囲を確認し、比較署名と日本語レポートが再実行で一致することを保証する。監査はSceneやECS状態を書き換えず、製品と同じ純粋Generatorを使い、Main Thread限定の`Allocator.Temp`へ依存しない。
+
+#### `HydrologyVisualizationTests`
+
+C3-D2のGameビューとMap Viewerが共有する水文色写像を検証する。打切り流域、固定湖候補、実湖面、越流が相互に異なる色であり、5水文モードのMap Viewer RGBがOverlayと一致して不透明になることを保証する。小さい3×2画像の各代表タイルを直接生成した固定水文セルと比較し、実Window同様のThreadPoolでも画像を完成できること、最大64サンプル制限でも2:1のViewport縦横比を維持することを確認する。
+
+2026-10-21のC3-D2 AI確認はUnity 6000.3.8f1の接続済みEditorで行い、コンパイルエラー0、`HydrologyDistributionAuditTests` 1件、`HydrologyVisualizationTests` 5件、`WorldGenerationMapViewerTests` 51件が成功した。World Generation EditMode Assemblyは130.74秒で411件すべて成功した。全Assembly中の警告6件は変更前からあるテスト用WorldのSystem Group順序属性2種類が各3回出たもので、D2のAllocator・Job安全性警告ではない。既定3 Seed・各5×5チャンクの監査も4,800セルを完走し、実Map ViewerとSampleSceneのGameビューでHydrology Lakeの凡例・色面・中央情報を表示後、Consoleエラー0・警告0を確認した。初回実UI確認で検出したバックグラウンド処理のTemp Allocator違反は、所有者が`Allocator.Persistent`作業領域を`using`で破棄する方式へ修正し、ThreadPoolテストと実UIで再発しないことを確認した。2026-10-21に人間が水文表示とMap Viewerを確認し、問題なしと判断した。Pipeline 0.8.0-exp.1はPlayMode 56件を一覧取得できるが`run_tests`では0件となるため、全PlayMode Assemblyの自動再実行は未検証事項として残す。
 
 2026-10-21のUnity 6000.3.8f1によるC3-A AI確認は、`DeterministicHydrologyGeneratorTests` 21件、`ChunkGenerationSystem_`回帰 4件、`AnimalPopulationGenerationTests` 22件、Salt一意性とチャンクハッシュ順序不変の回帰 2件が全成功した。PlayMode Assemblyは56件中55件が成功し、残る1件は`-batchmode -nographics`で既存の`ChunkStreaming` Profiler Markerが0nsとなる計測環境差である。生成、表示、座標回復のAssertはそれより前に通過した。通常EditorのSampleSceneではカメラ移動と移動先チャンク表示を確認し、Play終了後のConsoleは情報・警告・エラー0件だった。Profiler Markerの自動テスト自体は、通常Editorでの人間確認に残す。
 

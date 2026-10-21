@@ -92,7 +92,22 @@ namespace Farmware.WorldGeneration.Presentation
         GeologyDominantSite = 23,
 
         /// <summary>上下左右で支配地質サイトが切り替わるタイルを明色で表示します。</summary>
-        GeologySiteBoundary = 24
+        GeologySiteBoundary = 24,
+
+        /// <summary>8方向の固定流向と、下流を持たない終端を固定色で表示します。</summary>
+        HydrologyFlowDirection = 25,
+
+        /// <summary>下流終端のMarine・ClosedBasin・LongDrainageを固定色で表示します。</summary>
+        HydrologyTerminal = 26,
+
+        /// <summary>1〜4,096セルの集水面積を連続色で表示し、上限打切りを別色で示します。</summary>
+        HydrologyCatchment = 27,
+
+        /// <summary>固定表面流出を接続なし・Stream・Riverの固定色で表示します。</summary>
+        HydrologySurfaceWater = 28,
+
+        /// <summary>閉鎖流域、固定湖候補、湖面、越流、打切り流域を固定色で表示します。</summary>
+        HydrologyLake = 29
     }
 
     /// <summary>
@@ -157,6 +172,11 @@ namespace Farmware.WorldGeneration.Presentation
         // Rock Wall表示の1回のRepaint内で座標ごとの岩壁判定を共有し、同じ重いノイズ生成を近隣タイルごとに繰り返さないキャッシュです。
         private readonly Dictionary<long, bool> rockWallProbeCache =
             new Dictionary<long, bool>();
+
+        // 生成済み水文Bufferをセル座標で引くRepaint内キャッシュです。水文セルは中心が隣接チャンクに属する場合があるため、
+        // 描画中の地形チャンクだけへ依存せず、ロード済み全チャンクの64件Bufferから一度だけ構築します。
+        private readonly Dictionary<long, GeneratedHydrologyCell> hydrologyCellCache =
+            new Dictionary<long, GeneratedHydrologyCell>();
 
         // 可視タイル座標だけを保持し、変更のない画面外ECS Chunkの個体を毎Repaintで読み直さない索引です。
         private readonly AnimalPositionViewportCache animalPositionCache = new AnimalPositionViewportCache();
@@ -335,7 +355,15 @@ namespace Farmware.WorldGeneration.Presentation
             {
                 if (!TryEnsureQueries())
                 {
-                    DrawInformationPanel(false, default, default, default, default, default);
+                    DrawInformationPanel(
+                        false,
+                        default,
+                        default,
+                        default,
+                        false,
+                        default,
+                        default,
+                        default);
                     return;
                 }
 
@@ -687,6 +715,126 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
+        /// 指定モードがGeneratedHydrologyCellを読むTERRAIN-01C3診断表示かを返します。
+        /// Overlay、Map Viewer、凡例が同じ判定を共有し、水文Bufferを不要な表示で走査しないために使用します。
+        /// </summary>
+        /// <param name="mode">判定する開発者用可視化モードです。</param>
+        /// <returns>流向・終端・集水・表流水・湖のいずれかならtrueです。</returns>
+        public static bool IsHydrologyVisualizationMode(
+            WorldGenerationDebugVisualizationMode mode)
+        {
+            return mode >= WorldGenerationDebugVisualizationMode.HydrologyFlowDirection
+                && mode <= WorldGenerationDebugVisualizationMode.HydrologyLake;
+        }
+
+        /// <summary>
+        /// 生成済み水文セルを、流向・終端・集水・表流水・湖の診断色へ変換します。
+        /// 固定湖面を作れない打切り流域は紫、固定湖候補と湖面は青系に分け、未完成境界を湖と誤認させません。
+        /// </summary>
+        /// <param name="mode">水文診断の表示内容です。</param>
+        /// <param name="cell">ECS Bufferまたは決定論的Generatorから取得した固定水文セルです。</param>
+        /// <param name="hasCell">対象座標の水文セルを正常に取得できた場合はtrueです。</param>
+        /// <returns>Gameビューへ重ねる半透明RGBA色です。水文以外のモードは透明色です。</returns>
+        public static Color GetHydrologyVisualizationColor(
+            WorldGenerationDebugVisualizationMode mode,
+            in GeneratedHydrologyCell cell,
+            bool hasCell = true)
+        {
+            if (!hasCell)
+            {
+                // 隣接チャンクが生成待ちの領域を実際の終端や乾燥流域と混同しないよう、専用の暗い紫で示します。
+                return new Color32(54, 34, 62, 210);
+            }
+
+            switch (mode)
+            {
+                case WorldGenerationDebugVisualizationMode.HydrologyFlowDirection:
+                    switch (cell.FlowDirection)
+                    {
+                        case HydrologyFlowDirection.East: return new Color32(242, 92, 72, 238);
+                        case HydrologyFlowDirection.NorthEast: return new Color32(244, 154, 62, 238);
+                        case HydrologyFlowDirection.North: return new Color32(226, 220, 68, 238);
+                        case HydrologyFlowDirection.NorthWest: return new Color32(122, 204, 72, 238);
+                        case HydrologyFlowDirection.West: return new Color32(54, 190, 142, 238);
+                        case HydrologyFlowDirection.SouthWest: return new Color32(52, 172, 224, 238);
+                        case HydrologyFlowDirection.South: return new Color32(80, 106, 230, 238);
+                        case HydrologyFlowDirection.SouthEast: return new Color32(176, 86, 222, 238);
+                        default: return new Color32(238, 238, 242, 244);
+                    }
+
+                case WorldGenerationDebugVisualizationMode.HydrologyTerminal:
+                    if (cell.DownstreamTerminal == HydrologyConnectionFlags.Marine)
+                    {
+                        return new Color32(48, 126, 226, 238);
+                    }
+
+                    if (cell.DownstreamTerminal == HydrologyConnectionFlags.ClosedBasin)
+                    {
+                        return new Color32(232, 154, 54, 238);
+                    }
+
+                    return cell.DownstreamTerminal == HydrologyConnectionFlags.LongDrainage
+                        ? new Color32(210, 72, 202, 242)
+                        : new Color32(42, 42, 50, 210);
+
+                case WorldGenerationDebugVisualizationMode.HydrologyCatchment:
+                    if (cell.CatchmentTruncated)
+                    {
+                        return new Color32(220, 70, 210, 244);
+                    }
+
+                    // 1〜4,096件は12段階の2倍差を持つため、対数化して小流域と大流域の両方を識別できるようにします。
+                    float normalizedCatchment = cell.CatchmentAreaCells <= 1
+                        ? 0f
+                        : Mathf.Clamp01(Mathf.Log(cell.CatchmentAreaCells, 2f) / 12f);
+                    return Color.Lerp(
+                        new Color32(214, 188, 96, 238),
+                        new Color32(42, 112, 226, 242),
+                        normalizedCatchment);
+
+                case WorldGenerationDebugVisualizationMode.HydrologySurfaceWater:
+                    bool isRiver = (cell.ConnectionFlags & HydrologyConnectionFlags.River) != 0;
+                    bool isStream = (cell.ConnectionFlags & HydrologyConnectionFlags.Stream) != 0;
+                    if (isRiver)
+                    {
+                        return new Color32(36, 104, 236, 244);
+                    }
+
+                    return isStream
+                        ? new Color32(54, 202, 224, 240)
+                        : new Color32(54, 52, 58, 210);
+
+                case WorldGenerationDebugVisualizationMode.HydrologyLake:
+                    if ((cell.LakeFlags & HydrologyLakeFlags.BasinTruncated) != 0)
+                    {
+                        return new Color32(220, 70, 210, 244);
+                    }
+
+                    if ((cell.LakeFlags & HydrologyLakeFlags.Overflow) != 0)
+                    {
+                        return new Color32(58, 228, 238, 246);
+                    }
+
+                    if ((cell.LakeFlags & HydrologyLakeFlags.SurfaceCell) != 0)
+                    {
+                        return new Color32(48, 126, 232, 244);
+                    }
+
+                    if ((cell.LakeFlags & HydrologyLakeFlags.FixedLake) != 0)
+                    {
+                        return new Color32(72, 88, 190, 240);
+                    }
+
+                    return (cell.LakeFlags & HydrologyLakeFlags.BasinResolved) != 0
+                        ? new Color32(178, 132, 70, 232)
+                        : new Color32(42, 42, 50, 210);
+
+                default:
+                    return Color.clear;
+            }
+        }
+
+        /// <summary>
         /// 地質の安定分類を、GameビューとMap Viewerで共有する識別色へ変換します。
         /// 色は観察専用であり、分類抽選やゲーム判定には使用しません。
         /// </summary>
@@ -767,7 +915,8 @@ namespace Farmware.WorldGeneration.Presentation
                 ComponentType.ReadOnly<ChunkCoordinateComponent>(),
                 ComponentType.ReadOnly<ChunkGenerationStatus>(),
                 ComponentType.ReadOnly<GeneratedTile>(),
-                ComponentType.ReadOnly<GeneratedResourceTile>());
+                ComponentType.ReadOnly<GeneratedResourceTile>(),
+                ComponentType.ReadOnly<GeneratedHydrologyCell>());
             settingsQuery = entityManager.CreateEntityQuery(ComponentType.ReadOnly<WorldGenerationSettings>());
             resourceSettingsQuery = entityManager.CreateEntityQuery(
                 ComponentType.ReadOnly<ResourceGenerationSettings>());
@@ -805,6 +954,8 @@ namespace Farmware.WorldGeneration.Presentation
             bool hasCenterTile = false;
             GeneratedTile centerTile = default;
             GeneratedResourceTile centerResource = default;
+            bool hasCenterHydrologyCell = false;
+            GeneratedHydrologyCell centerHydrologyCell = default;
             EntityManager entityManager = presentationWorld.EntityManager;
             bool hasGenerationSettings = settingsQuery.CalculateEntityCount() == 1;
             WorldGenerationSettings settings = hasGenerationSettings
@@ -833,6 +984,10 @@ namespace Farmware.WorldGeneration.Presentation
                 chunkQuery.ToComponentDataArray<ChunkCoordinateComponent>(Allocator.Temp);
             using NativeArray<ChunkGenerationStatus> statuses =
                 chunkQuery.ToComponentDataArray<ChunkGenerationStatus>(Allocator.Temp);
+
+            // 水文セルの担当範囲は中心から-4〜+3タイルなので、地形タイルと同じチャンクのBufferだけでは
+            // 正端4タイルを引けません。水文モード中だけ全ロード済みBufferを座標索引へまとめます。
+            CacheHydrologyCellsForCurrentRepaint(entities, coordinates, statuses, entityManager);
 
             Color previousGuiColor = GUI.color;
             for (int entityIndex = 0; entityIndex < entities.Length; entityIndex++)
@@ -939,16 +1094,28 @@ namespace Farmware.WorldGeneration.Presentation
                                 out geologySite,
                                 out isGeologySiteBoundary);
                         }
-                        GUI.color = GetVisualizationColor(
-                            currentMode,
-                            tile,
-                            rockWallShadowOpacity,
-                            resource.Type,
-                            isMagmaInfluenceArea,
-                            isAnimalCandidate,
-                            hasConfirmedAnimal,
-                            geologySite,
-                            isGeologySiteBoundary);
+                        GeneratedHydrologyCell hydrologyCell = default;
+                        bool hasHydrologyCell = hasGenerationSettings
+                            && TryGetCachedHydrologyCellAtTile(
+                                settings.Hydrology,
+                                tileX,
+                                tileY,
+                                out hydrologyCell);
+                        GUI.color = IsHydrologyVisualizationMode(currentMode)
+                            ? GetHydrologyVisualizationColor(
+                                currentMode,
+                                hydrologyCell,
+                                hasHydrologyCell)
+                            : GetVisualizationColor(
+                                currentMode,
+                                tile,
+                                rockWallShadowOpacity,
+                                resource.Type,
+                                isMagmaInfluenceArea,
+                                isAnimalCandidate,
+                                hasConfirmedAnimal,
+                                geologySite,
+                                isGeologySiteBoundary);
                         GUI.DrawTexture(CalculateTileGuiRect(tileX, tileY), Texture2D.whiteTexture);
 
                         if (hasCenterCoordinate
@@ -958,6 +1125,8 @@ namespace Farmware.WorldGeneration.Presentation
                             hasCenterTile = true;
                             centerTile = tile;
                             centerResource = resource;
+                            hasCenterHydrologyCell = hasHydrologyCell;
+                            centerHydrologyCell = hydrologyCell;
                         }
                     }
                 }
@@ -969,8 +1138,99 @@ namespace Farmware.WorldGeneration.Presentation
                 centerTileCoordinate,
                 centerTile,
                 centerResource,
+                hasCenterHydrologyCell,
+                centerHydrologyCell,
                 settings,
                 resourceSettings);
+        }
+
+        /// <summary>
+        /// 水文モードのRepaint開始時に、生成済みチャンクの64件Bufferを絶対水文セル座標で引ける索引へまとめます。
+        /// 他モードでは空のままにし、通常の地形診断へ水文Buffer走査を追加しません。
+        /// </summary>
+        /// <param name="entities">Chunk Queryから同じ順序で取得したEntity配列です。</param>
+        /// <param name="coordinates">各Entityと同じ添字のチャンク座標とWorldLayerです。</param>
+        /// <param name="statuses">各Entityと同じ添字の生成状態です。</param>
+        /// <param name="entityManager">読み取り専用Bufferを取得する現在のWorldのEntityManagerです。</param>
+        private void CacheHydrologyCellsForCurrentRepaint(
+            NativeArray<Entity> entities,
+            NativeArray<ChunkCoordinateComponent> coordinates,
+            NativeArray<ChunkGenerationStatus> statuses,
+            EntityManager entityManager)
+        {
+            hydrologyCellCache.Clear();
+            if (!IsHydrologyVisualizationMode(currentMode))
+            {
+                return;
+            }
+
+            for (int entityIndex = 0; entityIndex < entities.Length; entityIndex++)
+            {
+                ChunkGenerationStatus status = statuses[entityIndex];
+                if (status.Phase != ChunkGenerationPhase.ReadyToApply
+                    && status.Phase != ChunkGenerationPhase.Active)
+                {
+                    continue;
+                }
+
+                // 水文セル座標だけではWorldLayerを区別できないため、現在表示中の層だけを索引化します。
+                // 将来ほかの層にも水文Bufferを持たせた際、同じXY座標で地上の診断値を上書きしないためです。
+                if (coordinates[entityIndex].Layer != currentLayer)
+                {
+                    continue;
+                }
+
+                DynamicBuffer<GeneratedHydrologyCell> cells =
+                    entityManager.GetBuffer<GeneratedHydrologyCell>(entities[entityIndex], true);
+                if (cells.Length != DeterministicHydrologyGenerator.CellsPerChunk)
+                {
+                    continue;
+                }
+
+                for (int cellIndex = 0; cellIndex < cells.Length; cellIndex++)
+                {
+                    GeneratedHydrologyCell cell = cells[cellIndex];
+                    hydrologyCellCache[CreateHydrologyCellKey(cell.CellX, cell.CellY)] = cell;
+                }
+            }
+        }
+
+        /// <summary>絶対タイル座標を水文セルへ変換し、現在Repaintの生成済みBuffer索引から固定結果を取得します。</summary>
+        /// <param name="settings">8×8格子を定義する固定水文設定です。</param>
+        /// <param name="tileX">検索する絶対タイルX座標です。</param>
+        /// <param name="tileY">検索する絶対タイルY座標です。</param>
+        /// <param name="cell">成功時に対応する生成済み水文セルを返します。</param>
+        /// <returns>座標変換とBuffer索引の両方が成功した場合はtrueです。</returns>
+        private bool TryGetCachedHydrologyCellAtTile(
+            in HydrologyGenerationSettings settings,
+            int tileX,
+            int tileY,
+            out GeneratedHydrologyCell cell)
+        {
+            if (!IsHydrologyVisualizationMode(currentMode)
+                || !DeterministicHydrologyGenerator.TryGetCellCoordinate(
+                    settings,
+                    tileX,
+                    tileY,
+                    out int cellX,
+                    out int cellY))
+            {
+                cell = default;
+                return false;
+            }
+
+            return hydrologyCellCache.TryGetValue(
+                CreateHydrologyCellKey(cellX, cellY),
+                out cell);
+        }
+
+        /// <summary>符号付き水文セルX/Yを衝突しない64bit辞書キーへ詰めます。</summary>
+        /// <param name="cellX">水平水文セル座標です。</param>
+        /// <param name="cellY">垂直水文セル座標です。</param>
+        /// <returns>Xを上位32bit、Yを下位32bitへ保持する可逆キーです。</returns>
+        private static long CreateHydrologyCellKey(int cellX, int cellY)
+        {
+            return ((long)cellX << 32) | (uint)cellY;
         }
 
         /// <summary>
@@ -1362,6 +1622,8 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="centerCoordinate">Camera中央の整数タイル座標です。</param>
         /// <param name="centerTile">取得できた中央GeneratedTileです。</param>
         /// <param name="centerResource">取得できた中央GeneratedResourceTileです。</param>
+        /// <param name="hasCenterHydrologyCell">中央タイルに対応する生成済み水文セルを取得できた場合はtrueです。</param>
+        /// <param name="centerHydrologyCell">中央タイルを担当する8×8水文セルの固定生成結果です。</param>
         /// <param name="settings">現在の生成閾値を保持するSingleton値です。</param>
         /// <param name="resourceSettings">現在の資源最低間隔と群半径を保持するSingleton値です。</param>
         private void DrawInformationPanel(
@@ -1369,16 +1631,20 @@ namespace Farmware.WorldGeneration.Presentation
             Vector3Int centerCoordinate,
             GeneratedTile centerTile,
             GeneratedResourceTile centerResource,
+            bool hasCenterHydrologyCell,
+            GeneratedHydrologyCell centerHydrologyCell,
             WorldGenerationSettings settings,
             ResourceGenerationSettings resourceSettings)
         {
             const int generatedTileInformationLineCount = 26;
             const int waitingInformationLineCount = 1;
+            const int hydrologyInformationLineCount = 6;
             const float bottomPadding = 6f;
-            float informationStartY = currentMode == WorldGenerationDebugVisualizationMode.Biome
-                    || currentMode == WorldGenerationDebugVisualizationMode.GeologyClass
-                ? 66f
-                : 48f;
+            bool showsTwoLegendRows = currentMode == WorldGenerationDebugVisualizationMode.Biome
+                || currentMode == WorldGenerationDebugVisualizationMode.GeologyClass
+                || currentMode == WorldGenerationDebugVisualizationMode.HydrologyFlowDirection
+                || currentMode == WorldGenerationDebugVisualizationMode.HydrologyLake;
+            float informationStartY = showsTwoLegendRows ? 66f : 48f;
 
             string centerInformation = "Center tile is waiting for generation.";
             if (hasCenterTile)
@@ -1548,9 +1814,52 @@ namespace Farmware.WorldGeneration.Presentation
                     + $"{settings.WetlandMaximumElevation}  "
                     + $"Highland={settings.HighlandElevationThreshold}  "
                     + $"Volcanic={settings.VolcanicWeirdnessThreshold}";
+
+                if (IsHydrologyVisualizationMode(currentMode))
+                {
+                    if (hasCenterHydrologyCell)
+                    {
+                        // 中央HUDはBufferが持つ確定値をそのまま表示し、表示側で流域や湖判定を再計算しません。
+                        centerInformation += "\n"
+                            + $"HydrologyCell=({centerHydrologyCell.CellX}, {centerHydrologyCell.CellY})  "
+                            + $"Height={centerHydrologyCell.HydrologyHeight}  "
+                            + $"CenterElevation={centerHydrologyCell.CenterElevation}\n"
+                            + $"Flow={centerHydrologyCell.FlowDirection} -> "
+                            + $"({centerHydrologyCell.DownstreamCellX}, {centerHydrologyCell.DownstreamCellY})  "
+                            + $"Terminal={centerHydrologyCell.DownstreamTerminal}  "
+                            + $"Edges={centerHydrologyCell.DownstreamEdgeCount}\n"
+                            + $"Reach=({centerHydrologyCell.DownstreamReachCellX}, "
+                            + $"{centerHydrologyCell.DownstreamReachCellY})  "
+                            + $"Catchment={centerHydrologyCell.CatchmentAreaCells}  "
+                            + $"Truncated={(centerHydrologyCell.CatchmentTruncated ? "Yes" : "No")}\n"
+                            + $"HydrologyMoisture={centerHydrologyCell.HydrologyMoisture}  "
+                            + $"RunoffSum={centerHydrologyCell.RunoffMoistureSum}  "
+                            + $"RunoffEquivalent={centerHydrologyCell.RunoffEquivalentCells}  "
+                            + $"MaxDistance={centerHydrologyCell.MaximumContributingDistance}\n"
+                            + $"Connections={centerHydrologyCell.ConnectionFlags}  "
+                            + $"BasinArea={centerHydrologyCell.BasinAreaCells}  "
+                            + $"LakeFlags={centerHydrologyCell.LakeFlags}\n"
+                            + $"LakeHeight: Bottom={centerHydrologyCell.LakeBottomHeight}  "
+                            + $"Spill={centerHydrologyCell.SpillHeight}  "
+                            + $"Surface={centerHydrologyCell.LakeSurfaceHeight}  "
+                            + $"Fill={centerHydrologyCell.LakeFillFraction}  "
+                            + $"SpillEdge=({centerHydrologyCell.SpillInsideCellX}, "
+                            + $"{centerHydrologyCell.SpillInsideCellY})->"
+                            + $"({centerHydrologyCell.SpillOutsideCellX}, {centerHydrologyCell.SpillOutsideCellY})";
+                    }
+                    else
+                    {
+                        centerInformation += "\nHydrology cell is waiting for generation.";
+                    }
+                }
             }
             int informationLineCount = hasCenterTile
                 ? generatedTileInformationLineCount
+                    + (IsHydrologyVisualizationMode(currentMode)
+                        ? hasCenterHydrologyCell
+                            ? hydrologyInformationLineCount
+                            : 1
+                        : 0)
                 : waitingInformationLineCount;
 
             // 長い閾値情報を2行へ分け、実際の行高からパネル下端を求めることで、見切れと余分な下余白を同時に防ぎます。
@@ -1706,6 +2015,31 @@ namespace Farmware.WorldGeneration.Presentation
             if (mode == WorldGenerationDebugVisualizationMode.GeologySiteBoundary)
             {
                 return "Geology Site Boundary";
+            }
+
+            if (mode == WorldGenerationDebugVisualizationMode.HydrologyFlowDirection)
+            {
+                return "Hydrology Flow Direction";
+            }
+
+            if (mode == WorldGenerationDebugVisualizationMode.HydrologyTerminal)
+            {
+                return "Hydrology Terminal";
+            }
+
+            if (mode == WorldGenerationDebugVisualizationMode.HydrologyCatchment)
+            {
+                return "Hydrology Catchment";
+            }
+
+            if (mode == WorldGenerationDebugVisualizationMode.HydrologySurfaceWater)
+            {
+                return "Hydrology Surface Water";
+            }
+
+            if (mode == WorldGenerationDebugVisualizationMode.HydrologyLake)
+            {
+                return "Hydrology Lake";
             }
 
             return mode == WorldGenerationDebugVisualizationMode.VolcanicActivityPotential
@@ -2136,10 +2470,223 @@ namespace Farmware.WorldGeneration.Presentation
                         "Confirmed animal",
                         126f);
                     break;
+                case WorldGenerationDebugVisualizationMode.HydrologyFlowDirection:
+                    DrawHydrologyFlowLegend(ref nextX, startX, y);
+                    break;
+                case WorldGenerationDebugVisualizationMode.HydrologyTerminal:
+                    DrawHydrologyLegendEntry(
+                        mode,
+                        ref nextX,
+                        y,
+                        new GeneratedHydrologyCell
+                        {
+                            ConnectionFlags = HydrologyConnectionFlags.Marine
+                        },
+                        "Marine",
+                        76f);
+                    DrawHydrologyLegendEntry(
+                        mode,
+                        ref nextX,
+                        y,
+                        new GeneratedHydrologyCell
+                        {
+                            ConnectionFlags = HydrologyConnectionFlags.ClosedBasin
+                        },
+                        "Closed Basin",
+                        104f);
+                    DrawHydrologyLegendEntry(
+                        mode,
+                        ref nextX,
+                        y,
+                        new GeneratedHydrologyCell
+                        {
+                            ConnectionFlags = HydrologyConnectionFlags.LongDrainage
+                        },
+                        "Long Drainage",
+                        112f);
+                    break;
+                case WorldGenerationDebugVisualizationMode.HydrologyCatchment:
+                    DrawHydrologyLegendEntry(
+                        mode,
+                        ref nextX,
+                        y,
+                        new GeneratedHydrologyCell { CatchmentAreaCells = 1 },
+                        "1 Cell",
+                        72f);
+                    DrawHydrologyLegendEntry(
+                        mode,
+                        ref nextX,
+                        y,
+                        new GeneratedHydrologyCell { CatchmentAreaCells = 4096 },
+                        "4096 Cells",
+                        92f);
+                    DrawHydrologyLegendEntry(
+                        mode,
+                        ref nextX,
+                        y,
+                        new GeneratedHydrologyCell
+                        {
+                            CatchmentAreaCells = 4096,
+                            CatchmentFlags = HydrologyCatchmentFlags.Truncated
+                        },
+                        "Truncated",
+                        88f);
+                    break;
+                case WorldGenerationDebugVisualizationMode.HydrologySurfaceWater:
+                    DrawHydrologyLegendEntry(mode, ref nextX, y, default, "None", 62f);
+                    DrawHydrologyLegendEntry(
+                        mode,
+                        ref nextX,
+                        y,
+                        new GeneratedHydrologyCell
+                        {
+                            ConnectionFlags = HydrologyConnectionFlags.Stream
+                        },
+                        "Stream",
+                        72f);
+                    DrawHydrologyLegendEntry(
+                        mode,
+                        ref nextX,
+                        y,
+                        new GeneratedHydrologyCell
+                        {
+                            ConnectionFlags = HydrologyConnectionFlags.Stream
+                                | HydrologyConnectionFlags.River
+                        },
+                        "River",
+                        68f);
+                    break;
+                case WorldGenerationDebugVisualizationMode.HydrologyLake:
+                    DrawHydrologyLakeLegend(ref nextX, startX, y);
+                    break;
                 default:
                     GUI.Label(new Rect(nextX, y - 2f, 40f, 18f), "Off", informationStyle);
                     break;
             }
+        }
+
+        /// <summary>8方向と終端を2行へ分け、狭い情報パネル内で流向色をすべて表示します。</summary>
+        /// <param name="nextX">1行目で次に描画するX座標です。</param>
+        /// <param name="startX">2行目を揃える凡例左端です。</param>
+        /// <param name="y">1行目の上端です。</param>
+        private void DrawHydrologyFlowLegend(ref float nextX, float startX, float y)
+        {
+            DrawHydrologyFlowLegendEntry(ref nextX, y, HydrologyFlowDirection.None, "End", 58f);
+            DrawHydrologyFlowLegendEntry(ref nextX, y, HydrologyFlowDirection.East, "E", 42f);
+            DrawHydrologyFlowLegendEntry(ref nextX, y, HydrologyFlowDirection.NorthEast, "NE", 46f);
+            DrawHydrologyFlowLegendEntry(ref nextX, y, HydrologyFlowDirection.North, "N", 42f);
+            DrawHydrologyFlowLegendEntry(ref nextX, y, HydrologyFlowDirection.NorthWest, "NW", 48f);
+
+            nextX = startX + 48f;
+            float secondRowY = y + 18f;
+            DrawHydrologyFlowLegendEntry(ref nextX, secondRowY, HydrologyFlowDirection.West, "W", 42f);
+            DrawHydrologyFlowLegendEntry(ref nextX, secondRowY, HydrologyFlowDirection.SouthWest, "SW", 48f);
+            DrawHydrologyFlowLegendEntry(ref nextX, secondRowY, HydrologyFlowDirection.South, "S", 42f);
+            DrawHydrologyFlowLegendEntry(ref nextX, secondRowY, HydrologyFlowDirection.SouthEast, "SE", 46f);
+        }
+
+        /// <summary>流向1種類を実描画と同じ色関数へ渡し、凡例へ追加します。</summary>
+        /// <param name="nextX">次に描画するX座標です。</param>
+        /// <param name="y">凡例行の上端です。</param>
+        /// <param name="direction">色見本へ設定する固定D8方向です。</param>
+        /// <param name="label">方向を表す短い表示名です。</param>
+        /// <param name="entryWidth">次の要素まで確保する横幅です。</param>
+        private void DrawHydrologyFlowLegendEntry(
+            ref float nextX,
+            float y,
+            HydrologyFlowDirection direction,
+            string label,
+            float entryWidth)
+        {
+            GeneratedHydrologyCell cell = new GeneratedHydrologyCell { FlowDirection = direction };
+            DrawLegendEntry(
+                ref nextX,
+                y,
+                GetHydrologyVisualizationColor(
+                    WorldGenerationDebugVisualizationMode.HydrologyFlowDirection,
+                    cell),
+                label,
+                entryWidth);
+        }
+
+        /// <summary>湖状態を2行へ分け、打切り・固定湖候補・湖面・越流を別色で案内します。</summary>
+        /// <param name="nextX">1行目で次に描画するX座標です。</param>
+        /// <param name="startX">2行目を揃える凡例左端です。</param>
+        /// <param name="y">1行目の上端です。</param>
+        private void DrawHydrologyLakeLegend(ref float nextX, float startX, float y)
+        {
+            WorldGenerationDebugVisualizationMode mode =
+                WorldGenerationDebugVisualizationMode.HydrologyLake;
+            DrawHydrologyLegendEntry(mode, ref nextX, y, default, "Not Basin", 88f);
+            DrawHydrologyLegendEntry(
+                mode,
+                ref nextX,
+                y,
+                new GeneratedHydrologyCell { LakeFlags = HydrologyLakeFlags.BasinResolved },
+                "Dry Basin",
+                84f);
+            DrawHydrologyLegendEntry(
+                mode,
+                ref nextX,
+                y,
+                new GeneratedHydrologyCell { LakeFlags = HydrologyLakeFlags.BasinTruncated },
+                "Truncated",
+                86f);
+
+            nextX = startX + 48f;
+            float secondRowY = y + 18f;
+            DrawHydrologyLegendEntry(
+                mode,
+                ref nextX,
+                secondRowY,
+                new GeneratedHydrologyCell { LakeFlags = HydrologyLakeFlags.FixedLake },
+                "Fixed Lake",
+                88f);
+            DrawHydrologyLegendEntry(
+                mode,
+                ref nextX,
+                secondRowY,
+                new GeneratedHydrologyCell
+                {
+                    LakeFlags = HydrologyLakeFlags.FixedLake | HydrologyLakeFlags.SurfaceCell
+                },
+                "Surface",
+                78f);
+            DrawHydrologyLegendEntry(
+                mode,
+                ref nextX,
+                secondRowY,
+                new GeneratedHydrologyCell
+                {
+                    LakeFlags = HydrologyLakeFlags.FixedLake
+                        | HydrologyLakeFlags.SurfaceCell
+                        | HydrologyLakeFlags.Overflow
+                },
+                "Overflow",
+                82f);
+        }
+
+        /// <summary>指定した固定水文セルを実描画と同じ色関数へ渡し、分類凡例へ追加します。</summary>
+        /// <param name="mode">色の意味を決める水文表示モードです。</param>
+        /// <param name="nextX">次に描画するX座標です。</param>
+        /// <param name="y">凡例行の上端です。</param>
+        /// <param name="cell">凡例分類を表す固定水文セルです。</param>
+        /// <param name="label">分類の表示名です。</param>
+        /// <param name="entryWidth">次の要素まで確保する横幅です。</param>
+        private void DrawHydrologyLegendEntry(
+            WorldGenerationDebugVisualizationMode mode,
+            ref float nextX,
+            float y,
+            GeneratedHydrologyCell cell,
+            string label,
+            float entryWidth)
+        {
+            DrawLegendEntry(
+                ref nextX,
+                y,
+                GetHydrologyVisualizationColor(mode, cell),
+                label,
+                entryWidth);
         }
 
         /// <summary>

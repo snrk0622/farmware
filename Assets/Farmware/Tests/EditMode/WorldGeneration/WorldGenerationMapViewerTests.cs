@@ -400,10 +400,16 @@ namespace Farmware.WorldGeneration.Tests
                 WorldGenerationMapViewerWindow.ResolveViewModeChoiceIndex(16),
                 Is.EqualTo(WorldGenerationMapViewMode.GeologySiteBoundary));
             Assert.That(
+                WorldGenerationMapViewerWindow.ResolveViewModeChoiceIndex(17),
+                Is.EqualTo(WorldGenerationMapViewMode.HydrologyFlowDirection));
+            Assert.That(
+                WorldGenerationMapViewerWindow.ResolveViewModeChoiceIndex(21),
+                Is.EqualTo(WorldGenerationMapViewMode.HydrologyLake));
+            Assert.That(
                 WorldGenerationMapViewerWindow.ResolveViewModeChoiceIndex(-1),
                 Is.EqualTo(WorldGenerationMapViewMode.Terrain));
             Assert.That(
-                WorldGenerationMapViewerWindow.ResolveViewModeChoiceIndex(17),
+                WorldGenerationMapViewerWindow.ResolveViewModeChoiceIndex(22),
                 Is.EqualTo(WorldGenerationMapViewMode.Terrain));
             Assert.That(
                 WorldGenerationMapViewerWindow.ResolveViewModeChoiceIndex(byte.MaxValue + 1),

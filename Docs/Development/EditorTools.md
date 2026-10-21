@@ -5,7 +5,7 @@
 
 ## 1. 用途
 
-本書のメニュー・設定・表示は、TERRAIN-01C2-BまでのdevelopとTERRAIN-01C3-D1の現行実装境界を説明する。C3-A〜D1は固定水文の基礎格子、D8流向、固定下流終端、集水面積、自然流出、Level 0〜6集約Summary、閉鎖流域境界、基礎湖面をSimulation側へ追加するが、Editorメニュー、Debug Visualization、Map Viewerの水文モードはまだ追加しない。集約Summaryの利用・分解・キャッシュ統計も性能テストだけで記録し、Editor表示へはまだ渡さない。流向・下流終端・集水・河川・湖の可視化と複数Seed分布監査は同じPRのC3-D2 commitで接続する。2026-10-19の[改訂マップ仕様](../GameSpecification/RandomMapGenerationSpecification.md)の可変Block、最終18Biome、水中文脈表示もまだツールに実装されていない。文書改訂やC3-A〜D1の非表示データ追加だけで以下のメニューの機能が増えたとは扱わない。
+本書のメニュー・設定・表示は、TERRAIN-01C2-BまでのdevelopとTERRAIN-01C3-D2の現行実装境界を説明する。C3-A〜D1がSimulationへ追加した固定水文の基礎格子、D8流向、固定下流終端、集水面積、自然流出、閉鎖流域境界、基礎湖面を、C3-D2で複数Seed分布監査、Debug Visualization、Map Viewerへ接続した。Level 0〜6集約Summaryの利用・分解・キャッシュ統計は性能テストだけで記録し、Editor表示へは渡さない。2026-10-19の[改訂マップ仕様](../GameSpecification/RandomMapGenerationSpecification.md)の可変Block、最終18Biome、水中文脈表示はまだツールに実装されていない。
 
 開発者専用のUnity Editorツールは、ワールド生成結果の調査、調整前後の比較、確認用Sceneとフォールバック素材の構築に使用する。
 これらは製品版のプレイヤー操作へ含めず、ランタイムのゲーム状態を変更するデバッグ操作にも使用しない。
@@ -142,6 +142,13 @@ Gameビューでは`CameraPanController`の表示原点を使い、CameraとGrid
 | `Resources` | 配置なし、木、石、砂の最終配置 |
 | `Terrain Placement` | 共通配置APIで通常設備、耐熱性を問わない橋、耐熱橋だけ、全対象の配置不可となる地形を色分けし、中央HUDへ3要求の判定結果と耐熱不足理由を表示。補助物流のベルト可否はこの地形診断へ含めない |
 | `Animal Population` | 全動物種のBiome・Ground条件を満たし資源予約のない候補タイル、候補外、初期補充で確定した個体位置を色分け |
+| `Hydrology > Flow Direction` | 8方向の固定D8流向と流向なし終端 |
+| `Hydrology > Terminal` | 海洋、閉鎖流域、4,096辺で確定できない長距離排水 |
+| `Hydrology > Catchment` | 1〜4,096セルの集水面積を対数色で表示し、打切りセルを別色で表示 |
+| `Hydrology > Surface Water` | 固定結果の流れなし、渓流、河川 |
+| `Hydrology > Lake` | 閉鎖流域外、解決済み乾燥流域、打切り流域、固定湖候補、湖面、越流を別色で表示 |
+
+水文表示は8×8タイルを担当する固定水文セル単位なので、同じ色が8×8タイルへ繰り返される。中央HUDはセル座標・代表標高、流向・下流座標、終端・辺数、集水面積・打切り、湿度・流出相当値、接続フラグ、流域面積、湖底・越流・湖面標高、充填率、越流辺を表示する。`BasinTruncated`は固定湖候補と誤認しないマゼンタ、固定湖候補は濃青、実湖面は青、越流はシアンで区別する。
 
 #### 次の修正をしたら確認する
 
@@ -162,7 +169,8 @@ Gameビューでは`CameraPanController`の表示原点を使い、CameraとGrid
 5. 正負の遠方へ明示的にCameraを移した場合も、色面が表示中のTilemapと同じ絶対セルへ重なり、中央HUDがCamera中央の絶対タイル情報を示す。
 6. `Animal Population`で候補外、候補タイル、確定個体が凡例どおりの3色になり、確定個体色が候補色より優先される。草原陸地でも木・石などの資源があるセルは候補外になる。
 7. 地質7モードで分類・3特性・フラグ・支配サイト・サイト境界が個別表示され、中央HUDの分類、フラグ、特性、サイト座標と一致する。サイト境界は同じ支配サイト内部へ出ず、隣接1タイルでサイトが変わる箇所へ出る。
-8. `Off`へ戻すと通常表示へ完全に戻る。
+8. 水文5モードがチャンク境界をまたいでも8×8セル単位で連続し、中央HUDと凡例が生成済み`GeneratedHydrologyCell`に一致する。Lakeでは打切り流域と固定湖候補が別色になる。
+9. `Off`へ戻すと通常表示へ完全に戻る。
 
 TERRAIN-01C1で、旧7Biomeの代表土壌との差だけを見る`Biome Transition`と、旧7Biome互換値だけを見る`Weirdness`モードを削除した。旧`Weirdness`データはTERRAIN-01C5まで内部互換生成に残るが、火山活動の診断には使用しない。
 
@@ -246,7 +254,24 @@ Consoleレポートには、次の比較材料を出力する。
 3. 同一コード・同一条件で再実行した署名と集計値が一致する。
 4. 抽選した群れを先に置くと後続の残数を有効な群れへ分割できない場合は、有限バックトラックで別の群れサイズ・中心・メンバーの組合せが再探索される。中心とメンバーのタイル選択は合計4,096回までに制限される。完全配置が不可能または探索上限へ達した後も残る目標個体数と確定候補数の差、および未充足地域数が地形分断と群れ最小数の方針に合う。
 
-### 2.7 Map Viewer
+### 2.7 Analyze Hydrology Distribution
+
+- メニュー: `Farmware > World Generation > Analyze Hydrology Distribution`
+- 実装: `HydrologyDistributionAuditMenu`、`HydrologyDistributionAnalyzer`
+- PlayMode: 不要。既定ではバックグラウンドで実行する。
+
+#### 用途
+
+固定3 Seedについて原点周囲の5×5チャンクを実ゲームと同じ`DeterministicHydrologyGenerator`で生成し、合計4,800水文セルの流向、終端、集水打切り、渓流・河川、閉鎖流域、固定湖候補、湖面、越流を集計する。流域数はSeedと下流終端座標で重複除去し、全固定分類から比較署名を作る。分布の合否閾値は設定せず、調整前後の同条件レポートと2種類の可視化を合わせて判断する。実行中は同じ監査を二重起動できない。
+
+#### 確認内容
+
+1. Consoleへ開始ログと完了レポートが1回ずつ出る。
+2. 流向別件数と終端別件数がそれぞれ全セル数に一致し、河川数が渓流数以下、湖面数が固定湖候補数以下になる。
+3. 解決済み、打切り、固定湖候補の流域数と、集水面積・流出相当値・流域面積の最大値が表示される。
+4. 同一コード・同一条件で再実行した署名と集計値が一致する。
+
+### 2.8 Map Viewer
 
 - メニュー: `Farmware > World Generation > Map Viewer`
 - 実装: `WorldGenerationMapViewerWindow`、`WorldGenerationMapSampler`
@@ -266,12 +291,12 @@ Farmwareのワールドは無限なので「全体」を有限画像へ収める
 - 設定SubSceneの全Root・全子孫を検査し、`WorldGenerationAuthoring`が0件または複数件なら生成を停止する。同じRoot配下の兄弟GameObjectにある重複も設定エラーとして扱う。
 - PlayModeでは、`ChunkGenerationSystem`が使用中のECS Singletonを直接読む。
 - 各代表タイルは`DeterministicChunkGenerator.GenerateTile`で生成し、ビューア専用の簡易バイオーム計算は持たない。
-- 表示領域が生成Textureの上限768サンプルを超える場合は、縦横共通の縮小率でTextureを生成し、正方形のタイルとグリッドを保つ。Windowリサイズで縦横比が変わった場合は、操作停止後に新しい比率のTextureを自動再生成する。生成TextureとCanvasの表示倍率はPointer座標、パン、ズーム、境界線、原点表示へ反映する。Pointer座標とカーソル中心ズームは、Point Filterで実際に表示されるTextureピクセルの代表タイルへ一致させる。グリッドと原点表示は、Texture解像度が奇数の場合も地形生成と同じ整数中央のサンプル境界へ揃える。ツールバーの＋・－ButtonはCanvas中央をPointerへ変換せず、現在の中心タイル座標を直接維持する。再生成直後のHover情報もCanvas中央の境界をPointerとして解釈せず、Side Panelと同じ中心タイルを直接表示する。
+- 表示領域が生成Textureの上限を超える場合は、縦横共通の縮小率でTextureを生成し、正方形のタイルとグリッドを保つ。通常モードは最大768サンプル、水文モードは1サンプルごとに最大4,096セルの集水・流域探索を行うため最大64サンプルとする。Windowリサイズで縦横比が変わった場合は、操作停止後に新しい比率のTextureを自動再生成する。生成TextureとCanvasの表示倍率はPointer座標、パン、ズーム、境界線、原点表示へ反映する。Pointer座標とカーソル中心ズームは、Point Filterで実際に表示されるTextureピクセルの代表タイルへ一致させる。グリッドと原点表示は、Texture解像度が奇数の場合も地形生成と同じ整数中央のサンプル境界へ揃える。ツールバーの＋・－ButtonはCanvas中央をPointerへ変換せず、現在の中心タイル座標を直接維持する。再生成直後のHover情報もCanvas中央の境界をPointerとして解釈せず、Side Panelと同じ中心タイルを直接表示する。
 - 実設定を取得できない場合は生成を停止し、別の既定値へフォールバックしない。
 - 初回はCanvasの両辺が有限値かつ64ポイント以上になるまで生成を待ち、未確定の`NaN`寸法から1×1画像を作らない。画像完成までは地図領域の中央と画面下部へ生成進捗の割合を表示する。再生成時は前の画像を維持し、下部の進捗を更新する。Hover情報は初回から地質サイトを含む5行分の高さを確保し、情報が増えたことによる再生成を避ける。
 
 `Terrain`は7バイオームの基準色だけを使い、SoilTypeを反映せず、淡水、海水、マグマ、岩壁を優先した最終地形を表示する。土壌分布はMap Viewerのプレイヤー向け地形と混ぜず、PlayMode中の`Debug Visualization > Soil`で確認する。
-`Biome`は水域や障害物の下も含む論理バイオームを表示する。`Elevation`、`Base Temperature`、`Terrain Temperature`、`Base Moisture`、`Woody Vegetation Potential`、`Terrain Ruggedness`、`Coastal Influence`、`Volcanic Activity Potential`はGameビューのDebug Visualizationと同じRGBで連続環境軸を表示する。`Geology Class`、3基礎特性、`Geology Flags`、`Geology Dominant Site`、`Geology Site Boundary`もGameビューと同じ色定義を使う。`Geology Dominant Site`の凡例色は固定の分類色ではなく、サイト座標から生成される実際の色の例であるため、地図には凡例と異なる色も表示される。同じサイトは同じ色を保ち、正確な境界確認には`Geology Site Boundary`を使う。サイト境界は広域縮小でも確認できるよう、上下左右の隣接代表サンプルとのサイト差を表示するため、Gameビューの隣接1タイル判定より太く見える場合がある。木、石、砂の資源分布は現時点では対象外である。
+`Biome`は水域や障害物の下も含む論理バイオームを表示する。`Elevation`、`Base Temperature`、`Terrain Temperature`、`Base Moisture`、`Woody Vegetation Potential`、`Terrain Ruggedness`、`Coastal Influence`、`Volcanic Activity Potential`はGameビューのDebug Visualizationと同じRGBで連続環境軸を表示する。`Geology Class`、3基礎特性、`Geology Flags`、`Geology Dominant Site`、`Geology Site Boundary`もGameビューと同じ色定義を使う。`Geology Dominant Site`の凡例色は固定の分類色ではなく、サイト座標から生成される実際の色の例であるため、地図には凡例と異なる色も表示される。同じサイトは同じ色を保ち、正確な境界確認には`Geology Site Boundary`を使う。サイト境界は広域縮小でも確認できるよう、上下左右の隣接代表サンプルとのサイト差を表示するため、Gameビューの隣接1タイル判定より太く見える場合がある。水文5モードはGameビューと同じRGBで、流向、終端、集水面積、渓流・河川、流域・湖を表示する。Hoverと中央情報には対応する固定水文セルの全診断値を追加し、Lake凡例では打切り流域を`Truncated basin (not a fixed lake)`として固定湖候補と区別する。木、石、砂の資源分布は現時点では対象外である。
 
 #### 画面上部の入力欄・ボタン
 
@@ -279,7 +304,7 @@ Farmwareのワールドは無限なので「全体」を有限画像へ収める
 | --- | --- |
 | `Seed` | 確認するワールドのシード文字列。値を変更して`移動・再生成`を押すと、Sceneの設定を変更せずに別シードを比較できる。 |
 | `X` / `Y` | 画像中央に表示するタイル座標。負座標も指定できる。 |
-| `表示` | `Terrain`は最終地形、`Biome`は論理バイオーム、TERRAIN-01C1の8連続環境軸、TERRAIN-01C2の地質分類・3特性・フラグ・支配サイト・サイト境界へ切り替える。変更すると現在位置を再生成する。 |
+| `表示` | `Terrain`は最終地形、`Biome`は論理バイオーム、TERRAIN-01C1の8連続環境軸、TERRAIN-01C2の地質7モード、TERRAIN-01C3の水文5モードへ切り替える。変更すると現在位置を再生成する。 |
 | `Grid` | 16×16タイルのサブチャンク境界と64×64タイルの論理チャンク境界の表示を切り替える。生成結果自体は変化しない。 |
 | `移動・再生成` | 入力中のSeedとX/Yを確定し、その地点の画像を生成し直す。 |
 | `実設定を再読込` | EditModeではAuthoring、PlayModeでは実行中ECSから生成設定とSeedを読み直し、現在位置を再生成する。入力した一時的なSeedは破棄される。 |
@@ -298,7 +323,7 @@ Farmwareのワールドは無限なので「全体」を有限画像へ収める
 
 #### 確認内容
 
-1. 原点付近と既知の遠距離座標で、Map ViewerとGameビューのバイオーム・水域・マグマ・岩壁、8つの連続環境軸、地質分類・3特性・フラグ・支配サイトが一致する。同じBiome内では標準・肥沃・砂質の土地表示が同じであり、`Debug Visualization > Soil`へ切り替えた場合だけ3種類を別色で確認できる。サイト境界は、Gameビューでは隣接1タイル、Map Viewerでは隣接代表サンプルという縮尺差を踏まえて同じ支配サイト変化を示す。
+1. 原点付近と既知の遠距離座標で、Map ViewerとGameビューのバイオーム・水域・マグマ・岩壁、8つの連続環境軸、地質7モード、水文5モードが一致する。同じBiome内では標準・肥沃・砂質の土地表示が同じであり、`Debug Visualization > Soil`へ切り替えた場合だけ3種類を別色で確認できる。サイト境界は、Gameビューでは隣接1タイル、Map Viewerでは隣接代表サンプルという縮尺差を踏まえて同じ支配サイト変化を示す。水文Lakeでは打切り流域と固定湖候補が別色になる。
 2. `実設定を再読込`後のSeed、WorldSeed、GeneratorVersion、設定取得元が想定どおり表示される。
 3. 負座標への移動、ドラッグ、ホイール、＋・－Buttonで中心と縮尺が正しく変化する。＋・－ButtonではTexture解像度が奇数・偶数のどちらでも中心タイル座標を動かさない。再生成直後のHover情報は、偶数解像度でもSide Panelと同じ中心座標を示す。Windowを768ポイントより大きくした場合と、生成Textureの幅または高さが奇数になる大きさにした場合のどちらでも、カーソル下の座標、グリッド、原点印が地形とずれず、正方形のグリッドが維持される。
 4. 同じSeed・座標・縮尺へ戻ると同じ画像になる。
@@ -312,6 +337,7 @@ Farmwareのワールドは無限なので「全体」を有限画像へ収める
 | 個別タイルの分類、色、境界、凡例 | Debug Visualization |
 | バイオームや地形の広域分布、隣接関係、決定性 | Analyze Distribution |
 | 動物の候補地形、確定位置、群れ・密度・重複 | Animal Population表示、Analyze Animal Population |
+| 水文の流向・終端・集水・河川・湖分布 | Hydrology表示、Analyze Hydrology Distribution、Map Viewer |
 | 広域形状、特定Seed・遠距離座標の探索 | Map Viewer |
 | 生成規則と表示の両方 | Analyze Distribution、Map Viewer、Debug Visualization |
 
@@ -324,7 +350,7 @@ Editorツールだけで検証を完了しない。対応する自動テスト�
 - WORLD-01CでLayerキーをビューア・中央情報・可視化の検索へ接続済み。Map Viewerの`Layer`欄、または`Farmware > World Generation > Debug Visualization > Layer`からSurface／Underwater／Deep Seaを選ぶ。Surface以外の自然生成はTERRAIN-01Cまで未接続のため、Map Viewerは暗色と未接続メッセージ、Gameビュー可視化は空表示を返す。
 - TERRAIN-01AではBlock定義と有効セルAPIをSimulationへ追加するが、色判定は既存`GeneratedTile`互換のままとする。仕様転換に合わせて`Terrain Placement`からベルト固有のHUDと凡例だけを除き、差分込み表示、Blockパレット、自然生成と実ワールドの表示切替はTERRAIN-01Cで追加する。
 - TERRAIN-01Bで採用したバイオーム構成と安定ID方針に基づき、TERRAIN-01C1〜C5で環境軸・地質・水文・Biome診断、TERRAIN-01C6でBlockパレットと変更後地形、TERRAIN-01C7で資源診断、TERRAIN-01Dでスポーン許可・探索失敗理由を追加する。Map Viewerの18Biome識別と自然生成・実ワールド差分の明示は、最終BiomeとBlockを接続するC5・C6で更新する。
-- TERRAIN-01C3では、水文セル中心タイルの陸海判定、9地点平均の代表標高、海洋流出口、選択した下流セル、海洋優先を適用した理由を同時に確認できるようにする。海洋流出口は下流なしの終端として表示し、海岸セルが代表標高の比較だけで閉鎖流域になっていないことを確認できるようにする。集水診断には4,096件の寄与上限、`CatchmentTruncated`、上限セルで見つけた未選択直接上流数、最遠寄与距離、Level 0〜6のSummary利用数・展開数、1チャンクの選択セル数・D8逆辺判定数、未完了状態を追加し、Summary境界やキャッシュ状態で集水・流出値が変わらないことを比較できるようにする。下流診断には4,096辺上限、`Marine`／`ClosedBasin`／`LongDrainage`、Level 0〜12のDownstream Summary利用数・展開数、終端までの辺数、1チャンクの流向辺数・候補判定数を追加し、ロードやキャッシュで終端分類が変わらないことを確認できるようにする。打切られた大規模閉鎖流域は固定湖候補と別色・別理由で表示する。これは実装時の更新予定であり、現行表示を変更済みとは扱わない。
+- TERRAIN-01C3-D2では、生成済み固定水文セルの流向・下流座標・終端・辺数・集水面積・打切り・最遠寄与距離・流出・流域・湖をGameビューとMap Viewerへ接続した。海洋流出口は流向なしの`Marine`終端、4,096辺または4,096セルで確定できない結果は`LongDrainage`または打切り色として表示する。Level 0〜6集約SummaryとLevel 0〜12 Downstream Summaryの利用・分解・キャッシュ統計は固定生成結果ではない比較実装の内部診断なので、性能テストだけで記録し表示へ混ぜない。打切られた大規模閉鎖流域は固定湖候補と別色・別理由で表示する。
 - TERRAIN-01C5では、環境として自然な直接接続を認めるv0.48の方針に合わせ、全18Biomeの153ペアの境界長・接触率、両側の気温・湿度・標高と差、植生・地質・火山段階・水文・海岸条件、最終選択理由を境界診断へ追加する。TERRAIN-01C1で削除した旧7Biome向けの`Biome Transition`を復活させず、第三Biome強制の仕様へ戻さない。新方式では橋不足や接続例への未記載を異常表示にせず、不正候補・必須ゲート違反と、景観品質の確認事項を区別する。湿原の専用Host許可・不許可とOverlay理由、火山中核の地質・活動度を表示し、周縁リングの欠落だけをエラーにしない。153ペア監査と最終選択理由はC5の更新予定であり、C1時点で実装済みとは扱わない。
 - TERRAIN-01C／GATHER-01／AUTO-01D: 編集後の隣接差分、穴・液体、反応・保留キューに加え、`LooseSurface`／`GroundEmbedded`／`WallEmbedded`／`MassiveDeposit`の形態、Host、採掘済み差分、巨大鉱床の残量・占有を表示する。自然生成Block、配置済みBlock、クラフト用資源を区別し、元生成を現在地形と誤表示しない。
 - ECO-01／JOURNAL-01: 永続／匿名、地域会計、収容数・回復、証拠判定を確認可能にする。

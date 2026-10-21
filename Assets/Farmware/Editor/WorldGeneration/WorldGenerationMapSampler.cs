@@ -2,9 +2,11 @@
 // EditorWindowのUIやTexture2D生成から純粋計算を分離し、バックグラウンド実行とEditModeテストを可能にします。
 
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using Farmware.Simulation;
 using Farmware.WorldGeneration.Presentation;
+using Unity.Collections;
 using UnityEngine;
 
 namespace Farmware.WorldGeneration.Editor
@@ -64,7 +66,22 @@ namespace Farmware.WorldGeneration.Editor
         GeologyDominantSite = 15,
 
         /// <summary>隣接する代表サンプルで支配地質サイトが切り替わる箇所を表示します。</summary>
-        GeologySiteBoundary = 16
+        GeologySiteBoundary = 16,
+
+        /// <summary>8方向の固定流向と下流なし終端を表示します。</summary>
+        HydrologyFlowDirection = 17,
+
+        /// <summary>Marine・ClosedBasin・LongDrainageの固定下流終端を表示します。</summary>
+        HydrologyTerminal = 18,
+
+        /// <summary>集水面積と4,096件上限打切りを表示します。</summary>
+        HydrologyCatchment = 19,
+
+        /// <summary>固定Stream・River接続を表示します。</summary>
+        HydrologySurfaceWater = 20,
+
+        /// <summary>閉鎖流域、固定湖、湖面、越流、打切り流域を表示します。</summary>
+        HydrologyLake = 21
     }
 
     /// <summary>
@@ -174,6 +191,12 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>1回の誤操作で巨大配列を確保しないための画像1辺上限です。単位はピクセルです。</summary>
         public const int MaximumResolution = 768;
 
+        /// <summary>
+        /// 集水・湖まで再計算する水文モードの画像1辺上限です。
+        /// 最大4,096セルの有限探索を768²回開始してEditorを長時間占有しないよう、低解像度TextureをPoint拡大します。
+        /// </summary>
+        public const int MaximumHydrologyResolution = 64;
+
         /// <summary>進捗通知でEditorのイベントキューを埋めないための通知間隔です。単位は生成画像の行です。</summary>
         private const int ProgressReportRowInterval = 16;
 
@@ -191,6 +214,30 @@ namespace Farmware.WorldGeneration.Editor
             out int sampleWidth,
             out int sampleHeight)
         {
+            CalculateSampleResolution(
+                viewportWidth,
+                viewportHeight,
+                MaximumResolution,
+                out sampleWidth,
+                out sampleHeight);
+        }
+
+        /// <summary>
+        /// 呼出元が指定した1辺上限内で、Canvasの縦横比を保つTextureサンプル数を求めます。
+        /// 水文モードは最大4,096件探索を伴うため、通常地形より小さい上限を同じ座標変換規則で適用します。
+        /// </summary>
+        /// <param name="viewportWidth">Canvasの横幅です。単位はEditorポイントです。</param>
+        /// <param name="viewportHeight">Canvasの縦幅です。単位はEditorポイントです。</param>
+        /// <param name="maximumResolution">長辺へ許可する1以上768以下の最大サンプル数です。</param>
+        /// <param name="sampleWidth">縦横比を保ったTextureの横サンプル数です。</param>
+        /// <param name="sampleHeight">縦横比を保ったTextureの縦サンプル数です。</param>
+        public static void CalculateSampleResolution(
+            float viewportWidth,
+            float viewportHeight,
+            int maximumResolution,
+            out int sampleWidth,
+            out int sampleHeight)
+        {
             if (float.IsNaN(viewportWidth) || float.IsInfinity(viewportWidth) || viewportWidth <= 0f)
             {
                 throw new ArgumentOutOfRangeException(nameof(viewportWidth));
@@ -201,17 +248,22 @@ namespace Farmware.WorldGeneration.Editor
                 throw new ArgumentOutOfRangeException(nameof(viewportHeight));
             }
 
+            if (maximumResolution <= 0 || maximumResolution > MaximumResolution)
+            {
+                throw new ArgumentOutOfRangeException(nameof(maximumResolution));
+            }
+
             // 長辺を基準に1つの縮小率を決めることで、短辺だけが余分に高解像度となる非等方伸縮を防ぎます。
             float longestViewportSide = Math.Max(viewportWidth, viewportHeight);
-            float uniformScale = Math.Min(1f, MaximumResolution / longestViewportSide);
+            float uniformScale = Math.Min(1f, maximumResolution / longestViewportSide);
             sampleWidth = Mathf.Clamp(
                 Mathf.RoundToInt(viewportWidth * uniformScale),
                 1,
-                MaximumResolution);
+                maximumResolution);
             sampleHeight = Mathf.Clamp(
                 Mathf.RoundToInt(viewportHeight * uniformScale),
                 1,
-                MaximumResolution);
+                maximumResolution);
         }
 
         /// <summary>
@@ -229,9 +281,32 @@ namespace Farmware.WorldGeneration.Editor
             float viewportWidth,
             float viewportHeight)
         {
+            return DoesSampleResolutionMatchViewport(
+                sampleWidth,
+                sampleHeight,
+                viewportWidth,
+                viewportHeight,
+                MaximumResolution);
+        }
+
+        /// <summary>指定した解像度上限で再計算したTexture寸法と、表示中サンプル寸法が一致するかを返します。</summary>
+        /// <param name="sampleWidth">表示中Textureの横サンプル数です。</param>
+        /// <param name="sampleHeight">表示中Textureの縦サンプル数です。</param>
+        /// <param name="viewportWidth">現在のCanvas横幅です。</param>
+        /// <param name="viewportHeight">現在のCanvas縦幅です。</param>
+        /// <param name="maximumResolution">現在モードへ適用する1辺上限です。</param>
+        /// <returns>同じ上限とCanvasで同じTexture寸法になる場合はtrueです。</returns>
+        public static bool DoesSampleResolutionMatchViewport(
+            int sampleWidth,
+            int sampleHeight,
+            float viewportWidth,
+            float viewportHeight,
+            int maximumResolution)
+        {
             CalculateSampleResolution(
                 viewportWidth,
                 viewportHeight,
+                maximumResolution,
                 out int expectedWidth,
                 out int expectedHeight);
             return sampleWidth == expectedWidth && sampleHeight == expectedHeight;
@@ -324,6 +399,35 @@ namespace Farmware.WorldGeneration.Editor
 
             Color32[] pixelColors = new Color32[width * height];
             bool hasGeneratedData = layer == WorldLayer.Surface;
+            bool isHydrologyViewMode = IsHydrologyViewMode(viewMode);
+            Dictionary<long, GeneratedHydrologyCell> hydrologyCellCache =
+                isHydrologyViewMode
+                    ? new Dictionary<long, GeneratedHydrologyCell>()
+                    : null;
+            // Map ViewerはThreadPoolでSampleを実行し、4フレームを超える場合があります。Temp系Allocatorの簡易APIを避け、
+            // 水文モード中だけPersistent作業領域を1組確保して全ピクセルで再利用し、usingで必ず破棄します。
+            using NativeArray<HydrologyUpstreamCandidate> hydrologyFrontier =
+                isHydrologyViewMode
+                    ? new NativeArray<HydrologyUpstreamCandidate>(
+                        DeterministicHydrologyCatchmentResolver.MaximumFrontierCapacity,
+                        Allocator.Persistent,
+                        NativeArrayOptions.UninitializedMemory)
+                    : default;
+            using NativeArray<HydrologyUpstreamCandidate> hydrologyBasinMembers =
+                isHydrologyViewMode
+                    ? new NativeArray<HydrologyUpstreamCandidate>(
+                        DeterministicHydrologyLakeResolver.MaximumBasinMembers,
+                        Allocator.Persistent,
+                        NativeArrayOptions.UninitializedMemory)
+                    : default;
+            using NativeArray<HydrologyBasinLookupSlot> hydrologyBasinLookup =
+                isHydrologyViewMode
+                    ? new NativeArray<HydrologyBasinLookupSlot>(
+                        DeterministicHydrologyLakeResolver.LookupCapacity,
+                        Allocator.Persistent,
+                        NativeArrayOptions.ClearMemory)
+                    : default;
+            HydrologyLakeBasinCache hydrologyBasinCache = default;
 
             // Texture2Dの配列は下端行から始まるため、pixelYの増加をワールドYの増加へそのまま対応させます。
             for (int pixelY = 0; pixelY < height; pixelY++)
@@ -350,6 +454,47 @@ namespace Farmware.WorldGeneration.Editor
                         tilesPerPixel);
                     if (hasGeneratedData)
                     {
+                        if (isHydrologyViewMode)
+                        {
+                            if (!DeterministicHydrologyGenerator.TryGetCellCoordinate(
+                                    settings.Hydrology,
+                                    worldTileX,
+                                    worldTileY,
+                                    out int hydrologyCellX,
+                                    out int hydrologyCellY))
+                            {
+                                throw new InvalidOperationException(
+                                    $"水文セル座標へ変換できません: ({worldTileX}, {worldTileY})");
+                            }
+
+                            long hydrologyKey = CreateCoordinateKey(hydrologyCellX, hydrologyCellY);
+                            if (!hydrologyCellCache.TryGetValue(
+                                    hydrologyKey,
+                                    out GeneratedHydrologyCell hydrologyCell))
+                            {
+                                // 同じ8×8セルを複数ピクセルが指す拡大表示では、最大4,096件の集水・湖探索を一度だけ行います。
+                                if (!TryGenerateHydrologyCellWithReusableWorkspace(
+                                        settings,
+                                        hydrologyCellX,
+                                        hydrologyCellY,
+                                        hydrologyFrontier,
+                                        hydrologyBasinMembers,
+                                        hydrologyBasinLookup,
+                                        ref hydrologyBasinCache,
+                                        out hydrologyCell))
+                                {
+                                    throw new InvalidOperationException(
+                                        $"固定水文セルを生成できません: ({hydrologyCellX}, {hydrologyCellY})");
+                                }
+
+                                hydrologyCellCache.Add(hydrologyKey, hydrologyCell);
+                            }
+
+                            pixelColors[(pixelY * width) + pixelX] =
+                                GetHydrologyDisplayColor(viewMode, hydrologyCell);
+                            continue;
+                        }
+
                         // int座標端で近傍サンプルを確保できない場合は、値0の地形を本物の結果として表示せず、
                         // EditorWindow側のエラー表示へ伝えます。これにより診断画像とSimulationの失敗判定が一致します。
                         if (!DeterministicChunkGenerator.TryGenerateTile(
@@ -416,6 +561,78 @@ namespace Farmware.WorldGeneration.Editor
                 centerTileY,
                 tilesPerPixel,
                 pixelColors);
+        }
+
+        /// <summary>Map Viewerモードが固定水文セルの再計算を必要とするかを返します。</summary>
+        /// <param name="viewMode">判定する広域表示モードです。</param>
+        /// <returns>流向から湖までの5水文モードならtrueです。</returns>
+        public static bool IsHydrologyViewMode(WorldGenerationMapViewMode viewMode)
+        {
+            return viewMode >= WorldGenerationMapViewMode.HydrologyFlowDirection
+                && viewMode <= WorldGenerationMapViewMode.HydrologyLake;
+        }
+
+        /// <summary>
+        /// ThreadPool上で4フレームを超えても使用できるPersistent作業領域から、集水・閉鎖流域・湖面まで含む1水文セルを生成します。
+        /// 公開単一セルAPIと同じResolver順を使い、同じ閉鎖末端が続く場合だけ流域結果を安全に再利用します。
+        /// </summary>
+        /// <param name="settings">Seed、GeneratorVersion、固定水文設定です。</param>
+        /// <param name="cellX">生成する絶対水文セルX座標です。</param>
+        /// <param name="cellY">生成する絶対水文セルY座標です。</param>
+        /// <param name="frontier">集水と流域探索で再利用する上流候補Heapです。</param>
+        /// <param name="basinMembers">閉鎖流域セルを保持する固定配列です。</param>
+        /// <param name="basinLookup">流域内外判定へ使う固定Hash表です。</param>
+        /// <param name="basinCache">直前に解決した閉鎖末端と共通湖結果です。</param>
+        /// <param name="cell">成功時の全固定水文結果です。</param>
+        /// <returns>集水と必要な湖面解決を固定上限内で完了できた場合はtrueです。</returns>
+        private static bool TryGenerateHydrologyCellWithReusableWorkspace(
+            in WorldGenerationSettings settings,
+            int cellX,
+            int cellY,
+            NativeArray<HydrologyUpstreamCandidate> frontier,
+            NativeArray<HydrologyUpstreamCandidate> basinMembers,
+            NativeArray<HydrologyBasinLookupSlot> basinLookup,
+            ref HydrologyLakeBasinCache basinCache,
+            out GeneratedHydrologyCell cell)
+        {
+            if (!DeterministicHydrologyGenerator.TryGenerateCellWithoutLake(
+                    settings,
+                    cellX,
+                    cellY,
+                    frontier,
+                    0,
+                    out cell))
+            {
+                cell = default;
+                return false;
+            }
+
+            if (!DeterministicHydrologyLakeResolver.TryApplyLakeState(
+                    settings,
+                    ref cell,
+                    frontier,
+                    0,
+                    basinMembers,
+                    0,
+                    basinLookup,
+                    0,
+                    ref basinCache))
+            {
+                cell = default;
+                basinCache = default;
+                return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>符号付き水文セルX/Yを衝突しない64bitキャッシュキーへ詰めます。</summary>
+        /// <param name="coordinateX">水平水文セル座標です。</param>
+        /// <param name="coordinateY">垂直水文セル座標です。</param>
+        /// <returns>Xを上位32bit、Yを下位32bitへ保持する可逆キーです。</returns>
+        private static long CreateCoordinateKey(int coordinateX, int coordinateY)
+        {
+            return ((long)coordinateX << 32) | (uint)coordinateY;
         }
 
         /// <summary>
@@ -849,6 +1066,47 @@ namespace Farmware.WorldGeneration.Editor
                     // Gameビューと同様に、SoilTypeは内部情報として保持しつつ土地の見た目はBiomeだけで決めます。
                     return GetBiomeColor(tile.Biome);
             }
+        }
+
+        /// <summary>
+        /// 固定水文セルをMap Viewer用の不透明色へ変換します。
+        /// GameビューOverlayとRGBを共有し、凡例・広域Texture・テストで打切り流域の意味がずれないようにします。
+        /// </summary>
+        /// <param name="viewMode">流向・終端・集水・表流水・湖の広域表示モードです。</param>
+        /// <param name="cell">決定論的Generatorが返した固定水文セルです。</param>
+        /// <param name="hasCell">生成成功済みのセルならtrueです。falseは生成待ち色になります。</param>
+        /// <returns>Map Viewer背景へ直接設定できるAlpha 255の色です。</returns>
+        public static Color32 GetHydrologyDisplayColor(
+            WorldGenerationMapViewMode viewMode,
+            in GeneratedHydrologyCell cell,
+            bool hasCell = true)
+        {
+            WorldGenerationDebugVisualizationMode overlayMode;
+            switch (viewMode)
+            {
+                case WorldGenerationMapViewMode.HydrologyFlowDirection:
+                    overlayMode = WorldGenerationDebugVisualizationMode.HydrologyFlowDirection;
+                    break;
+                case WorldGenerationMapViewMode.HydrologyTerminal:
+                    overlayMode = WorldGenerationDebugVisualizationMode.HydrologyTerminal;
+                    break;
+                case WorldGenerationMapViewMode.HydrologyCatchment:
+                    overlayMode = WorldGenerationDebugVisualizationMode.HydrologyCatchment;
+                    break;
+                case WorldGenerationMapViewMode.HydrologySurfaceWater:
+                    overlayMode = WorldGenerationDebugVisualizationMode.HydrologySurfaceWater;
+                    break;
+                case WorldGenerationMapViewMode.HydrologyLake:
+                    overlayMode = WorldGenerationDebugVisualizationMode.HydrologyLake;
+                    break;
+                default:
+                    return new Color32(0, 0, 0, 0);
+            }
+
+            Color32 color = WorldGenerationDebugVisualizationOverlay
+                .GetHydrologyVisualizationColor(overlayMode, cell, hasCell);
+            color.a = byte.MaxValue;
+            return color;
         }
 
         /// <summary>

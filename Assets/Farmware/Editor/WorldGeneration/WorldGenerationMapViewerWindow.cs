@@ -54,7 +54,12 @@ namespace Farmware.WorldGeneration.Editor
             "Geology Erosion Resistance",
             "Geology Flags",
             "Geology Dominant Site",
-            "Geology Site Boundary"
+            "Geology Site Boundary",
+            "Hydrology Flow Direction",
+            "Hydrology Terminal",
+            "Hydrology Catchment",
+            "Hydrology Surface Water",
+            "Hydrology Lake"
         };
 
         /// <summary>Toolbarの表示名と固定ワールドレイヤーを対応させる選択肢です。</summary>
@@ -158,6 +163,11 @@ namespace Farmware.WorldGeneration.Editor
 
         /// <summary>カーソルが同じタイル内を動くたびに再生成しないため、最後に表示した垂直座標を保持します。</summary>
         private int lastHoveredTileY = int.MinValue;
+
+        // Hover中央情報で同じ8×8水文セルをタイルごとに再生成しないため、現在の表示設定に限って固定結果を保持します。
+        // Map Viewerの地図Textureと同じ決定論的Generatorの結果だけをキャッシュし、Simulation状態には書き戻しません。
+        private readonly Dictionary<long, GeneratedHydrologyCell> hoverHydrologyCellCache =
+            new Dictionary<long, GeneratedHydrologyCell>();
 
         /// <summary>
         /// Farmwareメニューから広域マップビューアを開き、既存Windowがあれば再利用します。
@@ -274,7 +284,7 @@ namespace Farmware.WorldGeneration.Editor
             centerXField.tooltip = "移動先の水平ワールドタイル座標です。負座標も入力できます。";
             centerYField.tooltip = "移動先の垂直ワールドタイル座標です。負座標も入力できます。";
             viewModeField.tooltip =
-                "Terrainは最終地形、Biomeは論理バイオーム、Environmentは連続軸、GeologyはTERRAIN-01C2の分類・特性・サイトを表示します。";
+                "Terrainは最終地形、Biomeは論理バイオーム、Environmentは連続軸、GeologyはTERRAIN-01C2、HydrologyはTERRAIN-01C3の固定結果を表示します。";
             layerField.tooltip =
                 "診断する固定ワールドレイヤーです。WORLD-01CではSurfaceだけに自然生成が接続され、別層は未接続表示になります。";
             gridToggle.tooltip = "白線は16タイル、青線は64タイル境界です。遠距離では自動的に省略します。";
@@ -338,7 +348,10 @@ namespace Farmware.WorldGeneration.Editor
                         displayedSample.Width,
                         displayedSample.Height,
                         mapCanvas.contentRect.width,
-                        mapCanvas.contentRect.height)))
+                        mapCanvas.contentRect.height,
+                        WorldGenerationMapSampler.IsHydrologyViewMode(serializedViewMode)
+                            ? WorldGenerationMapSampler.MaximumHydrologyResolution
+                            : WorldGenerationMapSampler.MaximumResolution)))
             {
                 // リサイズを元の比率へ戻した場合は、直前のGeometryChangedEventで予約した不要な再生成を取り消します。
                 resizeRenderSchedule?.Pause();
@@ -478,15 +491,19 @@ namespace Farmware.WorldGeneration.Editor
             CancellationToken cancellationToken = renderCancellation.Token;
             int requestId = ++renderRequestId;
 
+            WorldGenerationMapViewMode viewMode = serializedViewMode;
+            int maximumResolution = WorldGenerationMapSampler.IsHydrologyViewMode(viewMode)
+                ? WorldGenerationMapSampler.MaximumHydrologyResolution
+                : WorldGenerationMapSampler.MaximumResolution;
             WorldGenerationMapSampler.CalculateSampleResolution(
                 mapCanvas.contentRect.width,
                 mapCanvas.contentRect.height,
+                maximumResolution,
                 out int width,
                 out int height);
             int centerTileX = serializedCenterTileX;
             int centerTileY = serializedCenterTileY;
             int tilesPerPixel = serializedTilesPerPixel;
-            WorldGenerationMapViewMode viewMode = serializedViewMode;
             WorldLayer layer = serializedLayer;
             WorldGenerationSettings renderSettings = sourceSettings;
             if (seedWasEdited)
@@ -597,6 +614,7 @@ namespace Farmware.WorldGeneration.Editor
 
             displayedSample = result;
             displayedSettings = renderSettings;
+            hoverHydrologyCellCache.Clear();
             generationLabel?.AddToClassList("hidden");
             lastHoveredTileX = int.MinValue;
             lastHoveredTileY = int.MinValue;
@@ -938,6 +956,34 @@ namespace Farmware.WorldGeneration.Editor
                     + $"Site ({geologyInfo.Site.SiteX}, {geologyInfo.Site.SiteY}) / "
                     + $"DistanceSquared {geologyInfo.Site.DistanceSquared}"
                 : "サイト情報生成失敗";
+            string hydrologyText = string.Empty;
+            if (WorldGenerationMapSampler.IsHydrologyViewMode(serializedViewMode))
+            {
+                if (TryGetHoverHydrologyCell(
+                        worldTileX,
+                        worldTileY,
+                        out GeneratedHydrologyCell hydrologyCell))
+                {
+                    hydrologyText = "\n"
+                        + $"Hydrology Cell ({hydrologyCell.CellX}, {hydrologyCell.CellY}) / "
+                        + $"Height {hydrologyCell.HydrologyHeight} / Flow {hydrologyCell.FlowDirection} -> "
+                        + $"({hydrologyCell.DownstreamCellX}, {hydrologyCell.DownstreamCellY}) / "
+                        + $"Terminal {hydrologyCell.DownstreamTerminal} / Edges {hydrologyCell.DownstreamEdgeCount}\n"
+                        + $"Catchment {hydrologyCell.CatchmentAreaCells} / "
+                        + $"Truncated {(hydrologyCell.CatchmentTruncated ? "Yes" : "No")} / "
+                        + $"Runoff {hydrologyCell.RunoffEquivalentCells} / "
+                        + $"Connections {hydrologyCell.ConnectionFlags}\n"
+                        + $"BasinArea {hydrologyCell.BasinAreaCells} / LakeFlags {hydrologyCell.LakeFlags} / "
+                        + $"Bottom {hydrologyCell.LakeBottomHeight} / Spill {hydrologyCell.SpillHeight} / "
+                        + $"Surface {hydrologyCell.LakeSurfaceHeight} / Fill {hydrologyCell.LakeFillFraction} / "
+                        + $"SpillEdge ({hydrologyCell.SpillInsideCellX}, {hydrologyCell.SpillInsideCellY})->"
+                        + $"({hydrologyCell.SpillOutsideCellX}, {hydrologyCell.SpillOutsideCellY})";
+                }
+                else
+                {
+                    hydrologyText = "\n固定水文セルを生成できません。";
+                }
+            }
 
             hoverLabel.text =
                 $"{displayedSample.Layer} / Tile ({worldTileX}, {worldTileY}) / Chunk ({chunk.X}, {chunk.Y}) / "
@@ -949,7 +995,51 @@ namespace Farmware.WorldGeneration.Editor
                 + $"Geology {tile.GeologyClass} / Flags {tile.GeologyFlags} / "
                 + $"Permeability {tile.GeologyPermeability} / Groundwater {tile.GeologyGroundwaterStorage} / "
                 + $"Erosion {tile.GeologyErosionResistance}\n"
-                + $"Geology Site: {geologySiteText}";
+                + $"Geology Site: {geologySiteText}"
+                + hydrologyText;
+        }
+
+        /// <summary>
+        /// Hoverタイルを担当する8×8水文セルを生成し、同じセルの再利用時はWindow内キャッシュから返します。
+        /// 地図サンプリングと同じ設定・単一セルAPIを使い、中央情報だけ別の近似値にならないようにします。
+        /// </summary>
+        /// <param name="worldTileX">Hover中の絶対タイルX座標です。</param>
+        /// <param name="worldTileY">Hover中の絶対タイルY座標です。</param>
+        /// <param name="cell">成功時に集水・湖まで確定した固定水文セルを返します。</param>
+        /// <returns>座標変換と決定論的水文生成に成功した場合はtrueです。</returns>
+        private bool TryGetHoverHydrologyCell(
+            int worldTileX,
+            int worldTileY,
+            out GeneratedHydrologyCell cell)
+        {
+            if (!DeterministicHydrologyGenerator.TryGetCellCoordinate(
+                    displayedSettings.Hydrology,
+                    worldTileX,
+                    worldTileY,
+                    out int cellX,
+                    out int cellY))
+            {
+                cell = default;
+                return false;
+            }
+
+            long key = ((long)cellX << 32) | (uint)cellY;
+            if (hoverHydrologyCellCache.TryGetValue(key, out cell))
+            {
+                return true;
+            }
+
+            if (!DeterministicHydrologyGenerator.TryGenerateCell(
+                    displayedSettings,
+                    cellX,
+                    cellY,
+                    out cell))
+            {
+                return false;
+            }
+
+            hoverHydrologyCellCache.Add(key, cell);
+            return true;
         }
 
         /// <summary>
@@ -1064,6 +1154,123 @@ namespace Farmware.WorldGeneration.Editor
                 return;
             }
 
+            if (selectedMode == WorldGenerationMapViewMode.HydrologyFlowDirection)
+            {
+                for (HydrologyFlowDirection direction = HydrologyFlowDirection.None;
+                     direction <= HydrologyFlowDirection.SouthEast;
+                     direction++)
+                {
+                    AddHydrologyLegendRow(
+                        selectedMode,
+                        direction == HydrologyFlowDirection.None ? "End" : direction.ToString(),
+                        new GeneratedHydrologyCell { FlowDirection = direction });
+                }
+
+                return;
+            }
+
+            if (selectedMode == WorldGenerationMapViewMode.HydrologyTerminal)
+            {
+                AddHydrologyLegendRow(
+                    selectedMode,
+                    "Marine",
+                    new GeneratedHydrologyCell
+                    {
+                        ConnectionFlags = HydrologyConnectionFlags.Marine
+                    });
+                AddHydrologyLegendRow(
+                    selectedMode,
+                    "Closed Basin",
+                    new GeneratedHydrologyCell
+                    {
+                        ConnectionFlags = HydrologyConnectionFlags.ClosedBasin
+                    });
+                AddHydrologyLegendRow(
+                    selectedMode,
+                    "Long Drainage",
+                    new GeneratedHydrologyCell
+                    {
+                        ConnectionFlags = HydrologyConnectionFlags.LongDrainage
+                    });
+                return;
+            }
+
+            if (selectedMode == WorldGenerationMapViewMode.HydrologyCatchment)
+            {
+                AddHydrologyLegendRow(
+                    selectedMode,
+                    "1 contributing cell",
+                    new GeneratedHydrologyCell { CatchmentAreaCells = 1 });
+                AddHydrologyLegendRow(
+                    selectedMode,
+                    "4,096 contributing cells",
+                    new GeneratedHydrologyCell { CatchmentAreaCells = 4096 });
+                AddHydrologyLegendRow(
+                    selectedMode,
+                    "Truncated at 4,096",
+                    new GeneratedHydrologyCell
+                    {
+                        CatchmentAreaCells = 4096,
+                        CatchmentFlags = HydrologyCatchmentFlags.Truncated
+                    });
+                return;
+            }
+
+            if (selectedMode == WorldGenerationMapViewMode.HydrologySurfaceWater)
+            {
+                AddHydrologyLegendRow(selectedMode, "No fixed surface flow", default);
+                AddHydrologyLegendRow(
+                    selectedMode,
+                    "Stream",
+                    new GeneratedHydrologyCell
+                    {
+                        ConnectionFlags = HydrologyConnectionFlags.Stream
+                    });
+                AddHydrologyLegendRow(
+                    selectedMode,
+                    "River",
+                    new GeneratedHydrologyCell
+                    {
+                        ConnectionFlags = HydrologyConnectionFlags.Stream
+                            | HydrologyConnectionFlags.River
+                    });
+                return;
+            }
+
+            if (selectedMode == WorldGenerationMapViewMode.HydrologyLake)
+            {
+                AddHydrologyLegendRow(selectedMode, "Not a closed basin", default);
+                AddHydrologyLegendRow(
+                    selectedMode,
+                    "Resolved dry basin",
+                    new GeneratedHydrologyCell { LakeFlags = HydrologyLakeFlags.BasinResolved });
+                AddHydrologyLegendRow(
+                    selectedMode,
+                    "Truncated basin (not a fixed lake)",
+                    new GeneratedHydrologyCell { LakeFlags = HydrologyLakeFlags.BasinTruncated });
+                AddHydrologyLegendRow(
+                    selectedMode,
+                    "Fixed lake basin",
+                    new GeneratedHydrologyCell { LakeFlags = HydrologyLakeFlags.FixedLake });
+                AddHydrologyLegendRow(
+                    selectedMode,
+                    "Fixed lake surface",
+                    new GeneratedHydrologyCell
+                    {
+                        LakeFlags = HydrologyLakeFlags.FixedLake | HydrologyLakeFlags.SurfaceCell
+                    });
+                AddHydrologyLegendRow(
+                    selectedMode,
+                    "Overflowing lake surface",
+                    new GeneratedHydrologyCell
+                    {
+                        LakeFlags = HydrologyLakeFlags.FixedLake
+                            | HydrologyLakeFlags.SurfaceCell
+                            | HydrologyLakeFlags.Overflow
+                    });
+                return;
+            }
+
             AddLegendRow("Grassland", "legend-grassland");
             AddLegendRow("Forest", "legend-forest");
             AddLegendRow("Desert", "legend-desert");
@@ -1103,6 +1310,20 @@ namespace Farmware.WorldGeneration.Editor
             AddLegendRow(
                 displayName,
                 WorldGenerationMapSampler.GetDisplayColor(WorldGenerationMapViewMode.GeologyFlags, tile));
+        }
+
+        /// <summary>固定水文分類1種類を実地図と同じ不透明色へ変換し、Map Viewer凡例へ追加します。</summary>
+        /// <param name="viewMode">現在選択中の水文表示モードです。</param>
+        /// <param name="displayName">分類の意味を示す表示名です。</param>
+        /// <param name="cell">凡例分類を表す固定水文セルです。</param>
+        private void AddHydrologyLegendRow(
+            WorldGenerationMapViewMode viewMode,
+            string displayName,
+            GeneratedHydrologyCell cell)
+        {
+            AddLegendRow(
+                displayName,
+                WorldGenerationMapSampler.GetHydrologyDisplayColor(viewMode, cell));
         }
 
         /// <summary>
