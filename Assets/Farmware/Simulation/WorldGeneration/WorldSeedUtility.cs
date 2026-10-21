@@ -47,6 +47,12 @@ namespace Farmware.WorldGeneration
         /// <summary>同じ代表標高の水文セルを循環しない全順序へ並べる専用ソルトです。</summary>
         public const ulong HydrologyFlowTie = 0xB5AD4ECEDA1CE2A9UL;
 
+        /// <summary>水文セル内で同じ最低標高を持つ河道Anchor候補を一意に並べる専用ソルトです。</summary>
+        public const ulong HydrologyChannelAnchor = 0xC13FA9A902A6328FUL;
+
+        /// <summary>標高費用が同じ河道経路を絶対タイル座標から一意に選ぶ専用ソルトです。</summary>
+        public const ulong HydrologyChannelPath = 0x91E10DA5C79E7B1DUL;
+
         /// <summary>バイオーム用気候ノイズの水平サンプリング座標を歪ませるソルトです。</summary>
         public const ulong BiomeWarpX = 0x243F6A8885A308D3UL;
 
