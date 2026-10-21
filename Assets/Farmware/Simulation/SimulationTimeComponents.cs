@@ -1,4 +1,4 @@
-// このファイルは、Farmware全体で共有する固定Tick設定、現在Tick、一時停止状態のECSデータを定義します。
+// このファイルは、Farmware全体で共有する固定Tick設定、現在Tick、一時停止、非同期準備状態のECSデータを定義します。
 // 固定Tick Groupと後続の生産・物流・動物SystemはこれらのSingletonを共有し、描画フレーム時間をゲーム結果の正にしません。
 
 using Unity.Entities;
@@ -93,6 +93,30 @@ namespace Farmware.Simulation
         public void SetPaused(bool isPaused)
         {
             Value = isPaused ? (byte)1 : (byte)0;
+        }
+    }
+
+    /// <summary>
+    /// 固定Tickへ入る前に完了すべき非同期準備が残っているかを保持する実行時Singletonです。
+    /// 現在はChunkGenerationSystemだけが更新し、Rate ManagerがメインスレッドでJobを待たずTickを延期するために読みます。
+    /// </summary>
+    public struct FixedTickReadinessState : IComponentData
+    {
+        /// <summary>
+        /// 0なら地形生成バッチが公開可能、1ならWorker上で生成中です。World寿命中保持し、ChunkGenerationSystemだけが変更します。
+        /// </summary>
+        public byte ChunkGenerationPending;
+
+        /// <summary>地形生成の完了前なので固定Tickを開始してはいけない場合にtrueを返します。</summary>
+        public readonly bool IsBlocked => ChunkGenerationPending != 0;
+
+        /// <summary>
+        /// 地形生成の待機状態を明示的なbyte値へ変換し、ECS Componentをunmanagedのまま維持します。
+        /// </summary>
+        /// <param name="isPending">生成Jobが未完了、または投入した同じ描画フレームならtrueです。</param>
+        public void SetChunkGenerationPending(bool isPending)
+        {
+            ChunkGenerationPending = isPending ? (byte)1 : (byte)0;
         }
     }
 }

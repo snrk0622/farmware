@@ -15,7 +15,7 @@ namespace Farmware.Tests.EditMode
     public sealed class FixedTickSimulationTests
     {
         /// <summary>
-        /// 初期化Systemを1回実行し、固定Tick設定、現在Tick、一時停止状態が各1件作られることを保証します。
+        /// 初期化Systemを1回実行し、固定Tick設定、現在Tick、一時停止状態、非同期準備状態が各1件作られることを保証します。
         /// </summary>
         [Test]
         public void InitializationSystem_CreatesOneSetOfSimulationTimeSingletons()
@@ -35,6 +35,9 @@ namespace Farmware.Tests.EditMode
             Assert.That(
                 CountComponents<SimulationPauseState>(world),
                 Is.EqualTo(1));
+            Assert.That(
+                CountComponents<FixedTickReadinessState>(world),
+                Is.EqualTo(1));
 
             FixedTickConfiguration configuration =
                 GetSingleton<FixedTickConfiguration>(world);
@@ -46,6 +49,7 @@ namespace Farmware.Tests.EditMode
                 Is.EqualTo(FixedTickConfiguration.DefaultMaximumTicksPerFrame));
             Assert.That(GetCurrentTick(world), Is.Zero);
             Assert.That(GetSingleton<SimulationPauseState>(world).IsPaused, Is.False);
+            Assert.That(GetSingleton<FixedTickReadinessState>(world).IsBlocked, Is.False);
         }
 
         /// <summary>
@@ -113,6 +117,43 @@ namespace Farmware.Tests.EditMode
                 GetCurrentTick(world),
                 Is.EqualTo(1ul),
                 "停止前の端数は保持しても、停止中の5秒は再開後へ加えてはいけません。");
+        }
+
+        /// <summary>
+        /// 非同期チャンク生成中はMain Threadで完了を待たず固定Tickを延期し、準備完了後も最大1 Tickだけ再開することを保証します。
+        /// </summary>
+        [Test]
+        public void FixedTickGroup_DefersOneTickWhileChunkGenerationIsPending()
+        {
+            using World world = CreateFixedTickTestWorld(
+                FixedTickConfiguration.CreateDefault(),
+                out FarmwareFixedTickSimulationSystemGroup fixedTickGroup);
+
+            SetChunkGenerationPending(world, true);
+
+            // 0.2秒では本来2 Tick到来しますが、生成中は描画へ制御を返すため一度も進めません。
+            UpdateFixedTickGroup(world, fixedTickGroup, 0.2f);
+            Assert.That(GetCurrentTick(world), Is.Zero);
+
+            // さらに待機時間が増えても、完了直後の大量追いつきを避けるため延期Tickは1件だけに保ちます。
+            UpdateFixedTickGroup(world, fixedTickGroup, 0.3f);
+            Assert.That(GetCurrentTick(world), Is.Zero);
+
+            SetChunkGenerationPending(world, false);
+            UpdateFixedTickGroup(world, fixedTickGroup, 0f);
+            Assert.That(
+                GetCurrentTick(world),
+                Is.EqualTo(1ul),
+                "生成完了後は、待機開始時から保持した1 Tickだけを再開してください。");
+
+            UpdateFixedTickGroup(world, fixedTickGroup, 0f);
+            Assert.That(
+                GetCurrentTick(world),
+                Is.EqualTo(1ul),
+                "生成待ち中に捨てた壁時計遅延を、後続フレームで追いついてはいけません。");
+
+            UpdateFixedTickGroup(world, fixedTickGroup, 0.1f);
+            Assert.That(GetCurrentTick(world), Is.EqualTo(2ul));
         }
 
         /// <summary>
@@ -235,6 +276,12 @@ namespace Farmware.Tests.EditMode
                 {
                     Value = 0
                 });
+            world.EntityManager.AddComponentData(
+                singletonEntity,
+                new FixedTickReadinessState
+                {
+                    ChunkGenerationPending = 0
+                });
 
             fixedTickGroup =
                 world.GetOrCreateSystemManaged<FarmwareFixedTickSimulationSystemGroup>();
@@ -279,6 +326,23 @@ namespace Farmware.Tests.EditMode
             pauseState.SetPaused(isPaused);
             world.EntityManager.SetComponentData(pauseEntity, pauseState);
             pauseQuery.Dispose();
+        }
+
+        /// <summary>
+        /// 非同期チャンク生成の準備状態を更新し、次の描画フレームで固定Tickを延期または再開させます。
+        /// </summary>
+        /// <param name="world">準備状態Singletonを所有するテストWorldです。</param>
+        /// <param name="isPending">未完了Jobがあり固定Tickを延期する場合はtrueです。</param>
+        private static void SetChunkGenerationPending(World world, bool isPending)
+        {
+            EntityQuery readinessQuery = world.EntityManager.CreateEntityQuery(
+                ComponentType.ReadWrite<FixedTickReadinessState>());
+            Entity readinessEntity = readinessQuery.GetSingletonEntity();
+            FixedTickReadinessState readiness =
+                world.EntityManager.GetComponentData<FixedTickReadinessState>(readinessEntity);
+            readiness.SetChunkGenerationPending(isPending);
+            world.EntityManager.SetComponentData(readinessEntity, readiness);
+            readinessQuery.Dispose();
         }
 
         /// <summary>

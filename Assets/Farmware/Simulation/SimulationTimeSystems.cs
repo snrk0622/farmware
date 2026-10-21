@@ -1,4 +1,4 @@
-// このファイルは、固定Tick用Singletonの初期化と、各固定Tick開始時のTick番号更新を担当します。
+// このファイルは、固定Tick用Singletonと非同期準備状態の初期化、および各固定Tick開始時のTick番号更新を担当します。
 // 初期化はFarmwareInitializationSystemGroup、Tick加算はFarmwareFixedTickSimulationSystemGroupへ分離します。
 
 using Unity.Entities;
@@ -6,7 +6,7 @@ using Unity.Entities;
 namespace Farmware.Simulation
 {
     /// <summary>
-    /// 新しいWorldへ固定Tick設定、現在Tick、一時停止状態を1件ずつ準備する初期化Systemです。
+    /// 新しいWorldへ固定Tick設定、現在Tick、一時停止、非同期準備状態を1件ずつ準備する初期化Systemです。
     /// Farmware Initializationの先頭で1回だけ実行し、作成後は自身を無効化します。
     /// </summary>
     [UpdateInGroup(typeof(FarmwareInitializationSystemGroup), OrderFirst = true)]
@@ -41,6 +41,12 @@ namespace Farmware.Simulation
                 new SimulationPauseState
                 {
                     Value = 0
+                });
+            state.EntityManager.AddComponentData(
+                simulationTimeEntity,
+                new FixedTickReadinessState
+                {
+                    ChunkGenerationPending = 0
                 });
 
             // これらのSingletonはWorld寿命中に1組だけ存在させるため、初期化後は毎フレーム更新しません。

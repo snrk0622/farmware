@@ -1,5 +1,5 @@
-// このファイルは、TERRAIN-01C3-A〜Cの8×8水文セル、D8流向、下流終端、集水・自然流出を決定論的に生成します。
-// ChunkGenerationSystem、状態ハッシュ、後続の湖処理が同じ純粋計算を共有し、ロード順や表示状態による差を防ぎます。
+// このファイルは、TERRAIN-01C3-A〜Dの8×8水文セル、D8流向、下流終端、集水・自然流出、基礎湖面を決定論的に生成します。
+// ChunkGenerationSystem、状態ハッシュ、湖Resolverが同じ純粋計算を共有し、ロード順や表示状態による差を防ぎます。
 
 using System;
 using Unity.Collections;
@@ -37,8 +37,20 @@ namespace Farmware.WorldGeneration
         /// <summary>固定の河川と判定する最小RunoffEquivalentCellsです。RiverはStreamも必ず伴います。</summary>
         public ushort RiverRunoffEquivalentThreshold;
 
+        /// <summary>同じ閉鎖末端へ流れるセル群を固定湖候補として扱う最小セル数です。</summary>
+        public ushort MinimumClosedBasinAreaCells;
+
+        /// <summary>正の水深を持つ閉鎖流域へLake候補を設定する最小RunoffEquivalentCellsです。</summary>
+        public ushort LakeRunoffEquivalentThreshold;
+
+        /// <summary>最大湖面へ到達し、安定した越流辺を有効にする最小RunoffEquivalentCellsです。</summary>
+        public ushort LakeOverflowRunoffEquivalentThreshold;
+
+        /// <summary>RunoffEquivalentCellsを0〜65,535の湖面充填率へ変換する固定倍率です。</summary>
+        public ushort LakeFillFractionMultiplier;
+
         /// <summary>
-        /// TERRAIN-01C3-A〜Cの確定値を持つ既定設定を作ります。
+        /// TERRAIN-01C3-A〜Dの確定値を持つ既定設定を作ります。
         /// </summary>
         /// <returns>8×8セル、9点サンプル、下流・上流各4,096件と固定流出閾値を持つ設定です。</returns>
         public static HydrologyGenerationSettings CreateDefault()
@@ -52,7 +64,11 @@ namespace Farmware.WorldGeneration
                 MaximumCatchmentContributingCells = 4096,
                 MaximumAggregationSummaryLevel = 6,
                 StreamRunoffEquivalentThreshold = 16,
-                RiverRunoffEquivalentThreshold = 128
+                RiverRunoffEquivalentThreshold = 128,
+                MinimumClosedBasinAreaCells = 4,
+                LakeRunoffEquivalentThreshold = 8,
+                LakeOverflowRunoffEquivalentThreshold = 32,
+                LakeFillFractionMultiplier = 2048
             };
         }
     }
@@ -147,8 +163,43 @@ namespace Farmware.WorldGeneration
     }
 
     /// <summary>
+    /// 閉鎖流域と基礎湖面の判定過程をビット単位で保持します。
+    /// 湖にならない理由も固定結果へ残し、診断表示が生成処理を再解釈しないようにします。
+    /// </summary>
+    [Flags]
+    public enum HydrologyLakeFlags : byte
+    {
+        /// <summary>海洋終端または長距離排水で、閉鎖流域の湖判定対象ではない状態です。</summary>
+        None = 0,
+
+        /// <summary>流向なしの陸上末端と、その末端へ流れる閉鎖流域を有限探索で解決した状態です。</summary>
+        BasinResolved = 1 << 0,
+
+        /// <summary>上流4,096件上限で流域境界が不完全なため、固定湖面を作らない状態です。</summary>
+        BasinTruncated = 1 << 1,
+
+        /// <summary>流域が4水文セル未満で、固定湖ではなく小池・一時水面候補に残した状態です。</summary>
+        BasinTooSmall = 1 << 2,
+
+        /// <summary>流出寄与が8未満で、固定湖ではなく乾燥窪地・一時湖候補に残した状態です。</summary>
+        InsufficientRunoff = 1 << 3,
+
+        /// <summary>越流標高が湖底以下で、正の水深を作れない状態です。</summary>
+        NoPositiveDepth = 1 << 4,
+
+        /// <summary>正の水深と流出条件を満たす固定湖候補が存在する閉鎖流域です。</summary>
+        FixedLake = 1 << 5,
+
+        /// <summary>この水文セルが湖底から連続する固定湖面セルへ含まれる状態です。</summary>
+        SurfaceCell = 1 << 6,
+
+        /// <summary>充填率が最大へ達し、SpillPointからの越流辺を持つ閉鎖流域です。</summary>
+        Overflow = 1 << 7
+    }
+
+    /// <summary>
     /// 固定水文が持つ自然接続を重複可能なビットとして表します。
-    /// C3-Cでは下流終端3種にStream・Riverを追加し、湖・地下水は後続PRで同じ値へ追加します。
+    /// C3-D1では下流終端3種、Stream・River、固定湖面のLakeを使用し、地下水は後続PRで追加します。
     /// </summary>
     [Flags]
     public enum HydrologyConnectionFlags : ushort
@@ -236,6 +287,33 @@ namespace Farmware.WorldGeneration
         /// <summary>C3-Bの相互排他的な下流終端と、後続PRで追加する自然接続を保持します。</summary>
         public HydrologyConnectionFlags ConnectionFlags;
 
+        /// <summary>閉鎖末端の正規化済み上流集合に含まれるセル数です。閉鎖流域以外では0です。</summary>
+        public uint BasinAreaCells;
+
+        /// <summary>安定した越流辺の流域内側セルXです。有効性はLakeFlagsのFixedLakeで判断します。</summary>
+        public int SpillInsideCellX;
+
+        /// <summary>安定した越流辺の流域内側セルYです。有効性はLakeFlagsのFixedLakeで判断します。</summary>
+        public int SpillInsideCellY;
+
+        /// <summary>安定した越流辺の流域外側セルXです。有効性はLakeFlagsのFixedLakeで判断します。</summary>
+        public int SpillOutsideCellX;
+
+        /// <summary>安定した越流辺の流域外側セルYです。有効性はLakeFlagsのFixedLakeで判断します。</summary>
+        public int SpillOutsideCellY;
+
+        /// <summary>流向なし末端の代表標高です。固定湖候補では湖底標高として使用します。</summary>
+        public ushort LakeBottomHeight;
+
+        /// <summary>流域境界で選んだ最小の越流標高です。境界未確定時は0です。</summary>
+        public ushort SpillHeight;
+
+        /// <summary>流出寄与へ2,048を掛けて0〜65,535へ飽和した固定湖面充填率です。</summary>
+        public ushort LakeFillFraction;
+
+        /// <summary>湖底から越流標高までを充填率で補間した固定湖面標高です。</summary>
+        public ushort LakeSurfaceHeight;
+
         /// <summary>隣接8セルのどちらへ流れるか、または下流なしを表す安定値です。</summary>
         public HydrologyFlowDirection FlowDirection;
 
@@ -244,6 +322,9 @@ namespace Farmware.WorldGeneration
 
         /// <summary>上流集合が4,096件上限で打ち切られたかなど、C3-Cの集水補助状態です。</summary>
         public HydrologyCatchmentFlags CatchmentFlags;
+
+        /// <summary>閉鎖流域の解決状態、湖にならない理由、湖面・越流の有無です。</summary>
+        public HydrologyLakeFlags LakeFlags;
 
         /// <summary>
         /// このセルが中心タイルの陸海判定による海洋流出口かを返します。
@@ -270,6 +351,22 @@ namespace Farmware.WorldGeneration
     }
 
     /// <summary>
+    /// 1論理チャンク内で同じ閉鎖末端へ到達する水文セル群を、並列湖Jobへ渡す作業項目です。
+    /// 基礎水文完成後に一度だけ作り、各セルを互いに重ならない一つの流域作業へ割り当てます。
+    /// </summary>
+    internal struct HydrologyLakeChunkWorkItem
+    {
+        /// <summary>流向なしとなる陸上末端の水平水文セル座標です。</summary>
+        public int SinkCellX;
+
+        /// <summary>流向なしとなる陸上末端の垂直水文セル座標です。</summary>
+        public int SinkCellY;
+
+        /// <summary>同じ末端を持つチャンク内64セルを、配列添字に対応するビットで保持します。</summary>
+        public ulong CellMask;
+    }
+
+    /// <summary>
     /// Seed、GeneratorVersion、固定設定、絶対整数座標だけから水文セルとD8流向を生成する純粋計算です。
     /// Burst Jobから呼べるよう、管理参照、例外、UnityEngine API、生成済みチャンク参照を使用しません。
     /// </summary>
@@ -288,10 +385,24 @@ namespace Farmware.WorldGeneration
             CellsPerChunkAxis * DeterministicHydrologyCatchmentResolver.MaximumFrontierCapacity;
 
         /// <summary>
+        /// チャンク全体で同じ閉鎖末端を一度だけ解決するときに使う、閉鎖流域セルの固定作業要素数です。
+        /// </summary>
+        internal const int ChunkBasinMemberCapacity = DeterministicHydrologyLakeResolver.MaximumBasinMembers;
+
+        /// <summary>チャンク全体の湖面解決で再利用する、流域座標Hash表の固定作業要素数です。</summary>
+        internal const int ChunkBasinLookupCapacity = DeterministicHydrologyLakeResolver.LookupCapacity;
+
+        /// <summary>最大8流域を並列解決するとき、各作業へ流域セル領域を一つずつ貸す総要素数です。</summary>
+        internal const int ParallelChunkBasinMemberCapacity = CellsPerChunkAxis * ChunkBasinMemberCapacity;
+
+        /// <summary>最大8流域を並列解決するとき、各作業へHash表領域を一つずつ貸す総要素数です。</summary>
+        internal const int ParallelChunkBasinLookupCapacity = CellsPerChunkAxis * ChunkBasinLookupCapacity;
+
+        /// <summary>
         /// 水文設定が確定した8×8格子、9点サンプル、有限の下流・上流上限を表すか検証します。
         /// </summary>
         /// <param name="settings">検証する固定水文設定です。</param>
-        /// <returns>暗黙補正せずC3-A〜C1の生成へ使用できる場合はtrueです。</returns>
+        /// <returns>暗黙補正せずC3-A〜D1の生成へ使用できる場合はtrueです。</returns>
         public static bool ValidateSettings(in HydrologyGenerationSettings settings)
         {
             return settings.CellSizeInTiles == 8
@@ -306,6 +417,11 @@ namespace Farmware.WorldGeneration
                 && settings.StreamRunoffEquivalentThreshold == 16
                 && settings.RiverRunoffEquivalentThreshold == 128
                 && settings.StreamRunoffEquivalentThreshold < settings.RiverRunoffEquivalentThreshold
+                && settings.MinimumClosedBasinAreaCells == 4
+                && settings.LakeRunoffEquivalentThreshold == 8
+                && settings.LakeOverflowRunoffEquivalentThreshold == 32
+                && settings.LakeRunoffEquivalentThreshold < settings.LakeOverflowRunoffEquivalentThreshold
+                && settings.LakeFillFractionMultiplier == 2048
                 && WorldGridConstants.LogicalChunkSize % settings.CellSizeInTiles == 0
                 && WorldGridConstants.LogicalChunkSize / settings.CellSizeInTiles == CellsPerChunkAxis;
         }
@@ -348,37 +464,36 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>
-        /// 1水文セルの代表値、D8下流、固定終端、最大4,096セルの集水・自然流出を生成します。
+        /// 1水文セルの代表値、D8下流、固定終端、最大4,096セルの集水・自然流出、閉鎖流域・基礎湖面を生成します。
         /// </summary>
         /// <param name="settings">Seed、GeneratorVersion、標高、水文設定を持つワールド設定です。</param>
         /// <param name="cellX">水平の絶対水文セル座標です。</param>
         /// <param name="cellY">垂直の絶対水文セル座標です。</param>
         /// <param name="cell">成功時の固定水文セル結果です。</param>
-        /// <returns>設定、中心、9サンプル、全D8隣接座標、下流経路が有効ならtrueです。</returns>
+        /// <returns>基礎水文と、必要な場合は閉鎖流域・湖面を固定上限内で完全に生成できた場合はtrueです。</returns>
         public static bool TryGenerateCell(
             in WorldGenerationSettings settings,
             int cellX,
             int cellY,
             out GeneratedHydrologyCell cell)
         {
-            using NativeArray<HydrologyUpstreamCandidate> frontier =
-                new NativeArray<HydrologyUpstreamCandidate>(
-                    DeterministicHydrologyCatchmentResolver.MaximumFrontierCapacity,
-                    Allocator.Temp,
-                    NativeArrayOptions.UninitializedMemory);
-            return TryGenerateCell(settings, cellX, cellY, frontier, out cell);
+            return DeterministicHydrologyLakeResolver.TryResolveCell(
+                settings,
+                cellX,
+                cellY,
+                out cell);
         }
 
         /// <summary>
-        /// 呼出元が再利用する上流フロンティアを使い、1水文セルの全固定値をmanaged allocationなしで生成します。
-        /// 単一セルAPIと直列Chunk経路は同じ配列を順番に再利用し、セルごとの大容量確保を避けます。
+        /// 呼出元が再利用する上流フロンティアと呼出し単位の湖作業配列を使い、1水文セルの全固定値を生成します。
+        /// 基礎集水のHeapだけは呼出元配列を再利用し、閉鎖流域の場合だけ追加の一時配列を確保します。
         /// </summary>
         /// <param name="settings">固定ワールド生成設定です。</param>
         /// <param name="cellX">水平の絶対水文セル座標です。</param>
         /// <param name="cellY">垂直の絶対水文セル座標です。</param>
         /// <param name="frontier">呼出元が所有する上流候補Heap用配列です。</param>
-        /// <param name="cell">成功時の下流・上流を含む固定水文結果です。</param>
-        /// <returns>設定、座標、全下流辺、全逆辺を固定上限内で検証できた場合はtrueです。</returns>
+        /// <param name="cell">成功時の下流、集水、閉鎖流域、湖面を含む固定水文結果です。</param>
+        /// <returns>基礎水文と、必要な場合は閉鎖流域・湖面を固定上限内で完全に生成できた場合はtrueです。</returns>
         internal static bool TryGenerateCell(
             in WorldGenerationSettings settings,
             int cellX,
@@ -386,7 +501,46 @@ namespace Farmware.WorldGeneration
             NativeArray<HydrologyUpstreamCandidate> frontier,
             out GeneratedHydrologyCell cell)
         {
-            return TryGenerateCell(settings, cellX, cellY, frontier, 0, out cell);
+            if (!TryGenerateCellWithoutLake(settings, cellX, cellY, frontier, 0, out cell))
+            {
+                // 下流だけが組み立てられた部分値を成功として返さないよう、基礎生成の失敗をそのまま伝えます。
+                cell = default;
+                return false;
+            }
+
+            if (cell.DownstreamTerminal != HydrologyConnectionFlags.ClosedBasin)
+            {
+                return true;
+            }
+
+            using NativeArray<HydrologyUpstreamCandidate> basinMembers =
+                new NativeArray<HydrologyUpstreamCandidate>(
+                    DeterministicHydrologyLakeResolver.MaximumBasinMembers,
+                    Allocator.Temp,
+                    NativeArrayOptions.UninitializedMemory);
+            using NativeArray<HydrologyBasinLookupSlot> basinLookup =
+                new NativeArray<HydrologyBasinLookupSlot>(
+                    DeterministicHydrologyLakeResolver.LookupCapacity,
+                    Allocator.Temp,
+                    NativeArrayOptions.ClearMemory);
+            HydrologyLakeBasinCache cache = default;
+            bool succeeded = DeterministicHydrologyLakeResolver.TryApplyLakeState(
+                settings,
+                ref cell,
+                frontier,
+                0,
+                basinMembers,
+                0,
+                basinLookup,
+                0,
+                ref cache);
+            if (!succeeded)
+            {
+                // 湖境界まで完成しなかったセルを、単一セルAPIの有効結果として誤利用させません。
+                cell = default;
+            }
+
+            return succeeded;
         }
 
         /// <summary>
@@ -399,7 +553,7 @@ namespace Farmware.WorldGeneration
         /// <param name="frontierStartIndex">この呼出しだけが使用する固定容量領域の先頭添字です。</param>
         /// <param name="cell">成功時の下流・上流を含む固定水文結果です。</param>
         /// <returns>設定、座標、下流辺、逆辺を固定上限内で検証できた場合はtrueです。</returns>
-        internal static bool TryGenerateCell(
+        internal static bool TryGenerateCellWithoutLake(
             in WorldGenerationSettings settings,
             int cellX,
             int cellY,
@@ -436,6 +590,53 @@ namespace Farmware.WorldGeneration
             cell.ConnectionFlags = downstreamResult.Terminal | catchmentResult.SurfaceWaterConnectionFlags;
             cell.CatchmentFlags = catchmentResult.CatchmentFlags;
             return true;
+        }
+
+        /// <summary>
+        /// 下流・集水の基礎結果へ閉鎖流域と湖面を追加し、同じ行の直前流域キャッシュを再利用します。
+        /// </summary>
+        /// <param name="settings">固定ワールド生成設定です。</param>
+        /// <param name="cellX">対象水文セルの水平絶対座標です。</param>
+        /// <param name="cellY">対象水文セルの垂直絶対座標です。</param>
+        /// <param name="frontier">上流候補Heapを保持する呼出元所有配列です。</param>
+        /// <param name="frontierStartIndex">この呼出しへ割り当てたHeap領域の先頭添字です。</param>
+        /// <param name="basinMembers">閉鎖流域の選択セルを保持する呼出元所有配列です。</param>
+        /// <param name="memberStartIndex">この呼出しへ割り当てた流域セル領域の先頭添字です。</param>
+        /// <param name="basinLookup">座標が閉鎖流域に属するかを引く固定Hash表です。</param>
+        /// <param name="lookupStartIndex">この呼出しへ割り当てたHash表領域の先頭添字です。</param>
+        /// <param name="cache">同じ作業領域で直前に解決した閉鎖末端と流域結果です。</param>
+        /// <param name="cell">成功時の下流、集水、閉鎖流域、湖面を含む固定結果です。</param>
+        /// <returns>基礎水文と、必要な場合は閉鎖流域を固定上限内で解決できた場合はtrueです。</returns>
+        internal static bool TryGenerateCell(
+            in WorldGenerationSettings settings,
+            int cellX,
+            int cellY,
+            NativeArray<HydrologyUpstreamCandidate> frontier,
+            int frontierStartIndex,
+            NativeArray<HydrologyUpstreamCandidate> basinMembers,
+            int memberStartIndex,
+            NativeArray<HydrologyBasinLookupSlot> basinLookup,
+            int lookupStartIndex,
+            ref HydrologyLakeBasinCache cache,
+            out GeneratedHydrologyCell cell)
+        {
+            return TryGenerateCellWithoutLake(
+                    settings,
+                    cellX,
+                    cellY,
+                    frontier,
+                    frontierStartIndex,
+                    out cell)
+                && DeterministicHydrologyLakeResolver.TryApplyLakeState(
+                    settings,
+                    ref cell,
+                    frontier,
+                    frontierStartIndex,
+                    basinMembers,
+                    memberStartIndex,
+                    basinLookup,
+                    lookupStartIndex,
+                    ref cache);
         }
 
         /// <summary>
@@ -670,6 +871,54 @@ namespace Farmware.WorldGeneration
                 return false;
             }
 
+            using NativeArray<HydrologyUpstreamCandidate> basinMembers =
+                new NativeArray<HydrologyUpstreamCandidate>(
+                    DeterministicHydrologyLakeResolver.MaximumBasinMembers,
+                    Allocator.Temp,
+                    NativeArrayOptions.UninitializedMemory);
+            using NativeArray<HydrologyBasinLookupSlot> basinLookup =
+                new NativeArray<HydrologyBasinLookupSlot>(
+                    DeterministicHydrologyLakeResolver.LookupCapacity,
+                    Allocator.Temp,
+                    NativeArrayOptions.ClearMemory);
+            return TryGenerateChunkCells(
+                settings,
+                chunkX,
+                chunkY,
+                cells,
+                frontier,
+                basinMembers,
+                basinLookup);
+        }
+
+        /// <summary>
+        /// 1論理チャンクの基礎水文を先に揃え、同じ閉鎖末端を共有するセル群へ湖面結果を一括適用します。
+        /// </summary>
+        /// <param name="settings">固定ワールド生成設定です。</param>
+        /// <param name="chunkX">水平の論理チャンク座標です。</param>
+        /// <param name="chunkY">垂直の論理チャンク座標です。</param>
+        /// <param name="cells">呼出元が所有する64件以上の出力配列です。</param>
+        /// <param name="frontier">上流探索で再利用する固定Heapです。</param>
+        /// <param name="basinMembers">1閉鎖流域の選択セルを保持する作業配列です。</param>
+        /// <param name="basinLookup">1閉鎖流域の座標と湖面状態を保持する固定Hash表です。</param>
+        /// <returns>64件の基礎水文と全閉鎖流域を固定上限内で解決できた場合はtrueです。</returns>
+        internal static bool TryGenerateChunkCells(
+            in WorldGenerationSettings settings,
+            int chunkX,
+            int chunkY,
+            NativeArray<GeneratedHydrologyCell> cells,
+            NativeArray<HydrologyUpstreamCandidate> frontier,
+            NativeArray<HydrologyUpstreamCandidate> basinMembers,
+            NativeArray<HydrologyBasinLookupSlot> basinLookup)
+        {
+            if (!cells.IsCreated || cells.Length < CellsPerChunk
+                || !DeterministicHydrologyCatchmentResolver.HasRequiredFrontierCapacity(frontier)
+                || !basinMembers.IsCreated || basinMembers.Length < ChunkBasinMemberCapacity
+                || !basinLookup.IsCreated || basinLookup.Length < ChunkBasinLookupCapacity)
+            {
+                return false;
+            }
+
             long firstCellX = (long)chunkX * CellsPerChunkAxis;
             long firstCellY = (long)chunkY * CellsPerChunkAxis;
             long lastCellX = firstCellX + CellsPerChunkAxis - 1L;
@@ -685,12 +934,13 @@ namespace Farmware.WorldGeneration
                 for (int localX = 0; localX < CellsPerChunkAxis; localX++)
                 {
                     int index = (localY * CellsPerChunkAxis) + localX;
-                    if (!TryGenerateCell(
-                        settings,
-                        (int)firstCellX + localX,
-                        (int)firstCellY + localY,
-                        frontier,
-                        out GeneratedHydrologyCell cell))
+                    if (!TryGenerateCellWithoutLake(
+                            settings,
+                            (int)firstCellX + localX,
+                            (int)firstCellY + localY,
+                            frontier,
+                            0,
+                            out GeneratedHydrologyCell cell))
                     {
                         return false;
                     }
@@ -699,11 +949,18 @@ namespace Farmware.WorldGeneration
                 }
             }
 
-            return true;
+            // 64セルの下流終端が揃ってからまとめることで、行をまたぐ同じ流域を一度だけ再構築します。
+            return TryApplyChunkLakeStates(
+                settings,
+                cells,
+                frontier,
+                basinMembers,
+                basinLookup);
         }
 
         /// <summary>
-        /// 1論理チャンクの指定した水文1行だけを生成し、8行を独立Jobとして並列化できるようにします。
+        /// 1論理チャンクの指定した水文1行について、湖面を除く基礎結果を生成します。
+        /// 8行を独立Jobで並列化し、全行完了後にTryApplyChunkLakeStatesで湖面をまとめて解決します。
         /// </summary>
         /// <param name="settings">固定ワールド生成設定です。</param>
         /// <param name="chunkX">水平の論理チャンク座標です。</param>
@@ -711,8 +968,8 @@ namespace Farmware.WorldGeneration
         /// <param name="localY">チャンク内の水文行です。0以上8未満に限定します。</param>
         /// <param name="cells">全8行が互いに異なる範囲へ書き込む64件以上の出力配列です。</param>
         /// <param name="frontier">各行へ固定容量ずつ割り当てた、8領域分の上流Heap配列です。</param>
-        /// <returns>指定行の8セルをすべて生成できた場合はtrueです。</returns>
-        internal static bool TryGenerateChunkCellRow(
+        /// <returns>指定行の8セルについて下流終端と集水結果まで生成できた場合はtrueです。</returns>
+        internal static bool TryGenerateChunkCellRowWithoutLake(
             in WorldGenerationSettings settings,
             int chunkX,
             int chunkY,
@@ -743,7 +1000,7 @@ namespace Farmware.WorldGeneration
             for (int localX = 0; localX < CellsPerChunkAxis; localX++)
             {
                 int index = (localY * CellsPerChunkAxis) + localX;
-                if (!TryGenerateCell(
+                if (!TryGenerateCellWithoutLake(
                         settings,
                         (int)firstCellX + localX,
                         (int)rowCellY,
@@ -755,6 +1012,235 @@ namespace Farmware.WorldGeneration
                 }
 
                 cells[index] = cell;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// 生成済み64セルを閉鎖末端ごとにまとめ、各流域を一度だけ構築して湖面状態を全対象セルへ適用します。
+        /// </summary>
+        /// <param name="settings">固定ワールド生成設定です。</param>
+        /// <param name="cells">基礎水文が生成済みの64件以上の配列です。成功時は湖面結果を上書きします。</param>
+        /// <param name="frontier">流域上流探索で再利用する固定Heapです。</param>
+        /// <param name="basinMembers">1閉鎖流域の選択セルを保持する作業配列です。</param>
+        /// <param name="basinLookup">1閉鎖流域の座標と湖面状態を保持する固定Hash表です。</param>
+        /// <returns>全閉鎖流域の湖面状態を固定上限内で解決できた場合はtrueです。</returns>
+        internal static bool TryApplyChunkLakeStates(
+            in WorldGenerationSettings settings,
+            NativeArray<GeneratedHydrologyCell> cells,
+            NativeArray<HydrologyUpstreamCandidate> frontier,
+            NativeArray<HydrologyUpstreamCandidate> basinMembers,
+            NativeArray<HydrologyBasinLookupSlot> basinLookup)
+        {
+            if (!cells.IsCreated || cells.Length < CellsPerChunk
+                || !DeterministicHydrologyCatchmentResolver.HasRequiredFrontierCapacity(frontier)
+                || !basinMembers.IsCreated || basinMembers.Length < ChunkBasinMemberCapacity
+                || !basinLookup.IsCreated || basinLookup.Length < ChunkBasinLookupCapacity)
+            {
+                return false;
+            }
+
+            for (int representativeIndex = 0; representativeIndex < CellsPerChunk; representativeIndex++)
+            {
+                GeneratedHydrologyCell representative = cells[representativeIndex];
+                if (representative.DownstreamTerminal != HydrologyConnectionFlags.ClosedBasin
+                    || (representative.LakeFlags & HydrologyLakeFlags.BasinResolved) != 0)
+                {
+                    continue;
+                }
+
+                // キャッシュが参照するHash表は次の流域で上書きされるため、同じ終端のセルを続けて全件処理します。
+                HydrologyLakeBasinCache cache = default;
+                if (!DeterministicHydrologyLakeResolver.TryApplyLakeState(
+                        settings,
+                        ref representative,
+                        frontier,
+                        0,
+                        basinMembers,
+                        0,
+                        basinLookup,
+                        0,
+                        ref cache))
+                {
+                    return false;
+                }
+
+                cells[representativeIndex] = representative;
+                for (int candidateIndex = representativeIndex + 1;
+                    candidateIndex < CellsPerChunk;
+                    candidateIndex++)
+                {
+                    GeneratedHydrologyCell candidate = cells[candidateIndex];
+                    if (candidate.DownstreamTerminal != HydrologyConnectionFlags.ClosedBasin
+                        || candidate.DownstreamReachCellX != representative.DownstreamReachCellX
+                        || candidate.DownstreamReachCellY != representative.DownstreamReachCellY)
+                    {
+                        continue;
+                    }
+
+                    if (!DeterministicHydrologyLakeResolver.TryApplyLakeState(
+                            settings,
+                            ref candidate,
+                            frontier,
+                            0,
+                            basinMembers,
+                            0,
+                            basinLookup,
+                            0,
+                            ref cache))
+                    {
+                        return false;
+                    }
+
+                    cells[candidateIndex] = candidate;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// 基礎水文64件を閉鎖末端ごとにまとめ、並列湖Jobが互いに異なるセルだけを書く作業一覧を作ります。
+        /// </summary>
+        /// <param name="cells">湖面適用前の基礎水文64件以上です。</param>
+        /// <param name="workItems">最大64個の一意な閉鎖末端と対象セルMaskを受け取る配列です。</param>
+        /// <param name="workItemCount">成功時に作成した一意な閉鎖末端数です。</param>
+        /// <returns>配列容量が有効で、全閉鎖流域セルを重複しない作業へ割り当てた場合はtrueです。</returns>
+        internal static bool TryBuildChunkLakeWorkItems(
+            NativeArray<GeneratedHydrologyCell> cells,
+            NativeArray<HydrologyLakeChunkWorkItem> workItems,
+            out int workItemCount)
+        {
+            workItemCount = 0;
+            if (!cells.IsCreated || cells.Length < CellsPerChunk
+                || !workItems.IsCreated || workItems.Length < CellsPerChunk)
+            {
+                return false;
+            }
+
+            for (int cellIndex = 0; cellIndex < CellsPerChunk; cellIndex++)
+            {
+                GeneratedHydrologyCell cell = cells[cellIndex];
+                if (cell.DownstreamTerminal != HydrologyConnectionFlags.ClosedBasin)
+                {
+                    continue;
+                }
+
+                int matchingWorkItemIndex = -1;
+                for (int workItemIndex = 0; workItemIndex < workItemCount; workItemIndex++)
+                {
+                    HydrologyLakeChunkWorkItem existing = workItems[workItemIndex];
+                    if (existing.SinkCellX == cell.DownstreamReachCellX
+                        && existing.SinkCellY == cell.DownstreamReachCellY)
+                    {
+                        matchingWorkItemIndex = workItemIndex;
+                        break;
+                    }
+                }
+
+                ulong cellBit = 1UL << cellIndex;
+                if (matchingWorkItemIndex >= 0)
+                {
+                    // 値型を取り出してから書き戻し、同じ末端のMaskだけへ現在セルを追加します。
+                    HydrologyLakeChunkWorkItem existing = workItems[matchingWorkItemIndex];
+                    existing.CellMask |= cellBit;
+                    workItems[matchingWorkItemIndex] = existing;
+                    continue;
+                }
+
+                workItems[workItemCount] = new HydrologyLakeChunkWorkItem
+                {
+                    SinkCellX = cell.DownstreamReachCellX,
+                    SinkCellY = cell.DownstreamReachCellY,
+                    CellMask = cellBit
+                };
+                workItemCount++;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// 並列湖Jobの1担当が作業一覧を飛び石状に受け持ち、専用ワーク領域で各閉鎖流域を解決します。
+        /// 作業Maskは重ならないため、別担当と同じ水文セルへ書きません。
+        /// </summary>
+        /// <param name="settings">固定ワールド生成設定です。</param>
+        /// <param name="cells">基礎水文64件です。担当Maskのセルだけへ湖面結果を書き戻します。</param>
+        /// <param name="workItems">閉鎖末端ごとの重複しない対象セルMaskです。</param>
+        /// <param name="workItemCount">作業一覧内の有効要素数です。</param>
+        /// <param name="laneIndex">0以上laneCount未満の担当番号です。</param>
+        /// <param name="laneCount">同時に作業領域を所有する担当総数です。</param>
+        /// <param name="frontier">担当ごとに独立した上流候補Heap領域を持つ配列です。</param>
+        /// <param name="basinMembers">担当ごとに独立した流域セル領域を持つ配列です。</param>
+        /// <param name="basinLookup">担当ごとに独立した流域所属Hash表領域を持つ配列です。</param>
+        /// <returns>担当する全閉鎖流域を固定上限内で解決できた場合はtrueです。</returns>
+        internal static bool TryApplyChunkLakeWorkItemsLane(
+            in WorldGenerationSettings settings,
+            NativeArray<GeneratedHydrologyCell> cells,
+            NativeArray<HydrologyLakeChunkWorkItem> workItems,
+            int workItemCount,
+            int laneIndex,
+            int laneCount,
+            NativeArray<HydrologyUpstreamCandidate> frontier,
+            NativeArray<HydrologyUpstreamCandidate> basinMembers,
+            NativeArray<HydrologyBasinLookupSlot> basinLookup)
+        {
+            if (!cells.IsCreated || cells.Length < CellsPerChunk
+                || !workItems.IsCreated || workItemCount < 0 || workItemCount > workItems.Length
+                || laneCount != CellsPerChunkAxis || laneIndex < 0 || laneIndex >= laneCount
+                || !frontier.IsCreated || frontier.Length < ParallelChunkFrontierCapacity
+                || !basinMembers.IsCreated || basinMembers.Length < ParallelChunkBasinMemberCapacity
+                || !basinLookup.IsCreated || basinLookup.Length < ParallelChunkBasinLookupCapacity)
+            {
+                return false;
+            }
+
+            int frontierStartIndex = laneIndex
+                * DeterministicHydrologyCatchmentResolver.MaximumFrontierCapacity;
+            int memberStartIndex = laneIndex * ChunkBasinMemberCapacity;
+            int lookupStartIndex = laneIndex * ChunkBasinLookupCapacity;
+            for (int workItemIndex = laneIndex;
+                workItemIndex < workItemCount;
+                workItemIndex += laneCount)
+            {
+                HydrologyLakeChunkWorkItem workItem = workItems[workItemIndex];
+                HydrologyLakeBasinCache cache = default;
+                bool appliedAnyCell = false;
+                for (int cellIndex = 0; cellIndex < CellsPerChunk; cellIndex++)
+                {
+                    if ((workItem.CellMask & (1UL << cellIndex)) == 0UL)
+                    {
+                        continue;
+                    }
+
+                    GeneratedHydrologyCell cell = cells[cellIndex];
+                    if (cell.DownstreamTerminal != HydrologyConnectionFlags.ClosedBasin
+                        || cell.DownstreamReachCellX != workItem.SinkCellX
+                        || cell.DownstreamReachCellY != workItem.SinkCellY
+                        || !DeterministicHydrologyLakeResolver.TryApplyLakeState(
+                            settings,
+                            ref cell,
+                            frontier,
+                            frontierStartIndex,
+                            basinMembers,
+                            memberStartIndex,
+                            basinLookup,
+                            lookupStartIndex,
+                            ref cache))
+                    {
+                        return false;
+                    }
+
+                    cells[cellIndex] = cell;
+                    appliedAnyCell = true;
+                }
+
+                if (!appliedAnyCell)
+                {
+                    // 空Maskは構築処理の不整合なので、部分的な湖面を公開せず明示的に失敗させます。
+                    return false;
+                }
             }
 
             return true;
@@ -777,36 +1263,52 @@ namespace Farmware.WorldGeneration
                     DeterministicHydrologyCatchmentResolver.MaximumFrontierCapacity,
                     Allocator.Temp,
                     NativeArrayOptions.UninitializedMemory);
-            long firstCellX = (long)chunkCoordinate.X * CellsPerChunkAxis;
-            long firstCellY = (long)chunkCoordinate.Y * CellsPerChunkAxis;
-            for (int localY = 0; localY < CellsPerChunkAxis; localY++)
+            using NativeArray<HydrologyUpstreamCandidate> basinMembers =
+                new NativeArray<HydrologyUpstreamCandidate>(
+                    DeterministicHydrologyLakeResolver.MaximumBasinMembers,
+                    Allocator.Temp,
+                    NativeArrayOptions.UninitializedMemory);
+            using NativeArray<HydrologyBasinLookupSlot> basinLookup =
+                new NativeArray<HydrologyBasinLookupSlot>(
+                    DeterministicHydrologyLakeResolver.LookupCapacity,
+                    Allocator.Temp,
+                    NativeArrayOptions.ClearMemory);
+            using NativeArray<GeneratedHydrologyCell> cells =
+                new NativeArray<GeneratedHydrologyCell>(
+                    CellsPerChunk,
+                    Allocator.Temp,
+                    NativeArrayOptions.UninitializedMemory);
+            if (!TryGenerateChunkCells(
+                    settings,
+                    chunkCoordinate.X,
+                    chunkCoordinate.Y,
+                    cells,
+                    frontier,
+                    basinMembers,
+                    basinLookup))
             {
-                for (int localX = 0; localX < CellsPerChunkAxis; localX++)
-                {
-                    long candidateX = firstCellX + localX;
-                    long candidateY = firstCellY + localY;
-                    if (candidateX < int.MinValue || candidateX > int.MaxValue
-                        || candidateY < int.MinValue || candidateY > int.MaxValue
-                        || !TryGenerateCell(
-                            settings,
-                            (int)candidateX,
-                            (int)candidateY,
-                            frontier,
-                            out GeneratedHydrologyCell cell))
-                    {
-                        // 不正設定や座標端を通常セルと同じdefault値へ潰さず、失敗自体を比較可能にします。
-                        return WorldSeedUtility.Mix64(currentHash ^ 0xC3A0FA11ED000001UL);
-                    }
+                // 不正設定や座標端を通常セルと同じdefault値へ潰さず、失敗自体を比較可能にします。
+                return WorldSeedUtility.Mix64(currentHash ^ 0xC3A0FA11ED000001UL);
+            }
 
-                    currentHash = HashCell(currentHash, cell);
-                }
+            for (int index = 0; index < CellsPerChunk; index++)
+            {
+                currentHash = HashCell(currentHash, cells[index]);
             }
 
             return currentHash;
         }
 
-        /// <summary>代表値と海洋判定だけを生成し、D8隣接から再帰的に流向を求めない内部処理です。</summary>
-        private static bool TryGenerateCellBasis(
+        /// <summary>
+        /// 代表値と海洋判定だけを生成し、D8隣接から再帰的に流向を求めない内部処理です。
+        /// 流向候補と湖の越流辺比較は標高・順位だけが必要なため、同じ基礎値を共有して不要な隣接生成を避けます。
+        /// </summary>
+        /// <param name="settings">標高、海面、順位Saltを含む固定ワールド生成設定です。</param>
+        /// <param name="cellX">水平の絶対水文セル座標です。</param>
+        /// <param name="cellY">垂直の絶対水文セル座標です。</param>
+        /// <param name="cell">成功時の代表標高、中心標高、順位、海洋フラグを持つ基礎セルです。</param>
+        /// <returns>中心と固定9サンプル座標が有効で、基礎セルを生成できた場合はtrueです。</returns>
+        internal static bool TryGenerateCellBasis(
             in WorldGenerationSettings settings,
             int cellX,
             int cellY,
@@ -1021,6 +1523,16 @@ namespace Farmware.WorldGeneration
                 ulong catchmentValues = cell.HydrologyMoisture;
                 catchmentValues |= (ulong)cell.RunoffEquivalentCells << 16;
                 catchmentValues |= (ulong)cell.MaximumContributingDistance << 32;
+                ulong basinArea = cell.BasinAreaCells;
+                basinArea |= (ulong)(byte)cell.LakeFlags << 32;
+                ulong spillInside = (uint)cell.SpillInsideCellX;
+                spillInside |= (ulong)(uint)cell.SpillInsideCellY << 32;
+                ulong spillOutside = (uint)cell.SpillOutsideCellX;
+                spillOutside |= (ulong)(uint)cell.SpillOutsideCellY << 32;
+                ulong lakeValues = cell.LakeBottomHeight;
+                lakeValues |= (ulong)cell.SpillHeight << 16;
+                lakeValues |= (ulong)cell.LakeFillFraction << 32;
+                lakeValues |= (ulong)cell.LakeSurfaceHeight << 48;
 
                 ulong coordinateHash = WorldSeedUtility.Mix64(currentHash ^ coordinate);
                 ulong downstreamHash = WorldSeedUtility.Mix64(coordinateHash ^ downstream);
@@ -1030,7 +1542,11 @@ namespace Farmware.WorldGeneration
                 ulong catchmentHash = WorldSeedUtility.Mix64(valuesHash ^ catchmentCount);
                 catchmentHash = WorldSeedUtility.Mix64(catchmentHash ^ runoffMoistureSum);
                 catchmentHash = WorldSeedUtility.Mix64(catchmentHash ^ catchmentValues);
-                return WorldSeedUtility.Mix64(catchmentHash ^ cell.PlateauRank);
+                ulong basinHash = WorldSeedUtility.Mix64(catchmentHash ^ basinArea);
+                basinHash = WorldSeedUtility.Mix64(basinHash ^ spillInside);
+                basinHash = WorldSeedUtility.Mix64(basinHash ^ spillOutside);
+                basinHash = WorldSeedUtility.Mix64(basinHash ^ lakeValues);
+                return WorldSeedUtility.Mix64(basinHash ^ cell.PlateauRank);
             }
         }
     }

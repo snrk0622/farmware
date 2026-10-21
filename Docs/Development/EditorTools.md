@@ -5,7 +5,7 @@
 
 ## 1. 用途
 
-本書のメニュー・設定・表示は、TERRAIN-01C2-BまでのdevelopとTERRAIN-01C3-C2の現行実装境界を説明する。C3-A〜C2は固定水文の基礎格子、D8流向、固定下流終端、集水面積、自然流出、Level 0〜6集約SummaryをSimulation側へ追加するが、Editorメニュー、Debug Visualization、Map Viewerの水文モードは追加しない。集約Summaryの利用・分解・キャッシュ統計も性能テストだけで記録し、Editor表示へはまだ渡さない。流向・下流終端・集水・河川・湖の可視化と分布監査はC3-Dでまとめて接続する。2026-10-19の[改訂マップ仕様](../GameSpecification/RandomMapGenerationSpecification.md)の可変Block、最終18Biome、水中文脈表示もまだツールに実装されていない。文書改訂やC3-A〜C2の非表示データ追加だけで以下のメニューの機能が増えたとは扱わない。
+本書のメニュー・設定・表示は、TERRAIN-01C2-BまでのdevelopとTERRAIN-01C3-D1の現行実装境界を説明する。C3-A〜D1は固定水文の基礎格子、D8流向、固定下流終端、集水面積、自然流出、Level 0〜6集約Summary、閉鎖流域境界、基礎湖面をSimulation側へ追加するが、Editorメニュー、Debug Visualization、Map Viewerの水文モードはまだ追加しない。集約Summaryの利用・分解・キャッシュ統計も性能テストだけで記録し、Editor表示へはまだ渡さない。流向・下流終端・集水・河川・湖の可視化と複数Seed分布監査は同じPRのC3-D2 commitで接続する。2026-10-19の[改訂マップ仕様](../GameSpecification/RandomMapGenerationSpecification.md)の可変Block、最終18Biome、水中文脈表示もまだツールに実装されていない。文書改訂やC3-A〜D1の非表示データ追加だけで以下のメニューの機能が増えたとは扱わない。
 
 開発者専用のUnity Editorツールは、ワールド生成結果の調査、調整前後の比較、確認用Sceneとフォールバック素材の構築に使用する。
 これらは製品版のプレイヤー操作へ含めず、ランタイムのゲーム状態を変更するデバッグ操作にも使用しない。
@@ -73,7 +73,7 @@ Profilerでは、全体の`Farmware.WorldGeneration.TilemapPresentation`と原�
 
 生成の非同期公開比較では、`ChunkGenerationPublish`が完了確認後のECSコピー、`ChunkGenerationSchedule`が作業枠確保・Job投入を計測する。接頭辞はいずれも`Farmware.WorldGeneration.`である。`PresentationWorkCollection`と`ChunkStreaming`も同時に確認し、生成Jobの待ちが別の区間へ移っていないことを調べる。Workerの生成は`GenerateChunkJob (Burst)`で確認する。開発者可視化は従来どおり`ReadyToApply`／`Active`の完成Bufferだけを読むため、生成中の作業配列は表示しない。新規メニューやプレイヤー用キーは追加しない。
 
-ANIMAL-01Bの個体群Worldでは、通常フレームで座標順の有限バッチを先行投入し、完了待ちと公開だけを固定Tick入口へまとめる。固定Tick時点で未投入なら同じ順で補完し、各Tickで同時生成上限の1バッチを処理するため、複数の追いつきTickが1フレームへ集まっても次バッチを進められる。C3-C1では1チャンクの水文8行と地形・資源を9作業へ分け、行ごとに独立したHeap領域を使ってWorker上で並列生成する。`ChunkGenerationBoundaryWait`はその境界と停止中の前フレームバッチ公開の待ちを計測する。既定2件・10 Tick/秒の上限20チャンク/秒は維持するが、要求直後や最大追いつき4 Tickのフレームには同期費用が残り得る。最大ズーム・通常／Shift移動・停止中移動で地形が順次表示され、再開後に`Animal Population`の確定位置が追加されることを確認する。候補条件・色・凡例・HUDは変更せず、生成中の専用配列も可視化へ渡さない。
+ANIMAL-01Bの個体群Worldでは、通常フレームで座標順の有限バッチを先行投入する。バッチが未完了なら`FixedTickReadinessState`で固定Tick自体を延期し、Main ThreadでJobを待たない。完成後の固定Tick入口で1バッチを一括公開して次を投入し、同じ描画フレームの追加追いつきTickは止める。待機開始時に到来済みのTickは最大1件だけ保持し、それを超える壁時計遅延は通常の追いつき上限と同様に破棄する。C3-C1では1チャンクの水文8行と地形・資源を9作業へ分け、行ごとに独立したHeap領域を使ってWorker上で並列生成する。`ChunkGenerationBoundaryWait`、`ChunkGenerationHydrologyBaseWait`、`ChunkGenerationLakeWait`、`ChunkGenerationTerrainWait`は、`IsCompleted`確認後の完成済みHandle確定費用を計測し、未完了Jobの待機時間は含めない。最大ズーム・通常／Shift移動・停止中移動で地形が順次表示され、再開後に`Animal Population`の確定位置が追加されることを確認する。候補条件・色・凡例・HUDは変更せず、生成中の専用配列も可視化へ渡さない。
 
 `Animal Population`の確定位置は、全個体を毎Repaintで配列化せず、ECS Chunkの範囲・位置変更版・構造変更版を使って可視位置だけをキャッシュする。これは64×64論理地域とは異なる格納Chunk単位の粗い索引で、範囲が画面と重なるChunk内では個体ごとの座標判定を行う。初回・位置書込・構造変更時には該当Chunkの全座標を読み直すが、不変の画面外Chunkは範囲だけで除外する。Camera移動、個体移動、個体の削除、World切替で色が古いまま残らないことを確認する。広域個体が同じECS Chunkに混在する場合や全個体が毎Tick移動する場合の費用まで解消したとは扱わない。
 
