@@ -1,8 +1,8 @@
 # TERRAIN-01C5 Biome分類と環境境界の実装記録
 
-- 最終更新日: 2026-10-22
-- 状態: C5-A 完了
-- 対象ブランチ: `terrain-01c5a-biome-definition-validation`
+- 最終更新日: 2026-10-23
+- 状態: C5-A完了、C5-B1 AI確認完了・人間確認待ち
+- 対象ブランチ: `terrain-01c5b-biome-classification`
 - 正仕様: [バイオーム・生態コンテンツ仕様](../GameSpecification/BiomeEcologyContentSpecification.md)、[ランダムマップ・可変地形仕様](../GameSpecification/RandomMapGenerationSpecification.md)
 
 ## 1. C5の目的
@@ -16,7 +16,9 @@ TERRAIN-01C5は、旧7Biomeを延命せず、地上18Biomeの候補抽出、特�
 | 項目 | 目的 | 製品生成への影響 |
 | --- | --- | --- |
 | C5-A | 新18Biome Definitionと読込検証を固定する | 旧7Biomeの生成結果はまだ変更しない |
-| C5-B | 候補・AxisFit・重み・特殊優先・同点解決を純粋計算として実装する | ECS Bufferへはまだ接続しない |
+| C5-B1 | 通常候補のゲート・AxisFit・重み・候補別Variationを純粋計算として実装する | ECS Bufferへはまだ接続しない |
+| C5-B2 | 全通常候補の安定順位・上位2候補・候補なしを純粋計算として実装する | ECS Bufferへはまだ接続しない |
+| C5-B3 | 火山中核・水文特殊の優先と最終選択を純粋計算として実装する | ECS Bufferへはまだ接続しない |
 | C5-C | ECS生成順を新分類器へ切り替え、旧生成経路を削除する | 新18Biomeへ非互換切替する |
 | C5-D | 動物Mask、状態ハッシュ、Presentation、Editor診断を新IDへ移行する | 全利用側を新18IDへ統一する |
 | C5-E | 複数Seed分布、全153ペア境界、旧経路不存在を監査する | C5全体の完了を判定する |
@@ -61,3 +63,24 @@ C5-Aでは新Definitionを旧7Biome分類器、ECS生成Buffer、Presentation、
 - 2026-10-23に、旧7Biome表示へ意図しない変化がないことの人間確認を完了した。
 
 差分レビューではP0・P1のブロッカーなし、空白エラーなし、C5-Aの旧7Biome生成結果への接続なしを確認した。
+
+## 6. C5-B1の実装契約
+
+C5-Bは初心者向けコメント、境界テスト、文書を含めると差分約500行を大きく超えるため、通常候補の個別評価、通常候補の安定順位、特殊優先と最終選択の3 commit単位へ分ける。C5-B1では、1つの通常Definitionを独立に評価する純粋計算だけを固定する。
+
+- 海面未満、通常スコアを使わないDefinition、水文特殊Definition、無効な安定ID・地質・Variation設定、各連続軸の許容範囲外を候補から除外する。
+- 亜熱帯海洋性林は海洋影響段階5、火山・地熱地帯は活動的火山適性を持つ地質と火山活動段階4を必須とする。段階5の火山中核はC5-B3の特殊優先へ残し、通常候補として受理しない。
+- `AxisFit`は許容範囲端を0、代表範囲を65,535とする両端包含の台形型とし、片側傾斜がない範囲でも0除算しない。
+- 8軸の積と加算は符号付き64bitで行い、重み合計256の理論最大16,776,960を超えない。許容端でScoreが0でも候補資格は維持する。
+- `BiomeVariation`は既存Biome Warp後座標へ256タイル・2オクターブを適用する。既存`SampleFractalNoise`の半減比重により256・128タイルを2：1で合成し、Definition固有Saltを使う。
+- 評価結果は安定ID、8軸適性、Score、Variationを保持し、C5-B2の順位決定とC5-Eの診断が同じ計算結果を再利用できるようにする。
+
+C5-B1はECS生成、旧7Biome分類、状態ハッシュ、Scene、Prefab、Presentationを変更しない。通常候補全件の順位と候補なしはC5-B2、火山中核・水文特殊・最終選択はC5-B3で実装する。
+
+## 7. C5-B1の検証
+
+`DeterministicBiomeClassifierTests`は、台形型の許容端・傾斜・代表範囲・範囲外、片側傾斜なし、最大64bit Score、0点候補、Warp後負座標とDefinition固有SaltのVariation、海岸・火山地質ゲート、海面直下と閾値上、不正な役割・設定・地質IDの拒否と部分結果非公開を検証する。`BiomeDefinitionCatalogTests`はVariation格子256タイルと2オクターブの共有既定値、および不正値の拒否を追加確認する。
+
+2026-10-23の接続済みUnity 6000.3.8f1 Editorでは、厳格再コンパイルがエラー0件・警告0件、`DeterministicBiomeClassifierTests` 8件、`BiomeDefinitionCatalogTests` 8件、World Generation EditMode 565件がすべて成功した。全体テスト中の警告6件は既知のテスト用System Group順序属性であり、分類器のJob・Allocator警告ではない。Unity CLI `1.0.0-beta.14`がPipeline `0.8.0-exp.1`へ旧コマンド名を照会した互換エラー7件も内容確認後にConsoleから消去し、最終実状態はコンパイル失敗なし、エラー0件、警告0件である。
+
+差分レビューではP0・P1のブロッカー、空白エラー、旧7Biome生成への接続、Scene・Prefab・Presentation変更がないことを確認した。純粋計算だけの変更であるためPlayModeと性能計測は実行せず、旧7Biome表示へ意図しない変化がないことの人間確認を残す。

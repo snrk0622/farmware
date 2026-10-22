@@ -1,0 +1,376 @@
+// このファイルは、TERRAIN-01C5-B1の通常Biome候補評価、台形型適性、64bit加重和、候補別Variationを検証します。
+// ECS生成と旧7Biomeはまだ切り替えず、新18Biome分類器の純粋計算だけをSceneなしのEditModeテストで固定します。
+
+using NUnit.Framework;
+
+namespace Farmware.WorldGeneration.Tests
+{
+    /// <summary>
+    /// 通常Biomeの候補ゲート、軸別適性、スコア、BiomeVariationを保証します。
+    /// </summary>
+    public sealed class DeterministicBiomeClassifierTests
+    {
+        /// <summary>
+        /// 台形型適性の許容端、傾斜、代表範囲、範囲外を両側で実行し、整数切り捨て式を保証します。
+        /// </summary>
+        [Test]
+        public void AxisFit_UsesInclusiveTrapezoidAndRejectsOutsideValues()
+        {
+            BiomeAxisRange range = new BiomeAxisRange
+            {
+                AllowedMin = 100,
+                PreferredMin = 200,
+                PreferredMax = 300,
+                AllowedMax = 400
+            };
+
+            AssertAxisFit(range, 100, true, 0);
+            AssertAxisFit(range, 150, true, 32767);
+            AssertAxisFit(range, 200, true, ushort.MaxValue);
+            AssertAxisFit(range, 250, true, ushort.MaxValue);
+            AssertAxisFit(range, 300, true, ushort.MaxValue);
+            AssertAxisFit(range, 350, true, 32767);
+            AssertAxisFit(range, 400, true, 0);
+            AssertAxisFit(range, 99, false, 0);
+            AssertAxisFit(range, 401, false, 0);
+        }
+
+        /// <summary>
+        /// 許容端と代表端が一致する片側傾斜なしの範囲でも0除算せず、代表値と範囲外を分けることを保証します。
+        /// </summary>
+        [Test]
+        public void AxisFit_DegenerateSlopeEndsDoNotDivideByZero()
+        {
+            BiomeAxisRange lowerFlat = new BiomeAxisRange
+            {
+                AllowedMin = 100,
+                PreferredMin = 100,
+                PreferredMax = 200,
+                AllowedMax = 300
+            };
+            BiomeAxisRange upperFlat = new BiomeAxisRange
+            {
+                AllowedMin = 100,
+                PreferredMin = 200,
+                PreferredMax = 300,
+                AllowedMax = 300
+            };
+
+            AssertAxisFit(lowerFlat, 100, true, ushort.MaxValue);
+            AssertAxisFit(lowerFlat, 99, false, 0);
+            AssertAxisFit(upperFlat, 300, true, ushort.MaxValue);
+            AssertAxisFit(upperFlat, 301, false, 0);
+        }
+
+        /// <summary>
+        /// 全重み付き軸を最高適性にした候補で、64bit加重和が理論最大16,776,960へ正確に到達することを保証します。
+        /// </summary>
+        [Test]
+        public void CandidateEvaluation_AllPreferredAxesReachMaximumScore()
+        {
+            BiomeClassificationSettings settings = BiomeDefinitionCatalog.CreateDefault();
+            Assert.That(BiomeDefinitionCatalog.TryGetDefinition(
+                settings,
+                BiomeStableIds.TemperateGrassland,
+                out BiomeDefinition definition), Is.True);
+
+            // 地質軸も最高適性に揃え、重み合計256の理論上限を直接検証します。
+            definition.GeologyFits[0] = ushort.MaxValue;
+            BiomeClassificationInput input = CreateInput(
+                terrainTemperature: 30000,
+                baseMoisture: 38000,
+                elevation: 30000,
+                woodyVegetation: 20000,
+                ruggedness: 10000,
+                coastalInfluence: 0,
+                volcanicActivity: 0,
+                geologyClass: GeologyClass.UnconsolidatedSediment);
+
+            bool succeeded = DeterministicBiomeClassifier.TryEvaluateNormalCandidate(
+                settings,
+                123UL,
+                1,
+                definition,
+                input,
+                out BiomeCandidateEvaluation evaluation);
+
+            Assert.That(succeeded, Is.True);
+            Assert.That(evaluation.Score, Is.EqualTo(DeterministicBiomeClassifier.MaximumBiomeScore));
+            Assert.That(evaluation.TerrainTemperatureFit, Is.EqualTo(ushort.MaxValue));
+            Assert.That(evaluation.BaseMoistureFit, Is.EqualTo(ushort.MaxValue));
+            Assert.That(evaluation.ElevationFit, Is.EqualTo(ushort.MaxValue));
+            Assert.That(evaluation.WoodyVegetationFit, Is.EqualTo(ushort.MaxValue));
+            Assert.That(evaluation.TerrainRuggednessFit, Is.EqualTo(ushort.MaxValue));
+            Assert.That(evaluation.GeologyFit, Is.EqualTo(ushort.MaxValue));
+        }
+
+        /// <summary>
+        /// 許容範囲端で全使用軸が0点でも候補資格を維持し、候補なしへ誤変換しないことを保証します。
+        /// </summary>
+        [Test]
+        public void CandidateEvaluation_ZeroScoreAtAllowedBoundsRemainsEligible()
+        {
+            BiomeClassificationSettings settings = BiomeDefinitionCatalog.CreateDefault();
+            Assert.That(BiomeDefinitionCatalog.TryGetDefinition(
+                settings,
+                BiomeStableIds.TemperateGrassland,
+                out BiomeDefinition definition), Is.True);
+
+            definition.GeologyFits[0] = 0;
+            // 草原の起伏軸は許容下限から最高適性なので、その40点分の重みを0適性になる気温軸へ移して合計256を保ちます。
+            definition.AxisWeights.TerrainTemperature += definition.AxisWeights.TerrainRuggedness;
+            definition.AxisWeights.TerrainRuggedness = 0;
+            BiomeClassificationInput input = CreateInput(
+                definition.TerrainTemperature.AllowedMin,
+                definition.BaseMoisture.AllowedMin,
+                definition.Elevation.AllowedMin,
+                definition.WoodyVegetation.AllowedMin,
+                definition.TerrainRuggedness.AllowedMin,
+                definition.CoastalInfluence.AllowedMin,
+                definition.VolcanicActivity.AllowedMin,
+                GeologyClass.UnconsolidatedSediment);
+
+            bool succeeded = DeterministicBiomeClassifier.TryEvaluateNormalCandidate(
+                settings,
+                456UL,
+                2,
+                definition,
+                input,
+                out BiomeCandidateEvaluation evaluation);
+
+            Assert.That(succeeded, Is.True);
+            Assert.That(evaluation.Score, Is.Zero);
+        }
+
+        /// <summary>
+        /// 候補のVariationがWarp後座標、Seed、Version、Definition固有Saltから同じノイズ関数で生成されることを保証します。
+        /// </summary>
+        [Test]
+        public void CandidateVariation_UsesDefinitionSaltAndWarpedCoordinates()
+        {
+            const ulong worldSeed = 0xFEDCBA9876543210UL;
+            const int generatorVersion = 7;
+            BiomeClassificationSettings settings = BiomeDefinitionCatalog.CreateDefault();
+            Assert.That(BiomeDefinitionCatalog.TryGetDefinition(
+                settings,
+                BiomeStableIds.TemperateGrassland,
+                out BiomeDefinition definition), Is.True);
+            BiomeClassificationInput input = CreateInput(
+                30000,
+                38000,
+                30000,
+                20000,
+                10000,
+                0,
+                0,
+                GeologyClass.UnconsolidatedSediment,
+                warpedSampleX: -513,
+                warpedSampleY: 1025);
+
+            Assert.That(DeterministicBiomeClassifier.TryEvaluateNormalCandidate(
+                settings,
+                worldSeed,
+                generatorVersion,
+                definition,
+                input,
+                out BiomeCandidateEvaluation evaluation), Is.True);
+            ushort expected = DeterministicNoise.SampleFractalNoise(
+                worldSeed,
+                generatorVersion,
+                -513,
+                1025,
+                settings.VariationCellSizeInTiles,
+                settings.VariationOctaveCount,
+                definition.VariationSalt);
+
+            Assert.That(evaluation.CandidateVariation, Is.EqualTo(expected));
+        }
+
+        /// <summary>
+        /// 海洋性林は海洋影響段階5、火山周縁は活動的火山地質と段階4だけを通常候補として受理することを保証します。
+        /// </summary>
+        [Test]
+        public void CandidateEvaluation_EnforcesCoastalAndVolcanicGates()
+        {
+            BiomeClassificationSettings settings = BiomeDefinitionCatalog.CreateDefault();
+            Assert.That(BiomeDefinitionCatalog.TryGetDefinition(
+                settings,
+                BiomeStableIds.SubtropicalOceanicForest,
+                out BiomeDefinition oceanic), Is.True);
+            Assert.That(BiomeDefinitionCatalog.TryGetDefinition(
+                settings,
+                BiomeStableIds.VolcanicGeothermal,
+                out BiomeDefinition volcanic), Is.True);
+
+            BiomeClassificationInput weakCoast = CreateInput(
+                40000, 50000, 30000, 50000, 20000, 52427, 0, GeologyClass.Limestone);
+            BiomeClassificationInput strongCoast = weakCoast;
+            strongCoast.Environment.CoastalInfluence = 52428;
+            Assert.That(TryEvaluate(settings, oceanic, weakCoast), Is.False);
+            Assert.That(TryEvaluate(settings, oceanic, strongCoast), Is.True);
+
+            BiomeClassificationInput unsupportedVolcanism = CreateInput(
+                30000, 30000, 30000, 20000, 50000, 0, 45000, GeologyClass.VolcanicRock);
+            BiomeClassificationInput supportedVolcanism = unsupportedVolcanism;
+            supportedVolcanism.GeologyFlags = GeologyDefinitionFlags.SupportsActiveVolcanism;
+            BiomeClassificationInput activeCore = supportedVolcanism;
+            activeCore.Environment.VolcanicActivityPotential = 52428;
+            Assert.That(TryEvaluate(settings, volcanic, unsupportedVolcanism), Is.False);
+            Assert.That(TryEvaluate(settings, volcanic, supportedVolcanism), Is.True);
+            Assert.That(TryEvaluate(settings, volcanic, activeCore), Is.False);
+        }
+
+        /// <summary>
+        /// 海面閾値の直下だけを地上Biome候補から除外し、閾値上の陸地は同じDefinitionで評価できることを保証します。
+        /// </summary>
+        [Test]
+        public void CandidateEvaluation_RejectsOnlyCellsBelowSeaLevel()
+        {
+            BiomeClassificationSettings settings = BiomeDefinitionCatalog.CreateDefault();
+            Assert.That(BiomeDefinitionCatalog.TryGetDefinition(
+                settings,
+                BiomeStableIds.TemperateGrassland,
+                out BiomeDefinition definition), Is.True);
+            BiomeClassificationInput belowSeaLevel = CreateInput(
+                30000,
+                38000,
+                30000,
+                20000,
+                10000,
+                0,
+                0,
+                GeologyClass.UnconsolidatedSediment,
+                seaLevelThreshold: 30001);
+            BiomeClassificationInput atSeaLevel = belowSeaLevel;
+            atSeaLevel.Environment.Elevation = 30001;
+
+            Assert.That(TryEvaluate(settings, definition, belowSeaLevel), Is.False);
+            Assert.That(TryEvaluate(settings, definition, atSeaLevel), Is.True);
+        }
+
+        /// <summary>
+        /// 水文特殊Definition、不正なVariation設定、不明な地質IDを拒否し、失敗時に部分評価を公開しないことを保証します。
+        /// </summary>
+        [Test]
+        public void CandidateEvaluation_RejectsInvalidRolesSettingsAndGeologyWithoutPartialResult()
+        {
+            BiomeClassificationSettings settings = BiomeDefinitionCatalog.CreateDefault();
+            Assert.That(BiomeDefinitionCatalog.TryGetDefinition(
+                settings,
+                BiomeStableIds.TemperateGrassland,
+                out BiomeDefinition grassland), Is.True);
+            Assert.That(BiomeDefinitionCatalog.TryGetDefinition(
+                settings,
+                BiomeStableIds.FreshwaterMarshFloodplain,
+                out BiomeDefinition hydrologySpecial), Is.True);
+            BiomeClassificationInput input = CreateInput(
+                30000, 38000, 30000, 20000, 10000, 0, 0, GeologyClass.UnconsolidatedSediment);
+
+            Assert.That(TryEvaluate(settings, hydrologySpecial, input), Is.False);
+
+            BiomeClassificationSettings invalidVariation = settings;
+            invalidVariation.VariationOctaveCount = 3;
+            Assert.That(DeterministicBiomeClassifier.TryEvaluateNormalCandidate(
+                invalidVariation,
+                999UL,
+                3,
+                grassland,
+                input,
+                out BiomeCandidateEvaluation failedEvaluation), Is.False);
+            Assert.That(failedEvaluation.StableId, Is.Zero);
+            Assert.That(failedEvaluation.Score, Is.Zero);
+
+            input.GeologyClass = (GeologyClass)byte.MaxValue;
+            Assert.That(TryEvaluate(settings, grassland, input), Is.False);
+        }
+
+        /// <summary>
+        /// 台形型適性の成否と値を1行で比較し、境界ケースの期待値を読みやすく保ちます。
+        /// </summary>
+        /// <param name="range">評価する許容・代表範囲です。</param>
+        /// <param name="value">評価する連続軸値です。</param>
+        /// <param name="expectedSuccess">候補範囲内として期待する成否です。</param>
+        /// <param name="expectedFit">成功時に期待する0〜65,535の適性です。</param>
+        private static void AssertAxisFit(
+            BiomeAxisRange range,
+            ushort value,
+            bool expectedSuccess,
+            ushort expectedFit)
+        {
+            bool succeeded = DeterministicBiomeClassifier.TryCalculateAxisFit(value, range, out ushort fit);
+            Assert.That(succeeded, Is.EqualTo(expectedSuccess));
+            Assert.That(fit, Is.EqualTo(expectedFit));
+        }
+
+        /// <summary>
+        /// 1候補の成否だけを検査するテストで、共通SeedとVersionを供給します。
+        /// </summary>
+        /// <param name="settings">BiomeVariation設定です。</param>
+        /// <param name="definition">評価する通常Biome Definitionです。</param>
+        /// <param name="input">固定環境と地質です。</param>
+        /// <returns>候補ゲートと許容範囲をすべて満たした場合はtrueです。</returns>
+        private static bool TryEvaluate(
+            in BiomeClassificationSettings settings,
+            in BiomeDefinition definition,
+            in BiomeClassificationInput input)
+        {
+            return DeterministicBiomeClassifier.TryEvaluateNormalCandidate(
+                settings,
+                999UL,
+                3,
+                definition,
+                input,
+                out _);
+        }
+
+        /// <summary>
+        /// 連続環境値と地質を純粋分類入力へまとめ、各テストが注目する値だけを明示できるようにします。
+        /// </summary>
+        /// <param name="terrainTemperature">標高寒冷補正後の地形気温です。</param>
+        /// <param name="baseMoisture">現在水分と分離した基礎湿度です。</param>
+        /// <param name="elevation">連続標高です。</param>
+        /// <param name="woodyVegetation">木本植生ポテンシャルです。</param>
+        /// <param name="ruggedness">地形起伏です。</param>
+        /// <param name="coastalInfluence">海洋影響です。</param>
+        /// <param name="volcanicActivity">火山活動度です。</param>
+        /// <param name="geologyClass">固定地質分類です。</param>
+        /// <param name="geologyFlags">固定地質Definitionの明示特性です。</param>
+        /// <param name="seaLevelThreshold">これ未満を地上Biome候補外にする保存済み海面閾値です。</param>
+        /// <param name="warpedSampleX">Biome Warp後の水平座標です。</param>
+        /// <param name="warpedSampleY">Biome Warp後の垂直座標です。</param>
+        /// <returns>分類器へ直接渡せるunmanaged入力です。</returns>
+        private static BiomeClassificationInput CreateInput(
+            ushort terrainTemperature,
+            ushort baseMoisture,
+            ushort elevation,
+            ushort woodyVegetation,
+            ushort ruggedness,
+            ushort coastalInfluence,
+            ushort volcanicActivity,
+            GeologyClass geologyClass,
+            GeologyDefinitionFlags geologyFlags = GeologyDefinitionFlags.None,
+            ushort seaLevelThreshold = WorldGenerationSettings.DefaultSeaLevelThreshold,
+            int warpedSampleX = 0,
+            int warpedSampleY = 0)
+        {
+            return new BiomeClassificationInput
+            {
+                Environment = new GeneratedEnvironmentData
+                {
+                    TerrainTemperature = terrainTemperature,
+                    BaseMoisture = baseMoisture,
+                    Elevation = elevation,
+                    WoodyVegetationPotential = woodyVegetation,
+                    TerrainRuggedness = ruggedness,
+                    CoastalInfluence = coastalInfluence,
+                    VolcanicActivityPotential = volcanicActivity,
+                    WarpedSampleX = warpedSampleX,
+                    WarpedSampleY = warpedSampleY
+                },
+                GeologyClass = geologyClass,
+                GeologyFlags = geologyFlags,
+                SeaLevelThreshold = seaLevelThreshold
+            };
+        }
+    }
+}
