@@ -1,5 +1,5 @@
 // このファイルは、地下水と自然土壌飽和だけが参照する局所地質補正を決定論的に生成します。
-// 基礎地質DefinitionやGeneratedTileを書き換えず、後続のC4-B2が固定9地点平均と水文結果へ接続します。
+// 基礎地質DefinitionやGeneratedTileを書き換えず、C4-B2の固定9地点平均・地下水・自然土壌飽和へ値を渡します。
 
 namespace Farmware.WorldGeneration
 {
@@ -51,10 +51,34 @@ namespace Farmware.WorldGeneration
         /// <summary>帯水層Supportを地下水保持力へ加える前に割る正の整数です。</summary>
         public byte AquiferStorageDivisor;
 
+        /// <summary>流出寄与セル相当値を0〜65,535の涵養候補へ変換する固定倍率です。</summary>
+        public ushort RunoffRechargeMultiplier;
+
+        /// <summary>水文セルへ広域地下水接続を設定するGroundwaterPotentialの下限です。</summary>
+        public ushort GroundwaterConnectionThreshold;
+
+        /// <summary>自然土壌飽和式で固定9地点の基礎湿度へ掛ける整数比重です。</summary>
+        public byte SaturationMoistureWeight;
+
+        /// <summary>自然土壌飽和式で水文セルの地下水ポテンシャルへ掛ける整数比重です。</summary>
+        public byte SaturationGroundwaterWeight;
+
+        /// <summary>自然土壌飽和式で排水しにくさへ掛ける整数比重です。</summary>
+        public byte SaturationDrainageWeight;
+
+        /// <summary>自然土壌飽和式で地形の平坦さへ掛ける整数比重です。</summary>
+        public byte SaturationFlatnessWeight;
+
+        /// <summary>自然土壌飽和式の4入力比重を合計した固定除数です。</summary>
+        public byte SaturationWeightTotal;
+
+        /// <summary>水文特殊Biome候補へ渡す自然土壌飽和条件の下限です。</summary>
+        public ushort NaturalSoilSaturationThreshold;
+
         /// <summary>
-        /// TERRAIN-01C4-B1で確定した局所地質補正設定を作ります。
+        /// TERRAIN-01C4-B1・B2で確定した局所地質補正と地下水・自然土壌飽和設定を作ります。
         /// </summary>
-        /// <returns>4種類の独立した3オクターブノイズと確定補正式を持つ設定です。</returns>
+        /// <returns>局所地質、涵養、地下水接続、自然土壌飽和の確定整数設定です。</returns>
         public static GroundwaterGenerationSettings CreateDefault()
         {
             return new GroundwaterGenerationSettings
@@ -72,7 +96,15 @@ namespace Farmware.WorldGeneration
                 FractureStorageDivisor = 8,
                 WeatheringStorageDivisor = 4,
                 ClayStorageDivisor = 4,
-                AquiferStorageDivisor = 2
+                AquiferStorageDivisor = 2,
+                RunoffRechargeMultiplier = 2048,
+                GroundwaterConnectionThreshold = 32768,
+                SaturationMoistureWeight = 2,
+                SaturationGroundwaterWeight = 2,
+                SaturationDrainageWeight = 1,
+                SaturationFlatnessWeight = 1,
+                SaturationWeightTotal = 6,
+                NaturalSoilSaturationThreshold = 39321
             };
         }
     }
@@ -119,10 +151,10 @@ namespace Farmware.WorldGeneration
     public static class DeterministicGroundwaterGenerator
     {
         /// <summary>
-        /// 設定が確定した4格子、3オクターブ、中央値、補正係数と一致するか検証します。
+        /// 設定が確定した局所地質、涵養、地下水接続、自然土壌飽和の契約と一致するか検証します。
         /// </summary>
         /// <param name="settings">検証する地下水固定生成設定です。</param>
-        /// <returns>暗黙補正せずC4-B1の純粋生成へ使用できる場合はtrueです。</returns>
+        /// <returns>暗黙補正せずC4-B1・B2の純粋生成へ使用できる場合はtrueです。</returns>
         public static bool ValidateSettings(in GroundwaterGenerationSettings settings)
         {
             return settings.FractureCellSizeInTiles == 128
@@ -138,7 +170,15 @@ namespace Farmware.WorldGeneration
                 && settings.FractureStorageDivisor == 8
                 && settings.WeatheringStorageDivisor == 4
                 && settings.ClayStorageDivisor == 4
-                && settings.AquiferStorageDivisor == 2;
+                && settings.AquiferStorageDivisor == 2
+                && settings.RunoffRechargeMultiplier == 2048
+                && settings.GroundwaterConnectionThreshold == 32768
+                && settings.SaturationMoistureWeight == 2
+                && settings.SaturationGroundwaterWeight == 2
+                && settings.SaturationDrainageWeight == 1
+                && settings.SaturationFlatnessWeight == 1
+                && settings.SaturationWeightTotal == 6
+                && settings.NaturalSoilSaturationThreshold == 39321;
         }
 
         /// <summary>

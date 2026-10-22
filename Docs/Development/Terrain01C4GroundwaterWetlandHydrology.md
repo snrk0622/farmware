@@ -2,7 +2,7 @@
 
 - 更新日: 2026-10-22
 - 対象PR: TERRAIN-01C4-A/B/C/D/E
-- 状態: C4-AはPR #39のmerge commit `2abaa0c5`で完了。C4-BはB1「局所地質補正」とB2「地下水・自然土壌飽和のECS接続」へ分割し、B1の実装・AI検証・人間確認を完了して本commitの対象とする
+- 状態: C4-AはPR #39のmerge commit `2abaa0c5`、C4-B1はcommit `15eb97a2`で完了。C4-B2「地下水・自然土壌飽和のECS接続」は実装・AI検証・人間確認を完了し、本commitの対象とする
 - 作業ブランチ: `terrain-01c4b-groundwater-saturation`
 
 ## 1. 目的と前提
@@ -66,6 +66,16 @@ TERRAIN-01C4は、TERRAIN-01C2の固定地質とTERRAIN-01C3の8×8水文セル�
 
 `DeterministicGroundwaterGenerator`は、絶対タイル座標から4用途別Saltの連続ポテンシャルを生成し、基礎透水性・地下水保持力へ符号付き64bitで全項を合成してから0〜65,535へ一度だけ飽和する。補正後値は戻り値にだけ保持し、`GeologyDefinition`、`GeneratedTile`、資源適性、Biome、既存地質の状態ハッシュを変更しない。C4-B1では純粋計算までを完了条件とし、固定9地点平均、地下水ポテンシャル、自然土壌飽和、ECS公開、性能・メモリ増分はC4-B2へ残す。
 
+### 4.2 C4-B2のECS接続
+
+`DeterministicSurfaceWaterGenerator`は、表流水4096件と同じ有限走査から、チャンクと交差する完成水文9×9件と、各セル内に自然河川・渓流・湖面候補が存在するかを示す81件の涵養フラグを出力する。正側末尾4タイルを担当する9個目の水文セルと、負側へ張り出す担当範囲も絶対タイル座標から判定し、ロード済みチャンク範囲へ依存しない。
+
+`DeterministicGroundwaterHydrologyGenerator`は、各水文セル中心の`-3／0／+3`固定9地点で補正後透水性・地下水保持力を整数平均する。基礎湿度、`RunoffEquivalentCells×2,048`を65,535へ飽和した値、自然表流水候補の65,535の最大を涵養値とし、補正後透水性・保持力の小さい方との64bit積を65,535で整数除算して`GroundwaterPotential`を得る。32,768以上では既存の接続bitを保ったまま`Groundwater`を追加するが、自然表流水や現在水文は変更しない。
+
+自然土壌飽和は4096タイルそれぞれについて、担当水文セルの基礎湿度と地下水を各2、対象タイルの排水しにくさと平坦さを各1として64bit合成し、合計6で整数除算する。結果は2 bytesの`GeneratedHydrologyTile.NaturalSoilSaturationPotential`として1チャンク4096件の専用Bufferへ保持する。39,321の飽和境界は設定へ固定するが、湿原Biomeへの昇格は後続C4-Dの低地・淡水接続・自然冠水条件と合わせて行う。
+
+`ChunkGenerationSystem`は、表流水Jobと地形・資源Jobの完成Handleを結合した後に地下水Jobを実行する。生成枠では9×9完成水文、81涵養フラグ、4096自然水文を所有し、地形、資源、地下水反映済み水文、表流水、自然水文の5 Bufferを同じ固定Tick境界で公開する。先行段階または地下水段階が失敗した場合は5 Bufferのどれも公開しない。状態ハッシュも地下水反映済み64水文セル、4096表流水、4096自然水文を固定順で含む。
+
 ## 5. 現在の検証状態
 
 - ブランチ作成前の`develop`はPR #38のmerge commit `1857386c`で、作業ツリーはクリーンだった。
@@ -82,3 +92,7 @@ TERRAIN-01C4は、TERRAIN-01C2の固定地質とTERRAIN-01C3の8×8水文セル�
 - 最終レビューでは、`int`最大端のチャンク走査を64×64ローカル添字へ変更し、湖面適格性と元地形生成失敗を分離した。PRレビュー後は、正側末尾4タイルを担当する9個目の水文セルと、そこへ流入するさらに外側の供給元をタイル境界から求めるよう修正した。正側外周の湖も代表セル走査へ含め、閉鎖末端の重複処理を防いだ。追加レビューでは、代表河道とは別の中心線が交差した場合も`ChannelCenterLine`を論理和で保持するよう修正した。さらに、9地点平均では陸上でも最低Anchorだけが海面下になる流域を淡水湖候補なしとして正常終了し、チャンク全体の生成失敗を防いだ。最新ソースの再コンパイル、対象9件、World Generation EditMode Assembly 435件（169.39秒）、PlayMode Assembly 56件（6.74秒）はすべて成功した。海面下Anchor修正は湖候補探索前の早期正常終了だけで作業配列・走査範囲・成功経路・公開容量を変えないため、明示的性能テストは再実行していない。AIコードレビューのP0・P1ブロッカーは残っていない。
 - C4-A2はPresentation、Scene、Prefab、Debug Visualizationを変更していない。最終Unityテストと差分レビューに加え、SampleSceneで通常移動中の停止、境界往復後の生成継続、Consoleエラー、`ChunkGenerationSurfaceWaterWait`を人間が確認し、追加レビュー修正を含むPR #39のmerge commit `2abaa0c5`としてdevelopへマージ済みである。
 - C4-B1では`GroundwaterGenerationSettings`、4用途別Salt、`LocalGeologyPotentials`、`AdjustedGroundwaterGeology`、純粋生成・補正APIを追加した。Unity 6000.3.8f1 Editorの厳格再コンパイルは警告0件・エラー0件、対象EditMode 10件とWorld Generation EditMode Assembly 445件は全件成功した。Unity CLIと既存Pipeline間の旧コマンド名解決エラーだけを内容確認後にConsoleから消去し、最終状態はエラー0件・警告0件である。ECS Buffer、Scene、Prefab、Presentation、Editor可視化を変更しないため、C4-B1の人間確認はConsoleに新規エラーがないことを対象とし、2026-10-22に確認を完了した。
+- C4-B2では`GroundwaterPotential`、`Groundwater`接続、2 bytesの`GeneratedHydrologyTile`、9×9涵養中間結果、地下水Job、`ChunkGenerationGroundwaterWait`を追加した。Unity 6000.3.8f1 Editorの再コンパイルは警告0件・エラー0件で、対象EditMode 10件、性能計測1件、World Generation EditMode Assembly 456件、PlayMode Assembly 56件は全件成功した。EditMode全体は139.33秒、PlayMode全体は7.09秒だった。同期HTTPでの初回EditMode全体実行は長時間接続中にEditorが再起動して結果を返さなかったが、同じ最終ソースを非同期実行して456件成功を確認したため、テスト失敗としては扱わない。
+- C4-B2後のPersistent作業配列は、1枠へ9×9完成水文7,776 bytes、涵養フラグ81 bytes、自然水文8,192 bytes、失敗通知1 byteの計16,050 bytesを追加する。1枠9,695,936 bytes、既定2枠19,391,872 bytes（約18.49MiB）である。`GeneratedHydrologyCell`は地下水値追加後も96 bytesの既存レイアウトを維持し、ECS側の追加はロード済み1チャンク当たり自然水文8,192 bytesである。コンテナ管理領域、Allocator余白、安全性情報、Dynamic Buffer管理領域は含めない。
+- 明示的性能テストでは、同じ1／4／16チャンクの地形・水文・表流水までが246.045／732.738／2,969.807ms、地下水・自然土壌飽和を含む場合が250.954／756.112／3,065.895msで、追加時間は4.910／23.374／96.088msだった。接続済みEditorのMain Thread同期経路であり、Burst Job、ECS公開、描画、Development Player、対象機器の合格値ではない。
+- C4-B2はPresentation、Scene、Prefab、Debug Visualizationを変更していない。SampleSceneの通常移動とチャンク境界往復、体感停止、Console、Profilerの`ChunkGenerationGroundwaterWait`について、2026-10-22に人間確認を完了した。可視化はC4-Eまで旧表示を維持する。

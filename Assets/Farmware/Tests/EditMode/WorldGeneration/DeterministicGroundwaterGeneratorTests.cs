@@ -34,6 +34,14 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(settings.WeatheringStorageDivisor, Is.EqualTo(4));
             Assert.That(settings.ClayStorageDivisor, Is.EqualTo(4));
             Assert.That(settings.AquiferStorageDivisor, Is.EqualTo(2));
+            Assert.That(settings.RunoffRechargeMultiplier, Is.EqualTo(2048));
+            Assert.That(settings.GroundwaterConnectionThreshold, Is.EqualTo(32768));
+            Assert.That(settings.SaturationMoistureWeight, Is.EqualTo(2));
+            Assert.That(settings.SaturationGroundwaterWeight, Is.EqualTo(2));
+            Assert.That(settings.SaturationDrainageWeight, Is.EqualTo(1));
+            Assert.That(settings.SaturationFlatnessWeight, Is.EqualTo(1));
+            Assert.That(settings.SaturationWeightTotal, Is.EqualTo(6));
+            Assert.That(settings.NaturalSoilSaturationThreshold, Is.EqualTo(39321));
         }
 
         /// <summary>
@@ -61,6 +69,14 @@ namespace Farmware.WorldGeneration.Tests
             GroundwaterGenerationSettings wrongCoefficient = GroundwaterGenerationSettings.CreateDefault();
             wrongCoefficient.ClayPermeabilityDivisor = 3;
             Assert.That(DeterministicGroundwaterGenerator.ValidateSettings(wrongCoefficient), Is.False);
+
+            GroundwaterGenerationSettings wrongRecharge = GroundwaterGenerationSettings.CreateDefault();
+            wrongRecharge.RunoffRechargeMultiplier = 1024;
+            Assert.That(DeterministicGroundwaterGenerator.ValidateSettings(wrongRecharge), Is.False);
+
+            GroundwaterGenerationSettings wrongWeightTotal = GroundwaterGenerationSettings.CreateDefault();
+            wrongWeightTotal.SaturationWeightTotal = 5;
+            Assert.That(DeterministicGroundwaterGenerator.ValidateSettings(wrongWeightTotal), Is.False);
         }
 
         /// <summary>

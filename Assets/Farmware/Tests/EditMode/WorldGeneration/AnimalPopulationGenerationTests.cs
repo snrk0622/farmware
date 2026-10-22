@@ -609,6 +609,7 @@ namespace Farmware.WorldGeneration.Tests
                 Assert.That(manager.GetBuffer<GeneratedResourceTile>(chunk).Length, Is.Zero);
                 Assert.That(manager.GetBuffer<GeneratedHydrologyCell>(chunk).Length, Is.Zero);
                 Assert.That(manager.GetBuffer<GeneratedSurfaceWaterTile>(chunk).Length, Is.Zero);
+                Assert.That(manager.GetBuffer<GeneratedHydrologyTile>(chunk).Length, Is.Zero);
 
                 // Worker完了をテスト側で確定し、固定Tick入口が待機せず一括公開できる状態を作ります。
                 CompleteAllGenerationSlots(world, generation);
@@ -625,6 +626,8 @@ namespace Farmware.WorldGeneration.Tests
                 Assert.That(manager.GetBuffer<GeneratedHydrologyCell>(chunk).Length,
                     Is.EqualTo(DeterministicHydrologyGenerator.CellsPerChunk));
                 Assert.That(manager.GetBuffer<GeneratedSurfaceWaterTile>(chunk).Length,
+                    Is.EqualTo(WorldGridConstants.TilesPerChunk));
+                Assert.That(manager.GetBuffer<GeneratedHydrologyTile>(chunk).Length,
                     Is.EqualTo(WorldGridConstants.TilesPerChunk));
             }
             finally
@@ -1268,6 +1271,7 @@ namespace Farmware.WorldGeneration.Tests
             entityManager.AddBuffer<GeneratedResourceTile>(chunkEntity);
             entityManager.AddBuffer<GeneratedHydrologyCell>(chunkEntity);
             entityManager.AddBuffer<GeneratedSurfaceWaterTile>(chunkEntity);
+            entityManager.AddBuffer<GeneratedHydrologyTile>(chunkEntity);
             // Buffer追加は構造変更なので、4つを追加した後に参照を取り直してから既存の地形・資源初期値を書き込みます。
             DynamicBuffer<GeneratedTile> tiles = entityManager.GetBuffer<GeneratedTile>(chunkEntity);
             DynamicBuffer<GeneratedResourceTile> resources =

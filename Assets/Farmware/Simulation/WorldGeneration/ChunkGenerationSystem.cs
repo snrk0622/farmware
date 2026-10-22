@@ -1,4 +1,4 @@
-// このファイルは、地形・資源・固定水文・タイル表流水をECSから独立した作業領域で生成し、完成結果だけをECSへ公開します。
+// このファイルは、地形・資源・固定水文・表流水・自然土壌飽和をECS外の作業領域で生成し、完成結果だけをECSへ公開します。
 // ChunkStreamingSystemが要求と寿命、Presentationが確定済みBufferの表示、固定Tick公開Systemが個体群の決定論境界を担当します。
 
 using System;
@@ -15,7 +15,7 @@ using Farmware.Simulation.Animals;
 namespace Farmware.WorldGeneration
 {
     /// <summary>
-    /// 有効なChunkGenerationRequestを持つチャンクだけを生成し、同じ座標の地形・資源・固定水文・表流水を対応付けるECS Systemです。
+    /// 有効なChunkGenerationRequestを持つチャンクだけを生成し、地形・資源・固定水文・表流水・自然土壌飽和を対応付けるECS Systemです。
     /// 開始時に要求を無効化します。動物個体群があるWorldでは固定Tick境界で一括公開し、Job完了順を論理状態へ持ち込みません。
     /// 個体群Worldでは通常フレームで先行投入し、未完了中は固定Tickを延期して、完成バッチだけをTick入口で公開します。
     /// </summary>
@@ -50,6 +50,10 @@ namespace Farmware.WorldGeneration
         private static readonly ProfilerMarker SurfaceWaterWaitProfilerMarker =
             new ProfilerMarker("Farmware.WorldGeneration.ChunkGenerationSurfaceWaterWait");
 
+        // 完成済みの地下水・自然土壌飽和Handleを安全に確定する時間です。
+        private static readonly ProfilerMarker GroundwaterWaitProfilerMarker =
+            new ProfilerMarker("Farmware.WorldGeneration.ChunkGenerationGroundwaterWait");
+
         // 完成確認済みの地形・資源Handleを安全に確定する時間です。
         private static readonly ProfilerMarker TerrainWaitProfilerMarker =
             new ProfilerMarker("Farmware.WorldGeneration.ChunkGenerationTerrainWait");
@@ -74,7 +78,7 @@ namespace Farmware.WorldGeneration
             requestQuery = new EntityQueryBuilder(Allocator.Temp)
                 .WithAll<ChunkCoordinateComponent, ChunkGenerationStatus, ChunkGenerationRequest>()
                 .WithAll<GeneratedTile, GeneratedResourceTile, GeneratedHydrologyCell,
-                    GeneratedSurfaceWaterTile>()
+                    GeneratedSurfaceWaterTile, GeneratedHydrologyTile>()
                 .Build(ref state);
             fixedTickReadinessQuery = new EntityQueryBuilder(Allocator.Temp)
                 .WithAllRW<FixedTickReadinessState>()
@@ -174,6 +178,10 @@ namespace Farmware.WorldGeneration
                 {
                     CompleteRunningStage(GenerationStage.Terrain);
                 }
+                using (GroundwaterWaitProfilerMarker.Auto())
+                {
+                    CompleteRunningStage(GenerationStage.Groundwater);
+                }
             }
 
             PublishCompletedResults(manager);
@@ -222,7 +230,7 @@ namespace Farmware.WorldGeneration
         /// <summary>
         /// 実行中の全枠から指定系列の完成済みHandleだけを結合し、Native Containerの安全性状態を確定します。
         /// </summary>
-        /// <param name="stage">基礎水文、湖、地形・資源のうち確定費用を分離する系列です。</param>
+        /// <param name="stage">基礎水文、湖、表流水、地形・資源、地下水のうち確定費用を分離する系列です。</param>
         private void CompleteRunningStage(GenerationStage stage)
         {
             JobHandle combined = default;
@@ -246,8 +254,11 @@ namespace Farmware.WorldGeneration
                     case GenerationStage.SurfaceWater:
                         stageHandle = slot.SurfaceWaterHandle;
                         break;
-                    default:
+                    case GenerationStage.Terrain:
                         stageHandle = slot.TerrainHandle;
+                        break;
+                    default:
+                        stageHandle = slot.GroundwaterHandle;
                         break;
                 }
                 combined = JobHandle.CombineDependencies(combined, stageHandle);
@@ -281,9 +292,13 @@ namespace Farmware.WorldGeneration
                 slot.SurfaceWaterPathTiles.Dispose();
                 slot.SurfaceWaterFloodVisited.Dispose();
                 slot.SurfaceWaterFloodQueue.Dispose();
+                slot.IntersectingHydrologyCells.Dispose();
+                slot.SurfaceRechargeCandidates.Dispose();
+                slot.HydrologyTiles.Dispose();
                 slot.HydrologyGenerationFailed.Dispose();
                 slot.TerrainGenerationFailed.Dispose();
                 slot.SurfaceWaterGenerationFailed.Dispose();
+                slot.GroundwaterGenerationFailed.Dispose();
             }
 
             // Systemだけが先に破棄されるテストWorldでも、存在しない生成Jobを理由に固定Tickを止め続けません。
@@ -291,7 +306,7 @@ namespace Farmware.WorldGeneration
             slots.Dispose();
         }
 
-        /// <summary>完成した作業枠だけを読み、存続する同じ要求Entityへ地形・資源・固定水文・表流水をまとめて公開します。</summary>
+        /// <summary>完成した作業枠だけを読み、存続する要求Entityへ5種類の固定生成Bufferをまとめて公開します。</summary>
         /// <param name="manager">同じWorldの公開先です。所有Jobの専用配列から完成結果をコピーします。</param>
         private void PublishCompletedResults(EntityManager manager)
         {
@@ -312,7 +327,8 @@ namespace Farmware.WorldGeneration
                     && manager.HasBuffer<GeneratedTile>(slot.Entity)
                     && manager.HasBuffer<GeneratedResourceTile>(slot.Entity)
                     && manager.HasBuffer<GeneratedHydrologyCell>(slot.Entity)
-                    && manager.HasBuffer<GeneratedSurfaceWaterTile>(slot.Entity))
+                    && manager.HasBuffer<GeneratedSurfaceWaterTile>(slot.Entity)
+                    && manager.HasBuffer<GeneratedHydrologyTile>(slot.Entity))
                 {
                     ChunkCoordinateComponent coordinate = manager.GetComponentData<ChunkCoordinateComponent>(slot.Entity);
                     ChunkGenerationStatus status = manager.GetComponentData<ChunkGenerationStatus>(slot.Entity);
@@ -334,6 +350,7 @@ namespace Farmware.WorldGeneration
                         }
                         generationFailed |= slot.TerrainGenerationFailed[0] != 0;
                         generationFailed |= slot.SurfaceWaterGenerationFailed[0] != 0;
+                        generationFailed |= slot.GroundwaterGenerationFailed[0] != 0;
 
                         if (generationFailed)
                         {
@@ -343,11 +360,12 @@ namespace Farmware.WorldGeneration
                         }
                         else
                         {
-                            // 4つのBufferを確定してからReadyへ進め、半分だけ完成した結果を表示側へ渡さないようにします。
+                            // 5つのBufferを確定してからReadyへ進め、半分だけ完成した結果を後続Systemへ渡しません。
                             manager.GetBuffer<GeneratedTile>(slot.Entity).CopyFrom(slot.Tiles);
                             manager.GetBuffer<GeneratedResourceTile>(slot.Entity).CopyFrom(slot.Resources);
                             manager.GetBuffer<GeneratedHydrologyCell>(slot.Entity).CopyFrom(slot.HydrologyCells);
                             manager.GetBuffer<GeneratedSurfaceWaterTile>(slot.Entity).CopyFrom(slot.SurfaceWater);
+                            manager.GetBuffer<GeneratedHydrologyTile>(slot.Entity).CopyFrom(slot.HydrologyTiles);
                             status.GeneratedWithVersion = slot.GeneratorVersion;
                             status.Phase = ChunkGenerationPhase.ReadyToApply;
                         }
@@ -423,6 +441,7 @@ namespace Farmware.WorldGeneration
                 }
                 slot.TerrainGenerationFailed[0] = 0;
                 slot.SurfaceWaterGenerationFailed[0] = 0;
+                slot.GroundwaterGenerationFailed[0] = 0;
                 slot.HydrologyLakeWorkItemCount[0] = 0;
                 GenerateHydrologyRowsJob hydrologyJob = new GenerateHydrologyRowsJob
                 {
@@ -471,24 +490,43 @@ namespace Farmware.WorldGeneration
                     PathTiles = slot.SurfaceWaterPathTiles,
                     FloodVisited = slot.SurfaceWaterFloodVisited,
                     FloodQueue = slot.SurfaceWaterFloodQueue,
+                    IntersectingHydrologyCells = slot.IntersectingHydrologyCells,
+                    SurfaceRechargeCandidates = slot.SurfaceRechargeCandidates,
                     SurfaceWater = slot.SurfaceWater,
                     GenerationFailed = slot.SurfaceWaterGenerationFailed
+                };
+                GenerateGroundwaterHydrologyJob groundwaterJob = new GenerateGroundwaterHydrologyJob
+                {
+                    Settings = settings,
+                    Coordinate = slot.Coordinate,
+                    Tiles = slot.Tiles,
+                    HydrologyCells = slot.HydrologyCells,
+                    IntersectingHydrologyCells = slot.IntersectingHydrologyCells,
+                    SurfaceRechargeCandidates = slot.SurfaceRechargeCandidates,
+                    HydrologyTiles = slot.HydrologyTiles,
+                    SurfaceWaterGenerationFailed = slot.SurfaceWaterGenerationFailed,
+                    TerrainGenerationFailed = slot.TerrainGenerationFailed,
+                    GenerationFailed = slot.GroundwaterGenerationFailed
                 };
 
                 // 基礎水文の完了後に閉鎖末端を一度分類し、異なる流域を最大8担当へ分けます。
                 // 湖系列全体を、独立した地形・資源Jobとは並行させます。
                 // 湖面確定後に表流水を細分化し、地形・資源Jobは引き続き独立して並行させます。
-                // 最終Handleを結合してから公開するため、4 Bufferの一括公開境界と決定論は変わりません。
+                // 地下水Jobは完成した地形と表流水の両方へ依存し、5 Bufferの一括公開境界を維持します。
                 JobHandle hydrologyHandle = hydrologyJob.Schedule(HydrologyRowWorkItemCount, 1);
                 JobHandle prepareLakeHandle = prepareLakeJob.Schedule(hydrologyHandle);
                 JobHandle lakeHandle = lakeJob.Schedule(HydrologyRowWorkItemCount, 1, prepareLakeHandle);
                 JobHandle surfaceWaterHandle = surfaceWaterJob.Schedule(lakeHandle);
                 JobHandle terrainHandle = terrainJob.Schedule();
+                JobHandle groundwaterInputHandle =
+                    JobHandle.CombineDependencies(surfaceWaterHandle, terrainHandle);
+                JobHandle groundwaterHandle = groundwaterJob.Schedule(groundwaterInputHandle);
                 slot.HydrologyBaseHandle = hydrologyHandle;
                 slot.LakeHandle = lakeHandle;
                 slot.SurfaceWaterHandle = surfaceWaterHandle;
                 slot.TerrainHandle = terrainHandle;
-                slot.Handle = JobHandle.CombineDependencies(surfaceWaterHandle, terrainHandle);
+                slot.GroundwaterHandle = groundwaterHandle;
+                slot.Handle = groundwaterHandle;
                 slots[slotIndex] = slot;
                 status.Phase = ChunkGenerationPhase.GeneratingData;
                 manager.SetComponentData(entity, status);
@@ -529,7 +567,7 @@ namespace Farmware.WorldGeneration
             }
         }
 
-        /// <summary>空き枠を返し、不足時だけ地形・資源・表流水各4096件と固定水文64件のPersistent配列を追加確保します。</summary>
+        /// <summary>空き枠を返し、不足時だけ5出力Bufferと固定上限の中間作業用Persistent配列を追加確保します。</summary>
         /// <returns>投入するJobの所有情報を書き込む枠の添字です。</returns>
         private int GetAvailableSlot()
         {
@@ -591,6 +629,18 @@ namespace Farmware.WorldGeneration
                     DeterministicSurfaceWaterGenerator.MaximumFloodTileCount,
                     Allocator.Persistent,
                     NativeArrayOptions.UninitializedMemory),
+                IntersectingHydrologyCells = new NativeArray<GeneratedHydrologyCell>(
+                    DeterministicGroundwaterHydrologyGenerator.IntersectingCellCount,
+                    Allocator.Persistent,
+                    NativeArrayOptions.UninitializedMemory),
+                SurfaceRechargeCandidates = new NativeArray<byte>(
+                    DeterministicGroundwaterHydrologyGenerator.IntersectingCellCount,
+                    Allocator.Persistent,
+                    NativeArrayOptions.ClearMemory),
+                HydrologyTiles = new NativeArray<GeneratedHydrologyTile>(
+                    WorldGridConstants.TilesPerChunk,
+                    Allocator.Persistent,
+                    NativeArrayOptions.UninitializedMemory),
                 HydrologyGenerationFailed = new NativeArray<byte>(
                     HydrologyRowWorkItemCount,
                     Allocator.Persistent,
@@ -600,6 +650,10 @@ namespace Farmware.WorldGeneration
                     Allocator.Persistent,
                     NativeArrayOptions.ClearMemory),
                 SurfaceWaterGenerationFailed = new NativeArray<byte>(
+                    1,
+                    Allocator.Persistent,
+                    NativeArrayOptions.ClearMemory),
+                GroundwaterGenerationFailed = new NativeArray<byte>(
                     1,
                     Allocator.Persistent,
                     NativeArrayOptions.ClearMemory)
@@ -628,6 +682,8 @@ namespace Farmware.WorldGeneration
             public JobHandle SurfaceWaterHandle;
             /// <summary>水文と並行する地形・資源系列の完了待ちを計測するHandleです。</summary>
             public JobHandle TerrainHandle;
+            /// <summary>地形と表流水の後に地下水・自然土壌飽和を生成する最終系列のHandleです。</summary>
+            public JobHandle GroundwaterHandle;
             /// <summary>地形4096件の作業配列です。枠の再利用中は保持し、System終了時にDisposeします。</summary>
             public NativeArray<GeneratedTile> Tiles;
             /// <summary>資源4096件の作業配列です。地形配列と同じ所有・解放規則です。</summary>
@@ -656,12 +712,20 @@ namespace Farmware.WorldGeneration
             public NativeArray<byte> SurfaceWaterFloodVisited;
             /// <summary>最大262,144タイルの湖Flood Fill待ち行列を保持する固定作業配列です。</summary>
             public NativeArray<int> SurfaceWaterFloodQueue;
+            /// <summary>64×64チャンクと交差する9×9完成水文を地下水Jobへ渡す中間配列です。</summary>
+            public NativeArray<GeneratedHydrologyCell> IntersectingHydrologyCells;
+            /// <summary>交差9×9水文セル内に自然表流水の涵養候補が存在するかを0／1で保持します。</summary>
+            public NativeArray<byte> SurfaceRechargeCandidates;
+            /// <summary>4096タイルの自然土壌飽和を保持し、完成時に専用ECS Bufferへコピーする配列です。</summary>
+            public NativeArray<GeneratedHydrologyTile> HydrologyTiles;
             /// <summary>8水文行の各作業が失敗時に自分の添字へ1を書く、湖Jobと公開処理への通知領域です。</summary>
             public NativeArray<byte> HydrologyGenerationFailed;
             /// <summary>地形・資源Jobが失敗時に先頭へ1を書く、公開処理への独立通知領域です。</summary>
             public NativeArray<byte> TerrainGenerationFailed;
-            /// <summary>表流水細分化Jobが失敗時に先頭へ1を書き、4 Bufferすべての公開を止める通知領域です。</summary>
+            /// <summary>表流水細分化Jobが失敗時に先頭へ1を書き、5 Bufferすべての公開を止める通知領域です。</summary>
             public NativeArray<byte> SurfaceWaterGenerationFailed;
+            /// <summary>地下水・自然土壌飽和Jobが失敗時に先頭へ1を書き、5 Bufferの公開を止める通知領域です。</summary>
+            public NativeArray<byte> GroundwaterGenerationFailed;
         }
 
         /// <summary>固定Tick境界で残り時間を個別計測する生成Job系列です。</summary>
@@ -677,7 +741,10 @@ namespace Farmware.WorldGeneration
             SurfaceWater = 2,
 
             /// <summary>4,096タイルの地形と資源を作る独立系列です。</summary>
-            Terrain = 3
+            Terrain = 3,
+
+            /// <summary>完成した地形・水文・表流水から地下水と自然土壌飽和を作る最終系列です。</summary>
+            Groundwater = 4
         }
 
         /// <summary>値コピーの設定と絶対座標だけから、8行の基礎水文を並列生成するBurst Jobです。</summary>
@@ -925,10 +992,16 @@ namespace Farmware.WorldGeneration
             /// <summary>最大262,144湖候補タイルを一度ずつ処理する固定長FIFO配列です。</summary>
             public NativeArray<int> FloodQueue;
 
+            /// <summary>成功時にチャンクと交差する9×9完成水文を地下水Jobへ渡す中間配列です。</summary>
+            public NativeArray<GeneratedHydrologyCell> IntersectingHydrologyCells;
+
+            /// <summary>河道・湖候補が存在する交差9×9水文セルを0／1で地下水Jobへ渡します。</summary>
+            public NativeArray<byte> SurfaceRechargeCandidates;
+
             /// <summary>成功時に4096件すべてを上書きし、最終Handle後にECSへ公開する表流水配列です。</summary>
             public NativeArray<GeneratedSurfaceWaterTile> SurfaceWater;
 
-            /// <summary>生成失敗時に先頭へ1を書き、地形・資源・水文を含む4 Bufferの公開を止めます。</summary>
+            /// <summary>生成失敗時に先頭へ1を書き、地形・資源・水文を含む5 Bufferの公開を止めます。</summary>
             public NativeArray<byte> GenerationFailed;
 
             /// <summary>固定長作業領域を純粋生成へ渡し、失敗時だけ公開停止フラグを設定します。</summary>
@@ -946,7 +1019,69 @@ namespace Farmware.WorldGeneration
                         PathTiles,
                         FloodVisited,
                         FloodQueue,
+                        IntersectingHydrologyCells,
+                        SurfaceRechargeCandidates,
                         SurfaceWater))
+                {
+                    GenerationFailed[0] = 1;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 完成済み地形・水文・表流水の後で、交差9×9セルの地下水と4096タイルの自然土壌飽和を生成するBurst Jobです。
+        /// </summary>
+        [BurstCompile]
+        private struct GenerateGroundwaterHydrologyJob : IJob
+        {
+            /// <summary>局所地質、涵養、地下水接続、自然土壌飽和の固定設定です。</summary>
+            public WorldGenerationSettings Settings;
+
+            /// <summary>生成対象となるSurface上の絶対論理チャンク座標です。</summary>
+            public ChunkCoordinateComponent Coordinate;
+
+            /// <summary>局所地質の基礎値と起伏を読む、完成済み4096地形タイルです。</summary>
+            [ReadOnly]
+            public NativeArray<GeneratedTile> Tiles;
+
+            /// <summary>地下水ポテンシャルと接続bitを反映し、完成時にECSへ公開する64水文セルです。</summary>
+            public NativeArray<GeneratedHydrologyCell> HydrologyCells;
+
+            /// <summary>表流水段階が完成させ、地下水計算後の境界タイル参照にも使う交差9×9水文です。</summary>
+            public NativeArray<GeneratedHydrologyCell> IntersectingHydrologyCells;
+
+            /// <summary>交差9×9各セルに自然表流水の涵養候補があるかを保持する読み取り専用配列です。</summary>
+            [ReadOnly]
+            public NativeArray<byte> SurfaceRechargeCandidates;
+
+            /// <summary>成功時に4096件すべてを上書きし、専用ECS Bufferへ公開する自然水文タイルです。</summary>
+            public NativeArray<GeneratedHydrologyTile> HydrologyTiles;
+
+            /// <summary>表流水生成が失敗済みなら地下水の部分計算を開始しないために読む1要素通知です。</summary>
+            [ReadOnly]
+            public NativeArray<byte> SurfaceWaterGenerationFailed;
+
+            /// <summary>地形生成が失敗済みなら基礎地質のdefault値を入力にしないために読む1要素通知です。</summary>
+            [ReadOnly]
+            public NativeArray<byte> TerrainGenerationFailed;
+
+            /// <summary>地下水または自然土壌飽和に失敗した場合、先頭へ1を書いて5 Bufferの公開を止めます。</summary>
+            public NativeArray<byte> GenerationFailed;
+
+            /// <summary>先行失敗を確認し、完成入力だけを純粋生成へ渡して一括成功または一括失敗にします。</summary>
+            public void Execute()
+            {
+                if (SurfaceWaterGenerationFailed[0] != 0
+                    || TerrainGenerationFailed[0] != 0
+                    || !DeterministicGroundwaterHydrologyGenerator.TryGenerateChunk(
+                        Settings,
+                        Coordinate.X,
+                        Coordinate.Y,
+                        Tiles,
+                        HydrologyCells,
+                        IntersectingHydrologyCells,
+                        SurfaceRechargeCandidates,
+                        HydrologyTiles))
                 {
                     GenerationFailed[0] = 1;
                 }

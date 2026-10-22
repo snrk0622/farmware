@@ -199,7 +199,7 @@ namespace Farmware.WorldGeneration
 
     /// <summary>
     /// 固定水文が持つ自然接続を重複可能なビットとして表します。
-    /// C3-D1では下流終端3種、Stream・River、固定湖面のLakeを使用し、地下水は後続PRで追加します。
+    /// C4-B2では下流終端3種、Stream・River、固定湖面のLake、固定地下水のGroundwaterを使用します。
     /// </summary>
     [Flags]
     public enum HydrologyConnectionFlags : ushort
@@ -274,6 +274,9 @@ namespace Farmware.WorldGeneration
 
         /// <summary>代表標高と同じ固定9地点で求めた基礎湿度の整数平均です。</summary>
         public ushort HydrologyMoisture;
+
+        /// <summary>涵養候補と固定9地点の補正後地質から求めた0〜65,535の固定地下水ポテンシャルです。</summary>
+        public ushort GroundwaterPotential;
 
         /// <summary>RunoffMoistureSumを65,535で整数除算した流出寄与セル相当値です。</summary>
         public ushort RunoffEquivalentCells;
@@ -1247,12 +1250,12 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>
-        /// 指定チャンクの64水文セルと4096固定表流水を、既存の地形チャンクハッシュへ順序付きで追加します。
+        /// 指定チャンクの地下水反映済み64水文セル、4096固定表流水、4096自然水文タイルを地形ハッシュへ追加します。
         /// </summary>
         /// <param name="settings">固定ワールド生成設定です。</param>
         /// <param name="chunkCoordinate">Surface上の論理チャンク座標です。</param>
         /// <param name="currentHash">地形タイルまでを反映した現在の64bitハッシュです。</param>
-        /// <returns>全水文セル・表流水、または明示的な生成失敗印を追加した64bitハッシュです。</returns>
+        /// <returns>全固定水文結果、または明示的な生成失敗印を追加した64bitハッシュです。</returns>
         public static ulong AppendChunkHash(
             in WorldGenerationSettings settings,
             ChunkCoordinate chunkCoordinate,
@@ -1291,11 +1294,6 @@ namespace Farmware.WorldGeneration
                 return WorldSeedUtility.Mix64(currentHash ^ 0xC3A0FA11ED000001UL);
             }
 
-            for (int index = 0; index < CellsPerChunk; index++)
-            {
-                currentHash = HashCell(currentHash, cells[index]);
-            }
-
             using NativeArray<SurfaceWaterPathSearchNode> pathWorkspace =
                 new NativeArray<SurfaceWaterPathSearchNode>(
                     DeterministicSurfaceWaterPathGenerator.MaximumSearchNodeCount,
@@ -1319,6 +1317,16 @@ namespace Farmware.WorldGeneration
                     WorldGridConstants.TilesPerChunk,
                     Allocator.Temp,
                     NativeArrayOptions.UninitializedMemory);
+            using NativeArray<GeneratedHydrologyCell> intersectingCells =
+                new NativeArray<GeneratedHydrologyCell>(
+                    DeterministicGroundwaterHydrologyGenerator.IntersectingCellCount,
+                    Allocator.Temp,
+                    NativeArrayOptions.UninitializedMemory);
+            using NativeArray<byte> surfaceRechargeCandidates =
+                new NativeArray<byte>(
+                    DeterministicGroundwaterHydrologyGenerator.IntersectingCellCount,
+                    Allocator.Temp,
+                    NativeArrayOptions.ClearMemory);
             if (!DeterministicSurfaceWaterGenerator.TryGenerateChunk(
                     settings,
                     chunkCoordinate.X,
@@ -1331,18 +1339,84 @@ namespace Farmware.WorldGeneration
                     pathTiles,
                     floodVisited,
                     floodQueue,
+                    intersectingCells,
+                    surfaceRechargeCandidates,
                     surfaceWater))
             {
                 // 表流水だけが失敗した場合も通常の空Bufferと区別し、決定性監査が欠落を見逃さないようにします。
                 return WorldSeedUtility.Mix64(currentHash ^ 0xC4A2FA11ED000001UL);
             }
 
+            using NativeArray<GeneratedTile> terrainTiles = new NativeArray<GeneratedTile>(
+                WorldGridConstants.TilesPerChunk,
+                Allocator.Temp,
+                NativeArrayOptions.UninitializedMemory);
+            for (int localY = 0; localY < WorldGridConstants.LogicalChunkSize; localY++)
+            {
+                for (int localX = 0; localX < WorldGridConstants.LogicalChunkSize; localX++)
+                {
+                    int worldTileX = WorldGrid.ToWorldTileX(chunkCoordinate.X, localX);
+                    int worldTileY = WorldGrid.ToWorldTileY(chunkCoordinate.Y, localY);
+                    int tileIndex = WorldGrid.ToTileIndex(localX, localY);
+                    if (!DeterministicChunkGenerator.TryGenerateTile(
+                            settings,
+                            worldTileX,
+                            worldTileY,
+                            out GeneratedTile terrainTile))
+                    {
+                        return WorldSeedUtility.Mix64(currentHash ^ 0xC4B2FA11ED000001UL);
+                    }
+                    SetTerrainTile(terrainTiles, tileIndex, terrainTile);
+                }
+            }
+
+            using NativeArray<GeneratedHydrologyTile> hydrologyTiles =
+                new NativeArray<GeneratedHydrologyTile>(
+                    WorldGridConstants.TilesPerChunk,
+                    Allocator.Temp,
+                    NativeArrayOptions.UninitializedMemory);
+            if (!DeterministicGroundwaterHydrologyGenerator.TryGenerateChunk(
+                    settings,
+                    chunkCoordinate.X,
+                    chunkCoordinate.Y,
+                    terrainTiles,
+                    cells,
+                    intersectingCells,
+                    surfaceRechargeCandidates,
+                    hydrologyTiles))
+            {
+                return WorldSeedUtility.Mix64(currentHash ^ 0xC4B2FA11ED000002UL);
+            }
+
+            // 地下水JobがConnectionFlagsとGroundwaterPotentialを確定した後の64セルを固定順で混合します。
+            for (int index = 0; index < CellsPerChunk; index++)
+            {
+                currentHash = HashCell(currentHash, cells[index]);
+            }
+
             for (int index = 0; index < WorldGridConstants.TilesPerChunk; index++)
             {
                 currentHash = DeterministicSurfaceWaterGenerator.HashTile(currentHash, surfaceWater[index]);
+                currentHash = DeterministicGroundwaterHydrologyGenerator.HashTile(
+                    currentHash,
+                    hydrologyTiles[index]);
             }
 
             return currentHash;
+        }
+
+        /// <summary>
+        /// using宣言で破棄責任を固定したNativeArrayへ、値コピーした配列ハンドルから1タイルを書き込みます。
+        /// </summary>
+        /// <param name="tiles">呼出し元が所有し、このメソッドでは破棄しない地形配列です。</param>
+        /// <param name="index">0〜4095の行優先タイル添字です。</param>
+        /// <param name="tile">書き込む完成済み基礎地形です。</param>
+        private static void SetTerrainTile(
+            NativeArray<GeneratedTile> tiles,
+            int index,
+            in GeneratedTile tile)
+        {
+            tiles[index] = tile;
         }
 
         /// <summary>
@@ -1567,8 +1641,9 @@ namespace Farmware.WorldGeneration
                 ulong catchmentCount = cell.CatchmentAreaCells;
                 ulong runoffMoistureSum = (ulong)cell.RunoffMoistureSum;
                 ulong catchmentValues = cell.HydrologyMoisture;
-                catchmentValues |= (ulong)cell.RunoffEquivalentCells << 16;
-                catchmentValues |= (ulong)cell.MaximumContributingDistance << 32;
+                catchmentValues |= (ulong)cell.GroundwaterPotential << 16;
+                catchmentValues |= (ulong)cell.RunoffEquivalentCells << 32;
+                catchmentValues |= (ulong)cell.MaximumContributingDistance << 48;
                 ulong basinArea = cell.BasinAreaCells;
                 basinArea |= (ulong)(byte)cell.LakeFlags << 32;
                 ulong spillInside = (uint)cell.SpillInsideCellX;

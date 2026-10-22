@@ -238,7 +238,9 @@ C4-A2の`DeterministicSurfaceWaterGenerator`は、64×64タイルから逆算し
 
 表流水結果は地下水涵養候補、確定自然表流水、淡水接続、河道中心線を別フラグとして保持する。C4-A2では渓流・河川を涵養候補・確定自然表流水・淡水接続とし、湖面候補は涵養候補だけにする。湖面候補は後続C4-Cの水収支前に恒久水面や淡水と断定しない。Presentationと開発者用可視化への接続はC4-Eで行い、C4-A2のECS BufferをGameObjectやTilemap側の状態へ複製してSimulationの正にしない。
 
-TERRAIN-01C4-B1では、亀裂、風化帯、粘土層、帯水層を絶対タイル座標と用途別Saltから生成する純粋計算を追加する。4ポテンシャルと補正後の透水性・地下水保持力は地下水・自然土壌飽和・後続診断だけの導出値とし、固定地質Definition、`GeneratedTile`の基礎地質3特性、資源適性、Biomeへ書き戻さない。C4-B1は設定と純粋計算までに限定し、固定9地点平均、`GroundwaterPotential`、`NaturalSoilSaturationPotential`、ECS公開、状態ハッシュはC4-B2で同じ完成境界へ接続する。
+TERRAIN-01C4-B1では、亀裂、風化帯、粘土層、帯水層を絶対タイル座標と用途別Saltから生成する純粋計算を追加する。4ポテンシャルと補正後の透水性・地下水保持力は地下水・自然土壌飽和・後続診断だけの導出値とし、固定地質Definition、`GeneratedTile`の基礎地質3特性、資源適性、Biomeへ書き戻さない。
+
+TERRAIN-01C4-B2では、表流水生成と同じ有限走査からチャンク交差9×9水文セルとセル別涵養フラグを作り、完成した地形・水文・表流水を依存入力として地下水Jobを実行する。固定9地点の補正後透水性・保持力平均から64水文セルの`GroundwaterPotential`と`Groundwater`接続を確定し、対象タイル自身の補正後透水性と起伏を使って4096件の`GeneratedHydrologyTile.NaturalSoilSaturationPotential`を生成する。地形、資源、地下水反映済み水文、表流水、自然水文の5 Bufferは同じ固定Tick境界で一括公開し、どの段階でも失敗した場合は部分Bufferを公開しない。状態ハッシュも5種類の固定生成結果を含み、現在降雨、灌水、排水、耕作、人工水路、配置Block、Presentationを入力にしない。
 
 ### チャンク別Tilemapの空領域履歴
 
