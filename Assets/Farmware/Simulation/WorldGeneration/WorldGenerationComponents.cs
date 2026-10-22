@@ -315,6 +315,12 @@ namespace Farmware.WorldGeneration
         /// </summary>
         public HydrologyGenerationSettings Hydrology;
 
+        /// <summary>
+        /// 地下水用の局所地質補正を再計算する固定設定です。
+        /// GeneratorVersionと一緒にワールド寿命中は変更しません。
+        /// </summary>
+        public GroundwaterGenerationSettings Groundwater;
+
         /// <summary>7バイオームの適性が閾値付近で滑らかに入れ替わる帯のおおよその幅です。単位はタイルです。</summary>
         public int BiomeClassificationTransitionWidthInTiles;
 
@@ -468,6 +474,7 @@ namespace Farmware.WorldGeneration
                 EnvironmentAxes = ContinuousEnvironmentSettings.CreateDefault(),
                 Geology = GeologyGenerationSettings.CreateDefault(),
                 Hydrology = HydrologyGenerationSettings.CreateDefault(),
+                Groundwater = GroundwaterGenerationSettings.CreateDefault(),
                 BiomeClassificationTransitionWidthInTiles = 12,
                 BiomeTransitionWidthInTiles = 6,
                 SeaLevelThreshold = DefaultSeaLevelThreshold,

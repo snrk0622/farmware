@@ -2,8 +2,8 @@
 
 - 更新日: 2026-10-22
 - 対象PR: TERRAIN-01C4-A/B/C/D/E
-- 状態: C4-A1はcommit `d1cc247`で完了。C4-A2「湖面候補・ECS接続」はcommit `a0b2cb08`までpush済みで、追加レビューの海面下湖Anchor修正は実装・AI検証・人間確認を完了し、commit・push対象とする
-- 作業ブランチ: `terrain-01c4-hydrology-foundation`
+- 状態: C4-AはPR #39のmerge commit `2abaa0c5`で完了。C4-BはB1「局所地質補正」とB2「地下水・自然土壌飽和のECS接続」へ分割し、B1の実装・AI検証・人間確認を完了して本commitの対象とする
+- 作業ブランチ: `terrain-01c4b-groundwater-saturation`
 
 ## 1. 目的と前提
 
@@ -17,7 +17,8 @@ TERRAIN-01C4は、TERRAIN-01C2の固定地質とTERRAIN-01C3の8×8水文セル�
 
 - C4-A1 河道中心線: 水文セルごとの安定Anchor、D8辺に対応する有限経路探索、負座標・チャンク境界・生成順不変を純粋計算とテストで確定する。
 - C4-A2 湖面候補・ECS接続: C4-A1の中心線へ渓流・河川幅を適用し、閉鎖流域内の標高未満タイルを末端からFlood Fillして、河道と湖面候補を4096件の固定表流水Bufferへ格納する。Chunk生成Job、状態ハッシュ、性能比較を更新する。
-- C4-B 局所地質・地下水・自然土壌飽和: 4局所補正、固定9地点平均、地下水接続境界、タイル別飽和度を実装する。
+- C4-B1 局所地質補正: 4用途の固定設定と専用Salt、連続ポテンシャル、地下水専用の透水性・保持力補正式を純粋計算として実装する。基礎地質Definition、既存Buffer、表示は変更しない。
+- C4-B2 地下水・自然土壌飽和のECS接続: 固定9地点平均、表流水涵養、地下水接続境界、タイル別飽和度、状態ハッシュ、固定Tick一括公開を実装する。
 - C4-C 湖水収支・泉: 湖候補を淡水・塩水・一時湖へ確定し、抑制済み泉源と固定淡水小川を追加する。
 - C4-D 自然冠水・湿原規模: 半径32タイルの恒久淡水源探索と4水文セルの広域規模判定を実装する。
 - C4-E 監査・診断表示: 複数Seed監査、Gameビュー、Map Viewer、凡例、中央タイル情報を接続する。
@@ -59,6 +60,12 @@ TERRAIN-01C4は、TERRAIN-01C2の固定地質とTERRAIN-01C3の8×8水文セル�
 
 水文セルの地下水には固定9地点の補正後平均、タイルの土壌飽和には対象タイルの補正後値を使う。これにより広域地質と局所変化を両立しつつ、水文セル境界だけで飽和域が四角くなることを防ぐ。
 
+### 4.1 C4-B1の実装境界
+
+`GroundwaterGenerationSettings`は、亀裂128タイル、風化帯96タイル、粘土層192タイル、帯水層256タイル、各3オクターブ、Support中央値32,768、仕様で確定した8個の除数を保持する。`WorldGenerationSettings`とAuthoring Snapshotは共有既定値を値コピーし、Inspectorへ同じ設定を重複保持しない。
+
+`DeterministicGroundwaterGenerator`は、絶対タイル座標から4用途別Saltの連続ポテンシャルを生成し、基礎透水性・地下水保持力へ符号付き64bitで全項を合成してから0〜65,535へ一度だけ飽和する。補正後値は戻り値にだけ保持し、`GeologyDefinition`、`GeneratedTile`、資源適性、Biome、既存地質の状態ハッシュを変更しない。C4-B1では純粋計算までを完了条件とし、固定9地点平均、地下水ポテンシャル、自然土壌飽和、ECS公開、性能・メモリ増分はC4-B2へ残す。
+
 ## 5. 現在の検証状態
 
 - ブランチ作成前の`develop`はPR #38のmerge commit `1857386c`で、作業ツリーはクリーンだった。
@@ -73,4 +80,5 @@ TERRAIN-01C4は、TERRAIN-01C2の固定地質とTERRAIN-01C3の8×8水文セル�
 - 2026-10-22のUnity 6000.3.8f1 Editor上で、同じチャンク列を交互に測る明示的性能テストを実行した。境界修正後の最終ソースで1／4／16チャンクの水文のみは262.087600／774.949100／3,226.749000ms、水文＋表流水は573.823800／2,055.544000／7,713.830000msだった。実担当9×9と河道供給元11×11を完全に調べる正しさを優先した結果であり、正側17セルの基礎水文は河道・湖処理間で再利用して二重生成を避ける。Main Thread上の純粋生成比較であり、Burst Job、ECS公開、描画、Development Player、対象機器の合格値ではない。
 - C4-A2後のPersistent作業配列は1枠9,679,886 bytes、既定2枠19,359,772 bytes（約18.46MiB）である。C3-D1から1枠1,390,593 bytes増え、ECS側にはロード済み1チャンク当たり65,536 bytesの表流水要素本体が加わる。境界修正では表流水Jobの一時`FixedList4096Bytes`を2個追加し、実行中の固定長ローカル領域が合計8,192 bytes増えるが、Persistent配列とECS Buffer容量は変わらない。コンテナ管理領域、Allocator余白、安全性情報、Dynamic Buffer管理領域は含めない。
 - 最終レビューでは、`int`最大端のチャンク走査を64×64ローカル添字へ変更し、湖面適格性と元地形生成失敗を分離した。PRレビュー後は、正側末尾4タイルを担当する9個目の水文セルと、そこへ流入するさらに外側の供給元をタイル境界から求めるよう修正した。正側外周の湖も代表セル走査へ含め、閉鎖末端の重複処理を防いだ。追加レビューでは、代表河道とは別の中心線が交差した場合も`ChannelCenterLine`を論理和で保持するよう修正した。さらに、9地点平均では陸上でも最低Anchorだけが海面下になる流域を淡水湖候補なしとして正常終了し、チャンク全体の生成失敗を防いだ。最新ソースの再コンパイル、対象9件、World Generation EditMode Assembly 435件（169.39秒）、PlayMode Assembly 56件（6.74秒）はすべて成功した。海面下Anchor修正は湖候補探索前の早期正常終了だけで作業配列・走査範囲・成功経路・公開容量を変えないため、明示的性能テストは再実行していない。AIコードレビューのP0・P1ブロッカーは残っていない。
-- C4-A2はPresentation、Scene、Prefab、Debug Visualizationをまだ変更しない。最終Unityテストと差分レビュー後、SampleSceneで通常移動中の停止、境界往復後の生成継続、Consoleエラー、`ChunkGenerationSurfaceWaterWait`を人間が確認し、commit許可を得る。
+- C4-A2はPresentation、Scene、Prefab、Debug Visualizationを変更していない。最終Unityテストと差分レビューに加え、SampleSceneで通常移動中の停止、境界往復後の生成継続、Consoleエラー、`ChunkGenerationSurfaceWaterWait`を人間が確認し、追加レビュー修正を含むPR #39のmerge commit `2abaa0c5`としてdevelopへマージ済みである。
+- C4-B1では`GroundwaterGenerationSettings`、4用途別Salt、`LocalGeologyPotentials`、`AdjustedGroundwaterGeology`、純粋生成・補正APIを追加した。Unity 6000.3.8f1 Editorの厳格再コンパイルは警告0件・エラー0件、対象EditMode 10件とWorld Generation EditMode Assembly 445件は全件成功した。Unity CLIと既存Pipeline間の旧コマンド名解決エラーだけを内容確認後にConsoleから消去し、最終状態はエラー0件・警告0件である。ECS Buffer、Scene、Prefab、Presentation、Editor可視化を変更しないため、C4-B1の人間確認はConsoleに新規エラーがないことを対象とし、2026-10-22に確認を完了した。

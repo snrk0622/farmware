@@ -405,6 +405,8 @@ namespace Farmware.WorldGeneration.Authoring
                 Geology = GeologyGenerationSettings.CreateDefault(),
                 // TERRAIN-01C3-Aの水文格子寸法と9点サンプルは調整値にせず、共有既定値をBakeします。
                 Hydrology = HydrologyGenerationSettings.CreateDefault(),
+                // TERRAIN-01C4-Bの局所地質補正もInspectorへ重複保持せず、共有既定値をBakeします。
+                Groundwater = GroundwaterGenerationSettings.CreateDefault(),
                 BiomeClassificationTransitionWidthInTiles =
                     biomeClassificationTransitionWidthInTiles,
                 BiomeTransitionWidthInTiles = biomeTransitionWidthInTiles,

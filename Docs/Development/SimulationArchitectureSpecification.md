@@ -238,6 +238,8 @@ C4-A2の`DeterministicSurfaceWaterGenerator`は、64×64タイルから逆算し
 
 表流水結果は地下水涵養候補、確定自然表流水、淡水接続、河道中心線を別フラグとして保持する。C4-A2では渓流・河川を涵養候補・確定自然表流水・淡水接続とし、湖面候補は涵養候補だけにする。湖面候補は後続C4-Cの水収支前に恒久水面や淡水と断定しない。Presentationと開発者用可視化への接続はC4-Eで行い、C4-A2のECS BufferをGameObjectやTilemap側の状態へ複製してSimulationの正にしない。
 
+TERRAIN-01C4-B1では、亀裂、風化帯、粘土層、帯水層を絶対タイル座標と用途別Saltから生成する純粋計算を追加する。4ポテンシャルと補正後の透水性・地下水保持力は地下水・自然土壌飽和・後続診断だけの導出値とし、固定地質Definition、`GeneratedTile`の基礎地質3特性、資源適性、Biomeへ書き戻さない。C4-B1は設定と純粋計算までに限定し、固定9地点平均、`GroundwaterPotential`、`NaturalSoilSaturationPotential`、ECS公開、状態ハッシュはC4-B2で同じ完成境界へ接続する。
+
 ### チャンク別Tilemapの空領域履歴
 
 `ChunkLocalTilemapPresentation`は9レイヤーごとに16bitの非空サブチャンク履歴を所有する。通常反映は`WriteSubChunk`を通し、今回の256セルが全nullで、かつ以前も空の領域だけ書込を省く。非空→空は実際のSetTilesBlock成功後に履歴を解除する。全消去は従来どおり全設定レイヤーへnullを書き、成功したサブチャンクの履歴を解除するため、16領域の消去後だけ空の状態でプールへ返せる。原点変更ではセルと履歴を一緒に維持し、World／方式切替では表示単位ごと破棄する。内部Tilemapの通常反映を別経路から直接行わないことが前提である。共有Tilemap方式は旧原点消去との寿命が異なるため、この履歴による省略を適用しない。履歴は表示専用であり、Simulationや保存状態の正にしない。
