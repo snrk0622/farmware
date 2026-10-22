@@ -1247,12 +1247,12 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>
-        /// 指定チャンクの64水文セルを、既存の地形チャンクハッシュへ順序付きで追加します。
+        /// 指定チャンクの64水文セルと4096固定表流水を、既存の地形チャンクハッシュへ順序付きで追加します。
         /// </summary>
         /// <param name="settings">固定ワールド生成設定です。</param>
         /// <param name="chunkCoordinate">Surface上の論理チャンク座標です。</param>
         /// <param name="currentHash">地形タイルまでを反映した現在の64bitハッシュです。</param>
-        /// <returns>全水文セル、または明示的な生成失敗印を追加した64bitハッシュです。</returns>
+        /// <returns>全水文セル・表流水、または明示的な生成失敗印を追加した64bitハッシュです。</returns>
         public static ulong AppendChunkHash(
             in WorldGenerationSettings settings,
             ChunkCoordinate chunkCoordinate,
@@ -1294,6 +1294,52 @@ namespace Farmware.WorldGeneration
             for (int index = 0; index < CellsPerChunk; index++)
             {
                 currentHash = HashCell(currentHash, cells[index]);
+            }
+
+            using NativeArray<SurfaceWaterPathSearchNode> pathWorkspace =
+                new NativeArray<SurfaceWaterPathSearchNode>(
+                    DeterministicSurfaceWaterPathGenerator.MaximumSearchNodeCount,
+                    Allocator.Temp,
+                    NativeArrayOptions.UninitializedMemory);
+            using NativeArray<SurfaceWaterPathTile> pathTiles =
+                new NativeArray<SurfaceWaterPathTile>(
+                    DeterministicSurfaceWaterPathGenerator.MaximumSearchNodeCount,
+                    Allocator.Temp,
+                    NativeArrayOptions.UninitializedMemory);
+            using NativeArray<byte> floodVisited = new NativeArray<byte>(
+                DeterministicSurfaceWaterGenerator.MaximumFloodTileCount,
+                Allocator.Temp,
+                NativeArrayOptions.UninitializedMemory);
+            using NativeArray<int> floodQueue = new NativeArray<int>(
+                DeterministicSurfaceWaterGenerator.MaximumFloodTileCount,
+                Allocator.Temp,
+                NativeArrayOptions.UninitializedMemory);
+            using NativeArray<GeneratedSurfaceWaterTile> surfaceWater =
+                new NativeArray<GeneratedSurfaceWaterTile>(
+                    WorldGridConstants.TilesPerChunk,
+                    Allocator.Temp,
+                    NativeArrayOptions.UninitializedMemory);
+            if (!DeterministicSurfaceWaterGenerator.TryGenerateChunk(
+                    settings,
+                    chunkCoordinate.X,
+                    chunkCoordinate.Y,
+                    cells,
+                    frontier,
+                    basinMembers,
+                    basinLookup,
+                    pathWorkspace,
+                    pathTiles,
+                    floodVisited,
+                    floodQueue,
+                    surfaceWater))
+            {
+                // 表流水だけが失敗した場合も通常の空Bufferと区別し、決定性監査が欠落を見逃さないようにします。
+                return WorldSeedUtility.Mix64(currentHash ^ 0xC4A2FA11ED000001UL);
+            }
+
+            for (int index = 0; index < WorldGridConstants.TilesPerChunk; index++)
+            {
+                currentHash = DeterministicSurfaceWaterGenerator.HashTile(currentHash, surfaceWater[index]);
             }
 
             return currentHash;

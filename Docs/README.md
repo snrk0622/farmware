@@ -7,7 +7,7 @@
 
 - [ゲーム仕様 v0.2 — 生物探索・採集サンドボックス](./GameSpecification/2026-10-11_casual_factory_concept_v0.1.md)
 - [ランダムマップ・可変地形仕様 v0.2](./GameSpecification/RandomMapGenerationSpecification.md)
-- [バイオーム・生態コンテンツ仕様 v0.52](./GameSpecification/BiomeEcologyContentSpecification.md)
+- [バイオーム・生態コンテンツ仕様 v0.53](./GameSpecification/BiomeEcologyContentSpecification.md)
 
 2026-10-19に、直接操作プレイヤー、可変地形、地上・海中・深海、図鑑研究を中心とする方針へ改訂した。バイオーム・生態コンテンツ仕様には、TERRAIN-01Bで採用した地上18バイオーム、水域17生息地、気候とBiomeの責務、モチーフ地域、地上同士の隣接、水域の内包・海岸境界・深度遷移、初期スポーン規則、鳥類を分けた初回登場候補、作物・牧場動物の入手地域、全地上バイオーム共通の木材・石材・鉄鉱石と特徴鉱物を記録する。v0.42では、同じ地形ブロックItemを穴・液体へ置くとGround、既存Ground上へ置くとWallになるCore Keeper型の設置・回収に加え、地形ブロックを再配置専用Item、クラフト素材を独立した有限資源Itemとした。v0.43では、見出しの「確定」が候補案内部の値を指すこと、移行帯対象表が全隣接セルへの禁止条件ではないこと、海洋影響の代表計算値を明記した。v0.44では、寒冷・乾燥・低地で候補が重なるステップとツンドラ・極地荒原の双方向直接隣接を追加した。v0.45では、冷涼・中湿度・低地で候補が重なる温帯草原とタイガの双方向直接隣接、同一入力で成立する橋候補の検証、Biome・地質混在窓の適格セル面積で按分する資源密度式を追加した。v0.46では、高温多湿な山地で候補が重なるモンスーン林と高山岩地の双方向直接隣接、および初回28資源の変更禁止な配置優先度と競合解決全順序を追加した。地質資源は露出、Ground内、Wall内、巨大鉱床の4形態で生成し、壁内鉱床はBlockと資源を同時回収、Ground内鉱床は地面を維持、巨大鉱床は将来の電力不要採掘設備へ接続する。採用済み仕様と段階実装の差は各TERRAIN-01C実装記録で明示し、着手順は現行ロードマップを正とする。
 
@@ -20,6 +20,8 @@ v0.50では、エンドレスワールドの上流全域をオンデマンド走
 v0.51では、下流終端の探索も最大4,096流向辺へ制限し、Level 0〜12の二分Downstream Summaryで同じ経路を再利用する。上限内で海または閉鎖末端へ届かないセルは`LongDrainage`へ固定し、下流チャンクのロード後も分類を変えない。これにより、上流・下流の両方向で1論理チャンクのオンデマンド水文作業量を有限にする。コードへの反映と計測はTERRAIN-01C3で行う。
 
 v0.52では、上流集合の4,096件目についても直接逆辺8件を必ず検査し、フロンティアが空でも未選択の上流が見つかれば`CatchmentTruncated = true`とする。階層Summaryも外部入口セルを保持し、一本鎖の4,097件目を見落として不完全な閉鎖流域から固定湖面を作らない。逆辺判定数の既存上限は増やさない。コードへの反映と回帰確認はTERRAIN-01C3で行う。
+
+v0.53では、8×8水文セルをそのまま水面にせず、安定Anchorと有限経路探索による河道、閉鎖流域末端からのFlood Fillによる湖面候補へ細分化する契約を追加した。地下水用の局所地質補正は、亀裂、風化帯、粘土層、帯水層を独立Saltの連続値として生成し、基礎地質Definitionを書き換えず透水性・保持力へ合成する。コードへの反映と回帰確認はTERRAIN-01C4で行う。
 
 ## アート制作
 
@@ -37,6 +39,7 @@ v0.52では、上流集合の4,096件目についても直接逆辺8件を必ず
 - [TERRAIN-01C1 連続環境軸の実装記録](./Development/Terrain01C1ContinuousEnvironmentAxes.md)
 - [TERRAIN-01C2 地質基盤の実装記録](./Development/Terrain01C2GeologyFoundation.md)
 - [TERRAIN-01C3 表面水系の実装記録](./Development/Terrain01C3SurfaceHydrology.md)
+- [TERRAIN-01C4 地下水・湿地水文の実装記録](./Development/Terrain01C4GroundwaterWetlandHydrology.md)
 - [Codexスキル](./Development/CodexSkills.md)
 - [Unity Editorツール](./Development/EditorTools.md)
 - [テスト](./Development/Testing.md)

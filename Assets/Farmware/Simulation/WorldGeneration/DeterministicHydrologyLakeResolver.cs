@@ -275,7 +275,7 @@ namespace Farmware.WorldGeneration
         /// <param name="lookupStartIndex">この探索へ割り当てたHash表領域の先頭添字です。</param>
         /// <param name="result">成功時の流域面積、越流辺、湖面、除外理由です。</param>
         /// <returns>設定と作業領域が有効で、必要な有限探索を完了できた場合はtrueです。</returns>
-        private static bool TryBuildBasin(
+        internal static bool TryBuildBasin(
             in WorldGenerationSettings settings,
             int sinkCellX,
             int sinkCellY,
@@ -564,7 +564,7 @@ namespace Farmware.WorldGeneration
         /// <param name="cellY">登録する垂直水文座標です。</param>
         /// <param name="memberIndex">流域セル配列内の0始まり相対添字です。</param>
         /// <returns>空きスロットへ一意に登録できた場合はtrueです。</returns>
-        private static bool TryInsertMember(
+        internal static bool TryInsertMember(
             NativeArray<HydrologyBasinLookupSlot> basinLookup,
             int lookupStartIndex,
             int cellX,
@@ -606,7 +606,7 @@ namespace Farmware.WorldGeneration
         /// <param name="slotIndex">成功時の配列全体に対する絶対スロット添字です。</param>
         /// <param name="memberIndex">成功時の流域セル配列内0始まり相対添字です。</param>
         /// <returns>指定座標が対象流域Hash表へ登録済みならtrueです。</returns>
-        private static bool TryFindMember(
+        internal static bool TryFindMember(
             NativeArray<HydrologyBasinLookupSlot> basinLookup,
             int lookupStartIndex,
             int cellX,
