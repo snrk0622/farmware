@@ -678,7 +678,7 @@ namespace Farmware.WorldGeneration
         /// <param name="maximumTileX">出力チャンクの右端タイルXです。</param>
         /// <param name="maximumTileY">出力チャンクの上端タイルYです。</param>
         /// <param name="surfaceWater">湖面候補を河道より優先して書く4096件の出力です。</param>
-        /// <returns>開始点と全到達タイルを固定上限内で処理できた場合はtrueです。</returns>
+        /// <returns>入力を検証し、開始点が海面下なら候補なしとして終了するか、全到達タイルを固定上限内で処理できた場合はtrueです。</returns>
         internal static bool TryFillLakeCandidate(
             in WorldGenerationSettings settings,
             in HydrologyLakeBasinResult basin,
@@ -714,10 +714,16 @@ namespace Farmware.WorldGeneration
                     start.WorldTileX,
                     start.WorldTileY,
                     basin.LakeSurfaceHeight,
-                    out bool isStartEligible)
-                || !isStartEligible)
+                    out bool isStartEligible))
             {
                 return false;
+            }
+
+            // 水文セルは9地点平均で陸上でも、セル内最低Anchorだけが海面下になる場合があります。
+            // 海水で分断された別の陸上タイルを代替開始点にすると湖形状が一意でなくなるため、この流域は淡水湖候補なしとして正常終了します。
+            if (!isStartEligible)
+            {
+                return true;
             }
 
             int remainingLocalCandidates = 0;

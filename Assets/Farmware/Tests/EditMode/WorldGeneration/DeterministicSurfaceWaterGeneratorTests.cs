@@ -469,6 +469,119 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// 水文セル中心は陸上でも最低Anchorだけが海面下になる海岸条件を作り、チャンク生成失敗や不連続な淡水湖にしないことを保証します。
+        /// </summary>
+        [Test]
+        public void LakeCandidate_UnderSeaAnchor_SkipsBasinWithoutFailure()
+        {
+            WorldGenerationSettings settings = CreateSettings("surface-water-coastal-lake-anchor");
+            int sinkCellX = default;
+            int sinkCellY = default;
+            SurfaceWaterPathTile anchor = default;
+            ushort anchorElevation = default;
+            ushort centerElevation = default;
+            bool foundCoastalShape = false;
+            for (int cellY = -32; cellY <= 32 && !foundCoastalShape; cellY++)
+            {
+                for (int cellX = -32; cellX <= 32 && !foundCoastalShape; cellX++)
+                {
+                    // 海面を最低点と中心点の間へ置けるセルを探し、平均水文とタイル地形の解像度差を決定論的に再現します。
+                    if (!DeterministicSurfaceWaterPathGenerator.TryFindChannelAnchor(
+                            settings,
+                            cellX,
+                            cellY,
+                            out SurfaceWaterPathTile candidateAnchor,
+                            out ushort candidateAnchorElevation)
+                        || !DeterministicEnvironmentGenerator.TryGenerateBaseClimate(
+                            settings,
+                            cellX * 8,
+                            cellY * 8,
+                            out GeneratedEnvironmentData centerEnvironment)
+                        || candidateAnchorElevation >= centerEnvironment.Elevation
+                        || candidateAnchorElevation >= settings.WetlandMaximumElevation
+                        || centerEnvironment.Elevation == ushort.MaxValue)
+                    {
+                        continue;
+                    }
+
+                    sinkCellX = cellX;
+                    sinkCellY = cellY;
+                    anchor = candidateAnchor;
+                    anchorElevation = candidateAnchorElevation;
+                    centerElevation = centerEnvironment.Elevation;
+                    foundCoastalShape = true;
+                }
+            }
+            Assert.That(foundCoastalShape, Is.True);
+
+            // 最低Anchorより1高い位置を海面にすると、Anchorだけが海面下で中心タイルは陸上になります。
+            settings.SeaLevelThreshold = (ushort)(anchorElevation + 1);
+            Assert.That(DeterministicEnvironmentGenerator.ValidateSettings(settings), Is.True);
+            Assert.That(anchorElevation, Is.LessThan(settings.SeaLevelThreshold));
+            Assert.That(centerElevation, Is.GreaterThanOrEqualTo(settings.SeaLevelThreshold));
+
+            ChunkCoordinate owner = WorldGrid.ToChunkCoordinate(anchor.WorldTileX, anchor.WorldTileY);
+            int minimumTileX = WorldGrid.ToWorldTileX(owner.X, 0);
+            int minimumTileY = WorldGrid.ToWorldTileY(owner.Y, 0);
+            int maximumTileX = WorldGrid.ToWorldTileX(owner.X, WorldGridConstants.LogicalChunkSize - 1);
+            int maximumTileY = WorldGrid.ToWorldTileY(owner.Y, WorldGridConstants.LogicalChunkSize - 1);
+            using var surfaceWater = new NativeArray<GeneratedSurfaceWaterTile>(
+                WorldGridConstants.TilesPerChunk,
+                Allocator.Temp,
+                NativeArrayOptions.ClearMemory);
+            using var basinMembers = new NativeArray<HydrologyUpstreamCandidate>(
+                DeterministicHydrologyLakeResolver.MaximumBasinMembers,
+                Allocator.Temp,
+                NativeArrayOptions.UninitializedMemory);
+            using var basinLookup = new NativeArray<HydrologyBasinLookupSlot>(
+                DeterministicHydrologyLakeResolver.LookupCapacity,
+                Allocator.Temp,
+                NativeArrayOptions.ClearMemory);
+            using var visited = new NativeArray<byte>(
+                DeterministicSurfaceWaterGenerator.MaximumFloodTileCount,
+                Allocator.Temp,
+                NativeArrayOptions.UninitializedMemory);
+            using var queue = new NativeArray<int>(
+                DeterministicSurfaceWaterGenerator.MaximumFloodTileCount,
+                Allocator.Temp,
+                NativeArrayOptions.UninitializedMemory);
+            SetSingleBasinMember(basinMembers, sinkCellX, sinkCellY);
+            Assert.That(
+                DeterministicHydrologyLakeResolver.TryInsertMember(
+                    basinLookup,
+                    0,
+                    sinkCellX,
+                    sinkCellY,
+                    0),
+                Is.True);
+            var basin = new HydrologyLakeBasinResult
+            {
+                SinkCellX = sinkCellX,
+                SinkCellY = sinkCellY,
+                BasinAreaCells = 1,
+                LakeFillFraction = 32768,
+                LakeSurfaceHeight = (ushort)(centerElevation + 1),
+                LakeFlags = HydrologyLakeFlags.BasinResolved | HydrologyLakeFlags.FixedLake
+            };
+
+            Assert.That(
+                DeterministicSurfaceWaterGenerator.TryFillLakeCandidate(
+                    settings,
+                    basin,
+                    basinMembers,
+                    basinLookup,
+                    visited,
+                    queue,
+                    minimumTileX,
+                    minimumTileY,
+                    maximumTileX,
+                    maximumTileY,
+                    surfaceWater),
+                Is.True);
+            Assert.That(CountType(surfaceWater, SurfaceWaterTileType.LakeCandidate), Is.Zero);
+        }
+
+        /// <summary>
         /// 右隣チャンクへ渡る1本の中心線を両チャンクへ別順で描き、各絶対タイルが所有Bufferで欠けないことを保証します。
         /// </summary>
         [Test]
