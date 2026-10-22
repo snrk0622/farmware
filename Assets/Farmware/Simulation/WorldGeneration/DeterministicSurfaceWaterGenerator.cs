@@ -215,6 +215,7 @@ namespace Farmware.WorldGeneration
                 || !TryGetHydrologyBufferOrigin(chunkX, chunkY, out int firstCellX, out int firstCellY)
                 || !TryGetHydrologyScanBounds(
                     settings.Hydrology,
+                    writesGroundwaterInputs,
                     minimumTileX,
                     minimumTileY,
                     maximumTileX,
@@ -249,7 +250,8 @@ namespace Farmware.WorldGeneration
             }
 
             // 河道中心線は隣接2セルの担当範囲を通ります。
-            // 正側末尾4タイルを所有する9個目のセルへ流入する辺も必要なため、担当セルのさらに外側まで再生成します。
+            // 表流水だけなら担当セルの1セル外側、地下水涵養も作る場合は河川幅が担当セルへ届く2セル外側まで再生成します。
+            // この差を設けないと、同じ境界セルの涵養有無が左チャンクと右チャンクのどちらから計算したかで変わります。
             // 64件Buffer外かつチャンクと交差する正側17セルは、後続の湖判定でも使うため固定長リストへ保持します。
             FixedList4096Bytes<GeneratedHydrologyCell> haloIntersectingCells = default;
             for (long sourceCellLongY = minimumChannelSourceCellY;
@@ -1430,6 +1432,7 @@ namespace Farmware.WorldGeneration
         /// タイル境界を正として、交差する担当水文セルと、その担当範囲へ流入できる河道供給元の範囲を求めます。
         /// </summary>
         /// <param name="settings">中心-4〜+3の担当変換に使う水文設定です。</param>
+        /// <param name="includesGroundwaterInputs">河川幅が境界セルへ届く供給元まで涵養用に含める場合はtrueです。</param>
         /// <param name="minimumTileX">対象チャンクの左端タイルXです。</param>
         /// <param name="minimumTileY">対象チャンクの下端タイルYです。</param>
         /// <param name="maximumTileX">対象チャンクの右端タイルXです。</param>
@@ -1442,9 +1445,10 @@ namespace Farmware.WorldGeneration
         /// <param name="minimumChannelSourceCellY">成功時に河道供給元として調べる最小セルYです。</param>
         /// <param name="maximumChannelSourceCellX">成功時に河道供給元として調べる最大セルXです。</param>
         /// <param name="maximumChannelSourceCellY">成功時に河道供給元として調べる最大セルYです。</param>
-        /// <returns>担当セル変換と、その外側1セルの座標がint範囲内ならtrueです。</returns>
+        /// <returns>担当セル変換と、用途に応じた外側1または2セルの座標がint範囲内ならtrueです。</returns>
         internal static bool TryGetHydrologyScanBounds(
             in HydrologyGenerationSettings settings,
+            bool includesGroundwaterInputs,
             int minimumTileX,
             int minimumTileY,
             int maximumTileX,
@@ -1458,6 +1462,9 @@ namespace Farmware.WorldGeneration
             out int maximumChannelSourceCellX,
             out int maximumChannelSourceCellY)
         {
+            // 地下水用の涵養フラグは、隣接セルに終端を持つ河川中心線から上下左右へ1タイル広がった幅も対象です。
+            // その幅は中心線の供給元から2セル先の担当範囲へ入れるため、地下水入力を作る場合だけHaloを2へ広げます。
+            int channelSourceHalo = includesGroundwaterInputs ? 2 : 1;
             if (!DeterministicHydrologyGenerator.TryGetCellCoordinate(
                     settings,
                     minimumTileX,
@@ -1470,10 +1477,14 @@ namespace Farmware.WorldGeneration
                     maximumTileY,
                     out maximumIntersectingCellX,
                     out maximumIntersectingCellY)
-                || !TryAdd(minimumIntersectingCellX, -1, out minimumChannelSourceCellX)
-                || !TryAdd(minimumIntersectingCellY, -1, out minimumChannelSourceCellY)
-                || !TryAdd(maximumIntersectingCellX, 1, out maximumChannelSourceCellX)
-                || !TryAdd(maximumIntersectingCellY, 1, out maximumChannelSourceCellY))
+                || !TryAdd(minimumIntersectingCellX, -channelSourceHalo,
+                    out minimumChannelSourceCellX)
+                || !TryAdd(minimumIntersectingCellY, -channelSourceHalo,
+                    out minimumChannelSourceCellY)
+                || !TryAdd(maximumIntersectingCellX, channelSourceHalo,
+                    out maximumChannelSourceCellX)
+                || !TryAdd(maximumIntersectingCellY, channelSourceHalo,
+                    out maximumChannelSourceCellY))
             {
                 minimumIntersectingCellX = default;
                 minimumIntersectingCellY = default;
@@ -1491,7 +1502,7 @@ namespace Farmware.WorldGeneration
 
         /// <summary>小さい固定オフセットをint座標へ加える前に64bitで範囲を検証します。</summary>
         /// <param name="value">基準となる絶対座標です。</param>
-        /// <param name="offset">-1、0、+1の近傍オフセットです。</param>
+        /// <param name="offset">近傍タイルまたは水文セルへ移動する小さい整数オフセットです。</param>
         /// <param name="result">成功時の加算結果です。</param>
         /// <returns>加算結果がint範囲内ならtrueです。</returns>
         private static bool TryAdd(int value, int offset, out int result)
