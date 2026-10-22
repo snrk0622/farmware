@@ -370,6 +370,7 @@ namespace Farmware.WorldGeneration
             commandBuffer.AddBuffer<GeneratedResourceTile>(entity);
             commandBuffer.AddBuffer<GeneratedHydrologyCell>(entity);
             commandBuffer.AddBuffer<GeneratedSurfaceWaterTile>(entity);
+            commandBuffer.AddBuffer<GeneratedHydrologyTile>(entity);
             requestBudget--;
         }
 

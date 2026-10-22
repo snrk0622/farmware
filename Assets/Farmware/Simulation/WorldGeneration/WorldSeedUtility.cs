@@ -53,6 +53,18 @@ namespace Farmware.WorldGeneration
         /// <summary>標高費用が同じ河道経路を絶対タイル座標から一意に選ぶ専用ソルトです。</summary>
         public const ulong HydrologyChannelPath = 0x91E10DA5C79E7B1DUL;
 
+        /// <summary>地下水計算用の局所的な亀裂・破砕帯ポテンシャル専用ソルトです。</summary>
+        public const ulong GroundwaterFracturePotential = 0xD2B74407B1CE6E93UL;
+
+        /// <summary>地下水計算用の局所的な風化帯ポテンシャル専用ソルトです。</summary>
+        public const ulong GroundwaterWeatheringPotential = 0xCA5A826395121157UL;
+
+        /// <summary>地下水計算用の局所的な粘土層ポテンシャル専用ソルトです。</summary>
+        public const ulong GroundwaterClayPotential = 0x9E6C63D0676A9A99UL;
+
+        /// <summary>地下水計算用の局所的な帯水層ポテンシャル専用ソルトです。</summary>
+        public const ulong GroundwaterAquiferPotential = 0xC2B2AE3D27D4EB4DUL;
+
         /// <summary>バイオーム用気候ノイズの水平サンプリング座標を歪ませるソルトです。</summary>
         public const ulong BiomeWarpX = 0x243F6A8885A308D3UL;
 

@@ -35,6 +35,7 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(
                 DeterministicSurfaceWaterGenerator.TryGetHydrologyScanBounds(
                     settings.Hydrology,
+                    false,
                     0,
                     0,
                     WorldGridConstants.LogicalChunkSize - 1,
@@ -57,6 +58,44 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(minimumChannelSourceCellY, Is.EqualTo(-1));
             Assert.That(maximumChannelSourceCellX, Is.EqualTo(9));
             Assert.That(maximumChannelSourceCellY, Is.EqualTo(9));
+        }
+
+        /// <summary>
+        /// 地下水涵養を生成するときは河川幅が2セル先の担当範囲へ入る供給元まで走査し、
+        /// 同じ境界セルの涵養結果が生成元チャンクによって変わらないことを保証します。
+        /// </summary>
+        [Test]
+        public void HydrologyScanBounds_GroundwaterRechargeIncludesSecondOuterChannelSource()
+        {
+            WorldGenerationSettings settings = CreateSettings("groundwater-recharge-scan-bounds");
+            Assert.That(
+                DeterministicSurfaceWaterGenerator.TryGetHydrologyScanBounds(
+                    settings.Hydrology,
+                    true,
+                    0,
+                    0,
+                    WorldGridConstants.LogicalChunkSize - 1,
+                    WorldGridConstants.LogicalChunkSize - 1,
+                    out int minimumIntersectingCellX,
+                    out int minimumIntersectingCellY,
+                    out int maximumIntersectingCellX,
+                    out int maximumIntersectingCellY,
+                    out int minimumChannelSourceCellX,
+                    out int minimumChannelSourceCellY,
+                    out int maximumChannelSourceCellX,
+                    out int maximumChannelSourceCellY),
+                Is.True);
+
+            // 交差セル0〜8は変えず、涵養の供給元だけを2セル外側の-2〜10まで広げます。
+            // 例えばセル6→7の河川がタイル59で終わると、幅のタイル60はセル8を担当するため、セル6も必要です。
+            Assert.That(minimumIntersectingCellX, Is.EqualTo(0));
+            Assert.That(minimumIntersectingCellY, Is.EqualTo(0));
+            Assert.That(maximumIntersectingCellX, Is.EqualTo(8));
+            Assert.That(maximumIntersectingCellY, Is.EqualTo(8));
+            Assert.That(minimumChannelSourceCellX, Is.EqualTo(-2));
+            Assert.That(minimumChannelSourceCellY, Is.EqualTo(-2));
+            Assert.That(maximumChannelSourceCellX, Is.EqualTo(10));
+            Assert.That(maximumChannelSourceCellY, Is.EqualTo(10));
         }
 
         /// <summary>
