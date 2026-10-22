@@ -1388,7 +1388,36 @@ namespace Farmware.WorldGeneration
                 return WorldSeedUtility.Mix64(currentHash ^ 0xC4B2FA11ED000002UL);
             }
 
-            // 地下水JobがConnectionFlagsとGroundwaterPotentialを確定した後の64セルを固定順で混合します。
+            using NativeArray<GeneratedHydrologyCell> springHydrologyCells =
+                new NativeArray<GeneratedHydrologyCell>(
+                    DeterministicLakeSpringGenerator.SpringHydrologyCellCount,
+                    Allocator.Temp,
+                    NativeArrayOptions.UninitializedMemory);
+            using NativeArray<SpringCandidate> springCandidates =
+                new NativeArray<SpringCandidate>(
+                    DeterministicLakeSpringGenerator.SpringCandidateCellCount,
+                    Allocator.Temp,
+                    NativeArrayOptions.UninitializedMemory);
+            if (!DeterministicLakeSpringGenerator.TryFinalizeChunk(
+                    settings,
+                    chunkCoordinate.X,
+                    chunkCoordinate.Y,
+                    cells,
+                    intersectingCells,
+                    surfaceWater,
+                    frontier,
+                    basinMembers,
+                    basinLookup,
+                    pathWorkspace,
+                    pathTiles,
+                    springHydrologyCells,
+                    springCandidates))
+            {
+                // C4-Cの湖最終区分または泉生成に失敗した状態を、通常の水面なしチャンクと区別します。
+                return WorldSeedUtility.Mix64(currentHash ^ 0xC4C0FA11ED000001UL);
+            }
+
+            // 湖水収支・泉JobがLake・Stream接続まで確定した後の64セルを固定順で混合します。
             for (int index = 0; index < CellsPerChunk; index++)
             {
                 currentHash = HashCell(currentHash, cells[index]);

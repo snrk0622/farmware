@@ -407,6 +407,8 @@ namespace Farmware.WorldGeneration.Authoring
                 Hydrology = HydrologyGenerationSettings.CreateDefault(),
                 // TERRAIN-01C4-Bの局所地質補正もInspectorへ重複保持せず、共有既定値をBakeします。
                 Groundwater = GroundwaterGenerationSettings.CreateDefault(),
+                // TERRAIN-01C4-Cの湖水収支・泉設定も調整値として重複させず、共有既定値をBakeします。
+                LakeSpring = LakeSpringGenerationSettings.CreateDefault(),
                 BiomeClassificationTransitionWidthInTiles =
                     biomeClassificationTransitionWidthInTiles,
                 BiomeTransitionWidthInTiles = biomeTransitionWidthInTiles,

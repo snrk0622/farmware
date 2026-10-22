@@ -1802,6 +1802,38 @@ namespace Farmware.WorldGeneration.Tests
                 AssertResourceEqual(DeterministicResourceGenerator.GenerateResource(
                     settings, resourceSettings, expected, x, y), resources[index], x, y);
             }
+
+            int temporaryLakeTiles = 0;
+            int saltLakeTiles = 0;
+            int freshwaterLakeTiles = 0;
+            int springStreamTiles = 0;
+            for (int index = 0; index < surfaceWater.Length; index++)
+            {
+                // C4-C固有Typeを数え、固定Seedの統合試料として利用できる区分が含まれるか診断します。
+                switch (surfaceWater[index].Type)
+                {
+                    case SurfaceWaterTileType.LakeCandidate:
+                        temporaryLakeTiles++;
+                        break;
+                    case SurfaceWaterTileType.PermanentSaltwaterLake:
+                        saltLakeTiles++;
+                        break;
+                    case SurfaceWaterTileType.PermanentFreshwaterLake:
+                        freshwaterLakeTiles++;
+                        break;
+                    case SurfaceWaterTileType.SpringStream:
+                        springStreamTiles++;
+                        break;
+                }
+            }
+            TestContext.WriteLine(
+                $"C4-C sample counts: temporary={temporaryLakeTiles}, salt={saltLakeTiles}, "
+                + $"fresh={freshwaterLakeTiles}, spring={springStreamTiles}");
+            Assert.That(
+                freshwaterLakeTiles,
+                Is.GreaterThan(0),
+                $"C4-C sample counts: temporary={temporaryLakeTiles}, salt={saltLakeTiles}, "
+                    + $"fresh={freshwaterLakeTiles}, spring={springStreamTiles}");
         }
 
         /// <summary>
@@ -1842,6 +1874,58 @@ namespace Farmware.WorldGeneration.Tests
                 Assert.That(timer.Elapsed.TotalSeconds, Is.LessThan(30), "地下水失敗結果が有限時間で確定しませんでした。");
                 system.Update(world.Unmanaged);
                 // 実製品の描画フレームと同様にWorkerへ実行時間を渡し、待機側のCPU占有を避けます。
+                System.Threading.Thread.Yield();
+            }
+
+            ChunkGenerationStatus status =
+                entityManager.GetComponentData<ChunkGenerationStatus>(chunkEntity);
+            Assert.That(status.Phase, Is.EqualTo(ChunkGenerationPhase.Failed));
+            Assert.That(status.GeneratedWithVersion, Is.Zero);
+            Assert.That(entityManager.GetBuffer<GeneratedTile>(chunkEntity).Length, Is.Zero);
+            Assert.That(entityManager.GetBuffer<GeneratedResourceTile>(chunkEntity).Length, Is.Zero);
+            Assert.That(entityManager.GetBuffer<GeneratedHydrologyCell>(chunkEntity).Length, Is.Zero);
+            Assert.That(entityManager.GetBuffer<GeneratedSurfaceWaterTile>(chunkEntity).Length, Is.Zero);
+            Assert.That(entityManager.GetBuffer<GeneratedHydrologyTile>(chunkEntity).Length, Is.Zero);
+        }
+
+        /// <summary>
+        /// C4-Cだけが拒否する不正な湖水収支比重を準備し、地下水まで完成しても5種類のECS Bufferを部分公開しないことを保証します。
+        /// </summary>
+        [Test]
+        public void ChunkGenerationSystem_LakeSpringFailureDoesNotPublishAnyBuffer()
+        {
+            using World world = new World("ChunkGenerationLakeSpringFailureTests");
+            EntityManager entityManager = world.EntityManager;
+            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.FromString("ecs-lake-spring-failure-test"),
+                1);
+            // 湖水収支の比重合計4だけを崩し、C4-B2までの全入力は有効な状態を維持します。
+            settings.LakeSpring.LakeWeightTotal = 3;
+
+            Entity settingsEntity = entityManager.CreateEntity();
+            entityManager.AddComponentData(settingsEntity, settings);
+            entityManager.AddComponentData(settingsEntity, ResourceGenerationSettings.CreateDefault());
+            Entity chunkEntity = CreateChunkEntity(
+                entityManager,
+                1,
+                -1,
+                ChunkGenerationPhase.Queued,
+                true);
+            SystemHandle system = world.GetOrCreateSystem<ChunkGenerationSystem>();
+
+            system.Update(world.Unmanaged);
+            entityManager.CompleteAllTrackedJobs();
+            Assert.That(
+                entityManager.GetComponentData<ChunkGenerationStatus>(chunkEntity).Phase,
+                Is.EqualTo(ChunkGenerationPhase.GeneratingData));
+
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+            while (entityManager.GetComponentData<ChunkGenerationStatus>(chunkEntity).Phase
+                == ChunkGenerationPhase.GeneratingData)
+            {
+                Assert.That(timer.Elapsed.TotalSeconds, Is.LessThan(30), "湖・泉失敗結果が有限時間で確定しませんでした。");
+                system.Update(world.Unmanaged);
+                // 製品の描画フレームと同様にWorkerへ実行時間を渡し、待機側のCPU占有を避けます。
                 System.Threading.Thread.Yield();
             }
 

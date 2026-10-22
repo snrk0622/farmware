@@ -2,8 +2,8 @@
 
 - 更新日: 2026-10-22
 - 対象PR: TERRAIN-01C4-A/B/C/D/E
-- 状態: C4-AはPR #39のmerge commit `2abaa0c5`、C4-B1はcommit `15eb97a2`で完了。C4-B2「地下水・自然土壌飽和のECS接続」は実装・AI検証・人間確認を完了し、本commitの対象とする
-- 作業ブランチ: `terrain-01c4b-groundwater-saturation`
+- 状態: C4-AはPR #39のmerge commit `2abaa0c5`、C4-BはPR #40のmerge commit `98a67b64`で完了。C4-C「湖水収支・泉」は実装・AI検証を完了し、人間確認とcommit許可待ち
+- 作業ブランチ: `terrain-01c4c-lake-springs`
 
 ## 1. 目的と前提
 
@@ -40,7 +40,7 @@ TERRAIN-01C4は、TERRAIN-01C2の固定地質とTERRAIN-01C3の8×8水文セル�
 
 `GeneratedSurfaceWaterTile`は1タイル16 bytesで、次の値を保持する。
 
-- `Type`: `None`、`Stream`、`River`、`LakeCandidate`。後続C4-C用の恒久淡水湖、恒久塩湖、泉流も予約する。
+- `Type`: `None`、`Stream`、`River`、`LakeCandidate`。C4-A2で予約した恒久淡水湖、恒久塩湖、泉流をC4-Cで使用する。
 - `Flags`: 地下水涵養候補、確定自然表流水、淡水接続、河道中心線を独立したbitで保持する。C4-A2の渓流・河川は涵養候補・確定自然表流水・淡水接続を設定する。湖面候補は涵養候補だけを設定し、後続区分前に恒久水面や淡水と断定しない。
 - `SurfaceHeight`: 河道は対象タイルの連続標高、湖面候補は固定湖面標高を保持する。
 - `SourceAmount`: 河道は`RunoffEquivalentCells`、湖面候補は`LakeFillFraction`を保持する。
@@ -78,7 +78,17 @@ TERRAIN-01C4は、TERRAIN-01C2の固定地質とTERRAIN-01C3の8×8水文セル�
 
 `ChunkGenerationSystem`は、表流水Jobと地形・資源Jobの完成Handleを結合した後に地下水Jobを実行する。生成枠では9×9完成水文、81涵養フラグ、4096自然水文を所有し、地形、資源、地下水反映済み水文、表流水、自然水文の5 Bufferを同じ固定Tick境界で公開する。先行段階または地下水段階が失敗した場合は5 Bufferのどれも公開しない。状態ハッシュも地下水反映済み64水文セル、4096表流水、4096自然水文を固定順で含む。
 
-## 5. 現在の検証状態
+## 5. C4-Cの湖水収支・泉
+
+`LakeSpringGenerationSettings`は、湖水収支の比重2：1：1と合計4、一時湖／塩湖境界26,214、塩湖／淡水湖境界52,428、泉の地下水／落差比重2：1と合計3、落差倍率16、放出境界39,321、抑制半径4水文セルを保持する。`DeterministicLakeSpringGenerator`は湖末端の充填率、地下水、地形気温、基礎湿度から64bit整数で水収支を求め、越流淡水湖、一時湖、恒久塩湖、閉鎖淡水湖へ分類する。一時湖は`LakeCandidate`の涵養履歴だけを残して固定自然水面を外し、塩湖は固定自然水面を維持して淡水接続を外す。
+
+泉は対象チャンクへ入り得る11×11泉源と、その周囲4セルの抑制比較に必要な19×19候補、候補の8近傍に必要な21×21完成水文から決める。地下水接続があり、恒久自然水面がなく、地下水のない低い隣接セルを持ち、放出度39,321以上となるセルだけを候補にする。半径4セル内では放出度最大、同値時は水文セルX・Y昇順の一つだけを残す。泉源から最低適格隣接セルへの合成辺は経路細分化の作業値にだけ設定し、公開する基礎D8、`CatchmentAreaCells`、`RunoffEquivalentCells`を変更しない。
+
+製品`ChunkGenerationSystem`は地下水Job後に、21行を既存8組の集水Heap・閉鎖流域配列・Hash領域へ剰余分割して周辺水文を並列生成し、最終Jobで湖区分と泉流を適用する。帯水係数は地下水ポテンシャルの上限でもあるため、外周セルの固定9地点補正後透水性・保持力の小さい方が32,768未満なら、最大涵養でも泉源にならないことを証明して代表標高だけを生成し、最大4,096セルの集水探索を省略する。最終Handle、`ChunkGenerationLakeSpringWait`、状態ハッシュ、失敗通知を既存5 Bufferの一括公開境界へ接続し、途中失敗時はどのBufferも公開しない。
+
+C4-Cは既存ECS Buffer要素を拡張せず、Persistent生成枠へ21×21の`GeneratedHydrologyCell` 42,336 bytes、19×19の`SpringCandidate` 8,664 bytes、8担当の失敗通知8 bytes、合計51,008 bytesを追加する。1枠は9,746,944 bytes、既定2枠は19,493,888 bytes（約18.59MiB）となる。`SpringCandidate`は24 bytesである。コンテナ管理領域、Allocator余白、安全性情報は含めない。
+
+## 6. 現在の検証状態
 
 - ブランチ作成前の`develop`はPR #38のmerge commit `1857386c`で、作業ツリーはクリーンだった。
 - C4-A1では、河道Anchor用と経路同点解決用のSaltを分離し、最低標高Anchor、最大16×16・256ノードの8近傍経路、無効入力時の部分結果非公開を純粋計算として追加した。最大標高だけを第1探索で確定し、その標高以下へ制限した第2探索で上り合計、辺数、標高合計、安定順位を比較する。これにより、後段の高地で最大標高が同値化したときに、上り合計の良い別経路を早く破棄しない。
@@ -98,3 +108,7 @@ TERRAIN-01C4は、TERRAIN-01C2の固定地質とTERRAIN-01C3の8×8水文セル�
 - C4-B2後のPersistent作業配列は、1枠へ9×9完成水文7,776 bytes、涵養フラグ81 bytes、自然水文8,192 bytes、失敗通知1 byteの計16,050 bytesを追加する。1枠9,695,936 bytes、既定2枠19,391,872 bytes（約18.49MiB）である。`GeneratedHydrologyCell`は地下水値追加後も96 bytesの既存レイアウトを維持し、ECS側の追加はロード済み1チャンク当たり自然水文8,192 bytesである。コンテナ管理領域、Allocator余白、安全性情報、Dynamic Buffer管理領域は含めない。
 - PR #40レビュー修正後の明示的性能テストでは、同じ1／4／16チャンクの地形・水文・表流水までが280.581／908.071／3,660.614ms、地下水・自然土壌飽和を含む場合が284.813／931.007／3,766.692msで、追加時間は4.232／22.936／106.078msだった。修正前の追加時間4.910／23.374／96.088msに対し、16チャンクで10.0ms増えたが、各条件1回かつ基準時間も変動しているため、安定した増減率とは扱わない。接続済みEditorのMain Thread同期経路であり、Burst Job、ECS公開、描画、Development Player、対象機器の合格値ではない。
 - C4-B2はPresentation、Scene、Prefab、Debug Visualizationを変更していない。SampleSceneの通常移動とチャンク境界往復、体感停止、Console、Profilerの`ChunkGenerationGroundwaterWait`について、2026-10-22に人間確認を完了した。可視化はC4-Eまで旧表示を維持する。
+- C4-Cでは湖水収支境界26,213／26,214・52,427／52,428、越流淡水化、一時湖・塩湖・淡水湖の表流水フラグ、泉放出境界39,320／39,321、地下水のない最低8近傍、放出度・座標同点順、泉流追加時の基礎D8・集水・流出寄与不変、`SpringCandidate` 24 bytes、失敗時の5 Buffer非公開を追加テストで固定した。固定Seedの製品Job統合試料では恒久淡水湖105タイルを確認した。
+- 21×21周辺水文を単一Jobで直列生成する初期実装はPlayModeの300フレーム生成上限を3件で超えたため、8担当の行並列化と、帯水係数上限による泉源不可能セルの安全な集水省略へ変更した。最終ソースでは厳格再コンパイルが警告0件・エラー0件、対象C4-Cテスト16件、製品Jobの通常公開1件と失敗時非公開1件、World Generation EditMode Assembly 474件（192.11秒）、PlayMode Assembly 56件（9.84秒）が全件成功し、ストリーミング回帰3件も300フレーム内へ戻った。最終Console実状態もコンパイル失敗なし、エラー0件、警告0件である。
+- 最適化後の明示的なMain Thread同期生成は1／4／16チャンクで560.460／1,298.688／7,240.875msだった。最適化前の714.457／2,496.452／8,949.429msから短縮したが、Burst並列Job、ECS公開、描画、Development Playerは含まず、Seed内の地形差もあるため正式な合格値にはしない。
+- C4-CはPresentation、Scene、Prefab、Debug Visualizationを変更していないため、見た目はC4-Eまで旧水域表示を維持する。SampleSceneの通常移動、チャンク境界往復、体感停止、Console、Profilerの`ChunkGenerationLakeSpringWait`は人間確認待ちである。

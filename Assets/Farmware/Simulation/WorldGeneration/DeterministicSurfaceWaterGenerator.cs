@@ -25,13 +25,13 @@ namespace Farmware.WorldGeneration
         /// <summary>閉鎖流域の湖底から連続する長期的な湖面候補です。恒久性と塩分はC4-Cで確定します。</summary>
         LakeCandidate = 3,
 
-        /// <summary>C4-Cで確定する恒久淡水湖用の予約済み安定値です。</summary>
+        /// <summary>C4-Cの越流または高い水収支によって確定した恒久淡水湖です。</summary>
         PermanentFreshwaterLake = 4,
 
-        /// <summary>C4-Cで確定する恒久塩湖用の予約済み安定値です。</summary>
+        /// <summary>C4-Cの閉鎖水収支によって確定し、淡水接続から除外する恒久塩湖です。</summary>
         PermanentSaltwaterLake = 5,
 
-        /// <summary>C4-Cで地下水の泉から追加する固定淡水流用の予約済み安定値です。</summary>
+        /// <summary>C4-Cで地下水域の低い縁から追加した固定淡水の泉流です。</summary>
         SpringStream = 6
     }
 

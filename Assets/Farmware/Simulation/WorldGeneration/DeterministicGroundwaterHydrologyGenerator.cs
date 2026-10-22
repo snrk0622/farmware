@@ -302,7 +302,7 @@ namespace Farmware.WorldGeneration
         /// <param name="adjustedPermeability">成功時の固定9地点補正後透水性平均です。</param>
         /// <param name="adjustedGroundwaterStorage">成功時の固定9地点補正後保持力平均です。</param>
         /// <returns>全サンプル座標と地質を生成できた場合はtrueです。</returns>
-        private static bool TrySampleAdjustedGeologyAverage(
+        internal static bool TrySampleAdjustedGeologyAverage(
             in WorldGenerationSettings settings,
             int cellX,
             int cellY,
