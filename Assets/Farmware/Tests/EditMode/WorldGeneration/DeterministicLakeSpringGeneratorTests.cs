@@ -565,6 +565,74 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// 交差9×9の正側境界で一時湖へ確定したセルを準備し、21×21泉キャッシュでもLake接続だけが外れ、
+        /// 通常河道の涵養で更新済みの地下水値と接続は失われないことを保証します。
+        /// </summary>
+        [Test]
+        public void SynchronizeFinalizedLakeConnection_ClearsTemporaryLakeAtPositiveChunkBoundary()
+        {
+            NativeArray<GeneratedHydrologyCell> springHydrologyCells =
+                new NativeArray<GeneratedHydrologyCell>(
+                    DeterministicLakeSpringGenerator.SpringHydrologyCellCount,
+                    Allocator.Temp,
+                    NativeArrayOptions.ClearMemory);
+            try
+            {
+                const int IntersectingOffsetX = 8;
+                const int IntersectingOffsetY = 4;
+                const int CellX = 8;
+                const int CellY = 4;
+                int cacheX = IntersectingOffsetX
+                    + DeterministicLakeSpringGenerator.SpringHydrologyOriginOffsetFromIntersecting;
+                int cacheY = IntersectingOffsetY
+                    + DeterministicLakeSpringGenerator.SpringHydrologyOriginOffsetFromIntersecting;
+                int cacheIndex =
+                    (cacheY * DeterministicLakeSpringGenerator.SpringHydrologyCellsPerAxis) + cacheX;
+
+                // 先行する涵養更新が地下水を追加した後、湖最終化前のLake接続だけが残った状態を再現します。
+                springHydrologyCells[cacheIndex] = new GeneratedHydrologyCell
+                {
+                    CellX = CellX,
+                    CellY = CellY,
+                    GroundwaterPotential = 60000,
+                    ConnectionFlags = HydrologyConnectionFlags.Groundwater | HydrologyConnectionFlags.Lake,
+                    LakeFlags = HydrologyLakeFlags.SurfaceCell
+                };
+                GeneratedHydrologyCell finalizedTemporaryLake = new GeneratedHydrologyCell
+                {
+                    CellX = CellX,
+                    CellY = CellY,
+                    ConnectionFlags = HydrologyConnectionFlags.None,
+                    LakeFlags = HydrologyLakeFlags.SurfaceCell
+                };
+
+                Assert.That(
+                    DeterministicLakeSpringGenerator.TrySynchronizeFinalizedLakeConnection(
+                        finalizedTemporaryLake,
+                        IntersectingOffsetX,
+                        IntersectingOffsetY,
+                        springHydrologyCells),
+                    Is.True);
+
+                GeneratedHydrologyCell synchronized = springHydrologyCells[cacheIndex];
+                Assert.That(
+                    (synchronized.ConnectionFlags & HydrologyConnectionFlags.Lake) == 0,
+                    Is.True,
+                    "一時湖は隣接チャンクから参照する泉キャッシュでも恒久水面として扱いません。");
+                Assert.That(
+                    (synchronized.ConnectionFlags & HydrologyConnectionFlags.Groundwater) != 0,
+                    Is.True,
+                    "Lakeビットの同期で、先行する通常河道涵養の地下水接続を失ってはいけません。");
+                Assert.That(synchronized.GroundwaterPotential, Is.EqualTo(60000));
+            }
+            finally
+            {
+                // Assert失敗時もテスト所有のNativeArrayを解放し、後続テストへAllocator警告を残しません。
+                springHydrologyCells.Dispose();
+            }
+        }
+
+        /// <summary>
         /// 準備済み21×21水文へ一つだけ泉候補を置き、固定小川の表流水とStream接続を追加しても
         /// 基礎D8、集水面積、流出寄与を変更しないことを保証します。
         /// </summary>
@@ -635,6 +703,37 @@ namespace Farmware.WorldGeneration.Tests
                                 CellY = cacheY - 6,
                                 HydrologyHeight = 30000
                             };
+                    }
+                }
+
+                // 製品Jobと同じく、交差9×9と公開8×8にも全セルの絶対座標を設定します。
+                // 泉源以外をdefaultの(0,0)にすると、同じ絶対セルを同期する境界検証を再現できません。
+                for (int intersectingY = 0;
+                    intersectingY < DeterministicGroundwaterHydrologyGenerator.IntersectingCellsPerAxis;
+                    intersectingY++)
+                {
+                    for (int intersectingX = 0;
+                        intersectingX < DeterministicGroundwaterHydrologyGenerator.IntersectingCellsPerAxis;
+                        intersectingX++)
+                    {
+                        int cacheX = intersectingX
+                            + DeterministicLakeSpringGenerator.SpringHydrologyOriginOffsetFromIntersecting;
+                        int cacheY = intersectingY
+                            + DeterministicLakeSpringGenerator.SpringHydrologyOriginOffsetFromIntersecting;
+                        GeneratedHydrologyCell preparedCell = springHydrologyCells[
+                            (cacheY * DeterministicLakeSpringGenerator.SpringHydrologyCellsPerAxis) + cacheX];
+                        intersectingCells[
+                            (intersectingY
+                                * DeterministicGroundwaterHydrologyGenerator.IntersectingCellsPerAxis)
+                            + intersectingX] = preparedCell;
+
+                        if (intersectingX < DeterministicHydrologyGenerator.CellsPerChunkAxis
+                            && intersectingY < DeterministicHydrologyGenerator.CellsPerChunkAxis)
+                        {
+                            hydrologyCells[
+                                (intersectingY * DeterministicHydrologyGenerator.CellsPerChunkAxis)
+                                + intersectingX] = preparedCell;
+                        }
                     }
                 }
 

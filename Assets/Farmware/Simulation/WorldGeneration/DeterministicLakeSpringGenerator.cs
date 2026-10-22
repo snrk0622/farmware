@@ -797,6 +797,15 @@ namespace Farmware.WorldGeneration
                 intersectingCells[index] = cell;
                 int offsetX = index % DeterministicGroundwaterHydrologyGenerator.IntersectingCellsPerAxis;
                 int offsetY = index / DeterministicGroundwaterHydrologyGenerator.IntersectingCellsPerAxis;
+                if (!TrySynchronizeFinalizedLakeConnection(
+                        cell,
+                        offsetX,
+                        offsetY,
+                        springHydrologyCells))
+                {
+                    return false;
+                }
+
                 if (offsetX < DeterministicHydrologyGenerator.CellsPerChunkAxis
                     && offsetY < DeterministicHydrologyGenerator.CellsPerChunkAxis)
                 {
@@ -932,6 +941,48 @@ namespace Farmware.WorldGeneration
                 }
             }
 
+            return true;
+        }
+
+        /// <summary>
+        /// 交差9×9で最終確定した湖接続だけを、同じ絶対セルの泉用21×21キャッシュへ同期します。
+        /// </summary>
+        /// <param name="finalizedCell">一時湖または恒久湖の判定を反映済みの交差水文セルです。</param>
+        /// <param name="intersectingOffsetX">交差9×9内の水平位置です。0〜8を指定します。</param>
+        /// <param name="intersectingOffsetY">交差9×9内の垂直位置です。0〜8を指定します。</param>
+        /// <param name="springHydrologyCells">同期先となる21×21の泉判定用水文キャッシュです。</param>
+        /// <returns>同じ絶対座標のキャッシュ要素へ湖接続を同期できた場合はtrueです。</returns>
+        internal static bool TrySynchronizeFinalizedLakeConnection(
+            in GeneratedHydrologyCell finalizedCell,
+            int intersectingOffsetX,
+            int intersectingOffsetY,
+            NativeArray<GeneratedHydrologyCell> springHydrologyCells)
+        {
+            if (!springHydrologyCells.IsCreated
+                || springHydrologyCells.Length < SpringHydrologyCellCount
+                || intersectingOffsetX < 0
+                || intersectingOffsetX >= DeterministicGroundwaterHydrologyGenerator.IntersectingCellsPerAxis
+                || intersectingOffsetY < 0
+                || intersectingOffsetY >= DeterministicGroundwaterHydrologyGenerator.IntersectingCellsPerAxis)
+            {
+                return false;
+            }
+
+            int cacheX = intersectingOffsetX + SpringHydrologyOriginOffsetFromIntersecting;
+            int cacheY = intersectingOffsetY + SpringHydrologyOriginOffsetFromIntersecting;
+            int cacheIndex = (cacheY * SpringHydrologyCellsPerAxis) + cacheX;
+            GeneratedHydrologyCell cachedCell = springHydrologyCells[cacheIndex];
+            if (cachedCell.CellX != finalizedCell.CellX || cachedCell.CellY != finalizedCell.CellY)
+            {
+                return false;
+            }
+
+            // 涵養再構築後の地下水値や河道接続をセル全体の代入で失わないため、
+            // 湖区分が変更するLakeビットだけを最終結果へ置き換えます。
+            cachedCell.ConnectionFlags =
+                (cachedCell.ConnectionFlags & ~HydrologyConnectionFlags.Lake)
+                | (finalizedCell.ConnectionFlags & HydrologyConnectionFlags.Lake);
+            springHydrologyCells[cacheIndex] = cachedCell;
             return true;
         }
 
