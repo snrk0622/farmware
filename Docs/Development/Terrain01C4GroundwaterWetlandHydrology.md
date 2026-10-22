@@ -2,8 +2,8 @@
 
 - 更新日: 2026-10-22
 - 対象PR: TERRAIN-01C4-A/B/C/D/E
-- 状態: C4-AはPR #39のmerge commit `2abaa0c5`、C4-BはPR #40のmerge commit `98a67b64`、C4-CはPR #41のmerge commit `cd154385`で完了。C4-DはD1「自然冠水の純粋計算」とD2「湿原規模・ECS接続」の実装・AI検証・人間確認・commitを完了。次の独立した変更単位はC4-E「監査・診断表示」
-- 作業ブランチ: `terrain-01c4d-natural-flooding-wetland`
+- 状態: C4-AはPR #39のmerge commit `2abaa0c5`、C4-BはPR #40のmerge commit `98a67b64`、C4-CはPR #41のmerge commit `cd154385`で完了。C4-DはD1「自然冠水の純粋計算」とD2「湿原規模・ECS接続」の実装・AI検証・人間確認・commitを完了。C4-Eは差分規模を抑えるため、E1a「完成チャンク診断経路」、E1b「複数Seed集計」、E2「Gameビュー診断」、E3「Map Viewer診断」の順に進める。C4-E1aは実装・AI検証・人間確認を完了し、次の独立した変更単位はC4-E1bである。
+- 作業ブランチ: `terrain-01c4e1a-hydrology-diagnostic-chunk`
 
 ## 1. 目的と前提
 
@@ -22,7 +22,10 @@ TERRAIN-01C4は、TERRAIN-01C2の固定地質とTERRAIN-01C3の8×8水文セル�
 - C4-C 湖水収支・泉: 湖候補を淡水・塩水・一時湖へ確定し、抑制済み泉源と固定淡水小川を追加する。
 - C4-D1 自然冠水の純粋計算: 半径32タイルの恒久淡水源探索、整数平方根、安定同点順、距離・比高・平坦さ・水域規模の整数合成を確定する。固定設定をWorldGenerationSettingsへ追加するが、ECS Bufferは変更しない。
 - C4-D2 湿原規模・ECS接続: チャンク境界を含む水源再構築、4096タイルの自然冠水度、セル内16適格タイル、上下左右4水文セルの広域規模判定をECS・状態ハッシュ・性能記録へ接続する。
-- C4-E 監査・診断表示: 複数Seed監査、Gameビュー、Map Viewer、凡例、中央タイル情報を接続する。
+- C4-E1a 完成チャンク診断経路: 製品Generatorと同じC3、C4-A〜Dの順序で、地形、水文セル、表流水、自然水文を再構築するEditor専用境界を追加する。
+- C4-E1b 複数Seed集計: E1aを有限範囲へ適用し、地下水、自然土壌飽和、湖区分、泉、自然冠水、湿原候補の分布と比較署名をEditorメニューから記録する。
+- C4-E2 Gameビュー診断: 生成済みECS Bufferから個別表示、凡例、中央タイル情報を追加する。
+- C4-E3 Map Viewer診断: E1aの完成チャンク診断経路を広域サンプリングへ再利用し、個別表示、凡例、Hover情報を追加してC4-Eを完了する。
 
 各項目は実装、初心者向け日本語コメント、関連EditMode／PlayModeテスト、文書更新、AI確認を同じ変更単位に含める。人間確認とcommit許可を受けるまでcommitせず、次項目へ自動着手しない。
 
@@ -111,7 +114,11 @@ C4-Cは既存ECS Buffer要素を拡張せず、Persistent生成枠へ21×21の`G
 
 `GeneratedHydrologyTile`は自然飽和、自然冠水、`FreshwaterConnected`・`WetlandTileEligible`・`LargeWetlandExtent`のflagsを持つ6 bytesとなる。`ChunkGenerationSystem`は湖・泉Job後に、周囲8チャンクを4担当ずつ2波で再構築する並列Jobと、担当0〜7を固定順で結合して4096タイルを評価する最終Jobを実行する。`ChunkGenerationNaturalFloodingWait`で完成済みHandleの確定費用を分離し、失敗通知、5 Buffer一括公開、状態ハッシュ、固定Tick境界は既存契約を維持する。PresentationとC4-Cまでの湖表示は変更せず、自然冠水・湿原の診断表示はC4-Eへ残す。
 
-## 8. 現在の検証状態
+## 8. C4-E1aの完成チャンク診断経路
+
+`HydrologyDiagnosticChunk`はEditor専用の完成チャンク生成境界として、C3水文セル、C4-A表流水候補、4096地形タイル、C4-B地下水・自然飽和、C4-C最終湖区分・泉、C4-D自然冠水・湿原規模を製品と同じ順序で実行する。出力は1チャンク分のPersistent `NativeArray`として所有し、成功・失敗・確保例外・生成例外の各経路で破棄する。Surface以外の未接続WorldLayerは配列確保前に拒否し、地上結果を流用しない。Scene、Prefab、ECS World、製品Buffer、生成設定、生成アセットは変更しない。C4-E1bとE3はこの経路を再利用し、診断側へ生成式を複製しない。
+
+## 9. 現在の検証状態
 
 - ブランチ作成前の`develop`はPR #38のmerge commit `1857386c`で、作業ツリーはクリーンだった。
 - C4-A1では、河道Anchor用と経路同点解決用のSaltを分離し、最低標高Anchor、最大16×16・256ノードの8近傍経路、無効入力時の部分結果非公開を純粋計算として追加した。最大標高だけを第1探索で確定し、その標高以下へ制限した第2探索で上り合計、辺数、標高合計、安定順位を比較する。これにより、後段の高地で最大標高が同値化したときに、上り合計の良い別経路を早く破棄しない。
@@ -143,3 +150,4 @@ C4-Cは既存ECS Buffer要素を拡張せず、Persistent生成枠へ21×21の`G
 - 初期の直列製品JobはPlayModeストリーミング3件で300フレーム上限を超えたため、周囲8チャンクを4担当ずつ2波へ分割し、最終結合だけを固定順で行う形へ変更した。8担当一波も比較したが、製品統合テストの短縮が1.3408秒から1.2956秒の小差に留まり、1枠約5MiBの追加常駐領域に見合わないため採用していない。BatchModeの高速空フレームは実プレイよりWorker時間が短いため、PlayMode待機は300フレーム上限を保ったまま1未完了フレーム当たり10msだけWorkerへ譲る。
 - PR #42レビュー修正後の最終ソースでは、塩湖・一時湖・未分類湖をLake由来の淡水接続から除外し、越流淡水湖・閉鎖淡水湖だけを認める境界10件を追加した。対象25件（明示的性能3件を含む）は61.29秒、World Generation EditMode 542件は276.43秒、PlayMode 56件は38.65秒で全件成功し、厳格再コンパイルはエラー0件・警告0件だった。C4-D2の実装・AI検証・性能／メモリ記録は完了した。SampleSceneの通常移動、チャンク境界往復、体感停止、Console、Profilerの`ChunkGenerationNaturalFloodingWait`と左移動時の先読み修正は、2026-10-22に人間確認を完了した。
 - 初回人間確認で、初期配置から左へ移動したときに左隣チャンクが一時的に未描画となる回帰が見つかった。C4-D2の負荷増加に対し、既存先読み順が左隣より左下・左上角を先に予約していたことが原因である。`ChunkStreamingSystem`を中心、上下左右、角の順へ修正し、修正後のAI SampleScene再現では中心のActive化時に左隣もInactiveとして生成済みで、左移動後に描画空白がないことを確認した。同時生成上限2、生成算式、固定ハッシュ、メモリ容量は変更しない。修正後のEditMode 532件とPlayMode 56件は全件成功し、人間再確認でも描画空白が解消したことを確認した。
+- C4-E1aでは完成チャンク診断器をEditor Assemblyへ追加し、成功時の4配列、Surface以外の拒否、重複Disposeを対象テストで確認した。Unity 6000.3.8f1 Editorの厳格再コンパイルは警告0件・エラー0件、最終対象EditMode 2件は8.70秒、World Generation EditMode Assembly 544件は283.63秒で全件成功した。Unity CLIと既存Pipeline間の旧コマンド名照会エラーだけを内容確認後に消去し、最終Console実状態もエラー0件・警告0件である。複数Seed集計、比較署名、EditorメニューはC4-E1bへ分離した。Scene、Prefab、ECS World、製品生成結果、生成設定、アセットは変更していない。2026-10-22に人間確認を完了し、commit許可を受けた。

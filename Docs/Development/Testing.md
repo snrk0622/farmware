@@ -142,6 +142,12 @@ C4-D2では低地20,000／36,000の両端、淡水接続必須、自然飽和ま
 
 C3-D2の複数Seed分布監査について、最小の1 Seed・1 ChunkをMain Threadと実メニュー同様のThreadPoolで集計する。総数64セル、流向・終端件数の合計、河川が渓流以下、湖面が固定湖候補以下、固定湖流域が解決済み流域以下、集水面積の範囲を確認し、比較署名と日本語レポートが再実行で一致することを保証する。監査はSceneやECS状態を書き換えず、製品と同じ純粋Generatorを使い、Main Thread限定の`Allocator.Temp`へ依存しない。
 
+#### `HydrologyDiagnosticChunkTests`
+
+C4-E1aの完成チャンク診断境界を対象にする。製品と同じC3、C4-A、C4-B、C4-C、C4-Dの順序でSurface原点チャンクを再構築し、地形4096件、水文セル64件、表流水4096件、自然水文4096件を部分結果なしで公開することを確認する。所有するPersistent `NativeArray`は破棄後に未確保状態へ戻り、`Dispose`を再度呼んでも二重破棄しない。自然生成へ未接続のUnderwaterは配列確保前に明示拒否し、Surface結果を流用しない。複数Seedの集計値、比較署名、ConsoleメニューはC4-E1bで追加する。
+
+2026-10-22のC4-E1a AI確認では、Unity 6000.3.8f1 Editorの厳格再コンパイルが警告0件・エラー0件で成功した。最終対象EditMode 2件は8.70秒、World Generation EditMode Assembly 544件は283.63秒ですべて成功し、失敗、スキップ、未確定はいずれも0件だった。Unity CLI 1.0.0-beta.14と既存Pipeline 0.8.0-exp.1間の旧コマンド名照会エラー4件だけを内容確認後にConsoleから消去し、最終実状態はコンパイル失敗なし、エラー0件、警告0件である。
+
 #### `HydrologyVisualizationTests`
 
 C3-D2のGameビューとMap Viewerが共有する水文色写像を検証する。打切り流域、固定湖候補、実湖面、越流が相互に異なる色であり、流域共通の`Overflow`だけを持つ非湖面セルは越流色にせず固定湖候補色を保つこと、5水文モードのMap Viewer RGBがOverlayと一致して不透明になることを保証する。小さい3×2画像の各代表タイルを直接生成した固定水文セルと比較し、実Window同様のThreadPoolでも画像を完成できること、最大64サンプル制限でも2:1のViewport縦横比を維持することを確認する。
