@@ -624,6 +624,9 @@ namespace Farmware.WorldGeneration.Authoring
             {
                 Entity entity = GetEntity(TransformUsageFlags.None);
                 AddComponent(entity, authoring.CreateWorldGenerationSettingsSnapshot());
+                // C5-Aの18Biome表は約4KBあるため、全生成Jobが受け取るWorldGenerationSettingsへ埋め込みません。
+                // 分類器だけが読む独立シングルトンに分け、既存Jobのスケジュールごとの不要な値コピーを避けます。
+                AddComponent(entity, BiomeDefinitionCatalog.CreateDefault());
                 AddComponent(entity, new ChunkStreamingSettings
                 {
                     PreloadMarginInChunks = authoring.preloadMarginInChunks,
