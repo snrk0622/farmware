@@ -139,6 +139,12 @@ namespace Farmware.WorldGeneration
         public const int SpringHydrologyCellCount =
             SpringHydrologyCellsPerAxis * SpringHydrologyCellsPerAxis;
 
+        /// <summary>泉水文21×21の正規表流水涵養有無を一度だけ保持する固定要素数です。</summary>
+        public const int SpringRechargeCandidateCount = SpringHydrologyCellCount;
+
+        /// <summary>交差9×9の先頭から泉水文21×21の先頭まで戻る固定セル数です。</summary>
+        public const int SpringHydrologyOriginOffsetFromIntersecting = 6;
+
         /// <summary>設定が確定したC4-C契約と一致するか検証します。</summary>
         /// <param name="settings">検証する湖水収支・泉設定です。</param>
         /// <returns>暗黙補正せず固定生成へ使用できる場合はtrueです。</returns>
@@ -386,6 +392,7 @@ namespace Farmware.WorldGeneration
         /// <param name="basinLookup">外周湖状態の再構築へ再利用する固定Hash表です。</param>
         /// <param name="pathWorkspace">泉の最大16×16経路探索へ再利用する作業配列です。</param>
         /// <param name="pathTiles">一つの泉経路を保持する作業配列です。</param>
+        /// <param name="springSurfaceRechargeCandidates">通常表流水生成が同じ河道経路から記録した21×21涵養フラグです。</param>
         /// <param name="springHydrologyCells">21×21の地下水・湖状態を一時保持する配列です。</param>
         /// <param name="springCandidates">19×19の泉候補を一時保持する配列です。</param>
         /// <returns>湖と泉を固定上限内で完全に確定できた場合はtrueです。</returns>
@@ -401,10 +408,11 @@ namespace Farmware.WorldGeneration
             NativeArray<HydrologyBasinLookupSlot> basinLookup,
             NativeArray<SurfaceWaterPathSearchNode> pathWorkspace,
             NativeArray<SurfaceWaterPathTile> pathTiles,
+            NativeArray<SurfaceRechargeCandidate> springSurfaceRechargeCandidates,
             NativeArray<GeneratedHydrologyCell> springHydrologyCells,
             NativeArray<SpringCandidate> springCandidates)
         {
-            // 同期ハッシュと単体テストでは1担当で周辺水文を準備します。製品Jobは下の行担当APIを8並列で先行実行します。
+            // 同期ハッシュと単体テストでは1担当で周辺水文を準備します。製品Jobは同じ処理を8並列で先行実行します。
             return TryPrepareSpringHydrologyRowsLane(
                     settings,
                     chunkX,
@@ -416,7 +424,7 @@ namespace Farmware.WorldGeneration
                     springHydrologyCells,
                     0,
                     1)
-                && TryFinalizePreparedChunk(
+                && TryFinalizePreparedChunkWithRechargeRefresh(
                     settings,
                     chunkX,
                     chunkY,
@@ -428,6 +436,7 @@ namespace Farmware.WorldGeneration
                     basinLookup,
                     pathWorkspace,
                     pathTiles,
+                    springSurfaceRechargeCandidates,
                     springHydrologyCells,
                     springCandidates);
         }
@@ -533,6 +542,172 @@ namespace Farmware.WorldGeneration
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// 21×21泉水文の涵養を通常表流水と同じ河道・河川幅・海面規則で再構築し、地下水を更新します。
+        /// キャッシュ済み隣接セルの河道幅も対象へ反映し、対象自身のConnectionFlagsだけを見る近似を避けます。
+        /// </summary>
+        /// <param name="settings">表流水、地下水、湖・泉を含む固定ワールド生成設定です。</param>
+        /// <param name="chunkX">対象の水平論理チャンク座標です。</param>
+        /// <param name="chunkY">対象の垂直論理チャンク座標です。</param>
+        /// <param name="springSurfaceRechargeCandidates">通常表流水生成が同じ河道経路から記録した21×21涵養フラグです。</param>
+        /// <param name="springHydrologyCells">更新対象の21×21周辺水文です。</param>
+        /// <returns>有限走査内ですべての涵養と地下水を再構築できた場合はtrueです。</returns>
+        internal static bool TryRefreshSpringHydrologyRecharge(
+            in WorldGenerationSettings settings,
+            int chunkX,
+            int chunkY,
+            NativeArray<SurfaceRechargeCandidate> springSurfaceRechargeCandidates,
+            NativeArray<GeneratedHydrologyCell> springHydrologyCells)
+        {
+            return TryRefreshSpringHydrologyRecharge(
+                settings,
+                chunkX,
+                chunkY,
+                springSurfaceRechargeCandidates,
+                springHydrologyCells,
+                default);
+        }
+
+        /// <summary>
+        /// 21×21泉水文の涵養と地下水を更新し、テストや監査で必要な場合だけ最終涵養フラグも出力します。
+        /// </summary>
+        /// <param name="settings">表流水、地下水、湖・泉を含む固定ワールド生成設定です。</param>
+        /// <param name="chunkX">対象の水平論理チャンク座標です。</param>
+        /// <param name="chunkY">対象の垂直論理チャンク座標です。</param>
+        /// <param name="springSurfaceRechargeCandidates">通常表流水生成が同じ河道経路から記録した21×21涵養フラグです。</param>
+        /// <param name="springHydrologyCells">更新対象の21×21周辺水文です。</param>
+        /// <param name="springRechargeCandidates">正規の涵養有無を受け取る21×21行優先配列です。</param>
+        /// <returns>有限走査内ですべての涵養と地下水を再構築できた場合はtrueです。</returns>
+        internal static bool TryRefreshSpringHydrologyRecharge(
+            in WorldGenerationSettings settings,
+            int chunkX,
+            int chunkY,
+            NativeArray<SurfaceRechargeCandidate> springSurfaceRechargeCandidates,
+            NativeArray<GeneratedHydrologyCell> springHydrologyCells,
+            NativeArray<SurfaceRechargeCandidate> springRechargeCandidates)
+        {
+            if (!DeterministicEnvironmentGenerator.ValidateSettings(settings)
+                || !DeterministicHydrologyGenerator.ValidateSettings(settings.Hydrology)
+                || !DeterministicGroundwaterGenerator.ValidateSettings(settings.Groundwater)
+                || !springSurfaceRechargeCandidates.IsCreated
+                || springSurfaceRechargeCandidates.Length < SpringRechargeCandidateCount
+                || !springHydrologyCells.IsCreated
+                || springHydrologyCells.Length < SpringHydrologyCellCount
+                || (springRechargeCandidates.IsCreated
+                    && springRechargeCandidates.Length < SpringRechargeCandidateCount)
+                || !TryGetChunkOrigins(
+                    settings.Hydrology,
+                    chunkX,
+                    chunkY,
+                    out _,
+                    out _,
+                    out _,
+                    out _))
+            {
+                return false;
+            }
+
+            for (int index = 0; index < SpringRechargeCandidateCount; index++)
+            {
+                GeneratedHydrologyCell cell = springHydrologyCells[index];
+                bool previousRecharge = (cell.ConnectionFlags
+                    & (HydrologyConnectionFlags.Stream | HydrologyConnectionFlags.River)) != 0
+                    || (cell.LakeFlags & HydrologyLakeFlags.SurfaceCell) != 0;
+                // 既存21×21生成が使った対象自身の河道・湖を基準にし、通常表流水と同じ経路から得た隣接河道分を追加します。
+                bool hasRecharge = previousRecharge
+                    || springSurfaceRechargeCandidates[index].HasRecharge != 0;
+                if (springRechargeCandidates.IsCreated)
+                {
+                    springRechargeCandidates[index] = new SurfaceRechargeCandidate
+                    {
+                        HasRecharge = (byte)(hasRecharge ? 1 : 0)
+                    };
+                }
+
+                // 隣接河道で涵養有無が変わったセルだけを再計算し、同じ入力の441セルを重複サンプルしません。
+                if (hasRecharge == previousRecharge)
+                {
+                    continue;
+                }
+
+                if (!DeterministicGroundwaterHydrologyGenerator.TryGenerateCellGroundwater(
+                        settings,
+                        cell,
+                        hasRecharge,
+                        out ushort groundwaterPotential))
+                {
+                    return false;
+                }
+
+                cell.GroundwaterPotential = groundwaterPotential;
+                cell.ConnectionFlags &= ~HydrologyConnectionFlags.Groundwater;
+                if (groundwaterPotential >= settings.Groundwater.GroundwaterConnectionThreshold)
+                {
+                    cell.ConnectionFlags |= HydrologyConnectionFlags.Groundwater;
+                }
+                springHydrologyCells[index] = cell;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// 正規表流水涵養で21×21地下水を更新した後、準備済み湖・泉結果を対象チャンクへ適用します。
+        /// 失敗時は公開用64セルと4096表流水の更新を開始せず、呼出し元が5 Bufferをまとめて非公開にできます。
+        /// </summary>
+        /// <param name="settings">湖・泉を含む固定ワールド生成設定です。</param>
+        /// <param name="chunkX">対象の水平論理チャンク座標です。</param>
+        /// <param name="chunkY">対象の垂直論理チャンク座標です。</param>
+        /// <param name="hydrologyCells">湖接続と泉Streamを反映する64水文セルです。</param>
+        /// <param name="intersectingCells">地下水反映済みの交差9×9水文セルです。</param>
+        /// <param name="surfaceWater">湖区分と泉流を反映する4096固定表流水です。</param>
+        /// <param name="frontier">河道供給元と湖末端の再構築へ再利用する集水Heapです。</param>
+        /// <param name="basinMembers">湖末端の閉鎖流域セル領域です。</param>
+        /// <param name="basinLookup">湖末端の流域所属Hash領域です。</param>
+        /// <param name="pathWorkspace">通常河道と泉経路へ再利用する探索配列です。</param>
+        /// <param name="pathTiles">一つの河道または泉経路を保持する配列です。</param>
+        /// <param name="springSurfaceRechargeCandidates">通常表流水生成が同じ河道経路から記録した21×21涵養フラグです。</param>
+        /// <param name="springHydrologyCells">21×21周辺水文です。</param>
+        /// <param name="springCandidates">19×19泉候補です。</param>
+        /// <returns>涵養再構築と湖・泉適用を一括で完了できた場合はtrueです。</returns>
+        internal static bool TryFinalizePreparedChunkWithRechargeRefresh(
+            in WorldGenerationSettings settings,
+            int chunkX,
+            int chunkY,
+            NativeArray<GeneratedHydrologyCell> hydrologyCells,
+            NativeArray<GeneratedHydrologyCell> intersectingCells,
+            NativeArray<GeneratedSurfaceWaterTile> surfaceWater,
+            NativeArray<HydrologyUpstreamCandidate> frontier,
+            NativeArray<HydrologyUpstreamCandidate> basinMembers,
+            NativeArray<HydrologyBasinLookupSlot> basinLookup,
+            NativeArray<SurfaceWaterPathSearchNode> pathWorkspace,
+            NativeArray<SurfaceWaterPathTile> pathTiles,
+            NativeArray<SurfaceRechargeCandidate> springSurfaceRechargeCandidates,
+            NativeArray<GeneratedHydrologyCell> springHydrologyCells,
+            NativeArray<SpringCandidate> springCandidates)
+        {
+            return TryRefreshSpringHydrologyRecharge(
+                    settings,
+                    chunkX,
+                    chunkY,
+                    springSurfaceRechargeCandidates,
+                    springHydrologyCells)
+                && TryFinalizePreparedChunk(
+                    settings,
+                    chunkX,
+                    chunkY,
+                    hydrologyCells,
+                    intersectingCells,
+                    surfaceWater,
+                    frontier,
+                    basinMembers,
+                    basinLookup,
+                    pathWorkspace,
+                    pathTiles,
+                    springHydrologyCells,
+                    springCandidates);
         }
 
         /// <summary>
@@ -1134,7 +1309,7 @@ namespace Farmware.WorldGeneration
         /// 細分化済み泉経路を対象チャンクへ適用し、既存の強い水面分類は上書きしません。
         /// 対象チャンク内の表流水だけを書き換え、範囲外経路は隣接チャンク自身の生成へ委ねます。
         /// </summary>
-        private static bool TryApplySpringPath(
+        internal static bool TryApplySpringPath(
             in WorldGenerationSettings settings,
             in SpringCandidate source,
             int minimumTileX,
@@ -1159,6 +1334,21 @@ namespace Farmware.WorldGeneration
                     continue;
                 }
 
+                if (!DeterministicEnvironmentGenerator.TryGenerateBaseClimate(
+                        settings,
+                        pathTile.WorldTileX,
+                        pathTile.WorldTileY,
+                        out GeneratedEnvironmentData environment))
+                {
+                    return false;
+                }
+
+                // 通常河道と同じく海面未満は既存海水域として維持し、泉流や淡水接続を追加しません。
+                if (environment.Elevation < settings.SeaLevelThreshold)
+                {
+                    continue;
+                }
+
                 int tileIndex = WorldGrid.ToTileIndex(localX, localY);
                 GeneratedSurfaceWaterTile existing = surfaceWater[tileIndex];
                 if (existing.Type == SurfaceWaterTileType.PermanentSaltwaterLake)
@@ -1176,15 +1366,6 @@ namespace Farmware.WorldGeneration
                         | SurfaceWaterTileFlags.RechargeCandidate;
                     surfaceWater[tileIndex] = existing;
                     continue;
-                }
-
-                if (!DeterministicEnvironmentGenerator.TryGenerateBaseClimate(
-                        settings,
-                        pathTile.WorldTileX,
-                        pathTile.WorldTileY,
-                        out GeneratedEnvironmentData environment))
-                {
-                    return false;
                 }
 
                 surfaceWater[tileIndex] = new GeneratedSurfaceWaterTile

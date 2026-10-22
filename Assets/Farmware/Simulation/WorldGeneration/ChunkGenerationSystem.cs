@@ -306,6 +306,7 @@ namespace Farmware.WorldGeneration
                 slot.IntersectingHydrologyCells.Dispose();
                 slot.SurfaceRechargeCandidates.Dispose();
                 slot.HydrologyTiles.Dispose();
+                slot.SpringSurfaceRechargeCandidates.Dispose();
                 slot.SpringHydrologyCells.Dispose();
                 slot.SpringCandidates.Dispose();
                 slot.LakeSpringHydrologyGenerationFailed.Dispose();
@@ -515,6 +516,7 @@ namespace Farmware.WorldGeneration
                     FloodQueue = slot.SurfaceWaterFloodQueue,
                     IntersectingHydrologyCells = slot.IntersectingHydrologyCells,
                     SurfaceRechargeCandidates = slot.SurfaceRechargeCandidates,
+                    SpringSurfaceRechargeCandidates = slot.SpringSurfaceRechargeCandidates,
                     SurfaceWater = slot.SurfaceWater,
                     GenerationFailed = slot.SurfaceWaterGenerationFailed
                 };
@@ -556,6 +558,7 @@ namespace Farmware.WorldGeneration
                     HydrologyBasinLookup = slot.HydrologyBasinLookup,
                     PathWorkspace = slot.SurfaceWaterPathWorkspace,
                     PathTiles = slot.SurfaceWaterPathTiles,
+                    SpringSurfaceRechargeCandidates = slot.SpringSurfaceRechargeCandidates,
                     SpringHydrologyCells = slot.SpringHydrologyCells,
                     SpringCandidates = slot.SpringCandidates,
                     GroundwaterGenerationFailed = slot.GroundwaterGenerationFailed,
@@ -694,7 +697,7 @@ namespace Farmware.WorldGeneration
                     DeterministicGroundwaterHydrologyGenerator.IntersectingCellCount,
                     Allocator.Persistent,
                     NativeArrayOptions.UninitializedMemory),
-                SurfaceRechargeCandidates = new NativeArray<byte>(
+                SurfaceRechargeCandidates = new NativeArray<SurfaceRechargeCandidate>(
                     DeterministicGroundwaterHydrologyGenerator.IntersectingCellCount,
                     Allocator.Persistent,
                     NativeArrayOptions.ClearMemory),
@@ -706,6 +709,10 @@ namespace Farmware.WorldGeneration
                     DeterministicLakeSpringGenerator.SpringHydrologyCellCount,
                     Allocator.Persistent,
                     NativeArrayOptions.UninitializedMemory),
+                SpringSurfaceRechargeCandidates = new NativeArray<SurfaceRechargeCandidate>(
+                    DeterministicLakeSpringGenerator.SpringRechargeCandidateCount,
+                    Allocator.Persistent,
+                    NativeArrayOptions.ClearMemory),
                 SpringCandidates = new NativeArray<SpringCandidate>(
                     DeterministicLakeSpringGenerator.SpringCandidateCellCount,
                     Allocator.Persistent,
@@ -794,11 +801,13 @@ namespace Farmware.WorldGeneration
             /// <summary>64×64チャンクと交差する9×9完成水文を地下水Jobへ渡す中間配列です。</summary>
             public NativeArray<GeneratedHydrologyCell> IntersectingHydrologyCells;
             /// <summary>交差9×9水文セル内に自然表流水の涵養候補が存在するかを0／1で保持します。</summary>
-            public NativeArray<byte> SurfaceRechargeCandidates;
+            public NativeArray<SurfaceRechargeCandidate> SurfaceRechargeCandidates;
             /// <summary>4096タイルの自然土壌飽和を保持し、完成時に専用ECS Bufferへコピーする配列です。</summary>
             public NativeArray<GeneratedHydrologyTile> HydrologyTiles;
             /// <summary>泉抑制範囲と8近傍を含む21×21地下水・湖状態の再利用作業配列です。</summary>
             public NativeArray<GeneratedHydrologyCell> SpringHydrologyCells;
+            /// <summary>通常表流水生成が同じ河道中心線から記録する泉判定用21×21涵養フラグです。</summary>
+            public NativeArray<SurfaceRechargeCandidate> SpringSurfaceRechargeCandidates;
             /// <summary>19×19泉候補を一度だけ評価し、半径4セルの最大候補比較へ使う作業配列です。</summary>
             public NativeArray<SpringCandidate> SpringCandidates;
             /// <summary>21×21周辺水文の8行担当が失敗時に自分の添字へ1を書く通知領域です。</summary>
@@ -1086,7 +1095,10 @@ namespace Farmware.WorldGeneration
             public NativeArray<GeneratedHydrologyCell> IntersectingHydrologyCells;
 
             /// <summary>河道・湖候補が存在する交差9×9水文セルを0／1で地下水Jobへ渡します。</summary>
-            public NativeArray<byte> SurfaceRechargeCandidates;
+            public NativeArray<SurfaceRechargeCandidate> SurfaceRechargeCandidates;
+
+            /// <summary>同じ河道中心線と河川幅が通る泉判定用21×21水文セルを0／1で保持します。</summary>
+            public NativeArray<SurfaceRechargeCandidate> SpringSurfaceRechargeCandidates;
 
             /// <summary>成功時に4096件すべてを上書きし、最終Handle後にECSへ公開する表流水配列です。</summary>
             public NativeArray<GeneratedSurfaceWaterTile> SurfaceWater;
@@ -1111,6 +1123,7 @@ namespace Farmware.WorldGeneration
                         FloodQueue,
                         IntersectingHydrologyCells,
                         SurfaceRechargeCandidates,
+                        SpringSurfaceRechargeCandidates,
                         SurfaceWater))
                 {
                     GenerationFailed[0] = 1;
@@ -1142,7 +1155,7 @@ namespace Farmware.WorldGeneration
 
             /// <summary>交差9×9各セルに自然表流水の涵養候補があるかを保持する読み取り専用配列です。</summary>
             [ReadOnly]
-            public NativeArray<byte> SurfaceRechargeCandidates;
+            public NativeArray<SurfaceRechargeCandidate> SurfaceRechargeCandidates;
 
             /// <summary>成功時に4096件すべてを上書きし、専用ECS Bufferへ公開する自然水文タイルです。</summary>
             public NativeArray<GeneratedHydrologyTile> HydrologyTiles;
@@ -1179,7 +1192,7 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>
-        /// 地下水計算後に泉判定用21×21周辺水文を8担当で並列生成するBurst Jobです。
+        /// 泉判定用21×21周辺水文を8担当で並列生成するBurst Jobです。
         /// 各担当は別の行、集水Heap、流域配列、Hash領域だけを書き、共有作業領域の競合を避けます。
         /// </summary>
         [BurstCompile]
@@ -1279,6 +1292,10 @@ namespace Farmware.WorldGeneration
             /// <summary>泉抑制範囲と8近傍を含む21×21完成水文の作業配列です。</summary>
             public NativeArray<GeneratedHydrologyCell> SpringHydrologyCells;
 
+            /// <summary>通常表流水生成が同じ河道中心線と河川幅から記録した21×21涵養フラグです。</summary>
+            [ReadOnly]
+            public NativeArray<SurfaceRechargeCandidate> SpringSurfaceRechargeCandidates;
+
             /// <summary>半径4セル抑制で比較する19×19泉候補の作業配列です。</summary>
             public NativeArray<SpringCandidate> SpringCandidates;
 
@@ -1307,9 +1324,8 @@ namespace Farmware.WorldGeneration
                         break;
                     }
                 }
-
                 if (preparationFailed
-                    || !DeterministicLakeSpringGenerator.TryFinalizePreparedChunk(
+                    || !DeterministicLakeSpringGenerator.TryFinalizePreparedChunkWithRechargeRefresh(
                         Settings,
                         Coordinate.X,
                         Coordinate.Y,
@@ -1321,6 +1337,7 @@ namespace Farmware.WorldGeneration
                         HydrologyBasinLookup,
                         PathWorkspace,
                         PathTiles,
+                        SpringSurfaceRechargeCandidates,
                         SpringHydrologyCells,
                         SpringCandidates))
                 {

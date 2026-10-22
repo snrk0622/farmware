@@ -51,7 +51,7 @@ namespace Farmware.WorldGeneration
             NativeArray<GeneratedTile> tiles,
             NativeArray<GeneratedHydrologyCell> hydrologyCells,
             NativeArray<GeneratedHydrologyCell> intersectingCells,
-            NativeArray<byte> surfaceRechargeCandidates,
+            NativeArray<SurfaceRechargeCandidate> surfaceRechargeCandidates,
             NativeArray<GeneratedHydrologyTile> hydrologyTiles)
         {
             if (!DeterministicGroundwaterGenerator.ValidateSettings(settings.Groundwater)
@@ -89,7 +89,7 @@ namespace Farmware.WorldGeneration
                         || !TryGenerateCellGroundwater(
                             settings,
                             cell,
-                            surfaceRechargeCandidates[cellIndex] != 0,
+                            surfaceRechargeCandidates[cellIndex].HasRecharge != 0,
                             out ushort groundwaterPotential))
                     {
                         return false;

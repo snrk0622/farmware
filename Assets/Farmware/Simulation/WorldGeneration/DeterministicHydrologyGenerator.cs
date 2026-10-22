@@ -1322,9 +1322,14 @@ namespace Farmware.WorldGeneration
                     DeterministicGroundwaterHydrologyGenerator.IntersectingCellCount,
                     Allocator.Temp,
                     NativeArrayOptions.UninitializedMemory);
-            using NativeArray<byte> surfaceRechargeCandidates =
-                new NativeArray<byte>(
+            using NativeArray<SurfaceRechargeCandidate> surfaceRechargeCandidates =
+                new NativeArray<SurfaceRechargeCandidate>(
                     DeterministicGroundwaterHydrologyGenerator.IntersectingCellCount,
+                    Allocator.Temp,
+                    NativeArrayOptions.ClearMemory);
+            using NativeArray<SurfaceRechargeCandidate> springSurfaceRechargeCandidates =
+                new NativeArray<SurfaceRechargeCandidate>(
+                    DeterministicLakeSpringGenerator.SpringRechargeCandidateCount,
                     Allocator.Temp,
                     NativeArrayOptions.ClearMemory);
             if (!DeterministicSurfaceWaterGenerator.TryGenerateChunk(
@@ -1341,6 +1346,7 @@ namespace Farmware.WorldGeneration
                     floodQueue,
                     intersectingCells,
                     surfaceRechargeCandidates,
+                    springSurfaceRechargeCandidates,
                     surfaceWater))
             {
                 // 表流水だけが失敗した場合も通常の空Bufferと区別し、決定性監査が欠落を見逃さないようにします。
@@ -1410,6 +1416,7 @@ namespace Farmware.WorldGeneration
                     basinLookup,
                     pathWorkspace,
                     pathTiles,
+                    springSurfaceRechargeCandidates,
                     springHydrologyCells,
                     springCandidates))
             {

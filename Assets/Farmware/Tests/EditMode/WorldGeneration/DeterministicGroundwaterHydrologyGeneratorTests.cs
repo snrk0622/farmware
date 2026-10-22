@@ -251,7 +251,7 @@ namespace Farmware.WorldGeneration.Tests
                 DeterministicGroundwaterHydrologyGenerator.IntersectingCellCount,
                 Allocator.Temp,
                 NativeArrayOptions.UninitializedMemory);
-            using var recharge = new NativeArray<byte>(
+            using var recharge = new NativeArray<SurfaceRechargeCandidate>(
                 DeterministicGroundwaterHydrologyGenerator.IntersectingCellCount,
                 Allocator.Temp,
                 NativeArrayOptions.ClearMemory);
@@ -319,7 +319,7 @@ namespace Farmware.WorldGeneration.Tests
                     ((rechargeCellY - firstCellY)
                         * DeterministicGroundwaterHydrologyGenerator.IntersectingCellsPerAxis)
                     + (rechargeCellX - firstCellX);
-                Assert.That(recharge[rechargeIndex], Is.EqualTo(1));
+                Assert.That(recharge[rechargeIndex].HasRecharge, Is.EqualTo(1));
             }
             Assert.That(outputRechargeCandidateCount, Is.GreaterThan(0));
 
@@ -327,7 +327,7 @@ namespace Farmware.WorldGeneration.Tests
             ushort expectedRechargeGroundwater = default;
             for (int cellIndex = 0; cellIndex < recharge.Length; cellIndex++)
             {
-                if (recharge[cellIndex] == 0)
+                if (recharge[cellIndex].HasRecharge == 0)
                 {
                     continue;
                 }
@@ -449,7 +449,7 @@ namespace Farmware.WorldGeneration.Tests
                 DeterministicGroundwaterHydrologyGenerator.IntersectingCellCount,
                 Allocator.Persistent,
                 NativeArrayOptions.UninitializedMemory);
-            using var recharge = new NativeArray<byte>(
+            using var recharge = new NativeArray<SurfaceRechargeCandidate>(
                 DeterministicGroundwaterHydrologyGenerator.IntersectingCellCount,
                 Allocator.Persistent,
                 NativeArrayOptions.ClearMemory);
@@ -662,7 +662,7 @@ namespace Farmware.WorldGeneration.Tests
             NativeArray<byte> visited,
             NativeArray<int> queue,
             NativeArray<GeneratedHydrologyCell> intersectingCells,
-            NativeArray<byte> recharge,
+            NativeArray<SurfaceRechargeCandidate> recharge,
             NativeArray<GeneratedSurfaceWaterTile> surfaceWater,
             NativeArray<GeneratedHydrologyTile> hydrologyTiles)
         {

@@ -289,6 +289,282 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// 所有チャンク外のセルへ隣接河川の幅だけが入る配置を探索し、泉Haloの再計算でもそのセルを涵養済み地下水として扱うことを保証します。
+        /// </summary>
+        [Test]
+        public void RefreshSpringHydrologyRecharge_UsesFullRiverWidthForHaloCells()
+        {
+            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.FromString("lake-spring-halo-river-width"),
+                1);
+            NativeArray<SurfaceWaterPathSearchNode> pathWorkspace =
+                new NativeArray<SurfaceWaterPathSearchNode>(
+                    DeterministicSurfaceWaterPathGenerator.MaximumSearchNodeCount,
+                    Allocator.Temp,
+                    NativeArrayOptions.UninitializedMemory);
+            NativeArray<SurfaceWaterPathTile> pathTiles = new NativeArray<SurfaceWaterPathTile>(
+                DeterministicSurfaceWaterPathGenerator.MaximumSearchNodeCount,
+                Allocator.Temp,
+                NativeArrayOptions.UninitializedMemory);
+            NativeArray<GeneratedHydrologyCell> springHydrologyCells =
+                new NativeArray<GeneratedHydrologyCell>(
+                    DeterministicLakeSpringGenerator.SpringHydrologyCellCount,
+                    Allocator.Temp,
+                    NativeArrayOptions.ClearMemory);
+            NativeArray<SurfaceRechargeCandidate> springRechargeCandidates =
+                new NativeArray<SurfaceRechargeCandidate>(
+                DeterministicLakeSpringGenerator.SpringRechargeCandidateCount,
+                Allocator.Temp,
+                NativeArrayOptions.ClearMemory);
+            NativeArray<SurfaceRechargeCandidate> probeRechargeCandidates =
+                new NativeArray<SurfaceRechargeCandidate>(
+                DeterministicLakeSpringGenerator.SpringRechargeCandidateCount,
+                Allocator.Temp,
+                NativeArrayOptions.ClearMemory);
+            NativeArray<GeneratedSurfaceWaterTile> surfaceWater =
+                new NativeArray<GeneratedSurfaceWaterTile>(
+                    WorldGridConstants.TilesPerChunk,
+                    Allocator.Temp,
+                    NativeArrayOptions.ClearMemory);
+
+            try
+            {
+                const int HydrologyOrigin = -6;
+                // 21×21泉水文は地下水更新結果の比較対象として、全座標を同じ初期値で準備します。
+                for (int cacheY = 0;
+                    cacheY < DeterministicLakeSpringGenerator.SpringHydrologyCellsPerAxis;
+                    cacheY++)
+                {
+                    for (int cacheX = 0;
+                        cacheX < DeterministicLakeSpringGenerator.SpringHydrologyCellsPerAxis;
+                        cacheX++)
+                    {
+                        springHydrologyCells[
+                            (cacheY * DeterministicLakeSpringGenerator.SpringHydrologyCellsPerAxis) + cacheX] =
+                            new GeneratedHydrologyCell
+                            {
+                                CellX = HydrologyOrigin + cacheX,
+                                CellY = HydrologyOrigin + cacheY,
+                                HydrologyHeight = 30000,
+                                CenterElevation = 30000,
+                                CatchmentAreaCells = 1
+                            };
+                    }
+                }
+
+                GeneratedHydrologyCell selectedSource = default;
+                int selectedTargetIndex = -1;
+                // 中央9×9の河川からその外側Haloへ幅だけが届く実経路を固定範囲で探します。
+                // 経路生成器そのものを使うため、Anchor位置をテスト側で推測して境界条件を弱めません。
+                for (int sourceY = 0; sourceY <= 8 && selectedTargetIndex < 0; sourceY++)
+                {
+                    for (int sourceX = 0; sourceX <= 8 && selectedTargetIndex < 0; sourceX++)
+                    {
+                        for (int directionIndex = 1; directionIndex <= 8 && selectedTargetIndex < 0;
+                            directionIndex++)
+                        {
+                            GetDirectionOffsetForTest(
+                                (HydrologyFlowDirection)directionIndex,
+                                out int offsetX,
+                                out int offsetY);
+                            GeneratedHydrologyCell source = new GeneratedHydrologyCell
+                            {
+                                CellX = sourceX,
+                                CellY = sourceY,
+                                DownstreamCellX = sourceX + offsetX,
+                                DownstreamCellY = sourceY + offsetY,
+                                HydrologyHeight = 30000,
+                                CenterElevation = 30000,
+                                CatchmentAreaCells = 1,
+                                RunoffEquivalentCells = 128,
+                                FlowDirection = (HydrologyFlowDirection)directionIndex,
+                                ConnectionFlags = HydrologyConnectionFlags.River
+                            };
+
+                            for (int index = 0; index < probeRechargeCandidates.Length; index++)
+                            {
+                                probeRechargeCandidates[index] = default;
+                            }
+                            Assert.That(
+                                DeterministicSurfaceWaterGenerator.TryRasterizeChannelWithinBounds(
+                                    settings,
+                                    source,
+                                    0,
+                                    0,
+                                    WorldGridConstants.LogicalChunkSize - 1,
+                                    WorldGridConstants.LogicalChunkSize - 1,
+                                    pathWorkspace,
+                                    pathTiles,
+                                    default,
+                                    default,
+                                    default,
+                                    HydrologyOrigin,
+                                    HydrologyOrigin,
+                                    probeRechargeCandidates,
+                                    surfaceWater),
+                                Is.True);
+
+                            for (int targetIndex = 0;
+                                targetIndex < probeRechargeCandidates.Length;
+                                targetIndex++)
+                            {
+                                if (probeRechargeCandidates[targetIndex].HasRecharge == 0)
+                                {
+                                    continue;
+                                }
+
+                                int targetX = HydrologyOrigin
+                                    + (targetIndex % DeterministicLakeSpringGenerator.SpringHydrologyCellsPerAxis);
+                                int targetY = HydrologyOrigin
+                                    + (targetIndex / DeterministicLakeSpringGenerator.SpringHydrologyCellsPerAxis);
+                                bool isCentralIntersectingCell = targetX >= 0 && targetX <= 8
+                                    && targetY >= 0 && targetY <= 8;
+                                bool isChannelEndpoint = (targetX == source.CellX && targetY == source.CellY)
+                                    || (targetX == source.DownstreamCellX
+                                        && targetY == source.DownstreamCellY);
+                                if (isCentralIntersectingCell || isChannelEndpoint
+                                    || !DeterministicGroundwaterHydrologyGenerator.TrySampleAdjustedGeologyAverage(
+                                        settings,
+                                        targetX,
+                                        targetY,
+                                        out ushort permeability,
+                                        out ushort storage)
+                                    || (permeability < storage ? permeability : storage)
+                                        < settings.Groundwater.GroundwaterConnectionThreshold)
+                                {
+                                    continue;
+                                }
+
+                                selectedSource = source;
+                                selectedTargetIndex = targetIndex;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                Assert.That(
+                    selectedTargetIndex,
+                    Is.GreaterThanOrEqualTo(0),
+                    "中央河川の幅だけが高帯水係数Haloセルへ入る固定試料が見つかりませんでした。");
+                int selectedSourceIndex =
+                    ((selectedSource.CellY - HydrologyOrigin)
+                        * DeterministicLakeSpringGenerator.SpringHydrologyCellsPerAxis)
+                    + selectedSource.CellX - HydrologyOrigin;
+                springHydrologyCells[selectedSourceIndex] = selectedSource;
+
+                GeneratedHydrologyCell before = springHydrologyCells[selectedTargetIndex];
+                Assert.That(before.ConnectionFlags, Is.EqualTo(HydrologyConnectionFlags.None));
+                Assert.That(
+                    DeterministicLakeSpringGenerator.TryRefreshSpringHydrologyRecharge(
+                        settings,
+                        0,
+                        0,
+                        probeRechargeCandidates,
+                        springHydrologyCells,
+                        springRechargeCandidates),
+                    Is.True);
+
+                GeneratedHydrologyCell after = springHydrologyCells[selectedTargetIndex];
+                Assert.That(
+                    springRechargeCandidates[selectedTargetIndex].HasRecharge,
+                    Is.EqualTo(1));
+                Assert.That(
+                    (after.ConnectionFlags & HydrologyConnectionFlags.Groundwater) != 0,
+                    Is.True,
+                    "所有セルにStream/Riverがなくても、隣接河川幅からの涵養で地下水接続になる必要があります。");
+            }
+            finally
+            {
+                // 途中の探索失敗でも全NativeArrayを解放し、Allocator警告を後続テストへ残しません。
+                pathWorkspace.Dispose();
+                pathTiles.Dispose();
+                springHydrologyCells.Dispose();
+                springRechargeCandidates.Dispose();
+                probeRechargeCandidates.Dispose();
+                surfaceWater.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// 海面未満の1タイルだけを泉経路として渡し、SpringStreamと淡水接続を一切書き込まないことを保証します。
+        /// </summary>
+        [Test]
+        public void ApplySpringPath_DoesNotOverwriteTilesBelowSeaLevel()
+        {
+            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.FromString("lake-spring-below-sea"),
+                1);
+            using NativeArray<SurfaceWaterPathTile> pathTiles = new NativeArray<SurfaceWaterPathTile>(
+                1,
+                Allocator.Temp,
+                NativeArrayOptions.ClearMemory);
+            using NativeArray<GeneratedSurfaceWaterTile> surfaceWater =
+                new NativeArray<GeneratedSurfaceWaterTile>(
+                    WorldGridConstants.TilesPerChunk,
+                    Allocator.Temp,
+                    NativeArrayOptions.ClearMemory);
+
+            int selectedWorldTileX = default;
+            int selectedWorldTileY = default;
+            bool foundBelowSeaTile = false;
+            for (int worldTileY = -512; worldTileY <= 512 && !foundBelowSeaTile; worldTileY += 8)
+            {
+                for (int worldTileX = -512; worldTileX <= 512; worldTileX += 8)
+                {
+                    Assert.That(
+                        DeterministicEnvironmentGenerator.TryGenerateBaseClimate(
+                            settings,
+                            worldTileX,
+                            worldTileY,
+                            out GeneratedEnvironmentData environment),
+                        Is.True);
+                    if (environment.Elevation < settings.SeaLevelThreshold)
+                    {
+                        foundBelowSeaTile = true;
+                        selectedWorldTileX = worldTileX;
+                        selectedWorldTileY = worldTileY;
+                        SetPathTile(
+                            pathTiles,
+                            new SurfaceWaterPathTile
+                            {
+                                WorldTileX = worldTileX,
+                                WorldTileY = worldTileY
+                            });
+                        break;
+                    }
+                }
+            }
+
+            Assert.That(foundBelowSeaTile, Is.True);
+            ChunkCoordinate owner = WorldGrid.ToChunkCoordinate(selectedWorldTileX, selectedWorldTileY);
+            int minimumTileX = owner.X * WorldGridConstants.LogicalChunkSize;
+            int minimumTileY = owner.Y * WorldGridConstants.LogicalChunkSize;
+            int localX = selectedWorldTileX - minimumTileX;
+            int localY = selectedWorldTileY - minimumTileY;
+            int selectedTileIndex = WorldGrid.ToTileIndex(localX, localY);
+            SpringCandidate source = new SpringCandidate
+            {
+                IsCandidate = 1,
+                CellX = 0,
+                CellY = 0,
+                DischargePotential = ushort.MaxValue
+            };
+            Assert.That(
+                DeterministicLakeSpringGenerator.TryApplySpringPath(
+                    settings,
+                    source,
+                    minimumTileX,
+                    minimumTileY,
+                    pathTiles,
+                    1,
+                    surfaceWater),
+                Is.True);
+            Assert.That(surfaceWater[selectedTileIndex].Type, Is.EqualTo(SurfaceWaterTileType.None));
+            Assert.That(surfaceWater[selectedTileIndex].Flags, Is.EqualTo(SurfaceWaterTileFlags.None));
+        }
+
+        /// <summary>
         /// 準備済み21×21水文へ一つだけ泉候補を置き、固定小川の表流水とStream接続を追加しても
         /// 基礎D8、集水面積、流出寄与を変更しないことを保証します。
         /// </summary>
@@ -460,6 +736,48 @@ namespace Farmware.WorldGeneration.Tests
         public void SpringCandidate_SizeMatchesRecordedWorkMemory()
         {
             Assert.That(UnsafeUtility.SizeOf<SpringCandidate>(), Is.EqualTo(24));
+            Assert.That(
+                DeterministicLakeSpringGenerator.SpringRechargeCandidateCount,
+                Is.EqualTo(21 * 21));
+        }
+
+        /// <summary>テスト用のD8列挙値を水平・垂直オフセットへ変換し、本番の全8方向と同じ隣接関係を作ります。</summary>
+        /// <param name="direction">変換するD8流向です。</param>
+        /// <param name="offsetX">成功時の水平差分です。</param>
+        /// <param name="offsetY">成功時の垂直差分です。</param>
+        private static void GetDirectionOffsetForTest(
+            HydrologyFlowDirection direction,
+            out int offsetX,
+            out int offsetY)
+        {
+            offsetX = direction == HydrologyFlowDirection.East
+                || direction == HydrologyFlowDirection.NorthEast
+                || direction == HydrologyFlowDirection.SouthEast
+                ? 1
+                : direction == HydrologyFlowDirection.West
+                    || direction == HydrologyFlowDirection.NorthWest
+                    || direction == HydrologyFlowDirection.SouthWest
+                    ? -1
+                    : 0;
+            offsetY = direction == HydrologyFlowDirection.North
+                || direction == HydrologyFlowDirection.NorthEast
+                || direction == HydrologyFlowDirection.NorthWest
+                ? 1
+                : direction == HydrologyFlowDirection.South
+                    || direction == HydrologyFlowDirection.SouthEast
+                    || direction == HydrologyFlowDirection.SouthWest
+                    ? -1
+                    : 0;
+        }
+
+        /// <summary>using変数のNativeArrayハンドルを値コピーし、所有権を移さず先頭経路タイルだけを書き込みます。</summary>
+        /// <param name="pathTiles">呼出し元が所有し、このメソッドでは破棄しない経路配列です。</param>
+        /// <param name="pathTile">先頭要素へ設定する絶対タイル座標です。</param>
+        private static void SetPathTile(
+            NativeArray<SurfaceWaterPathTile> pathTiles,
+            in SurfaceWaterPathTile pathTile)
+        {
+            pathTiles[0] = pathTile;
         }
 
         /// <summary>

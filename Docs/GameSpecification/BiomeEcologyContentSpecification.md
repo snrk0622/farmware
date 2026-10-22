@@ -1182,7 +1182,7 @@ SpringDischargePotential = floor(
 4. `SpringDischargePotential >= 39,321`である。
 
 - 候補の密集を防ぐため、前後4水文セル、32タイル以内では`SpringDischargePotential`が最大の候補だけを泉源にする。同値は水文セル座標X・Yの昇順で決める。
-- 泉源から最も低い適格隣接セルへ`SpringOutflowEdge`を作り、泉源と細分化された下流経路へ`Stream`および固定`NaturalSurfaceWater`を設定する。基礎D8流向、`CatchmentAreaCells`、`RunoffEquivalentCells`は変更しない。
+- 泉源から最も低い適格隣接セルへ`SpringOutflowEdge`を作り、泉源と細分化された下流経路へ`Stream`および固定`NaturalSurfaceWater`を設定する。ただし連続標高が海面未満の経路タイルは海水域のまま維持し、泉流や淡水接続で上書きしない。基礎D8流向、`CatchmentAreaCells`、`RunoffEquivalentCells`は変更しない。
 - 泉水は初回では淡水として扱う。火山・地熱地帯の温泉、酸性泉、鉱泉は水温・化学性・局所熱源のOverlayを追加し、淡水接続そのものと混同しない。
 - 湖水収支の比重2：1：1、区分境界26,214・52,428、泉の落差倍率16、放出境界39,321、抑制半径4水文セルはGeneratorVersionとワールド生成設定の対象にする。
 - 監査では湖候補からの昇格・除外理由、淡水湖・塩湖・一時湖の面積率、越流、地下水重複、泉候補・抑制・下流接続を可視化する。

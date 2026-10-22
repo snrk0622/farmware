@@ -59,6 +59,16 @@ namespace Farmware.WorldGeneration
     }
 
     /// <summary>
+    /// 一つの水文セル内に自然表流水の涵養候補が存在するかを保持する1 byteの中間値です。
+    /// 表流水Jobが用途別の別配列へ書き、地下水Jobと泉最終化Jobは対応する配列を読み取ります。
+    /// </summary>
+    public struct SurfaceRechargeCandidate
+    {
+        /// <summary>海面以上の河道・河川幅・湖候補が一つ以上あれば1、それ以外は0です。</summary>
+        public byte HasRecharge;
+    }
+
+    /// <summary>
     /// 1論理チャンクで行優先4096件を保持する固定表流水Buffer要素です。
     /// Buffer添字から絶対座標を復元できるため座標は重複保持せず、代表供給元の水文セルだけを記録します。
     /// </summary>
@@ -181,11 +191,66 @@ namespace Farmware.WorldGeneration
             NativeArray<byte> floodVisited,
             NativeArray<int> floodQueue,
             NativeArray<GeneratedHydrologyCell> intersectingHydrologyCells,
-            NativeArray<byte> surfaceRechargeCandidates,
+            NativeArray<SurfaceRechargeCandidate> surfaceRechargeCandidates,
+            NativeArray<GeneratedSurfaceWaterTile> surfaceWater)
+        {
+            return TryGenerateChunk(
+                settings,
+                chunkX,
+                chunkY,
+                hydrologyCells,
+                frontier,
+                basinMembers,
+                basinLookup,
+                pathWorkspace,
+                pathTiles,
+                floodVisited,
+                floodQueue,
+                intersectingHydrologyCells,
+                surfaceRechargeCandidates,
+                default,
+                surfaceWater);
+        }
+
+        /// <summary>
+        /// 通常表流水と交差9×9涵養に加え、同じ河道中心線から泉判定用21×21涵養を追加計算なしで記録します。
+        /// </summary>
+        /// <param name="settings">Seed、GeneratorVersion、海面、標高、水文設定を持つ固定生成設定です。</param>
+        /// <param name="chunkX">出力する水平論理チャンク座標です。</param>
+        /// <param name="chunkY">出力する垂直論理チャンク座標です。</param>
+        /// <param name="hydrologyCells">湖面解決まで完成した対象チャンクの行優先64水文セルです。</param>
+        /// <param name="frontier">外周河道と流域再構築で再利用する上流候補Heapです。</param>
+        /// <param name="basinMembers">一つの閉鎖流域を保持する作業配列です。</param>
+        /// <param name="basinLookup">流域座標を検索する固定Hash表です。</param>
+        /// <param name="pathWorkspace">河道中心線探索へ貸す作業配列です。</param>
+        /// <param name="pathTiles">河道中心線を一時保持する配列です。</param>
+        /// <param name="floodVisited">流域全タイルの訪問状態です。</param>
+        /// <param name="floodQueue">流域全タイルの待ち行列です。</param>
+        /// <param name="intersectingHydrologyCells">成功時に行優先9×9の完成水文を受け取る配列です。</param>
+        /// <param name="surfaceRechargeCandidates">各9×9セルに涵養候補があれば1を受け取る配列です。</param>
+        /// <param name="springSurfaceRechargeCandidates">同じ河道と河川幅が通る泉判定用21×21セルを1にする配列です。</param>
+        /// <param name="surfaceWater">成功時に行優先4096件をすべて上書きする出力配列です。</param>
+        /// <returns>表流水と二つの涵養中間結果を固定上限内で生成できた場合はtrueです。</returns>
+        internal static bool TryGenerateChunk(
+            in WorldGenerationSettings settings,
+            int chunkX,
+            int chunkY,
+            NativeArray<GeneratedHydrologyCell> hydrologyCells,
+            NativeArray<HydrologyUpstreamCandidate> frontier,
+            NativeArray<HydrologyUpstreamCandidate> basinMembers,
+            NativeArray<HydrologyBasinLookupSlot> basinLookup,
+            NativeArray<SurfaceWaterPathSearchNode> pathWorkspace,
+            NativeArray<SurfaceWaterPathTile> pathTiles,
+            NativeArray<byte> floodVisited,
+            NativeArray<int> floodQueue,
+            NativeArray<GeneratedHydrologyCell> intersectingHydrologyCells,
+            NativeArray<SurfaceRechargeCandidate> surfaceRechargeCandidates,
+            NativeArray<SurfaceRechargeCandidate> springSurfaceRechargeCandidates,
             NativeArray<GeneratedSurfaceWaterTile> surfaceWater)
         {
             bool writesGroundwaterInputs = intersectingHydrologyCells.IsCreated
                 || surfaceRechargeCandidates.IsCreated;
+            bool writesSpringRecharge = springSurfaceRechargeCandidates.IsCreated;
             if (!DeterministicEnvironmentGenerator.ValidateSettings(settings)
                 || !DeterministicHydrologyGenerator.ValidateSettings(settings.Hydrology)
                 || !hydrologyCells.IsCreated
@@ -210,6 +275,9 @@ namespace Farmware.WorldGeneration
                         || !surfaceRechargeCandidates.IsCreated
                         || surfaceRechargeCandidates.Length
                             < DeterministicGroundwaterHydrologyGenerator.IntersectingCellCount))
+                || (writesSpringRecharge
+                    && springSurfaceRechargeCandidates.Length
+                        < DeterministicLakeSpringGenerator.SpringRechargeCandidateCount)
                 || !TryGetChunkBounds(chunkX, chunkY, out int minimumTileX, out int minimumTileY,
                     out int maximumTileX, out int maximumTileY)
                 || !TryGetHydrologyBufferOrigin(chunkX, chunkY, out int firstCellX, out int firstCellY)
@@ -232,6 +300,19 @@ namespace Farmware.WorldGeneration
                 return false;
             }
 
+            long springFirstCellLongX = (long)firstCellX
+                - DeterministicLakeSpringGenerator.SpringHydrologyOriginOffsetFromIntersecting;
+            long springFirstCellLongY = (long)firstCellY
+                - DeterministicLakeSpringGenerator.SpringHydrologyOriginOffsetFromIntersecting;
+            if (writesSpringRecharge
+                && (springFirstCellLongX < int.MinValue || springFirstCellLongX > int.MaxValue
+                    || springFirstCellLongY < int.MinValue || springFirstCellLongY > int.MaxValue))
+            {
+                return false;
+            }
+            int springFirstCellX = (int)springFirstCellLongX;
+            int springFirstCellY = (int)springFirstCellLongY;
+
             // 枠を再利用した前回チャンクの値を残さず、成功時は必ず4096件すべてを今回の結果にします。
             for (int tileIndex = 0; tileIndex < WorldGridConstants.TilesPerChunk; tileIndex++)
             {
@@ -245,7 +326,17 @@ namespace Farmware.WorldGeneration
                     cellIndex++)
                 {
                     intersectingHydrologyCells[cellIndex] = default;
-                    surfaceRechargeCandidates[cellIndex] = 0;
+                    surfaceRechargeCandidates[cellIndex] = default;
+                }
+            }
+            if (writesSpringRecharge)
+            {
+                // Slot再利用時の前回値が別チャンクの泉判定へ混ざらないよう、21×21を必ず初期化します。
+                for (int cellIndex = 0;
+                    cellIndex < DeterministicLakeSpringGenerator.SpringRechargeCandidateCount;
+                    cellIndex++)
+                {
+                    springSurfaceRechargeCandidates[cellIndex] = default;
                 }
             }
 
@@ -324,6 +415,9 @@ namespace Farmware.WorldGeneration
                             firstCellX,
                             firstCellY,
                             surfaceRechargeCandidates,
+                            springFirstCellX,
+                            springFirstCellY,
+                            springSurfaceRechargeCandidates,
                             surfaceWater))
                     {
                         return false;
@@ -488,6 +582,9 @@ namespace Farmware.WorldGeneration
                 default,
                 default,
                 default,
+                default,
+                default,
+                default,
                 surfaceWater);
         }
 
@@ -503,9 +600,12 @@ namespace Farmware.WorldGeneration
         /// <param name="firstCellX">涵養出力を使う場合の9×9先頭水平水文セル座標です。</param>
         /// <param name="firstCellY">涵養出力を使う場合の9×9先頭垂直水文セル座標です。</param>
         /// <param name="surfaceRechargeCandidates">作成済みなら河道が通る9×9セルを1にする出力です。</param>
+        /// <param name="springFirstCellX">泉涵養出力を使う場合の21×21先頭水平水文セル座標です。</param>
+        /// <param name="springFirstCellY">泉涵養出力を使う場合の21×21先頭垂直水文セル座標です。</param>
+        /// <param name="springSurfaceRechargeCandidates">作成済みなら同じ河道が通る21×21セルを1にする出力です。</param>
         /// <param name="surfaceWater">優先順位を適用して河道候補を書き込む4096件以上の配列です。</param>
         /// <returns>中心線生成と全幅候補の標高評価を完了できた場合はtrueです。</returns>
-        private static bool TryRasterizeChannelWithinBounds(
+        internal static bool TryRasterizeChannelWithinBounds(
             in WorldGenerationSettings settings,
             in GeneratedHydrologyCell sourceCell,
             int minimumTileX,
@@ -516,7 +616,10 @@ namespace Farmware.WorldGeneration
             NativeArray<SurfaceWaterPathTile> pathTiles,
             int firstCellX,
             int firstCellY,
-            NativeArray<byte> surfaceRechargeCandidates,
+            NativeArray<SurfaceRechargeCandidate> surfaceRechargeCandidates,
+            int springFirstCellX,
+            int springFirstCellY,
+            NativeArray<SurfaceRechargeCandidate> springSurfaceRechargeCandidates,
             NativeArray<GeneratedSurfaceWaterTile> surfaceWater)
         {
             if (!DeterministicSurfaceWaterPathGenerator.TryBuildChannelCenterLine(
@@ -547,6 +650,9 @@ namespace Farmware.WorldGeneration
                         firstCellX,
                         firstCellY,
                         surfaceRechargeCandidates,
+                        springFirstCellX,
+                        springFirstCellY,
+                        springSurfaceRechargeCandidates,
                         surfaceWater))
                 {
                     return false;
@@ -580,6 +686,9 @@ namespace Farmware.WorldGeneration
                             firstCellX,
                             firstCellY,
                             surfaceRechargeCandidates,
+                            springFirstCellX,
+                            springFirstCellY,
+                            springSurfaceRechargeCandidates,
                             surfaceWater))
                     {
                         return false;
@@ -662,20 +771,79 @@ namespace Farmware.WorldGeneration
             int maximumTileY,
             int firstCellX,
             int firstCellY,
-            NativeArray<byte> surfaceRechargeCandidates,
+            NativeArray<SurfaceRechargeCandidate> surfaceRechargeCandidates,
             NativeArray<GeneratedSurfaceWaterTile> surfaceWater)
         {
-            if (!DeterministicEnvironmentGenerator.TryGenerateBaseClimate(
+            return TryApplyChannelTile(
+                settings,
+                worldTileX,
+                worldTileY,
+                isCenterLine,
+                isRiver,
+                sourceCell,
+                minimumTileX,
+                minimumTileY,
+                maximumTileX,
+                maximumTileY,
+                firstCellX,
+                firstCellY,
+                surfaceRechargeCandidates,
+                default,
+                default,
+                default,
+                surfaceWater);
+        }
+
+        /// <summary>河道候補1タイルを一度だけ標高評価し、通常9×9と泉21×21の涵養および表流水へ反映します。</summary>
+        /// <param name="settings">連続標高と海面を再現する固定設定です。</param>
+        /// <param name="worldTileX">候補の水平絶対タイル座標です。</param>
+        /// <param name="worldTileY">候補の垂直絶対タイル座標です。</param>
+        /// <param name="isCenterLine">河道中心線そのものならtrueです。</param>
+        /// <param name="isRiver">River幅として扱う場合はtrueです。</param>
+        /// <param name="sourceCell">種類、流出量、代表供給元座標を持つ上流水文セルです。</param>
+        /// <param name="minimumTileX">対象チャンクの左端タイルXです。</param>
+        /// <param name="minimumTileY">対象チャンクの下端タイルYです。</param>
+        /// <param name="maximumTileX">対象チャンクの右端タイルXです。</param>
+        /// <param name="maximumTileY">対象チャンクの上端タイルYです。</param>
+        /// <param name="firstCellX">通常涵養出力の先頭水平水文セル座標です。</param>
+        /// <param name="firstCellY">通常涵養出力の先頭垂直水文セル座標です。</param>
+        /// <param name="surfaceRechargeCandidates">通常9×9涵養出力です。</param>
+        /// <param name="springFirstCellX">泉涵養出力の先頭水平水文セル座標です。</param>
+        /// <param name="springFirstCellY">泉涵養出力の先頭垂直水文セル座標です。</param>
+        /// <param name="springSurfaceRechargeCandidates">泉21×21涵養出力です。</param>
+        /// <param name="surfaceWater">対象チャンクの行優先表流水出力です。</param>
+        /// <returns>候補が海面下または範囲外で無関係、もしくは全出力への反映を完了した場合はtrueです。</returns>
+        private static bool TryApplyChannelTile(
+            in WorldGenerationSettings settings,
+            int worldTileX,
+            int worldTileY,
+            bool isCenterLine,
+            bool isRiver,
+            in GeneratedHydrologyCell sourceCell,
+            int minimumTileX,
+            int minimumTileY,
+            int maximumTileX,
+            int maximumTileY,
+            int firstCellX,
+            int firstCellY,
+            NativeArray<SurfaceRechargeCandidate> surfaceRechargeCandidates,
+            int springFirstCellX,
+            int springFirstCellY,
+            NativeArray<SurfaceRechargeCandidate> springSurfaceRechargeCandidates,
+            NativeArray<GeneratedSurfaceWaterTile> surfaceWater)
+        {
+            if (!TryGetSurfaceWaterElevation(
                     settings,
                     worldTileX,
                     worldTileY,
-                    out GeneratedEnvironmentData environment))
+                    out ushort elevation,
+                    out bool isAboveSeaLevel))
             {
                 return false;
             }
 
             // 海面未満は既存の海水域を維持し、河道の淡水候補で上書きしません。
-            if (environment.Elevation < settings.SeaLevelThreshold)
+            if (!isAboveSeaLevel)
             {
                 return true;
             }
@@ -687,7 +855,21 @@ namespace Farmware.WorldGeneration
                     worldTileY,
                     firstCellX,
                     firstCellY,
+                    DeterministicGroundwaterHydrologyGenerator.IntersectingCellsPerAxis,
                     surfaceRechargeCandidates))
+            {
+                return false;
+            }
+
+            if (springSurfaceRechargeCandidates.IsCreated
+                && !TryMarkSurfaceRechargeCandidate(
+                    settings.Hydrology,
+                    worldTileX,
+                    worldTileY,
+                    springFirstCellX,
+                    springFirstCellY,
+                    DeterministicLakeSpringGenerator.SpringHydrologyCellsPerAxis,
+                    springSurfaceRechargeCandidates))
             {
                 return false;
             }
@@ -732,7 +914,7 @@ namespace Farmware.WorldGeneration
                     | (isCenterLine
                         ? SurfaceWaterTileFlags.ChannelCenterLine
                         : SurfaceWaterTileFlags.None),
-                SurfaceHeight = environment.Elevation,
+                SurfaceHeight = elevation,
                 SourceAmount = sourceCell.RunoffEquivalentCells,
                 SourceCellX = sourceCell.CellX,
                 SourceCellY = sourceCell.CellY
@@ -902,7 +1084,7 @@ namespace Farmware.WorldGeneration
             int maximumTileY,
             int firstCellX,
             int firstCellY,
-            NativeArray<byte> surfaceRechargeCandidates,
+            NativeArray<SurfaceRechargeCandidate> surfaceRechargeCandidates,
             NativeArray<GeneratedSurfaceWaterTile> surfaceWater)
         {
             int memberCount = (int)basin.BasinAreaCells;
@@ -1093,6 +1275,7 @@ namespace Farmware.WorldGeneration
                             worldTileY,
                             firstCellX,
                             firstCellY,
+                            DeterministicGroundwaterHydrologyGenerator.IntersectingCellsPerAxis,
                             out int rechargeIndex,
                             out isRechargeTile))
                     {
@@ -1100,7 +1283,10 @@ namespace Farmware.WorldGeneration
                     }
                     if (isRechargeTile)
                     {
-                        surfaceRechargeCandidates[rechargeIndex] = 1;
+                        surfaceRechargeCandidates[rechargeIndex] = new SurfaceRechargeCandidate
+                        {
+                            HasRecharge = 1
+                        };
                     }
                 }
 
@@ -1167,31 +1353,34 @@ namespace Farmware.WorldGeneration
             return true;
         }
 
-        /// <summary>河道候補タイルを担当する交差9×9水文セルがあれば、涵養候補を1へ設定します。</summary>
+        /// <summary>河道候補タイルを担当する正方形水文セル範囲があれば、涵養候補を1へ設定します。</summary>
         /// <param name="settings">絶対タイルから水文セルへ変換する固定8タイル設定です。</param>
         /// <param name="worldTileX">候補の水平絶対タイル座標です。</param>
         /// <param name="worldTileY">候補の垂直絶対タイル座標です。</param>
         /// <param name="firstCellX">交差9×9配列の先頭水平水文セル座標です。</param>
         /// <param name="firstCellY">交差9×9配列の先頭垂直水文セル座標です。</param>
-        /// <param name="surfaceRechargeCandidates">涵養候補を保持する行優先81件以上の配列です。</param>
-        /// <returns>座標変換と配列検証に成功した場合はtrueです。9×9範囲外は正常として無視します。</returns>
+        /// <param name="cellsPerAxis">涵養候補配列の一辺のセル数です。</param>
+        /// <param name="surfaceRechargeCandidates">涵養候補を保持する行優先配列です。</param>
+        /// <returns>座標変換と配列検証に成功した場合はtrueです。出力範囲外は正常として無視します。</returns>
         private static bool TryMarkSurfaceRechargeCandidate(
             in HydrologyGenerationSettings settings,
             int worldTileX,
             int worldTileY,
             int firstCellX,
             int firstCellY,
-            NativeArray<byte> surfaceRechargeCandidates)
+            int cellsPerAxis,
+            NativeArray<SurfaceRechargeCandidate> surfaceRechargeCandidates)
         {
-            if (!surfaceRechargeCandidates.IsCreated
-                || surfaceRechargeCandidates.Length
-                    < DeterministicGroundwaterHydrologyGenerator.IntersectingCellCount
+            if (cellsPerAxis <= 0
+                || !surfaceRechargeCandidates.IsCreated
+                || (long)surfaceRechargeCandidates.Length < (long)cellsPerAxis * cellsPerAxis
                 || !TryGetSurfaceRechargeCandidateIndex(
                     settings,
                     worldTileX,
                     worldTileY,
                     firstCellX,
                     firstCellY,
+                    cellsPerAxis,
                     out int rechargeIndex,
                     out bool isInRange))
             {
@@ -1200,19 +1389,23 @@ namespace Farmware.WorldGeneration
 
             if (isInRange)
             {
-                surfaceRechargeCandidates[rechargeIndex] = 1;
+                surfaceRechargeCandidates[rechargeIndex] = new SurfaceRechargeCandidate
+                {
+                    HasRecharge = 1
+                };
             }
             return true;
         }
 
-        /// <summary>絶対タイルの担当水文セルを交差9×9配列の行優先添字へ変換します。</summary>
+        /// <summary>絶対タイルの担当水文セルを任意の正方形配列の行優先添字へ変換します。</summary>
         /// <param name="settings">絶対タイルから水文セルへ変換する固定8タイル設定です。</param>
         /// <param name="worldTileX">水平絶対タイル座標です。</param>
         /// <param name="worldTileY">垂直絶対タイル座標です。</param>
         /// <param name="firstCellX">交差9×9配列の先頭水平水文セル座標です。</param>
         /// <param name="firstCellY">交差9×9配列の先頭垂直水文セル座標です。</param>
-        /// <param name="index">範囲内の場合に0〜80の行優先添字を受け取ります。</param>
-        /// <param name="isInRange">変換結果が今回の交差9×9セル内ならtrueです。</param>
+        /// <param name="cellsPerAxis">変換先配列の一辺のセル数です。</param>
+        /// <param name="index">範囲内の場合に行優先添字を受け取ります。</param>
+        /// <param name="isInRange">変換結果が今回の出力セル範囲内ならtrueです。</param>
         /// <returns>水文セル座標への変換自体に成功した場合はtrueです。</returns>
         private static bool TryGetSurfaceRechargeCandidateIndex(
             in HydrologyGenerationSettings settings,
@@ -1220,12 +1413,14 @@ namespace Farmware.WorldGeneration
             int worldTileY,
             int firstCellX,
             int firstCellY,
+            int cellsPerAxis,
             out int index,
             out bool isInRange)
         {
             index = default;
             isInRange = false;
-            if (!DeterministicHydrologyGenerator.TryGetCellCoordinate(
+            if (cellsPerAxis <= 0
+                || !DeterministicHydrologyGenerator.TryGetCellCoordinate(
                     settings,
                     worldTileX,
                     worldTileY,
@@ -1238,16 +1433,45 @@ namespace Farmware.WorldGeneration
             long offsetX = (long)cellX - firstCellX;
             long offsetY = (long)cellY - firstCellY;
             if (offsetX < 0
-                || offsetX >= DeterministicGroundwaterHydrologyGenerator.IntersectingCellsPerAxis
+                || offsetX >= cellsPerAxis
                 || offsetY < 0
-                || offsetY >= DeterministicGroundwaterHydrologyGenerator.IntersectingCellsPerAxis)
+                || offsetY >= cellsPerAxis)
             {
                 return true;
             }
 
-            index = ((int)offsetY * DeterministicGroundwaterHydrologyGenerator.IntersectingCellsPerAxis)
-                + (int)offsetX;
+            index = ((int)offsetY * cellsPerAxis) + (int)offsetX;
             isInRange = true;
+            return true;
+        }
+
+        /// <summary>表流水候補タイルの固定標高を生成し、海面以上かを同じ閾値規則で返します。</summary>
+        /// <param name="settings">基礎気候と海面閾値を持つ固定生成設定です。</param>
+        /// <param name="worldTileX">評価する水平絶対タイル座標です。</param>
+        /// <param name="worldTileY">評価する垂直絶対タイル座標です。</param>
+        /// <param name="elevation">成功時の固定標高です。</param>
+        /// <param name="isAboveSeaLevel">標高が海面閾値以上ならtrueです。</param>
+        /// <returns>基礎気候を完全に生成できた場合はtrueです。</returns>
+        private static bool TryGetSurfaceWaterElevation(
+            in WorldGenerationSettings settings,
+            int worldTileX,
+            int worldTileY,
+            out ushort elevation,
+            out bool isAboveSeaLevel)
+        {
+            elevation = default;
+            isAboveSeaLevel = false;
+            if (!DeterministicEnvironmentGenerator.TryGenerateBaseClimate(
+                    settings,
+                    worldTileX,
+                    worldTileY,
+                    out GeneratedEnvironmentData environment))
+            {
+                return false;
+            }
+
+            elevation = environment.Elevation;
+            isAboveSeaLevel = elevation >= settings.SeaLevelThreshold;
             return true;
         }
 
