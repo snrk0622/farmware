@@ -1,4 +1,4 @@
-// このファイルは、TERRAIN-01C5-B1/B2の通常Biome候補評価、整数Score、候補別Variation、安定順位を検証します。
+// このファイルは、TERRAIN-01C5-B1〜B3の通常候補評価、安定順位、特殊優先、最終Biome選択を検証します。
 // ECS生成と旧7Biomeはまだ切り替えず、新18Biome分類器の純粋計算だけをSceneなしのEditModeテストで固定します。
 
 using NUnit.Framework;
@@ -6,7 +6,7 @@ using NUnit.Framework;
 namespace Farmware.WorldGeneration.Tests
 {
     /// <summary>
-    /// 通常Biomeの候補ゲート、軸別適性、スコア、BiomeVariation、上位2候補の安定順位を保証します。
+    /// 通常Biomeの候補評価と順位、および火山中核・水文特殊・通常首位の最終優先順を保証します。
     /// </summary>
     public sealed class DeterministicBiomeClassifierTests
     {
@@ -433,6 +433,187 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// 活動度段階5の活動的火山岩は広域湿原条件より先に火山中核へ確定することを保証します。
+        /// </summary>
+        [Test]
+        public void FinalSelection_ActiveVolcanicCoreOverridesHydrologySpecial()
+        {
+            BiomeClassificationSettings settings = BiomeDefinitionCatalog.CreateDefault();
+            BiomeClassificationInput input = CreateInput(
+                terrainTemperature: 35000,
+                baseMoisture: 45000,
+                elevation: 30000,
+                woodyVegetation: 50000,
+                ruggedness: 30000,
+                coastalInfluence: 0,
+                volcanicActivity: DeterministicEnvironmentGenerator.EnvironmentBand5Threshold,
+                geologyClass: GeologyClass.VolcanicRock,
+                geologyFlags: GeologyDefinitionFlags.SupportsActiveVolcanism,
+                hydrologyFlags: GeneratedHydrologyTileFlags.FreshwaterConnected
+                    | GeneratedHydrologyTileFlags.WetlandTileEligible
+                    | GeneratedHydrologyTileFlags.LargeWetlandExtent);
+
+            Assert.That(TrySelect(settings, input, out FinalBiomeSelection selection), Is.True);
+            Assert.That(selection.StableId, Is.EqualTo(BiomeStableIds.VolcanicGeothermal));
+            Assert.That(selection.Reason, Is.EqualTo(BiomeSelectionReason.ActiveVolcanicCore));
+            Assert.That(selection.NormalCandidates.CandidateCount, Is.GreaterThan(0));
+        }
+
+        /// <summary>
+        /// 活動度段階5だけ、または活動適性だけでは火山中核にせず、火山岩を含む3条件すべてを要求します。
+        /// </summary>
+        [Test]
+        public void FinalSelection_VolcanicCoreRequiresClassFlagAndBandFive()
+        {
+            BiomeClassificationSettings settings = BiomeDefinitionCatalog.CreateDefault();
+            BiomeClassificationInput missingFlag = CreateInput(
+                30000, 38000, 30000, 20000, 10000, 0,
+                DeterministicEnvironmentGenerator.EnvironmentBand5Threshold,
+                GeologyClass.VolcanicRock);
+            BiomeClassificationInput wrongClass = missingFlag;
+            wrongClass.GeologyClass = GeologyClass.Limestone;
+            wrongClass.GeologyFlags = GeologyDefinitionFlags.SupportsActiveVolcanism;
+            BiomeClassificationInput bandFour = missingFlag;
+            bandFour.GeologyFlags = GeologyDefinitionFlags.SupportsActiveVolcanism;
+            bandFour.Environment.VolcanicActivityPotential =
+                (ushort)(DeterministicEnvironmentGenerator.EnvironmentBand5Threshold - 1);
+
+            Assert.That(TrySelect(settings, missingFlag, out FinalBiomeSelection noFlag), Is.True);
+            Assert.That(noFlag.Reason, Is.Not.EqualTo(BiomeSelectionReason.ActiveVolcanicCore));
+            Assert.That(TrySelect(settings, wrongClass, out FinalBiomeSelection nonVolcanic), Is.True);
+            Assert.That(nonVolcanic.Reason, Is.Not.EqualTo(BiomeSelectionReason.ActiveVolcanicCore));
+            Assert.That(TrySelect(settings, bandFour, out FinalBiomeSelection fringe), Is.True);
+            Assert.That(fringe.Reason, Is.Not.EqualTo(BiomeSelectionReason.ActiveVolcanicCore));
+        }
+
+        /// <summary>
+        /// 広域水文条件成立後の木本植生境界39,320／39,321で、草本湿原と湿地林を分けることを保証します。
+        /// </summary>
+        [Test]
+        public void FinalSelection_WetlandWoodyBoundarySelectsMarshOrSwamp()
+        {
+            BiomeClassificationSettings settings = BiomeDefinitionCatalog.CreateDefault();
+            GeneratedHydrologyTileFlags wetlandFlags = GeneratedHydrologyTileFlags.FreshwaterConnected
+                | GeneratedHydrologyTileFlags.WetlandTileEligible
+                | GeneratedHydrologyTileFlags.LargeWetlandExtent;
+            BiomeClassificationInput marshInput = CreateInput(
+                30000, 45000, 30000, 39320, 10000, 0, 0,
+                GeologyClass.UnconsolidatedSediment,
+                hydrologyFlags: wetlandFlags);
+            BiomeClassificationInput swampInput = marshInput;
+            swampInput.Environment.TerrainTemperature = 35000;
+            swampInput.Environment.WoodyVegetationPotential =
+                DeterministicEnvironmentGenerator.EnvironmentBand4Threshold;
+
+            Assert.That(TrySelect(settings, marshInput, out FinalBiomeSelection marsh), Is.True);
+            Assert.That(IsFreshwaterMarshHost(
+                settings,
+                marsh.NormalCandidates.First.StableId), Is.True);
+            Assert.That(marsh.StableId, Is.EqualTo(BiomeStableIds.FreshwaterMarshFloodplain));
+            Assert.That(marsh.Reason,
+                Is.EqualTo(BiomeSelectionReason.FreshwaterMarshPromotion));
+
+            Assert.That(TrySelect(settings, swampInput, out FinalBiomeSelection swamp), Is.True);
+            Assert.That(IsSwampForestHost(settings, swamp.NormalCandidates.First.StableId), Is.True);
+            Assert.That(swamp.StableId, Is.EqualTo(BiomeStableIds.SwampForest));
+            Assert.That(swamp.Reason, Is.EqualTo(BiomeSelectionReason.SwampForestPromotion));
+        }
+
+        /// <summary>
+        /// 水文3フラグの不足、気候範囲外、許可されていない通常Hostでは水文特殊Biomeへ昇格しないことを保証します。
+        /// </summary>
+        [Test]
+        public void FinalSelection_HydrologyPromotionRequiresAllFlagsClimateAndAllowedHost()
+        {
+            BiomeClassificationSettings settings = BiomeDefinitionCatalog.CreateDefault();
+            BiomeClassificationInput baseWetTile = CreateInput(
+                30000, 45000, 30000, 20000, 10000, 0, 0,
+                GeologyClass.UnconsolidatedSediment);
+            BiomeClassificationInput missingFreshwater = baseWetTile;
+            missingFreshwater.HydrologyFlags = GeneratedHydrologyTileFlags.WetlandTileEligible
+                | GeneratedHydrologyTileFlags.LargeWetlandExtent;
+            BiomeClassificationInput missingEligibility = baseWetTile;
+            missingEligibility.HydrologyFlags = GeneratedHydrologyTileFlags.FreshwaterConnected
+                | GeneratedHydrologyTileFlags.LargeWetlandExtent;
+            BiomeClassificationInput missingExtent = baseWetTile;
+            missingExtent.HydrologyFlags = GeneratedHydrologyTileFlags.FreshwaterConnected
+                | GeneratedHydrologyTileFlags.WetlandTileEligible;
+            BiomeClassificationInput coldWetland = baseWetTile;
+            coldWetland.Environment.TerrainTemperature = 11999;
+            coldWetland.HydrologyFlags = GeneratedHydrologyTileFlags.FreshwaterConnected
+                | GeneratedHydrologyTileFlags.WetlandTileEligible
+                | GeneratedHydrologyTileFlags.LargeWetlandExtent;
+            BiomeClassificationInput disallowedSteppeHost = CreateInput(
+                30000, 18000, 30000, 5000, 10000, 0, 0,
+                GeologyClass.UnconsolidatedSediment,
+                hydrologyFlags: GeneratedHydrologyTileFlags.FreshwaterConnected
+                    | GeneratedHydrologyTileFlags.WetlandTileEligible
+                    | GeneratedHydrologyTileFlags.LargeWetlandExtent);
+
+            AssertThatSelectionKeepsNormal(settings, missingFreshwater);
+            AssertThatSelectionKeepsNormal(settings, missingEligibility);
+            AssertThatSelectionKeepsNormal(settings, missingExtent);
+            AssertThatSelectionKeepsNormal(settings, coldWetland);
+            Assert.That(TrySelect(
+                settings,
+                disallowedSteppeHost,
+                out FinalBiomeSelection disallowed), Is.True);
+            Assert.That(disallowed.NormalCandidates.First.StableId, Is.EqualTo(BiomeStableIds.Steppe));
+            Assert.That(disallowed.StableId, Is.EqualTo(BiomeStableIds.Steppe));
+            Assert.That(disallowed.Reason, Is.EqualTo(BiomeSelectionReason.NormalCandidate));
+        }
+
+        /// <summary>
+        /// Definition登録順を逆転しても、通常順位、特殊ID、選択理由がすべて一致することを保証します。
+        /// </summary>
+        [Test]
+        public void FinalSelection_IsIndependentOfDefinitionRegistrationOrder()
+        {
+            BiomeClassificationSettings forwardSettings = BiomeDefinitionCatalog.CreateDefault();
+            BiomeClassificationSettings reverseSettings = forwardSettings;
+            ReverseDefinitions(ref reverseSettings);
+            BiomeClassificationInput input = CreateInput(
+                30000, 45000, 30000, 39320, 10000, 0, 0,
+                GeologyClass.UnconsolidatedSediment,
+                warpedSampleX: -1025,
+                warpedSampleY: 2049,
+                hydrologyFlags: GeneratedHydrologyTileFlags.FreshwaterConnected
+                    | GeneratedHydrologyTileFlags.WetlandTileEligible
+                    | GeneratedHydrologyTileFlags.LargeWetlandExtent);
+
+            Assert.That(TrySelect(forwardSettings, input, out FinalBiomeSelection forward), Is.True);
+            Assert.That(TrySelect(reverseSettings, input, out FinalBiomeSelection reverse), Is.True);
+            Assert.That(reverse.StableId, Is.EqualTo(forward.StableId));
+            Assert.That(reverse.Reason, Is.EqualTo(forward.Reason));
+            AssertEvaluationEquals(forward.NormalCandidates.First, reverse.NormalCandidates.First);
+            AssertEvaluationEquals(forward.NormalCandidates.Second, reverse.NormalCandidates.Second);
+            Assert.That(reverse.NormalCandidates.CandidateCount,
+                Is.EqualTo(forward.NormalCandidates.CandidateCount));
+        }
+
+        /// <summary>
+        /// 通常候補が存在しない入力では特殊条件が見かけ上成立しても失敗し、部分的な最終結果を返さないことを保証します。
+        /// </summary>
+        [Test]
+        public void FinalSelection_NoNormalCandidateReturnsFalseAndDefaultResult()
+        {
+            BiomeClassificationSettings settings = BiomeDefinitionCatalog.CreateDefault();
+            BiomeClassificationInput input = CreateInput(
+                30000, 45000, 19999, 50000, 10000, 0,
+                DeterministicEnvironmentGenerator.EnvironmentBand5Threshold,
+                GeologyClass.VolcanicRock,
+                GeologyDefinitionFlags.SupportsActiveVolcanism,
+                hydrologyFlags: GeneratedHydrologyTileFlags.FreshwaterConnected
+                    | GeneratedHydrologyTileFlags.WetlandTileEligible
+                    | GeneratedHydrologyTileFlags.LargeWetlandExtent);
+
+            Assert.That(TrySelect(settings, input, out FinalBiomeSelection selection), Is.False);
+            Assert.That(selection.StableId, Is.EqualTo(BiomeStableIds.None));
+            Assert.That(selection.Reason, Is.EqualTo(BiomeSelectionReason.None));
+            Assert.That(selection.NormalCandidates.CandidateCount, Is.Zero);
+        }
+
+        /// <summary>
         /// 台形型適性の成否と値を1行で比較し、境界ケースの期待値を読みやすく保ちます。
         /// </summary>
         /// <param name="range">評価する許容・代表範囲です。</param>
@@ -469,6 +650,82 @@ namespace Farmware.WorldGeneration.Tests
                 definition,
                 input,
                 out _);
+        }
+
+        /// <summary>
+        /// 最終選択テストへ共通SeedとGeneratorVersionを渡し、テスト本文を優先条件の比較へ集中させます。
+        /// </summary>
+        /// <param name="settings">新18BiomeとHost集合を持つ固定設定です。</param>
+        /// <param name="input">固定環境、地質、自然水文を持つ分類入力です。</param>
+        /// <param name="selection">成功時の最終Biome、理由、通常順位です。</param>
+        /// <returns>候補抽出から最終選択まで成功した場合はtrueです。</returns>
+        private static bool TrySelect(
+            in BiomeClassificationSettings settings,
+            in BiomeClassificationInput input,
+            out FinalBiomeSelection selection)
+        {
+            return DeterministicBiomeClassifier.TrySelectFinalBiome(
+                settings,
+                999UL,
+                3,
+                input,
+                out selection);
+        }
+
+        /// <summary>
+        /// 水文特殊条件が一部不足する入力で、通常首位と最終Biomeが一致することを保証します。
+        /// </summary>
+        /// <param name="settings">検証済みの新18Biome設定です。</param>
+        /// <param name="input">昇格不成立を期待する固定入力です。</param>
+        private static void AssertThatSelectionKeepsNormal(
+            in BiomeClassificationSettings settings,
+            in BiomeClassificationInput input)
+        {
+            Assert.That(TrySelect(settings, input, out FinalBiomeSelection selection), Is.True);
+            Assert.That(selection.StableId, Is.EqualTo(selection.NormalCandidates.First.StableId));
+            Assert.That(selection.Reason, Is.EqualTo(BiomeSelectionReason.NormalCandidate));
+        }
+
+        /// <summary>
+        /// 湿地林用の固定Host集合を明示走査し、選択テストの通常首位が許可対象かを確認します。
+        /// </summary>
+        /// <param name="settings">湿地林専用Host集合を持つ固定設定です。</param>
+        /// <param name="stableId">確認する通常首位の安定IDです。</param>
+        /// <returns>専用Host集合にIDが含まれていればtrueです。</returns>
+        private static bool IsSwampForestHost(
+            in BiomeClassificationSettings settings,
+            byte stableId)
+        {
+            for (int index = 0; index < settings.SwampForestHostIds.Length; index++)
+            {
+                if (settings.SwampForestHostIds[index] == stableId)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// 淡水湿原用の固定Host集合を明示走査し、選択テストの通常首位が許可対象かを確認します。
+        /// </summary>
+        /// <param name="settings">淡水湿原専用Host集合を持つ固定設定です。</param>
+        /// <param name="stableId">確認する通常首位の安定IDです。</param>
+        /// <returns>専用Host集合にIDが含まれていればtrueです。</returns>
+        private static bool IsFreshwaterMarshHost(
+            in BiomeClassificationSettings settings,
+            byte stableId)
+        {
+            for (int index = 0; index < settings.FreshwaterMarshHostIds.Length; index++)
+            {
+                if (settings.FreshwaterMarshHostIds[index] == stableId)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -544,6 +801,7 @@ namespace Farmware.WorldGeneration.Tests
         /// <param name="seaLevelThreshold">これ未満を地上Biome候補外にする保存済み海面閾値です。</param>
         /// <param name="warpedSampleX">Biome Warp後の水平座標です。</param>
         /// <param name="warpedSampleY">Biome Warp後の垂直座標です。</param>
+        /// <param name="hydrologyFlags">固定自然水文が確定した湿原資格と広域規模です。</param>
         /// <returns>分類器へ直接渡せるunmanaged入力です。</returns>
         private static BiomeClassificationInput CreateInput(
             ushort terrainTemperature,
@@ -557,7 +815,8 @@ namespace Farmware.WorldGeneration.Tests
             GeologyDefinitionFlags geologyFlags = GeologyDefinitionFlags.None,
             ushort seaLevelThreshold = WorldGenerationSettings.DefaultSeaLevelThreshold,
             int warpedSampleX = 0,
-            int warpedSampleY = 0)
+            int warpedSampleY = 0,
+            GeneratedHydrologyTileFlags hydrologyFlags = GeneratedHydrologyTileFlags.None)
         {
             return new BiomeClassificationInput
             {
@@ -575,7 +834,8 @@ namespace Farmware.WorldGeneration.Tests
                 },
                 GeologyClass = geologyClass,
                 GeologyFlags = geologyFlags,
-                SeaLevelThreshold = seaLevelThreshold
+                SeaLevelThreshold = seaLevelThreshold,
+                HydrologyFlags = hydrologyFlags
             };
         }
     }

@@ -1,7 +1,7 @@
 # TERRAIN-01C5 Biome分類と環境境界の実装記録
 
 - 最終更新日: 2026-10-23
-- 状態: C5-A・C5-B1・C5-B2完了
+- 状態: C5-A・C5-B完了
 - 対象ブランチ: `terrain-01c5b-biome-classification`
 - 正仕様: [バイオーム・生態コンテンツ仕様](../GameSpecification/BiomeEcologyContentSpecification.md)、[ランダムマップ・可変地形仕様](../GameSpecification/RandomMapGenerationSpecification.md)
 
@@ -112,3 +112,26 @@ C5-B2はECS Buffer、旧7Biome分類、状態ハッシュ、Scene、Prefab、Pre
 差分レビューではP0・P1のブロッカー、空白エラー、仕様と異なる順位分岐、旧7Biome生成への接続、Scene・Prefab・Presentation変更がないことを確認した。ゲーム仕様は既存の確定順位を実装しただけで変更せず、`EditorTools.md`はEditor機能変更なし、`Docs/README.md`は文書追加・移動なしのため更新不要と判断した。
 
 純粋計算だけの変更で製品生成と表示を変えないため、PlayModeと性能計測は実行しない。2026-10-23の人間確認では、旧7Biome表示へC5-B2起因の意図しない変化がないことを確認し、commit許可を得た。Shift高速移動時の一時的な描画空白は、製品生成・表示へ未接続のC5-B2による回帰ではなく、既存の1チャンク先読みを移動が上回る条件として切り分けた。速度別先読みと生成待ちの対応は`VEHICLE-01B`・`VEHICLE-01F`およびロードマップ末尾の性能確認方針に既に含まれるため、本変更へ混在させない。
+
+## 10. C5-B3の実装契約
+
+C5-B3では、C5-B2の通常候補順位を診断用に保持したまま、1タイルの最終Biomeを次の変更禁止順序で選ぶ。
+
+1. 火山・地熱地帯Definitionで適合度が正の地質、`SupportsActiveVolcanism`、火山活動度段階5のすべてが成立した場合は、活動的火山中核を最優先する。
+2. 火山中核が不成立で、`FreshwaterConnected`・`WetlandTileEligible`・`LargeWetlandExtent`の3フラグがすべて成立した場合だけ、水文特殊Biomeを評価する。
+3. 木本植生ポテンシャル39,320以下は淡水湿原・氾濫原、39,321以上は湿地林・沼沢林を対象とする。対象Definitionの地形気温・基礎湿度・標高・木本植生許容範囲と、特殊判定前の通常首位が専用Host集合に含まれることを追加条件とする。
+4. 特殊条件が不成立なら通常首位を維持する。通常候補が0件なら`None`へ読み替えず、既定結果を伴う明示失敗を返す。
+
+最終結果は安定ID、`BiomeSelectionReason`、特殊判定前の通常首位・次点・候補総数を保持する。水文昇格は隣接Biome、現在の降雨、人工水路、現在の土壌水分を参照せず、固定自然水文と同一タイルの通常首位だけで決めるため、Definition登録順、候補列挙順、チャンク生成順、ロード範囲へ依存しない。
+
+C5-B3はECS Buffer、旧7Biome分類、状態ハッシュ、Scene、Prefab、Presentationへ接続しない。新18Biomeへの生成切替と旧経路削除はC5-C、選択理由を含む診断表示はC5-Eで一括して行う。
+
+## 11. C5-B3の検証
+
+`DeterministicBiomeClassifierTests`へ、火山中核が水文特殊より優先されること、火山Definitionの地質適合・活動的火山特性・活動度段階5の3条件、木本植生39,320／39,321境界、淡水接続・湿原タイル資格・広域規模、対象Definitionの気候許容範囲、許可Hostと非許可Host、通常候補なし、Definition登録逆順での不変を追加した。特殊選択後も通常首位・次点・候補総数が維持されることを同じ結果から確認する。
+
+2026-10-23の接続済みUnity 6000.3.8f1 Editorでは、再コンパイルが失敗なし、`DeterministicBiomeClassifierTests` 18件、World Generation EditMode 575件がすべて成功した。最終Console実状態はコンパイル失敗なし、エラー0件、警告0件である。純粋計算だけの変更で製品生成と表示を変えないため、PlayModeと性能計測は実行しない。
+
+差分レビューではP0・P1のブロッカー、空白エラー、旧7Biome生成への接続、Scene・Prefab・Presentation変更がないことを確認した。ゲーム仕様は既存の特殊優先、Host、環境境界を実装しただけで変更せず、`EditorTools.md`はEditor機能変更なし、`Docs/README.md`は文書追加・移動なしのため更新不要と判断した。人間確認ではConsoleに新規エラー・警告がなく、旧7Biome表示へ意図しない変化がないことを確認する。
+
+C5-B3は2026-10-23に人間確認とcommit許可を受け、C5-B全体を完了した。

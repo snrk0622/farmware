@@ -1,5 +1,7 @@
-// このファイルは、TERRAIN-01C5-Bの新18Biome Definitionから通常候補を評価し、安定順位で上位2件を選びます。
-// C5-CでECS生成へ接続する前に、候補ゲート、整数Score、BiomeVariation、列挙順に依存しない順位を純粋計算として固定します。
+// このファイルは、TERRAIN-01C5-Bの新18Biome Definitionから通常候補を評価し、特殊優先を含む最終Biomeを選びます。
+// C5-CでECS生成へ接続する前に、候補ゲート、安定順位、火山中核、水文特殊Host、最終選択を純粋計算として固定します。
+
+using Unity.Collections;
 
 namespace Farmware.WorldGeneration
 {
@@ -20,6 +22,12 @@ namespace Farmware.WorldGeneration
 
         /// <summary>これ未満の標高を地上Biome候補から除外する、ワールドへ保存済みの海面閾値です。</summary>
         public ushort SeaLevelThreshold;
+
+        /// <summary>
+        /// 自然冠水生成が確定した淡水接続、タイル資格、広域湿原規模です。
+        /// 現在の降雨や人工水路ではなく、固定生成結果だけを最終Biome選択へ渡します。
+        /// </summary>
+        public GeneratedHydrologyTileFlags HydrologyFlags;
     }
 
     /// <summary>
@@ -82,6 +90,44 @@ namespace Farmware.WorldGeneration
     }
 
     /// <summary>
+    /// 最終Biomeをどの優先段階で選んだかを表します。
+    /// C5-Eの診断表示はこの値を読み、表示側で分類条件を再実装しません。
+    /// </summary>
+    public enum BiomeSelectionReason : byte
+    {
+        /// <summary>分類失敗または未選択です。</summary>
+        None = 0,
+
+        /// <summary>特殊条件が成立せず、安定順位の通常首位を選びました。</summary>
+        NormalCandidate = 1,
+
+        /// <summary>活動的火山地質と活動度段階5が成立し、最優先で火山中核を選びました。</summary>
+        ActiveVolcanicCore = 2,
+
+        /// <summary>広域湿原条件と通常首位Hostが成立し、淡水湿原・氾濫原へ昇格しました。</summary>
+        FreshwaterMarshPromotion = 3,
+
+        /// <summary>広域湿原条件と通常首位Hostが成立し、湿地林・沼沢林へ昇格しました。</summary>
+        SwampForestPromotion = 4
+    }
+
+    /// <summary>
+    /// 1タイルの最終Biomeと、その判断根拠になる通常候補順位をまとめます。
+    /// 特殊Biomeを選んだ場合も通常首位と次点を残し、Host判定と診断を同じ結果から追跡できます。
+    /// </summary>
+    public struct FinalBiomeSelection
+    {
+        /// <summary>特殊優先を適用した後の最終Biome安定IDです。</summary>
+        public byte StableId;
+
+        /// <summary>最終IDを選んだ優先段階です。</summary>
+        public BiomeSelectionReason Reason;
+
+        /// <summary>特殊判定前に確定した通常候補の首位、次点、候補総数です。</summary>
+        public NormalBiomeCandidateRanking NormalCandidates;
+    }
+
+    /// <summary>
     /// 新18Biomeの通常候補を、管理確保や浮動小数点を使わず決定論的に評価・順位付けします。
     /// 安定IDまで含む全順序を使うため、Definition登録順やJob実行順が変わっても同じ上位2候補を得られます。
     /// </summary>
@@ -90,6 +136,65 @@ namespace Farmware.WorldGeneration
         /// <summary>通常Biomeの理論上の最大スコアです。65,535と重み合計256の積です。</summary>
         public const long MaximumBiomeScore = (long)ushort.MaxValue
             * BiomeDefinitionCatalog.RequiredNormalWeightTotal;
+
+        /// <summary>
+        /// 検証済み設定と固定環境から、特殊優先を適用した最終Biomeを一意に選びます。
+        /// </summary>
+        /// <param name="settings">読込時にBiomeDefinitionCatalog.ValidateSettingsを通した固定設定です。</param>
+        /// <param name="worldSeed">BiomeVariationへ使う、ワールド寿命中に固定した64bit Seedです。</param>
+        /// <param name="generatorVersion">生成規則と保存互換性を区切る固定Versionです。</param>
+        /// <param name="input">対象タイルの固定環境、地質、自然水文です。</param>
+        /// <param name="selection">成功時に最終ID、選択理由、特殊判定前の通常順位を返します。</param>
+        /// <returns>通常候補が存在し、必要な特殊Definitionも有効ならtrueです。失敗時は既定値を返します。</returns>
+        public static bool TrySelectFinalBiome(
+            in BiomeClassificationSettings settings,
+            ulong worldSeed,
+            int generatorVersion,
+            in BiomeClassificationInput input,
+            out FinalBiomeSelection selection)
+        {
+            selection = default;
+            if (!TryRankNormalCandidates(
+                    settings,
+                    worldSeed,
+                    generatorVersion,
+                    input,
+                    out NormalBiomeCandidateRanking normalCandidates))
+            {
+                // 候補なしを既定Biomeへ読み替えず、設定または生成監査で検出できる明示失敗にします。
+                return false;
+            }
+
+            byte selectedStableId = normalCandidates.First.StableId;
+            BiomeSelectionReason reason = BiomeSelectionReason.NormalCandidate;
+            if (!TryEvaluateActiveVolcanicCore(settings, input, out bool isActiveVolcanicCore))
+            {
+                return false;
+            }
+
+            if (isActiveVolcanicCore)
+            {
+                selectedStableId = BiomeStableIds.VolcanicGeothermal;
+                reason = BiomeSelectionReason.ActiveVolcanicCore;
+            }
+            else if (!TrySelectHydrologySpecial(
+                    settings,
+                    input,
+                    normalCandidates.First.StableId,
+                    ref selectedStableId,
+                    ref reason))
+            {
+                return false;
+            }
+
+            selection = new FinalBiomeSelection
+            {
+                StableId = selectedStableId,
+                Reason = reason,
+                NormalCandidates = normalCandidates
+            };
+            return true;
+        }
 
         /// <summary>
         /// 2つの通常候補をScore、Variation、安定IDの順で比較し、左候補が上位かを返します。
@@ -201,6 +306,138 @@ namespace Farmware.WorldGeneration
                 ranking.Second = candidate;
                 ranking.HasSecond = true;
             }
+        }
+
+        /// <summary>
+        /// 火山Biome Definitionの地質適合、明示地質特性、活動度段階5から活動的火山中核を判定します。
+        /// </summary>
+        /// <param name="settings">火山・地熱地帯Definitionを持つ検証済み固定設定です。</param>
+        /// <param name="input">固定地質、地質特性、火山活動度を持つ分類入力です。</param>
+        /// <param name="isActiveVolcanicCore">評価成功時に活動的火山中核ならtrueを返します。</param>
+        /// <returns>必要な火山Definitionと役割が有効で、判定を完了できた場合はtrueです。</returns>
+        private static bool TryEvaluateActiveVolcanicCore(
+            in BiomeClassificationSettings settings,
+            in BiomeClassificationInput input,
+            out bool isActiveVolcanicCore)
+        {
+            isActiveVolcanicCore = false;
+            if (!BiomeDefinitionCatalog.TryGetDefinition(
+                    settings,
+                    BiomeStableIds.VolcanicGeothermal,
+                    out BiomeDefinition volcanicDefinition)
+                || (volcanicDefinition.Flags & BiomeDefinitionFlags.UsesNormalScore) == 0
+                || (volcanicDefinition.Flags & BiomeDefinitionFlags.RequiresActiveVolcanism) == 0)
+            {
+                // 読込検証を迂回した設定から、存在しない火山Biomeを成功結果として公開しません。
+                return false;
+            }
+
+            // 地質名や列挙値を条件へ直書きせず、C5-Aで検証したDefinitionの地質適合表を正にします。
+            isActiveVolcanicCore = volcanicDefinition.GetGeologyFit(input.GeologyClass) > 0
+                && (input.GeologyFlags & GeologyDefinitionFlags.SupportsActiveVolcanism) != 0
+                && input.Environment.VolcanicActivityPotential
+                    >= DeterministicEnvironmentGenerator.EnvironmentBand5Threshold;
+            return true;
+        }
+
+        /// <summary>
+        /// 火山中核が不成立のタイルについて、広域水文条件と通常首位Hostから水文特殊Biomeを選びます。
+        /// </summary>
+        /// <param name="settings">水文特殊Definitionと専用Host集合を持つ固定設定です。</param>
+        /// <param name="input">対象タイルの固定環境と自然水文です。</param>
+        /// <param name="normalHostId">特殊優先前の通常比較で首位になった安定IDです。</param>
+        /// <param name="selectedStableId">昇格成立時だけ水文特殊Biome IDへ置き換える最終候補です。</param>
+        /// <param name="reason">昇格成立時だけ対応する水文特殊選択理由へ置き換えます。</param>
+        /// <returns>設定外形が有効ならtrueです。昇格不成立は通常Biome維持としてtrueを返します。</returns>
+        private static bool TrySelectHydrologySpecial(
+            in BiomeClassificationSettings settings,
+            in BiomeClassificationInput input,
+            byte normalHostId,
+            ref byte selectedStableId,
+            ref BiomeSelectionReason reason)
+        {
+            GeneratedHydrologyTileFlags requiredHydrologyFlags =
+                GeneratedHydrologyTileFlags.FreshwaterConnected
+                | GeneratedHydrologyTileFlags.WetlandTileEligible
+                | GeneratedHydrologyTileFlags.LargeWetlandExtent;
+            if ((input.HydrologyFlags & requiredHydrologyFlags) != requiredHydrologyFlags)
+            {
+                // 広域規模を満たさない池辺・泉辺などは、固定Biomeではなく後続の生息地やSurfaceで表現します。
+                return true;
+            }
+
+            bool selectsSwampForest = input.Environment.WoodyVegetationPotential
+                >= DeterministicEnvironmentGenerator.EnvironmentBand4Threshold;
+            byte specialStableId = selectsSwampForest
+                ? BiomeStableIds.SwampForest
+                : BiomeStableIds.FreshwaterMarshFloodplain;
+            if (!BiomeDefinitionCatalog.TryGetDefinition(
+                    settings,
+                    specialStableId,
+                    out BiomeDefinition specialDefinition)
+                || (specialDefinition.Flags & BiomeDefinitionFlags.HydrologySpecial) == 0
+                || (specialDefinition.Flags & BiomeDefinitionFlags.UsesNormalScore) != 0)
+            {
+                return false;
+            }
+
+            GeneratedEnvironmentData environment = input.Environment;
+            if (!IsInsideAllowedRange(environment.TerrainTemperature, specialDefinition.TerrainTemperature)
+                || !IsInsideAllowedRange(environment.BaseMoisture, specialDefinition.BaseMoisture)
+                || !IsInsideAllowedRange(environment.Elevation, specialDefinition.Elevation)
+                || !IsInsideAllowedRange(
+                    environment.WoodyVegetationPotential,
+                    specialDefinition.WoodyVegetation))
+            {
+                // 水文規模だけで気候範囲外を湿原化せず、通常首位を維持します。
+                return true;
+            }
+
+            FixedList32Bytes<byte> allowedHostIds = selectsSwampForest
+                ? settings.SwampForestHostIds
+                : settings.FreshwaterMarshHostIds;
+            if (!ContainsStableId(allowedHostIds, normalHostId))
+            {
+                // 同一セルの通常首位が専用Hostでない場合、隣接Biomeを参照せず通常Biomeを維持します。
+                return true;
+            }
+
+            selectedStableId = specialStableId;
+            reason = selectsSwampForest
+                ? BiomeSelectionReason.SwampForestPromotion
+                : BiomeSelectionReason.FreshwaterMarshPromotion;
+            return true;
+        }
+
+        /// <summary>
+        /// 検証済み軸範囲に連続値が含まれるかを、両端を含めて判定します。
+        /// </summary>
+        /// <param name="value">判定する0〜65,535の固定環境値です。</param>
+        /// <param name="range">候補許容範囲と代表範囲です。</param>
+        /// <returns>範囲順が正しく、値が許容端を含む範囲内ならtrueです。</returns>
+        private static bool IsInsideAllowedRange(ushort value, in BiomeAxisRange range)
+        {
+            return range.IsOrdered() && value >= range.AllowedMin && value <= range.AllowedMax;
+        }
+
+        /// <summary>
+        /// 固定長Host集合に指定IDが含まれるかを線形走査します。
+        /// Hostは最大7件の読込時固定値なので、タイルごとの管理確保や検索表を追加しません。
+        /// </summary>
+        /// <param name="stableIds">水文特殊Biome専用の許可Host集合です。</param>
+        /// <param name="stableId">特殊優先前の通常首位IDです。</param>
+        /// <returns>集合内に同じ安定IDがあればtrueです。</returns>
+        private static bool ContainsStableId(FixedList32Bytes<byte> stableIds, byte stableId)
+        {
+            for (int index = 0; index < stableIds.Length; index++)
+            {
+                if (stableIds[index] == stableId)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>
