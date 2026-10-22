@@ -1,11 +1,11 @@
 # Unity Editorツール
 
-- 最終更新日: 2026-10-21
+- 最終更新日: 2026-10-22
 - 対象: `Assets/Farmware/Editor/WorldGeneration/`
 
 ## 1. 用途
 
-本書のメニュー・設定・表示は、TERRAIN-01C2-Bまでのdevelop、TERRAIN-01C3-D2、水文Lake表示へ先行反映したTERRAIN-01C4-Cの現行実装境界を説明する。C3-A〜D1がSimulationへ追加した固定水文の基礎格子、D8流向、固定下流終端、集水面積、自然流出、閉鎖流域境界、基礎湖面を、C3-D2で複数Seed分布監査、Debug Visualization、Map Viewerへ接続した。C4-Cは最終湖区分だけを両表示へ追加し、地下水、土壌飽和、泉、自然冠水、湿原候補の個別診断と分布監査はC4-Eに残す。Level 0〜6集約Summaryの利用・分解・キャッシュ統計は性能テストだけで記録し、Editor表示へは渡さない。2026-10-19の[改訂マップ仕様](../GameSpecification/RandomMapGenerationSpecification.md)の可変Block、最終18Biome、水中文脈表示はまだツールに実装されていない。
+本書のメニュー・設定・表示は、TERRAIN-01C2-Bまでのdevelop、TERRAIN-01C3-D2、水文Lake表示へ先行反映したTERRAIN-01C4-C、派生水文分布監査を追加したTERRAIN-01C4-E1bの現行実装境界を説明する。C3-A〜D1がSimulationへ追加した固定水文の基礎格子、D8流向、固定下流終端、集水面積、自然流出、閉鎖流域境界、基礎湖面を、C3-D2で複数Seed分布監査、Debug Visualization、Map Viewerへ接続した。C4-E1bは地下水、土壌飽和、最終湖区分、泉、自然冠水、湿原候補を複数Seed分布監査へ接続したが、これらのGameビューとMap Viewerの個別診断はC4-E2／E3に残す。Level 0〜6集約Summaryの利用・分解・キャッシュ統計は性能テストだけで記録し、Editor表示へは渡さない。2026-10-19の[改訂マップ仕様](../GameSpecification/RandomMapGenerationSpecification.md)の可変Block、最終18Biome、水中文脈表示はまだツールに実装されていない。
 
 開発者専用のUnity Editorツールは、ワールド生成結果の調査、調整前後の比較、確認用Sceneとフォールバック素材の構築に使用する。
 これらは製品版のプレイヤー操作へ含めず、ランタイムのゲーム状態を変更するデバッグ操作にも使用しない。
@@ -271,7 +271,26 @@ Consoleレポートには、次の比較材料を出力する。
 3. 解決済み、打切り、固定湖候補の流域数と、集水面積・流出相当値・流域面積の最大値が表示される。
 4. 同一コード・同一条件で再実行した署名と集計値が一致する。
 
-### 2.8 Map Viewer
+### 2.8 Analyze Derived Hydrology Distribution
+
+- メニュー: `Farmware > World Generation > Analyze Derived Hydrology Distribution`
+- 実装: `HydrologyDistributionAuditMenu`、`DerivedHydrologyDistributionAnalyzer`、`HydrologyDiagnosticChunk`
+- PlayMode: 不要。既定ではバックグラウンドで実行する。
+
+#### 用途
+
+固定3 Seedについて原点の各1チャンクをC3、C4-A〜Dの製品Generatorと同じ順序で完成生成し、合計192水文セルと12,288タイルを集計する。地下水接続、自然土壌飽和、最終湖4区分、泉流、自然冠水、湿原資格、広域湿原規模の件数・割合、3ポテンシャルの最大値、監査対象値の比較署名をConsoleへ表示する。Scene、Prefab、ECS World、生成アセットは変更しない。
+
+一時湖、塩湖、閉鎖淡水湖、泉などが既定の有限試料で0件でも監査失敗にはしない。0件を省略せず表示し、Seedまたは生成設定を変えた同条件のレポート、C4-E2／E3の可視化、境界値の固定テストを合わせて判断する。既定3 Seedの実行中は同じ監査を二重起動できない。
+
+#### 確認内容
+
+1. Consoleへ開始ログと完了レポートが1回ずつ出る。
+2. 3チャンク、192水文セル、12,288タイルを集計し、各分類の0件も明示する。
+3. 地下水、自然飽和、自然冠水、湿原資格、広域規模の件数が対応する母数以内で、最終湖4区分の合計が水文セル総数以内になる。
+4. 同一コード・同一条件でMain ThreadとThreadPoolから再実行した署名とレポートが一致する。
+
+### 2.9 Map Viewer
 
 - メニュー: `Farmware > World Generation > Map Viewer`
 - 実装: `WorldGenerationMapViewerWindow`、`WorldGenerationMapSampler`
@@ -338,6 +357,7 @@ Farmwareのワールドは無限なので「全体」を有限画像へ収める
 | バイオームや地形の広域分布、隣接関係、決定性 | Analyze Distribution |
 | 動物の候補地形、確定位置、群れ・密度・重複 | Animal Population表示、Analyze Animal Population |
 | 水文の流向・終端・集水・河川・湖分布 | Hydrology表示、Analyze Hydrology Distribution、Map Viewer |
+| 地下水、自然飽和、最終湖区分、泉、自然冠水、湿原の分布 | Analyze Derived Hydrology Distribution |
 | 広域形状、特定Seed・遠距離座標の探索 | Map Viewer |
 | 生成規則と表示の両方 | Analyze Distribution、Map Viewer、Debug Visualization |
 

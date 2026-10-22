@@ -144,9 +144,15 @@ C3-D2の複数Seed分布監査について、最小の1 Seed・1 ChunkをMain Th
 
 #### `HydrologyDiagnosticChunkTests`
 
-C4-E1aの完成チャンク診断境界を対象にする。製品と同じC3、C4-A、C4-B、C4-C、C4-Dの順序でSurface原点チャンクを再構築し、地形4096件、水文セル64件、表流水4096件、自然水文4096件を部分結果なしで公開することを確認する。所有するPersistent `NativeArray`は破棄後に未確保状態へ戻り、`Dispose`を再度呼んでも二重破棄しない。自然生成へ未接続のUnderwaterは配列確保前に明示拒否し、Surface結果を流用しない。複数Seedの集計値、比較署名、ConsoleメニューはC4-E1bで追加する。
+C4-E1aの完成チャンク診断境界を対象にする。製品と同じC3、C4-A、C4-B、C4-C、C4-Dの順序でSurface原点チャンクを再構築し、地形4096件、水文セル64件、表流水4096件、自然水文4096件を部分結果なしで公開することを確認する。所有するPersistent `NativeArray`は破棄後に未確保状態へ戻り、`Dispose`を再度呼んでも二重破棄しない。自然生成へ未接続のUnderwaterは配列確保前に明示拒否し、Surface結果を流用しない。複数Seedの集計値、比較署名、Consoleメニューは`DerivedHydrologyDistributionAuditTests`とC4-E1bの実メニュー確認で扱う。
 
 2026-10-22のC4-E1a AI確認では、Unity 6000.3.8f1 Editorの厳格再コンパイルが警告0件・エラー0件で成功した。最終対象EditMode 2件は8.70秒、World Generation EditMode Assembly 544件は283.63秒ですべて成功し、失敗、スキップ、未確定はいずれも0件だった。Unity CLI 1.0.0-beta.14と既存Pipeline 0.8.0-exp.1間の旧コマンド名照会エラー4件だけを内容確認後にConsoleから消去し、最終実状態はコンパイル失敗なし、エラー0件、警告0件である。
+
+#### `DerivedHydrologyDistributionAuditTests`
+
+C4-E1bの派生水文分布監査について、最小の1 Seed・1 ChunkをMain Threadと実メニュー同様のThreadPoolで完成生成する。総数1チャンク・64水文セル・4096タイル、各件数が対応する母数以内であること、最終湖4区分が相互排他的であることを確認する。比較署名と、0件分類も省略しない日本語レポートが再実行で一致することを保証する。固定の発生件数を合格条件にせず、各生成式の閾値や分類可能性はC4-B〜Dの境界テストを正とする。
+
+2026-10-22のC4-E1b AI確認では、Unity 6000.3.8f1 Editorの厳格再コンパイルが警告0件・エラー0件で成功し、最終対象EditMode 1件は9.88秒、World Generation EditMode Assembly 545件は293.98秒ですべて成功した。既定3 Seed・各原点1チャンクの実メニュー監査は15.91秒で完走し、192水文セル、12,288タイル、比較署名`28C93E4ACD468FBD`を記録した。既定試料で一時湖、恒久塩湖、閉鎖淡水湖、泉流は0件だったが、監査は0件を省略せず観測値として表示し、固定の合否閾値には使用しない。Unity CLIと既存Pipeline間の旧コマンド名照会エラーだけを内容確認後に消去し、最終Console実状態はコンパイル失敗なし、エラー0件、警告0件である。同日に人間が実メニューを実行し、開始・完了ログ、集計母数、比較署名の一致を確認した。
 
 #### `HydrologyVisualizationTests`
 
