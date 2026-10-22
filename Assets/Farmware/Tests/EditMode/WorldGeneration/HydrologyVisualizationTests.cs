@@ -1,4 +1,4 @@
-// このファイルは、TERRAIN-01C3-D2とC4-CのGameビューとMap Viewerが同じ固定水文・最終湖区分を同じ分類色へ変換することを検証します。
+// このファイルは、TERRAIN-01C3-D2とC4-E2のGameビューが固定水文・派生水文を正しい分類色へ変換することを検証します。
 // SceneやECS Worldを作らず、色写像、低解像度上限、決定論的サンプリングを純粋EditModeテストで確認します。
 
 using System.Threading;
@@ -10,7 +10,7 @@ using UnityEngine;
 
 namespace Farmware.WorldGeneration.Tests
 {
-    /// <summary>流向・終端・集水・河川・湖の診断色とMap Viewer接続を保証します。</summary>
+    /// <summary>流向・終端・集水・河川・湖・派生水文の診断色とMap Viewer接続を保証します。</summary>
     public sealed class HydrologyVisualizationTests
     {
         /// <summary>
@@ -154,6 +154,144 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(saltwaterColor, Is.Not.EqualTo(freshwaterColor));
             Assert.That(saltwaterColor, Is.Not.EqualTo(overflowColor));
             Assert.That(freshwaterColor, Is.Not.EqualTo(overflowColor));
+        }
+
+        /// <summary>
+        /// C4-E2で追加する5モードを固定水文診断として認識し、無関係な地形モードを水文Buffer走査へ含めないことを保証します。
+        /// </summary>
+        [Test]
+        public void IsHydrologyVisualizationMode_IncludesAllDerivedModesOnly()
+        {
+            WorldGenerationDebugVisualizationMode[] derivedModes =
+            {
+                WorldGenerationDebugVisualizationMode.HydrologyGroundwater,
+                WorldGenerationDebugVisualizationMode.HydrologyNaturalSoilSaturation,
+                WorldGenerationDebugVisualizationMode.HydrologySpring,
+                WorldGenerationDebugVisualizationMode.HydrologyNaturalFlooding,
+                WorldGenerationDebugVisualizationMode.HydrologyWetlandCandidate
+            };
+
+            foreach (WorldGenerationDebugVisualizationMode mode in derivedModes)
+            {
+                Assert.That(
+                    WorldGenerationDebugVisualizationOverlay.IsHydrologyVisualizationMode(mode),
+                    Is.True,
+                    mode.ToString());
+            }
+
+            Assert.That(
+                WorldGenerationDebugVisualizationOverlay.IsHydrologyVisualizationMode(
+                    WorldGenerationDebugVisualizationMode.BaseMoisture),
+                Is.False);
+        }
+
+        /// <summary>
+        /// 地下水接続境界、自然飽和・自然冠水の端点、泉の有無、局所・広域湿原を準備し、
+        /// 各固定生成状態が別色になって現在水文を入力せず判定できることを保証します。
+        /// </summary>
+        [Test]
+        public void DerivedHydrologyColors_DistinguishFixedGeneratedStates()
+        {
+            GeneratedHydrologyCell disconnectedGroundwater = new GeneratedHydrologyCell
+            {
+                GroundwaterPotential = 32767
+            };
+            GeneratedHydrologyCell connectedGroundwater = new GeneratedHydrologyCell
+            {
+                GroundwaterPotential = 32768,
+                ConnectionFlags = HydrologyConnectionFlags.Groundwater
+            };
+            GeneratedHydrologyTile dryTile = default;
+            GeneratedHydrologyTile wetTile = new GeneratedHydrologyTile
+            {
+                NaturalSoilSaturationPotential = ushort.MaxValue,
+                NaturalFloodingPotential = ushort.MaxValue
+            };
+            GeneratedHydrologyTile localWetland = new GeneratedHydrologyTile
+            {
+                Flags = GeneratedHydrologyTileFlags.WetlandTileEligible
+            };
+            GeneratedHydrologyTile largeWetland = new GeneratedHydrologyTile
+            {
+                Flags = GeneratedHydrologyTileFlags.WetlandTileEligible
+                    | GeneratedHydrologyTileFlags.LargeWetlandExtent
+            };
+            GeneratedSurfaceWaterTile noSpring = default;
+            GeneratedSurfaceWaterTile spring = new GeneratedSurfaceWaterTile
+            {
+                Type = SurfaceWaterTileType.SpringStream
+            };
+
+            Assert.That(
+                WorldGenerationDebugVisualizationOverlay.GetHydrologyVisualizationColor(
+                    WorldGenerationDebugVisualizationMode.HydrologyGroundwater,
+                    disconnectedGroundwater,
+                    dryTile,
+                    noSpring),
+                Is.Not.EqualTo(
+                    WorldGenerationDebugVisualizationOverlay.GetHydrologyVisualizationColor(
+                        WorldGenerationDebugVisualizationMode.HydrologyGroundwater,
+                        connectedGroundwater,
+                        dryTile,
+                        noSpring)));
+            Assert.That(
+                WorldGenerationDebugVisualizationOverlay.GetHydrologyVisualizationColor(
+                    WorldGenerationDebugVisualizationMode.HydrologyNaturalSoilSaturation,
+                    default,
+                    dryTile,
+                    noSpring),
+                Is.Not.EqualTo(
+                    WorldGenerationDebugVisualizationOverlay.GetHydrologyVisualizationColor(
+                        WorldGenerationDebugVisualizationMode.HydrologyNaturalSoilSaturation,
+                        default,
+                        wetTile,
+                        noSpring)));
+            Assert.That(
+                WorldGenerationDebugVisualizationOverlay.GetHydrologyVisualizationColor(
+                    WorldGenerationDebugVisualizationMode.HydrologySpring,
+                    default,
+                    dryTile,
+                    noSpring),
+                Is.Not.EqualTo(
+                    WorldGenerationDebugVisualizationOverlay.GetHydrologyVisualizationColor(
+                        WorldGenerationDebugVisualizationMode.HydrologySpring,
+                        default,
+                        dryTile,
+                        spring)));
+            Assert.That(
+                WorldGenerationDebugVisualizationOverlay.GetHydrologyVisualizationColor(
+                    WorldGenerationDebugVisualizationMode.HydrologyNaturalFlooding,
+                    default,
+                    dryTile,
+                    noSpring),
+                Is.Not.EqualTo(
+                    WorldGenerationDebugVisualizationOverlay.GetHydrologyVisualizationColor(
+                        WorldGenerationDebugVisualizationMode.HydrologyNaturalFlooding,
+                        default,
+                        wetTile,
+                        noSpring)));
+
+            Color ineligibleColor = WorldGenerationDebugVisualizationOverlay
+                .GetHydrologyVisualizationColor(
+                    WorldGenerationDebugVisualizationMode.HydrologyWetlandCandidate,
+                    default,
+                    dryTile,
+                    noSpring);
+            Color localColor = WorldGenerationDebugVisualizationOverlay
+                .GetHydrologyVisualizationColor(
+                    WorldGenerationDebugVisualizationMode.HydrologyWetlandCandidate,
+                    default,
+                    localWetland,
+                    noSpring);
+            Color largeColor = WorldGenerationDebugVisualizationOverlay
+                .GetHydrologyVisualizationColor(
+                    WorldGenerationDebugVisualizationMode.HydrologyWetlandCandidate,
+                    default,
+                    largeWetland,
+                    noSpring);
+            Assert.That(ineligibleColor, Is.Not.EqualTo(localColor));
+            Assert.That(ineligibleColor, Is.Not.EqualTo(largeColor));
+            Assert.That(localColor, Is.Not.EqualTo(largeColor));
         }
 
         /// <summary>

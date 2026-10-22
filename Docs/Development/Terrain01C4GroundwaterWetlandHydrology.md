@@ -2,8 +2,8 @@
 
 - 更新日: 2026-10-22
 - 対象PR: TERRAIN-01C4-A/B/C/D/E
-- 状態: C4-AはPR #39のmerge commit `2abaa0c5`、C4-BはPR #40のmerge commit `98a67b64`、C4-CはPR #41のmerge commit `cd154385`で完了。C4-DはD1「自然冠水の純粋計算」とD2「湿原規模・ECS接続」の実装・AI検証・人間確認・commitを完了。C4-Eは差分規模を抑えるため、E1a「完成チャンク診断経路」、E1b「複数Seed集計」、E2「Gameビュー診断」、E3「Map Viewer診断」の順に進める。C4-E1aとC4-E1bは実装・AI検証・人間確認を完了し、次の独立した変更単位はC4-E2である。
-- 作業ブランチ: `terrain-01c4e1b-hydrology-distribution-audit`
+- 状態: C4-AはPR #39のmerge commit `2abaa0c5`、C4-BはPR #40のmerge commit `98a67b64`、C4-CはPR #41のmerge commit `cd154385`で完了。C4-DはD1「自然冠水の純粋計算」とD2「湿原規模・ECS接続」の実装・AI検証・人間確認・commitを完了。C4-Eは差分規模を抑えるため、E1a「完成チャンク診断経路」、E1b「複数Seed集計」、E2「Gameビュー診断」、E3「Map Viewer診断」の順に進める。C4-E1a、C4-E1b、C4-E2は実装・AI検証・人間確認を完了し、次の独立した変更単位はC4-E3である。
+- 作業ブランチ: `terrain-01c4e2-hydrology-game-view-diagnostics`
 
 ## 1. 目的と前提
 
@@ -126,6 +126,12 @@ Editorメニュー`Farmware > World Generation > Analyze Derived Hydrology Distr
 
 既定条件では3チャンク、192水文セル、12,288タイルを15.91秒で完走した。地下水接続6セル、自然飽和56タイル、越流淡水湖4セル、自然冠水3,570タイル、湿原資格2,211タイル、広域湿原規模2,688タイルを観測し、最大地下水48,737、最大自然飽和40,236、最大自然冠水64,281、比較署名`28C93E4ACD468FBD`となった。一時湖、恒久塩湖、閉鎖淡水湖、泉流はこの既定試料で0件だが、各分類の生成可能性はC4-Cの境界テストで別に固定している。
 
+### 8.2 C4-E2のGameビュー診断
+
+`WorldGenerationDebugVisualizationOverlay`は、完成チャンクEntityの`GeneratedHydrologyCell`、`GeneratedSurfaceWaterTile`、`GeneratedHydrologyTile`を読み、地下水、自然土壌飽和、泉、自然冠水、湿原候補を5つの独立したEditorメニューへ接続する。地下水は8×8水文セルのポテンシャルと接続境界32,768、自然飽和と自然冠水は1タイルごとの0〜65,535連続値、泉は最終`SpringStream`、湿原候補は条件外、局所資格、広域規模を色分けする。中央HUDは3 Bufferの固定値と資格bitを表示し、凡例も実描画と同じ色変換APIを使う。
+
+可視化は完成済みECS Bufferの読み取りだけを行い、生成式を再実装せず、ECS状態も変更しない。現在降雨、灌水、排水、現在土壌水分、現在水位は入力に取らないため、固定生成値と現在水文は混在しない。C4-E2ではGameビューだけを対象とし、Map Viewerの完成チャンクサンプリング、広域表示、Hover情報はC4-E3へ残す。Scene、Prefab、SimulationのBuffer構造、生成設定、状態ハッシュは変更しない。
+
 ## 9. 現在の検証状態
 
 - ブランチ作成前の`develop`はPR #38のmerge commit `1857386c`で、作業ツリーはクリーンだった。
@@ -160,3 +166,4 @@ Editorメニュー`Farmware > World Generation > Analyze Derived Hydrology Distr
 - 初回人間確認で、初期配置から左へ移動したときに左隣チャンクが一時的に未描画となる回帰が見つかった。C4-D2の負荷増加に対し、既存先読み順が左隣より左下・左上角を先に予約していたことが原因である。`ChunkStreamingSystem`を中心、上下左右、角の順へ修正し、修正後のAI SampleScene再現では中心のActive化時に左隣もInactiveとして生成済みで、左移動後に描画空白がないことを確認した。同時生成上限2、生成算式、固定ハッシュ、メモリ容量は変更しない。修正後のEditMode 532件とPlayMode 56件は全件成功し、人間再確認でも描画空白が解消したことを確認した。
 - C4-E1aでは完成チャンク診断器をEditor Assemblyへ追加し、成功時の4配列、Surface以外の拒否、重複Disposeを対象テストで確認した。Unity 6000.3.8f1 Editorの厳格再コンパイルは警告0件・エラー0件、最終対象EditMode 2件は8.70秒、World Generation EditMode Assembly 544件は283.63秒で全件成功した。Unity CLIと既存Pipeline間の旧コマンド名照会エラーだけを内容確認後に消去し、最終Console実状態もエラー0件・警告0件である。複数Seed集計、比較署名、EditorメニューはC4-E1bへ分離した。Scene、Prefab、ECS World、製品生成結果、生成設定、アセットは変更していない。2026-10-22に人間確認を完了し、commit許可を受けた。
 - C4-E1bではC4-E1aの完成チャンクを使う複数Seed集計器、非同期Editorメニュー、1 Seed・1 Chunkの決定論テストを追加した。Unity 6000.3.8f1 Editorの厳格再コンパイルは警告0件・エラー0件、最終対象EditMode 1件は9.88秒、World Generation EditMode Assembly 545件は293.98秒で全件成功した。既定3 Seed監査も15.91秒で完走し、0件分類を含む件数・極値・比較署名をConsoleへ記録した。Unity CLI 1.0.0-beta.14と既存Pipeline 0.8.0-exp.1間の旧コマンド名照会エラーは監査処理と無関係であり、内容確認後の最終Console実状態はコンパイル失敗なし、エラー0件、警告0件である。2026-10-22に人間が実メニューの完走、192水文セル、12,288タイル、比較署名`28C93E4ACD468FBD`の一致を確認し、commitを許可した。
+- C4-E2では完成チャンクEntityの3 Bufferを読むGameビュー用の地下水、自然土壌飽和、泉、自然冠水、湿原候補メニュー、色、凡例、中央情報を追加した。Unity 6000.3.8f1 Editorの厳格再コンパイルは警告0件・エラー0件、対象`HydrologyVisualizationTests` 9件は0.49秒、World Generation EditMode Assembly 547件は294.90秒で全件成功した。PlayMode AssemblyはCLIの旧`editor status`エラー混入で初回56件中1件だけログ未許可となったが、同じ1件を分離再実行して18.68秒で成功した。AIはSampleSceneで全5メニュー、進行フレーム、色面、凡例、中央固定値を確認し、最終Consoleをエラー0件・警告0件とした。現在水文、Map Viewer、Scene、Prefab、Simulation Buffer、生成設定、状態ハッシュは変更していない。2026-10-22の人間確認では、高速移動中に秒単位の一時的な表示遅延が見られたが、停止後に表示が収束することを確認し、開発者専用診断として許容した。AIの同一入力による診断ON／OFF比較では追加の入力遅延を確認せず、人間確認とcommit許可を完了した。

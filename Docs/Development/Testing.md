@@ -156,11 +156,13 @@ C4-E1bの派生水文分布監査について、最小の1 Seed・1 ChunkをMain
 
 #### `HydrologyVisualizationTests`
 
-C3-D2のGameビューとMap Viewerが共有する水文色写像を検証する。打切り流域、固定湖候補、実湖面、越流が相互に異なる色であり、流域共通の`Overflow`だけを持つ非湖面セルは越流色にせず固定湖候補色を保つこと、5水文モードのMap Viewer RGBがOverlayと一致して不透明になることを保証する。小さい3×2画像の各代表タイルを直接生成した固定水文セルと比較し、実Window同様のThreadPoolでも画像を完成できること、最大64サンプル制限でも2:1のViewport縦横比を維持することを確認する。
+C3-D2のGameビューとMap Viewerが共有する基礎水文色写像と、C4-E2のGameビュー派生水文色写像を検証する。打切り流域、固定湖候補、実湖面、越流が相互に異なる色であり、流域共通の`Overflow`だけを持つ非湖面セルは越流色にせず固定湖候補色を保つこと、5基礎水文モードのMap Viewer RGBがOverlayと一致して不透明になることを保証する。派生水文では地下水接続境界32,767／32,768、自然土壌飽和・自然冠水の0／65,535端点、泉の有無、湿原条件外・局所資格・広域規模が別色となり、5モードだけが固定水文Buffer走査対象へ含まれることを確認する。小さい3×2画像の各代表タイルを直接生成した固定水文セルと比較し、実Window同様のThreadPoolでも画像を完成できること、最大64サンプル制限でも2:1のViewport縦横比を維持することを確認する。
 
 2026-10-21のC3-D2 AI確認はUnity 6000.3.8f1の接続済みEditorで行い、コンパイルエラー0、`HydrologyDistributionAuditTests` 1件、`HydrologyVisualizationTests` 5件、`WorldGenerationMapViewerTests` 51件が成功した。World Generation EditMode Assemblyは130.74秒で411件すべて成功した。全Assembly中の警告6件は変更前からあるテスト用WorldのSystem Group順序属性2種類が各3回出たもので、D2のAllocator・Job安全性警告ではない。既定3 Seed・各5×5チャンクの監査も4,800セルを完走し、実Map ViewerとSampleSceneのGameビューでHydrology Lakeの凡例・色面・中央情報を表示後、Consoleエラー0・警告0を確認した。初回実UI確認で検出したバックグラウンド処理のTemp Allocator違反は、所有者が`Allocator.Persistent`作業領域を`using`で破棄する方式へ修正し、ThreadPoolテストと実UIで再発しないことを確認した。2026-10-21に人間が水文表示とMap Viewerを確認し、問題なしと判断した。Pipeline 0.8.0-exp.1はPlayMode 56件を一覧取得できるが`run_tests`では0件となるため、全PlayMode Assemblyの自動再実行は未検証事項として残す。
 
 PR #38のレビュー対応では、Map Viewerの描画・リサイズ・カーソル中心ズームでモード別最大解像度を共有する回帰テストと、`Overflow`を持つ非湖面セルを越流色にしない回帰テストを追加した。Unity 6000.3.8f1で再コンパイルエラー・警告0を確認し、通常EditorのTest Runnerで`HydrologyVisualizationTests` 6件、`WorldGenerationMapViewerTests` 52件がすべて成功した。Play Mode中の最初のEditMode実行はTest Runnerが`EditorSceneManager.NewScene`を使用できず失敗したため、Play Modeを停止してから同じ対象を再実行した結果を採用する。
+
+2026-10-22のC4-E2 AI確認では、Unity 6000.3.8f1 Editorの厳格再コンパイルが警告0件・エラー0件、`HydrologyVisualizationTests` 9件が0.49秒、World Generation EditMode Assembly 547件が294.90秒で全件成功した。PlayMode Assemblyは非同期実行で56件中55件が成功し、残る1件は実行中にCLIの`unity status`が旧コマンド名`editor status`のエラーをConsoleへ挿入したためログ未許可で失敗した。同じ1件をCLI状態照会なしで分離再実行し18.68秒で成功したため、製品回帰56件の判定自体はすべて成功している。SampleSceneではフレーム進行を確認後、地下水、自然土壌飽和、泉、自然冠水、湿原候補の5メニューを実行し、選択モード、色面、凡例、中央固定値をGameビュー画像で確認した。最終Console実状態はコンパイル失敗なし、エラー0件、警告0件である。同日の人間確認では実際の高速移動で秒単位の一時的な表示遅延を確認した。AIの同一入力による診断ON／OFF比較では診断表示による追加の入力遅延は確認されず、既定の1チャンク先読みと同時生成2枠に対して移動が先行したと判断した。停止後に表示が収束し、例外や永続的な欠落がないことを条件として、開発者専用診断では許容範囲とし、人間確認とcommit許可を完了した。
 
 2026-10-21のUnity 6000.3.8f1によるC3-A AI確認は、`DeterministicHydrologyGeneratorTests` 21件、`ChunkGenerationSystem_`回帰 4件、`AnimalPopulationGenerationTests` 22件、Salt一意性とチャンクハッシュ順序不変の回帰 2件が全成功した。PlayMode Assemblyは56件中55件が成功し、残る1件は`-batchmode -nographics`で既存の`ChunkStreaming` Profiler Markerが0nsとなる計測環境差である。生成、表示、座標回復のAssertはそれより前に通過した。通常EditorのSampleSceneではカメラ移動と移動先チャンク表示を確認し、Play終了後のConsoleは情報・警告・エラー0件だった。Profiler Markerの自動テスト自体は、通常Editorでの人間確認に残す。
 
