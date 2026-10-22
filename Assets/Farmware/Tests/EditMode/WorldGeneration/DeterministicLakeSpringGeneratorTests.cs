@@ -603,7 +603,8 @@ namespace Farmware.WorldGeneration.Tests
                     CellX = CellX,
                     CellY = CellY,
                     ConnectionFlags = HydrologyConnectionFlags.None,
-                    LakeFlags = HydrologyLakeFlags.SurfaceCell
+                    LakeFlags = HydrologyLakeFlags.SurfaceCell,
+                    LakeClassification = LakeWaterBalanceClassification.Temporary
                 };
 
                 Assert.That(
@@ -624,6 +625,83 @@ namespace Farmware.WorldGeneration.Tests
                     Is.True,
                     "Lakeビットの同期で、先行する通常河道涵養の地下水接続を失ってはいけません。");
                 Assert.That(synchronized.GroundwaterPotential, Is.EqualTo(60000));
+                Assert.That(
+                    synchronized.LakeClassification,
+                    Is.EqualTo(LakeWaterBalanceClassification.Temporary));
+            }
+            finally
+            {
+                // Assert失敗時もテスト所有のNativeArrayを解放し、後続テストへAllocator警告を残しません。
+                springHydrologyCells.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// 地下水だけを持つセルへ低い非地下水近傍を置き、河川幅が同じセルへ入る場合は泉候補から除外されることを保証します。
+        /// </summary>
+        [Test]
+        public void BuildSpringCandidate_RejectsCellOccupiedByRiverWidth()
+        {
+            NativeArray<GeneratedHydrologyCell> springHydrologyCells =
+                new NativeArray<GeneratedHydrologyCell>(
+                    DeterministicLakeSpringGenerator.SpringHydrologyCellCount,
+                    Allocator.Temp,
+                    NativeArrayOptions.ClearMemory);
+            try
+            {
+                const int CacheX = 10;
+                const int CacheY = 10;
+                // 8近傍判定が配列の未初期化値に左右されないよう、全セルを同じ地下水域として準備します。
+                for (int y = 0; y < DeterministicLakeSpringGenerator.SpringHydrologyCellsPerAxis; y++)
+                {
+                    for (int x = 0; x < DeterministicLakeSpringGenerator.SpringHydrologyCellsPerAxis; x++)
+                    {
+                        springHydrologyCells[
+                            (y * DeterministicLakeSpringGenerator.SpringHydrologyCellsPerAxis) + x] =
+                            new GeneratedHydrologyCell
+                            {
+                                CellX = x,
+                                CellY = y,
+                                HydrologyHeight = 30000,
+                                ConnectionFlags = HydrologyConnectionFlags.Groundwater,
+                                GroundwaterPotential = ushort.MaxValue
+                            };
+                    }
+                }
+
+                // 東隣だけを低い非地下水セルにし、河川幅がなければ有効な泉候補になる対照条件を作ります。
+                int neighborIndex =
+                    (CacheY * DeterministicLakeSpringGenerator.SpringHydrologyCellsPerAxis) + CacheX + 1;
+                GeneratedHydrologyCell neighbor = springHydrologyCells[neighborIndex];
+                neighbor.HydrologyHeight = 29999;
+                neighbor.ConnectionFlags = HydrologyConnectionFlags.None;
+                springHydrologyCells[neighborIndex] = neighbor;
+                GeneratedHydrologyCell current = springHydrologyCells[
+                    (CacheY * DeterministicLakeSpringGenerator.SpringHydrologyCellsPerAxis) + CacheX];
+
+                Assert.That(
+                    DeterministicLakeSpringGenerator.TryBuildSpringCandidateFromCache(
+                        LakeSpringGenerationSettings.CreateDefault(),
+                        current,
+                        false,
+                        CacheX,
+                        CacheY,
+                        springHydrologyCells,
+                        out SpringCandidate unobstructed),
+                    Is.True);
+                Assert.That(unobstructed.IsCandidate, Is.EqualTo(1));
+
+                Assert.That(
+                    DeterministicLakeSpringGenerator.TryBuildSpringCandidateFromCache(
+                        LakeSpringGenerationSettings.CreateDefault(),
+                        current,
+                        true,
+                        CacheX,
+                        CacheY,
+                        springHydrologyCells,
+                        out SpringCandidate occupied),
+                    Is.False);
+                Assert.That(occupied.IsCandidate, Is.Zero);
             }
             finally
             {
@@ -674,6 +752,11 @@ namespace Farmware.WorldGeneration.Tests
                 DeterministicSurfaceWaterPathGenerator.MaximumSearchNodeCount,
                 Allocator.Temp,
                 NativeArrayOptions.UninitializedMemory);
+            NativeArray<SurfaceRechargeCandidate> springSurfaceRechargeCandidates =
+                new NativeArray<SurfaceRechargeCandidate>(
+                    DeterministicLakeSpringGenerator.SpringRechargeCandidateCount,
+                    Allocator.Temp,
+                    NativeArrayOptions.ClearMemory);
             NativeArray<GeneratedHydrologyCell> springHydrologyCells =
                 new NativeArray<GeneratedHydrologyCell>(
                     DeterministicLakeSpringGenerator.SpringHydrologyCellCount,
@@ -788,6 +871,7 @@ namespace Farmware.WorldGeneration.Tests
                         basinLookup,
                         pathWorkspace,
                         pathTiles,
+                        springSurfaceRechargeCandidates,
                         springHydrologyCells,
                         springCandidates),
                     Is.True);
@@ -823,6 +907,7 @@ namespace Farmware.WorldGeneration.Tests
                 basinLookup.Dispose();
                 pathWorkspace.Dispose();
                 pathTiles.Dispose();
+                springSurfaceRechargeCandidates.Dispose();
                 springHydrologyCells.Dispose();
                 springCandidates.Dispose();
             }

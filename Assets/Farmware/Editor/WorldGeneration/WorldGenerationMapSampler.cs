@@ -1,4 +1,4 @@
-// このファイルは、Editorの広域マップビューアへ渡す色付きサンプルを、実ゲームと同じ決定論的地形生成関数から作ります。
+// このファイルは、Editorの広域マップビューアへ渡す色付きサンプルを、実ゲームと同じ決定論的地形・水文・最終湖区分から作ります。
 // EditorWindowのUIやTexture2D生成から純粋計算を分離し、バックグラウンド実行とEditModeテストを可能にします。
 
 using System;
@@ -477,6 +477,7 @@ namespace Farmware.WorldGeneration.Editor
                                         settings,
                                         hydrologyCellX,
                                         hydrologyCellY,
+                                        viewMode == WorldGenerationMapViewMode.HydrologyLake,
                                         hydrologyFrontier,
                                         hydrologyBasinMembers,
                                         hydrologyBasinLookup,
@@ -579,6 +580,7 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="settings">Seed、GeneratorVersion、固定水文設定です。</param>
         /// <param name="cellX">生成する絶対水文セルX座標です。</param>
         /// <param name="cellY">生成する絶対水文セルY座標です。</param>
+        /// <param name="finalizeLakeClassification">C4-Cの最終湖水収支まで反映する場合はtrueです。</param>
         /// <param name="frontier">集水と流域探索で再利用する上流候補Heapです。</param>
         /// <param name="basinMembers">閉鎖流域セルを保持する固定配列です。</param>
         /// <param name="basinLookup">流域内外判定へ使う固定Hash表です。</param>
@@ -589,6 +591,7 @@ namespace Farmware.WorldGeneration.Editor
             in WorldGenerationSettings settings,
             int cellX,
             int cellY,
+            bool finalizeLakeClassification,
             NativeArray<HydrologyUpstreamCandidate> frontier,
             NativeArray<HydrologyUpstreamCandidate> basinMembers,
             NativeArray<HydrologyBasinLookupSlot> basinLookup,
@@ -623,7 +626,81 @@ namespace Farmware.WorldGeneration.Editor
                 return false;
             }
 
+            if (!finalizeLakeClassification)
+            {
+                return true;
+            }
+
+            if (!DeterministicLakeSpringGenerator.TryFinalizeCellLakeForVisualization(
+                    settings,
+                    ref cell,
+                    frontier,
+                    basinMembers,
+                    basinLookup,
+                    ref basinCache))
+            {
+                cell = default;
+                basinCache = default;
+                return false;
+            }
+
             return true;
+        }
+
+        /// <summary>
+        /// Hover表示とEditModeテスト向けに、1水文セルをC3-DまたはC4-Cまで製品Generatorと同じ順で生成します。
+        /// </summary>
+        /// <param name="settings">Seed、GeneratorVersion、水文・地下水・湖水収支の固定設定です。</param>
+        /// <param name="cellX">生成する絶対水文セルX座標です。</param>
+        /// <param name="cellY">生成する絶対水文セルY座標です。</param>
+        /// <param name="finalizeLakeClassification">一時湖・塩湖・淡水湖の最終区分まで必要な場合はtrueです。</param>
+        /// <param name="cell">成功時に要求段階まで確定した水文セルを返します。</param>
+        /// <returns>必要な有限探索をすべて完了できた場合はtrueです。</returns>
+        public static bool TryGenerateHydrologyCellForDisplay(
+            in WorldGenerationSettings settings,
+            int cellX,
+            int cellY,
+            bool finalizeLakeClassification,
+            out GeneratedHydrologyCell cell)
+        {
+            // Lake以外の表示はC3-Dまでの値で足りるため、大きな流域作業配列を確保せず既存の単セル生成を使います。
+            if (!finalizeLakeClassification)
+            {
+                return DeterministicHydrologyGenerator.TryGenerateCell(
+                    settings,
+                    cellX,
+                    cellY,
+                    out cell);
+            }
+
+            using NativeArray<HydrologyUpstreamCandidate> frontier =
+                new NativeArray<HydrologyUpstreamCandidate>(
+                    DeterministicHydrologyCatchmentResolver.MaximumFrontierCapacity,
+                    Allocator.Temp,
+                    NativeArrayOptions.UninitializedMemory);
+            using NativeArray<HydrologyUpstreamCandidate> basinMembers =
+                new NativeArray<HydrologyUpstreamCandidate>(
+                    DeterministicHydrologyLakeResolver.MaximumBasinMembers,
+                    Allocator.Temp,
+                    NativeArrayOptions.UninitializedMemory);
+            using NativeArray<HydrologyBasinLookupSlot> basinLookup =
+                new NativeArray<HydrologyBasinLookupSlot>(
+                    DeterministicHydrologyLakeResolver.LookupCapacity,
+                    Allocator.Temp,
+                    NativeArrayOptions.ClearMemory);
+            HydrologyLakeBasinCache basinCache = default;
+
+            // Hoverは1セルだけを同期生成するためTempを使い、呼出し終了時にusingで必ず解放します。
+            return TryGenerateHydrologyCellWithReusableWorkspace(
+                settings,
+                cellX,
+                cellY,
+                finalizeLakeClassification,
+                frontier,
+                basinMembers,
+                basinLookup,
+                ref basinCache,
+                out cell);
         }
 
         /// <summary>符号付き水文セルX/Yを衝突しない64bitキャッシュキーへ詰めます。</summary>

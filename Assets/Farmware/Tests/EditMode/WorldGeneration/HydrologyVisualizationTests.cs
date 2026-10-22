@@ -1,4 +1,4 @@
-// このファイルは、TERRAIN-01C3-D2のGameビューとMap Viewerが同じ固定水文結果を同じ分類色へ変換することを検証します。
+// このファイルは、TERRAIN-01C3-D2とC4-CのGameビューとMap Viewerが同じ固定水文・最終湖区分を同じ分類色へ変換することを検証します。
 // SceneやECS Worldを作らず、色写像、低解像度上限、決定論的サンプリングを純粋EditModeテストで確認します。
 
 using System.Threading;
@@ -103,6 +103,60 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// C4-Cの最終4区分を持つ湖面セルを準備し、一時湖、塩湖、閉鎖淡水湖、越流淡水湖が別色になることを保証します。
+        /// </summary>
+        [Test]
+        public void LakeColors_DistinguishFinalWaterBalanceClassifications()
+        {
+            HydrologyLakeFlags surfaceFlags = HydrologyLakeFlags.FixedLake
+                | HydrologyLakeFlags.SurfaceCell;
+            GeneratedHydrologyCell temporary = new GeneratedHydrologyCell
+            {
+                LakeFlags = surfaceFlags,
+                LakeClassification = LakeWaterBalanceClassification.Temporary
+            };
+            GeneratedHydrologyCell saltwater = new GeneratedHydrologyCell
+            {
+                LakeFlags = surfaceFlags,
+                LakeClassification = LakeWaterBalanceClassification.PermanentSaltwater
+            };
+            GeneratedHydrologyCell freshwater = new GeneratedHydrologyCell
+            {
+                LakeFlags = surfaceFlags,
+                LakeClassification = LakeWaterBalanceClassification.ClosedFreshwater
+            };
+            GeneratedHydrologyCell overflow = new GeneratedHydrologyCell
+            {
+                LakeFlags = surfaceFlags | HydrologyLakeFlags.Overflow,
+                LakeClassification = LakeWaterBalanceClassification.OverflowFreshwater
+            };
+
+            Color temporaryColor = WorldGenerationDebugVisualizationOverlay
+                .GetHydrologyVisualizationColor(
+                    WorldGenerationDebugVisualizationMode.HydrologyLake,
+                    temporary);
+            Color saltwaterColor = WorldGenerationDebugVisualizationOverlay
+                .GetHydrologyVisualizationColor(
+                    WorldGenerationDebugVisualizationMode.HydrologyLake,
+                    saltwater);
+            Color freshwaterColor = WorldGenerationDebugVisualizationOverlay
+                .GetHydrologyVisualizationColor(
+                    WorldGenerationDebugVisualizationMode.HydrologyLake,
+                    freshwater);
+            Color overflowColor = WorldGenerationDebugVisualizationOverlay
+                .GetHydrologyVisualizationColor(
+                    WorldGenerationDebugVisualizationMode.HydrologyLake,
+                    overflow);
+
+            Assert.That(temporaryColor, Is.Not.EqualTo(saltwaterColor));
+            Assert.That(temporaryColor, Is.Not.EqualTo(freshwaterColor));
+            Assert.That(temporaryColor, Is.Not.EqualTo(overflowColor));
+            Assert.That(saltwaterColor, Is.Not.EqualTo(freshwaterColor));
+            Assert.That(saltwaterColor, Is.Not.EqualTo(overflowColor));
+            Assert.That(freshwaterColor, Is.Not.EqualTo(overflowColor));
+        }
+
+        /// <summary>
         /// Map Viewerの5水文モードがGameビューとRGBを共有し、背景Texture向けに不透明化されることを保証します。
         /// </summary>
         [Test]
@@ -186,10 +240,11 @@ namespace Farmware.WorldGeneration.Tests
                             out int cellY),
                         Is.True);
                     Assert.That(
-                        DeterministicHydrologyGenerator.TryGenerateCell(
+                        WorldGenerationMapSampler.TryGenerateHydrologyCellForDisplay(
                             settings,
                             cellX,
                             cellY,
+                            true,
                             out GeneratedHydrologyCell cell),
                         Is.True);
                     Color32 expected = WorldGenerationMapSampler.GetHydrologyDisplayColor(

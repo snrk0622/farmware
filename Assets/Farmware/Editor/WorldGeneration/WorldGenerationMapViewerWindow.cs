@@ -984,6 +984,7 @@ namespace Farmware.WorldGeneration.Editor
                         + $"Runoff {hydrologyCell.RunoffEquivalentCells} / "
                         + $"Connections {hydrologyCell.ConnectionFlags}\n"
                         + $"BasinArea {hydrologyCell.BasinAreaCells} / LakeFlags {hydrologyCell.LakeFlags} / "
+                        + $"LakeClassification {hydrologyCell.LakeClassification} / "
                         + $"Bottom {hydrologyCell.LakeBottomHeight} / Spill {hydrologyCell.SpillHeight} / "
                         + $"Surface {hydrologyCell.LakeSurfaceHeight} / Fill {hydrologyCell.LakeFillFraction} / "
                         + $"SpillEdge ({hydrologyCell.SpillInsideCellX}, {hydrologyCell.SpillInsideCellY})->"
@@ -1039,10 +1040,11 @@ namespace Farmware.WorldGeneration.Editor
                 return true;
             }
 
-            if (!DeterministicHydrologyGenerator.TryGenerateCell(
+            if (!WorldGenerationMapSampler.TryGenerateHydrologyCellForDisplay(
                     displayedSettings,
                     cellX,
                     cellY,
+                    serializedViewMode == WorldGenerationMapViewMode.HydrologyLake,
                     out cell))
             {
                 return false;
@@ -1264,19 +1266,37 @@ namespace Farmware.WorldGeneration.Editor
                     new GeneratedHydrologyCell { LakeFlags = HydrologyLakeFlags.FixedLake });
                 AddHydrologyLegendRow(
                     selectedMode,
-                    "Fixed lake surface",
+                    "Temporary lake / dry lakebed",
                     new GeneratedHydrologyCell
                     {
-                        LakeFlags = HydrologyLakeFlags.FixedLake | HydrologyLakeFlags.SurfaceCell
+                        LakeFlags = HydrologyLakeFlags.FixedLake | HydrologyLakeFlags.SurfaceCell,
+                        LakeClassification = LakeWaterBalanceClassification.Temporary
                     });
                 AddHydrologyLegendRow(
                     selectedMode,
-                    "Overflowing lake surface",
+                    "Permanent saltwater lake",
+                    new GeneratedHydrologyCell
+                    {
+                        LakeFlags = HydrologyLakeFlags.FixedLake | HydrologyLakeFlags.SurfaceCell,
+                        LakeClassification = LakeWaterBalanceClassification.PermanentSaltwater
+                    });
+                AddHydrologyLegendRow(
+                    selectedMode,
+                    "Permanent freshwater lake",
+                    new GeneratedHydrologyCell
+                    {
+                        LakeFlags = HydrologyLakeFlags.FixedLake | HydrologyLakeFlags.SurfaceCell,
+                        LakeClassification = LakeWaterBalanceClassification.ClosedFreshwater
+                    });
+                AddHydrologyLegendRow(
+                    selectedMode,
+                    "Overflowing freshwater lake",
                     new GeneratedHydrologyCell
                     {
                         LakeFlags = HydrologyLakeFlags.FixedLake
                             | HydrologyLakeFlags.SurfaceCell
-                            | HydrologyLakeFlags.Overflow
+                            | HydrologyLakeFlags.Overflow,
+                        LakeClassification = LakeWaterBalanceClassification.OverflowFreshwater
                     });
                 return;
             }

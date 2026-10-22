@@ -71,7 +71,7 @@ namespace Farmware.WorldGeneration
 
     /// <summary>
     /// 地下水計算後に確定する湖候補の最終区分です。
-    /// 表流水Bufferの安定Typeへ変換する前の純粋計算結果と、C4-Eの監査理由に使用します。
+    /// 表流水Bufferの安定Typeへ変換する純粋計算結果、水文セルの固定診断値、C4-C以降の監査理由に使用します。
     /// </summary>
     public enum LakeWaterBalanceClassification : byte
     {
@@ -706,6 +706,7 @@ namespace Farmware.WorldGeneration
                     basinLookup,
                     pathWorkspace,
                     pathTiles,
+                    springSurfaceRechargeCandidates,
                     springHydrologyCells,
                     springCandidates);
         }
@@ -724,6 +725,7 @@ namespace Farmware.WorldGeneration
         /// <param name="basinLookup">湖末端の流域所属Hash領域です。</param>
         /// <param name="pathWorkspace">泉の細分化経路探索に使う作業配列です。</param>
         /// <param name="pathTiles">一つの泉経路を保持する作業配列です。</param>
+        /// <param name="springSurfaceRechargeCandidates">通常河道の中心線または河川幅が入る21×21セルです。</param>
         /// <param name="springHydrologyCells">先行行Jobが準備した21×21完成水文です。</param>
         /// <param name="springCandidates">19×19泉候補を一度ずつ保持する作業配列です。</param>
         /// <returns>湖区分と抑制済み泉を部分結果なしで反映できた場合はtrueです。</returns>
@@ -739,6 +741,7 @@ namespace Farmware.WorldGeneration
             NativeArray<HydrologyBasinLookupSlot> basinLookup,
             NativeArray<SurfaceWaterPathSearchNode> pathWorkspace,
             NativeArray<SurfaceWaterPathTile> pathTiles,
+            NativeArray<SurfaceRechargeCandidate> springSurfaceRechargeCandidates,
             NativeArray<GeneratedHydrologyCell> springHydrologyCells,
             NativeArray<SpringCandidate> springCandidates)
         {
@@ -759,6 +762,8 @@ namespace Farmware.WorldGeneration
                 || pathWorkspace.Length < DeterministicSurfaceWaterPathGenerator.MaximumSearchNodeCount
                 || !pathTiles.IsCreated
                 || pathTiles.Length < DeterministicSurfaceWaterPathGenerator.MaximumSearchNodeCount
+                || !springSurfaceRechargeCandidates.IsCreated
+                || springSurfaceRechargeCandidates.Length < SpringRechargeCandidateCount
                 || !springHydrologyCells.IsCreated
                 || springHydrologyCells.Length < SpringHydrologyCellCount
                 || !springCandidates.IsCreated
@@ -863,6 +868,7 @@ namespace Farmware.WorldGeneration
                         TryBuildSpringCandidateFromCache(
                             settings.LakeSpring,
                             current,
+                            springSurfaceRechargeCandidates[hydrologyIndex].HasRecharge != 0,
                             hydrologyX,
                             hydrologyY,
                             springHydrologyCells,
@@ -945,13 +951,13 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>
-        /// 交差9×9で最終確定した湖接続だけを、同じ絶対セルの泉用21×21キャッシュへ同期します。
+        /// 交差9×9で最終確定した湖接続と診断区分を、同じ絶対セルの泉用21×21キャッシュへ同期します。
         /// </summary>
         /// <param name="finalizedCell">一時湖または恒久湖の判定を反映済みの交差水文セルです。</param>
         /// <param name="intersectingOffsetX">交差9×9内の水平位置です。0〜8を指定します。</param>
         /// <param name="intersectingOffsetY">交差9×9内の垂直位置です。0〜8を指定します。</param>
         /// <param name="springHydrologyCells">同期先となる21×21の泉判定用水文キャッシュです。</param>
-        /// <returns>同じ絶対座標のキャッシュ要素へ湖接続を同期できた場合はtrueです。</returns>
+        /// <returns>同じ絶対座標のキャッシュ要素へ湖接続と区分を同期できた場合はtrueです。</returns>
         internal static bool TrySynchronizeFinalizedLakeConnection(
             in GeneratedHydrologyCell finalizedCell,
             int intersectingOffsetX,
@@ -982,12 +988,13 @@ namespace Farmware.WorldGeneration
             cachedCell.ConnectionFlags =
                 (cachedCell.ConnectionFlags & ~HydrologyConnectionFlags.Lake)
                 | (finalizedCell.ConnectionFlags & HydrologyConnectionFlags.Lake);
+            cachedCell.LakeClassification = finalizedCell.LakeClassification;
             springHydrologyCells[cacheIndex] = cachedCell;
             return true;
         }
 
         /// <summary>
-        /// 一つのセルの湖候補接続を最終区分に合わせ、一時湖だけLake接続を外します。
+        /// 一つのセルの湖候補接続と診断用区分を最終水収支へ合わせ、一時湖だけLake接続を外します。
         /// 呼出し元所有の作業領域とキャッシュを更新しますが、ECSへ直接公開しません。
         /// </summary>
         private static bool TryFinalizeCellLakeConnection(
@@ -1001,6 +1008,7 @@ namespace Farmware.WorldGeneration
         {
             if ((cell.LakeFlags & HydrologyLakeFlags.SurfaceCell) == 0)
             {
+                cell.LakeClassification = LakeWaterBalanceClassification.None;
                 return true;
             }
 
@@ -1028,7 +1036,39 @@ namespace Farmware.WorldGeneration
                 cell.ConnectionFlags |= HydrologyConnectionFlags.Lake;
             }
 
+            // 表流水Bufferと水文診断が別々に最終区分を再計算しないよう、同じ確定値をセルへ保持します。
+            cell.LakeClassification = classification.Classification;
+
             return true;
+        }
+
+        /// <summary>
+        /// Editor診断が製品生成と同じ湖水収支を使えるよう、準備済み水文セルの最終湖区分を確定します。
+        /// </summary>
+        /// <param name="settings">湖水収支、地下水、基礎環境を含む固定生成設定です。</param>
+        /// <param name="cell">C3-Dまでの湖状態を持ち、成功時にC4-Cの接続と区分が入るセルです。</param>
+        /// <param name="frontier">末端セルの集水探索へ再利用する固定長Heapです。</param>
+        /// <param name="basinMembers">閉鎖流域セルを保持する固定長配列です。</param>
+        /// <param name="basinLookup">閉鎖流域所属を引く固定Hash表です。</param>
+        /// <param name="lakeCache">同じ末端の流域計算を再利用する呼出し元キャッシュです。</param>
+        /// <returns>湖面候補でない場合を含め、製品経路と同じ最終区分を確定できた場合はtrueです。</returns>
+        internal static bool TryFinalizeCellLakeForVisualization(
+            in WorldGenerationSettings settings,
+            ref GeneratedHydrologyCell cell,
+            NativeArray<HydrologyUpstreamCandidate> frontier,
+            NativeArray<HydrologyUpstreamCandidate> basinMembers,
+            NativeArray<HydrologyBasinLookupSlot> basinLookup,
+            ref HydrologyLakeBasinCache lakeCache)
+        {
+            FixedList4096Bytes<LakeClassificationCacheEntry> classifications = default;
+            return TryFinalizeCellLakeConnection(
+                settings,
+                ref cell,
+                frontier,
+                basinMembers,
+                basinLookup,
+                ref lakeCache,
+                ref classifications);
         }
 
         /// <summary>
@@ -1222,9 +1262,11 @@ namespace Farmware.WorldGeneration
         /// 21×21キャッシュの中央セルと8近傍から、一つの泉候補を組み立てます。
         /// 入力配列は読み取りだけとし、全条件を満たさない場合はdefault候補とfalseを返します。
         /// </summary>
-        private static bool TryBuildSpringCandidateFromCache(
+        /// <param name="hasSurfaceChannel">通常河道の中心線または河川幅が対象セルへ入る場合はtrueです。</param>
+        internal static bool TryBuildSpringCandidateFromCache(
             in LakeSpringGenerationSettings settings,
             in GeneratedHydrologyCell current,
+            bool hasSurfaceChannel,
             int cacheX,
             int cacheY,
             NativeArray<GeneratedHydrologyCell> hydrologyCells,
@@ -1235,6 +1277,7 @@ namespace Farmware.WorldGeneration
                 & (HydrologyConnectionFlags.Stream | HydrologyConnectionFlags.River | HydrologyConnectionFlags.Lake);
             if ((current.ConnectionFlags & HydrologyConnectionFlags.Groundwater) == 0
                 || permanentWater != HydrologyConnectionFlags.None
+                || hasSurfaceChannel
                 || current.IsOceanOutlet)
             {
                 return false;

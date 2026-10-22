@@ -1837,6 +1837,73 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// 最終湖面を含む固定Seedのチャンクを製品Jobで生成し、公開水文BufferへC4-Cの区分が保存されることを保証します。
+        /// </summary>
+        [Test]
+        public void ChunkGenerationSystem_PublishesFinalLakeClassification()
+        {
+            using World world = new World("WorldGenerationLakeClassificationTests");
+            EntityManager entityManager = world.EntityManager;
+            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.FromString("ecs-system-test"),
+                1);
+
+            Entity settingsEntity = entityManager.CreateEntity();
+            entityManager.AddComponentData(settingsEntity, settings);
+            entityManager.AddComponentData(settingsEntity, ResourceGenerationSettings.CreateDefault());
+
+            Entity chunkEntity = entityManager.CreateEntity();
+            entityManager.AddComponentData(
+                chunkEntity,
+                new ChunkCoordinateComponent
+                {
+                    Layer = WorldLayer.Surface,
+                    X = 0,
+                    Y = -3
+                });
+            entityManager.AddComponentData(
+                chunkEntity,
+                new ChunkGenerationStatus
+                {
+                    Phase = ChunkGenerationPhase.Queued,
+                    GeneratedWithVersion = 0
+                });
+            entityManager.AddComponent<ChunkGenerationRequest>(chunkEntity);
+            entityManager.AddBuffer<GeneratedTile>(chunkEntity);
+            entityManager.AddBuffer<GeneratedResourceTile>(chunkEntity);
+            entityManager.AddBuffer<GeneratedHydrologyCell>(chunkEntity);
+            entityManager.AddBuffer<GeneratedSurfaceWaterTile>(chunkEntity);
+            entityManager.AddBuffer<GeneratedHydrologyTile>(chunkEntity);
+
+            // 製品と同じ二段階公開を通し、Job完了後にだけ固定水文Bufferを読み取ります。
+            SystemHandle system = world.GetOrCreateSystem<ChunkGenerationSystem>();
+            system.Update(world.Unmanaged);
+            entityManager.CompleteAllTrackedJobs();
+            WaitForChunkGeneration(world, system, chunkEntity);
+
+            DynamicBuffer<GeneratedHydrologyCell> hydrology =
+                entityManager.GetBuffer<GeneratedHydrologyCell>(chunkEntity);
+            const int LakeLocalX = 2;
+            const int LakeLocalY = 0;
+            GeneratedHydrologyCell lakeCell = hydrology[
+                (LakeLocalY * DeterministicHydrologyGenerator.CellsPerChunkAxis) + LakeLocalX];
+
+            Assert.That(lakeCell.CellX, Is.EqualTo(2));
+            Assert.That(lakeCell.CellY, Is.EqualTo(-24));
+            Assert.That(
+                (lakeCell.LakeFlags & HydrologyLakeFlags.SurfaceCell) != 0,
+                Is.True,
+                "固定Seedの検証セルは、最終区分を公開する湖面セルである必要があります。");
+            Assert.That(
+                lakeCell.LakeClassification,
+                Is.EqualTo(LakeWaterBalanceClassification.OverflowFreshwater));
+            Assert.That(
+                (lakeCell.ConnectionFlags & HydrologyConnectionFlags.Lake) != 0,
+                Is.True,
+                "越流淡水湖は最終区分とLake接続を同時に公開する必要があります。");
+        }
+
+        /// <summary>
         /// C4-B2だけが拒否する不正比重を準備し、先行Jobが作業配列を生成しても5種類のECS Bufferを部分公開しないことを保証します。
         /// </summary>
         [Test]
