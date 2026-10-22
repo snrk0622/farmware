@@ -1792,56 +1792,6 @@ namespace Farmware.WorldGeneration.Tests
                 hydrologyTiles[0].NaturalSoilSaturationPotential,
                 Is.EqualTo(expectedFirstSaturation));
 
-            int positiveFloodingTiles = 0;
-            int freshwaterConnectedTiles = 0;
-            int wetlandEligibleTiles = 0;
-            int largeWetlandExtentTiles = 0;
-            for (int index = 0; index < hydrologyTiles.Length; index++)
-            {
-                GeneratedHydrologyTile hydrologyTile = hydrologyTiles[index];
-                GeneratedTile terrainTile = tiles[index];
-                bool freshwaterConnected =
-                    (hydrologyTile.Flags & GeneratedHydrologyTileFlags.FreshwaterConnected) != 0;
-                bool wetlandEligible =
-                    (hydrologyTile.Flags & GeneratedHydrologyTileFlags.WetlandTileEligible) != 0;
-                bool expectedWetlandEligible =
-                    DeterministicWetlandExtentGenerator.IsWetlandTileEligible(
-                        settings.NaturalFlooding,
-                        terrainTile.Elevation,
-                        freshwaterConnected,
-                        hydrologyTile.NaturalSoilSaturationPotential,
-                        hydrologyTile.NaturalFloodingPotential);
-
-                if (hydrologyTile.NaturalFloodingPotential > 0)
-                {
-                    positiveFloodingTiles++;
-                }
-                if (freshwaterConnected)
-                {
-                    freshwaterConnectedTiles++;
-                }
-                if (wetlandEligible)
-                {
-                    wetlandEligibleTiles++;
-                }
-                if ((hydrologyTile.Flags & GeneratedHydrologyTileFlags.LargeWetlandExtent) != 0)
-                {
-                    largeWetlandExtentTiles++;
-                }
-
-                Assert.That(
-                    wetlandEligible,
-                    Is.EqualTo(expectedWetlandEligible),
-                    $"C4-D2の湿原資格bitが純粋判定と一致しません。tileIndex={index}");
-            }
-            TestContext.WriteLine(
-                $"C4-D2 sample counts: flooded={positiveFloodingTiles}, "
-                + $"freshwater={freshwaterConnectedTiles}, eligible={wetlandEligibleTiles}, "
-                + $"largeExtent={largeWetlandExtentTiles}");
-            Assert.That(positiveFloodingTiles, Is.GreaterThan(0));
-            Assert.That(freshwaterConnectedTiles, Is.GreaterThan(0));
-            Assert.That(largeWetlandExtentTiles, Is.GreaterThan(0));
-
             // 地形・資源は先頭だけでなく全4096タイルを直接計算と比較し、作業配列への切替で結果が変わらないことを保証します。
             for (int index = 0; index < WorldGridConstants.TilesPerChunk; index++)
             {
@@ -2057,138 +2007,6 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(entityManager.GetBuffer<GeneratedHydrologyTile>(chunkEntity).Length, Is.Zero);
         }
 
-        /// <summary>
-        /// C4-D2だけが拒否する不正な冠水比重を準備し、湖・泉まで完成しても5種類のECS Bufferを部分公開しないことを保証します。
-        /// </summary>
-        [Test]
-        public void ChunkGenerationSystem_NaturalFloodingFailureDoesNotPublishAnyBuffer()
-        {
-            using World world = new World("ChunkGenerationNaturalFloodingFailureTests");
-            EntityManager entityManager = world.EntityManager;
-            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
-                WorldSeedUtility.FromString("ecs-natural-flooding-failure-test"),
-                1);
-            // 合計6というC4-D1/D2契約だけを崩し、C4-Cまでの全入力は有効な状態を維持します。
-            settings.NaturalFlooding.WeightTotal = 5;
-
-            Entity settingsEntity = entityManager.CreateEntity();
-            entityManager.AddComponentData(settingsEntity, settings);
-            entityManager.AddComponentData(settingsEntity, ResourceGenerationSettings.CreateDefault());
-            Entity chunkEntity = CreateChunkEntity(
-                entityManager,
-                1,
-                -1,
-                ChunkGenerationPhase.Queued,
-                true);
-            SystemHandle system = world.GetOrCreateSystem<ChunkGenerationSystem>();
-
-            system.Update(world.Unmanaged);
-            entityManager.CompleteAllTrackedJobs();
-            Assert.That(
-                entityManager.GetComponentData<ChunkGenerationStatus>(chunkEntity).Phase,
-                Is.EqualTo(ChunkGenerationPhase.GeneratingData));
-
-            var timer = System.Diagnostics.Stopwatch.StartNew();
-            while (entityManager.GetComponentData<ChunkGenerationStatus>(chunkEntity).Phase
-                == ChunkGenerationPhase.GeneratingData)
-            {
-                Assert.That(
-                    timer.Elapsed.TotalSeconds,
-                    Is.LessThan(30),
-                    "自然冠水失敗結果が有限時間で確定しませんでした。");
-                system.Update(world.Unmanaged);
-                // 実製品の描画フレームと同様にWorkerへ実行時間を渡し、待機側のCPU占有を避けます。
-                System.Threading.Thread.Yield();
-            }
-
-            ChunkGenerationStatus status =
-                entityManager.GetComponentData<ChunkGenerationStatus>(chunkEntity);
-            Assert.That(status.Phase, Is.EqualTo(ChunkGenerationPhase.Failed));
-            Assert.That(status.GeneratedWithVersion, Is.Zero);
-            Assert.That(entityManager.GetBuffer<GeneratedTile>(chunkEntity).Length, Is.Zero);
-            Assert.That(entityManager.GetBuffer<GeneratedResourceTile>(chunkEntity).Length, Is.Zero);
-            Assert.That(entityManager.GetBuffer<GeneratedHydrologyCell>(chunkEntity).Length, Is.Zero);
-            Assert.That(entityManager.GetBuffer<GeneratedSurfaceWaterTile>(chunkEntity).Length, Is.Zero);
-            Assert.That(entityManager.GetBuffer<GeneratedHydrologyTile>(chunkEntity).Length, Is.Zero);
-        }
-
-        /// <summary>
-        /// 左右に隣接する2チャンクを同じバッチで生成し、境界をまたぐ同一水文セルの広域湿原判定が一致することを保証します。
-        /// </summary>
-        [Test]
-        public void ChunkGenerationSystem_WetlandExtentMatchesAcrossChunkBoundary()
-        {
-            using World world = new World("ChunkGenerationWetlandBoundaryTests");
-            EntityManager entityManager = world.EntityManager;
-            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
-                WorldSeedUtility.FromString("ecs-system-test"),
-                1);
-            Entity settingsEntity = entityManager.CreateEntity();
-            entityManager.AddComponentData(settingsEntity, settings);
-            entityManager.AddComponentData(settingsEntity, ResourceGenerationSettings.CreateDefault());
-            Entity left = CreateChunkEntity(
-                entityManager,
-                0,
-                -1,
-                ChunkGenerationPhase.Queued,
-                true);
-            Entity right = CreateChunkEntity(
-                entityManager,
-                1,
-                -1,
-                ChunkGenerationPhase.Queued,
-                true);
-            SystemHandle system = world.GetOrCreateSystem<ChunkGenerationSystem>();
-
-            system.Update(world.Unmanaged);
-            entityManager.CompleteAllTrackedJobs();
-            var timer = System.Diagnostics.Stopwatch.StartNew();
-            while (entityManager.GetComponentData<ChunkGenerationStatus>(left).Phase
-                    == ChunkGenerationPhase.GeneratingData
-                || entityManager.GetComponentData<ChunkGenerationStatus>(right).Phase
-                    == ChunkGenerationPhase.GeneratingData)
-            {
-                Assert.That(
-                    timer.Elapsed.TotalSeconds,
-                    Is.LessThan(30),
-                    "湿原境界を含む2チャンク生成が有限時間で確定しませんでした。");
-                system.Update(world.Unmanaged);
-                System.Threading.Thread.Yield();
-            }
-
-            Assert.That(
-                entityManager.GetComponentData<ChunkGenerationStatus>(left).Phase,
-                Is.EqualTo(ChunkGenerationPhase.ReadyToApply));
-            Assert.That(
-                entityManager.GetComponentData<ChunkGenerationStatus>(right).Phase,
-                Is.EqualTo(ChunkGenerationPhase.ReadyToApply));
-            DynamicBuffer<GeneratedHydrologyTile> leftTiles =
-                entityManager.GetBuffer<GeneratedHydrologyTile>(left);
-            DynamicBuffer<GeneratedHydrologyTile> rightTiles =
-                entityManager.GetBuffer<GeneratedHydrologyTile>(right);
-            int matchingLargeExtentRows = 0;
-            for (int localY = 0; localY < WorldGridConstants.LogicalChunkSize; localY++)
-            {
-                bool leftLarge = (leftTiles[WorldGrid.ToTileIndex(63, localY)].Flags
-                    & GeneratedHydrologyTileFlags.LargeWetlandExtent) != 0;
-                bool rightLarge = (rightTiles[WorldGrid.ToTileIndex(0, localY)].Flags
-                    & GeneratedHydrologyTileFlags.LargeWetlandExtent) != 0;
-                Assert.That(
-                    rightLarge,
-                    Is.EqualTo(leftLarge),
-                    $"同じ境界水文セルの広域湿原bitが不一致です。localY={localY}");
-                if (leftLarge)
-                {
-                    matchingLargeExtentRows++;
-                }
-            }
-
-            Assert.That(
-                matchingLargeExtentRows,
-                Is.GreaterThan(0),
-                "固定Seedが境界上の広域湿原判定を実際に通る試料である必要があります。");
-        }
-
         /// <summary>上限1と2件の要求を準備し、Job開始と後続公開を経ても同時に2件を投入しないことを保証します。</summary>
         [Test]
         public void ChunkGenerationSystem_RespectsConcurrentLimitAndReusesSlot()
@@ -2304,8 +2122,7 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 原点だけが見えるObserverと同時生成上限3を準備し、中心の次に左右隣接を角より優先することを保証します。
-        /// C4-D2の生成時間中に通常移動が境界へ達しても、左下・左上角を先に待って水平隣接が空白になる回帰を防ぎます。
+        /// 原点だけが見えるObserverと同時生成上限3を準備し、中心優先かつ上限以内で要求が作られることを保証します。
         /// </summary>
         [Test]
         public void ChunkStreamingSystem_QueuesNearChunksWithinConcurrentLimit()
@@ -2338,10 +2155,6 @@ namespace Farmware.WorldGeneration.Tests
                 ComponentType.ReadOnly<ChunkGenerationStatus>());
             Assert.That(chunkQuery.CalculateEntityCount(), Is.EqualTo(3));
             Assert.That(ContainsChunkCoordinate(chunkQuery, 0, 0), Is.True);
-            Assert.That(ContainsChunkCoordinate(chunkQuery, -1, 0), Is.True);
-            Assert.That(ContainsChunkCoordinate(chunkQuery, 1, 0), Is.True);
-            Assert.That(ContainsChunkCoordinate(chunkQuery, -1, -1), Is.False);
-            Assert.That(ContainsChunkCoordinate(chunkQuery, -1, 1), Is.False);
 
             // 生成Jobを進めない2回目の更新では3要求が上限を満たしたままなので、重複Entityを追加しません。
             streamingSystem.Update(world.Unmanaged);

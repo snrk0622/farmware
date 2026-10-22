@@ -14,12 +14,12 @@ namespace Farmware.WorldGeneration.Tests
     public sealed class DeterministicGroundwaterHydrologyGeneratorTests
     {
         /// <summary>
-        /// ECSへ4096件格納する要素を準備し、飽和・冠水・資格bitが1タイル6 bytesへ収まることを保証します。
+        /// ECSへ4096件格納する要素を準備し、初回実装が1タイル2 bytesだけを保持することを保証します。
         /// </summary>
         [Test]
         public void GeneratedHydrologyTile_SizeMatchesCapacityDocumentation()
         {
-            Assert.That(UnsafeUtility.SizeOf<GeneratedHydrologyTile>(), Is.EqualTo(6));
+            Assert.That(UnsafeUtility.SizeOf<GeneratedHydrologyTile>(), Is.EqualTo(2));
         }
 
         /// <summary>
@@ -564,33 +564,19 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 飽和、冠水、資格bitを一項目ずつ変え、状態ハッシュがC4-D2までの全フィールド差を検出することを保証します。
+        /// 異なる飽和値を同じ基礎ハッシュへ追加し、状態ハッシュが新しいECS Bufferの差を検出することを保証します。
         /// </summary>
         [Test]
-        public void HydrologyTileHash_ChangesWhenAnyFieldChanges()
+        public void HydrologyTileHash_ChangesWhenSaturationChanges()
         {
             const ulong InitialHash = 0xCBF29CE484222325UL;
             var dry = new GeneratedHydrologyTile { NaturalSoilSaturationPotential = 39320 };
             var saturated = new GeneratedHydrologyTile { NaturalSoilSaturationPotential = 39321 };
-            var flooded = new GeneratedHydrologyTile
-            {
-                NaturalSoilSaturationPotential = 39320,
-                NaturalFloodingPotential = 1
-            };
-            var eligible = new GeneratedHydrologyTile
-            {
-                NaturalSoilSaturationPotential = 39320,
-                Flags = GeneratedHydrologyTileFlags.WetlandTileEligible
-            };
 
             ulong dryHash = DeterministicGroundwaterHydrologyGenerator.HashTile(InitialHash, dry);
             ulong saturatedHash = DeterministicGroundwaterHydrologyGenerator.HashTile(InitialHash, saturated);
-            ulong floodedHash = DeterministicGroundwaterHydrologyGenerator.HashTile(InitialHash, flooded);
-            ulong eligibleHash = DeterministicGroundwaterHydrologyGenerator.HashTile(InitialHash, eligible);
 
             Assert.That(dryHash, Is.Not.EqualTo(saturatedHash));
-            Assert.That(dryHash, Is.Not.EqualTo(floodedHash));
-            Assert.That(dryHash, Is.Not.EqualTo(eligibleHash));
         }
 
         /// <summary>テスト名から安定Seedを作り、製品既定のGeneratorVersion 1設定を返します。</summary>

@@ -30,12 +30,6 @@ namespace Farmware.WorldGeneration.PlayModeTests
         /// <summary>SubSceneの非同期Bake・ロードと初回チャンク生成を待つ最大描画フレーム数です。</summary>
         private const int MaximumWaitFrames = 300;
 
-        /// <summary>
-        /// BatchModeの高速空フレーム間で、Burst Workerへ処理時間を渡す待機時間です。単位はミリ秒です。
-        /// 60fps実プレイの1フレームより短い10ミリ秒に留め、300フレーム上限を変えずにWorker飢餓だけを防ぎます。
-        /// </summary>
-        private const int BatchModeWorkerYieldMilliseconds = 10;
-
         /// <summary>初期スポーンチャンクが保持範囲外へ確実に出る、テスト用カメラ水平移動量です。</summary>
         private const int FarCameraOffsetInTiles = WorldGridConstants.LogicalChunkSize * 8;
 
@@ -2109,7 +2103,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                         }
 
                         // BatchModeは描画フレームだけが実時間より速く進むため、Workerと10 Tick/秒の境界へ最低限の実時間を渡します。
-                        System.Threading.Thread.Sleep(BatchModeWorkerYieldMilliseconds);
+                        System.Threading.Thread.Sleep(1);
                         yield return null;
                     }
 
@@ -2732,7 +2726,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 }
 
                 // 初回生成も固定Tickで投入するため、BatchModeの高速空フレームだけで待機上限を使い切らないようにします。
-                System.Threading.Thread.Sleep(BatchModeWorkerYieldMilliseconds);
+                System.Threading.Thread.Sleep(1);
                 yield return null;
             }
 
@@ -2740,18 +2734,6 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 initialLoadCompleted,
                 Is.True,
                 $"{MaximumWaitFrames}フレーム以内に初回生成と表示が完了しませんでした。");
-
-            // 通常の左移動で最初に画面へ入る隣接チャンクは、中心と同じ初回生成バッチで完成させます。
-            // C4-D2の重い生成中に角チャンクを先に待ち、左境界越え時に空白が見える回帰を検出します。
-            Assert.That(
-                TryGetCompleteChunk(
-                    world.EntityManager,
-                    chunkQuery,
-                    initialSpawnChunk.X - 1,
-                    initialSpawnChunk.Y,
-                    out _),
-                Is.True,
-                "初期チャンクの描画完了時に左隣チャンクの5 Bufferが先読み完了していません。");
 
             // 実際のSubScene Baker結果を読み、Sceneの文字列だけ正しくてもRuntime Blobが欠ける回帰を検出します。
             DefinitionCatalog runtimeDefinitionCatalog =
@@ -2996,7 +2978,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 }
 
                 // 遠方移動後の生成Jobと固定Tick公開へ処理時間を渡し、EditorとBatchModeで同じ待機契約にします。
-                System.Threading.Thread.Sleep(BatchModeWorkerYieldMilliseconds);
+                System.Threading.Thread.Sleep(1);
                 yield return null;
             }
 
@@ -3049,7 +3031,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 }
 
                 // 負座標への即時移動後も、BatchModeの高速空フレームだけで待機上限を使い切らないようにします。
-                System.Threading.Thread.Sleep(BatchModeWorkerYieldMilliseconds);
+                System.Threading.Thread.Sleep(1);
                 yield return null;
             }
 
@@ -3114,7 +3096,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 }
 
                 // 再生成Jobと固定Tick公開へ処理時間を渡し、EditorとBatchModeで同じ待機契約にします。
-                System.Threading.Thread.Sleep(BatchModeWorkerYieldMilliseconds);
+                System.Threading.Thread.Sleep(1);
                 yield return null;
             }
 
@@ -3186,7 +3168,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 }
 
                 // 遠方の液体チャンクも固定Tickで生成を投入するため、BatchModeではWorkerとTickへ最低限の実時間を渡します。
-                System.Threading.Thread.Sleep(BatchModeWorkerYieldMilliseconds);
+                System.Threading.Thread.Sleep(1);
                 yield return null;
             }
 
@@ -3430,64 +3412,6 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     && resources.Length == WorldGridConstants.TilesPerChunk)
                 {
                     chunkEntity = entities[index];
-                    return true;
-                }
-            }
-
-            chunkEntity = Entity.Null;
-            return false;
-        }
-
-        /// <summary>
-        /// 指定座標でReadyToApply、Active、Inactiveのいずれかとなり、5種類の固定生成Bufferがそろったチャンクを取得します。
-        /// 画面外の先読みはTilemap反映前のReadyToApplyまたは反映後のInactiveなので、Active限定の検索と分けます。
-        /// </summary>
-        /// <param name="entityManager">5種類のBufferを所有するDefault WorldのEntityManagerです。</param>
-        /// <param name="chunkQuery">座標、状態、地形・資源Bufferを持つチャンクQueryです。</param>
-        /// <param name="chunkX">検索する水平論理チャンク座標です。</param>
-        /// <param name="chunkY">検索する垂直論理チャンク座標です。</param>
-        /// <param name="chunkEntity">成功時に、完全生成済みのチャンクEntityを返します。</param>
-        /// <returns>Simulationの5 Buffer公開と表示対象判定が完了していればtrueです。</returns>
-        private static bool TryGetCompleteChunk(
-            EntityManager entityManager,
-            EntityQuery chunkQuery,
-            int chunkX,
-            int chunkY,
-            out Entity chunkEntity)
-        {
-            using NativeArray<Entity> entities = chunkQuery.ToEntityArray(Allocator.Temp);
-            using NativeArray<ChunkCoordinateComponent> coordinates =
-                chunkQuery.ToComponentDataArray<ChunkCoordinateComponent>(Allocator.Temp);
-            using NativeArray<ChunkGenerationStatus> statuses =
-                chunkQuery.ToComponentDataArray<ChunkGenerationStatus>(Allocator.Temp);
-
-            for (int index = 0; index < entities.Length; index++)
-            {
-                ChunkGenerationPhase phase = statuses[index].Phase;
-                if (coordinates[index].Layer != WorldLayer.Surface
-                    || coordinates[index].X != chunkX
-                    || coordinates[index].Y != chunkY
-                    || (phase != ChunkGenerationPhase.ReadyToApply
-                        && phase != ChunkGenerationPhase.Active
-                        && phase != ChunkGenerationPhase.Inactive))
-                {
-                    continue;
-                }
-
-                Entity entity = entities[index];
-                // 5 Bufferのいずれかが欠ける部分公開も、先読み完了とはみなしません。
-                if (entityManager.GetBuffer<GeneratedTile>(entity, true).Length
-                        == WorldGridConstants.TilesPerChunk
-                    && entityManager.GetBuffer<GeneratedResourceTile>(entity, true).Length
-                        == WorldGridConstants.TilesPerChunk
-                    && entityManager.GetBuffer<GeneratedHydrologyCell>(entity, true).Length
-                        == DeterministicHydrologyGenerator.CellsPerChunk
-                    && entityManager.GetBuffer<GeneratedSurfaceWaterTile>(entity, true).Length
-                        == WorldGridConstants.TilesPerChunk
-                    && entityManager.GetBuffer<GeneratedHydrologyTile>(entity, true).Length
-                        == WorldGridConstants.TilesPerChunk)
-                {
-                    chunkEntity = entity;
                     return true;
                 }
             }

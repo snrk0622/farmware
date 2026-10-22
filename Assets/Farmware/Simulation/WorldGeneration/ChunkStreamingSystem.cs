@@ -255,54 +255,9 @@ namespace Farmware.WorldGeneration
                 int bottom = centerY - ring;
                 int top = centerY + ring;
 
-                // 通常移動では斜め角より先に上下左右の隣接チャンクが画面へ入ります。
-                // 生成上限が小さいときも移動先の描画を間に合わせるため、各辺の中央を角より先に予約します。
-                TryQueueChunk(
-                    layer,
-                    left,
-                    centerY,
-                    bounds,
-                    ref requestBudget,
-                    ref knownCoordinates,
-                    ref reactivatableRequests,
-                    ref commandBuffer);
-                TryQueueChunk(
-                    layer,
-                    right,
-                    centerY,
-                    bounds,
-                    ref requestBudget,
-                    ref knownCoordinates,
-                    ref reactivatableRequests,
-                    ref commandBuffer);
-                TryQueueChunk(
-                    layer,
-                    centerX,
-                    bottom,
-                    bounds,
-                    ref requestBudget,
-                    ref knownCoordinates,
-                    ref reactivatableRequests,
-                    ref commandBuffer);
-                TryQueueChunk(
-                    layer,
-                    centerX,
-                    top,
-                    bounds,
-                    ref requestBudget,
-                    ref knownCoordinates,
-                    ref reactivatableRequests,
-                    ref commandBuffer);
-
-                // 残る上下の辺を左から右へ、続いて左右の辺を下から上へ処理します。
-                // 中央は上で予約済みなので飛ばし、同じ座標のHash検索も増やしません。
+                // 上下の辺を左から右へ、続いて左右の辺を下から上へ処理し、角の重複を避けます。
                 for (int x = left; x <= right && requestBudget > 0; x++)
                 {
-                    if (x == centerX)
-                    {
-                        continue;
-                    }
-
                     TryQueueChunk(
                         layer,
                         x,
@@ -325,11 +280,6 @@ namespace Farmware.WorldGeneration
 
                 for (int y = bottom + 1; y < top && requestBudget > 0; y++)
                 {
-                    if (y == centerY)
-                    {
-                        continue;
-                    }
-
                     TryQueueChunk(
                         layer,
                         left,

@@ -1,32 +1,11 @@
 // このファイルは、完成済みの地形・固定水文・表流水から地下水と自然土壌飽和を決定論的に導出します。
 // 水文セルの地下水はGeneratedHydrologyCellへ、タイル別飽和度は専用ECS Bufferへ出力し、現在水文とは分離します。
 
-using System;
 using Unity.Collections;
 using Unity.Entities;
 
 namespace Farmware.WorldGeneration
 {
-    /// <summary>
-    /// 1タイルの固定水文が満たす淡水接続、湿原資格、広域規模を重複可能なbitで保持します。
-    /// C4-D2の生成Jobだけが設定し、公開後はワールド生成結果として変更しません。
-    /// </summary>
-    [Flags]
-    public enum GeneratedHydrologyTileFlags : ushort
-    {
-        /// <summary>固定水文上の追加条件を満たさない状態です。</summary>
-        None = 0,
-
-        /// <summary>河川、淡水湖、地下水、または半径32内の恒久淡水源へ接続するタイルです。</summary>
-        FreshwaterConnected = 1 << 0,
-
-        /// <summary>低地、淡水接続、自然飽和または自然冠水の3条件を満たすタイルです。</summary>
-        WetlandTileEligible = 1 << 1,
-
-        /// <summary>資格タイル16以上の水文セルが上下左右に4セル以上連結する成分へ属するタイルです。</summary>
-        LargeWetlandExtent = 1 << 2
-    }
-
     /// <summary>
     /// 1タイルの自然状態における固定水文導出値です。
     /// 1論理チャンクEntityへ行優先4096件を保持し、降雨、灌水、排水、耕作などの現在状態から書き換えません。
@@ -36,21 +15,8 @@ namespace Farmware.WorldGeneration
     {
         /// <summary>
         /// 基礎湿度、地下水、局所透水性、地形起伏から求めた0〜65,535の自然土壌飽和ポテンシャルです。
-        /// 地下水Jobが設定し、公開後は固定生成結果として変更しません。
         /// </summary>
         public ushort NaturalSoilSaturationPotential;
-
-        /// <summary>
-        /// 恒久淡水源への距離、水面との比高、平坦さ、水域規模から求めた0〜65,535の自然冠水度です。
-        /// 自然冠水Jobが設定し、公開後は固定生成結果として変更しません。
-        /// </summary>
-        public ushort NaturalFloodingPotential;
-
-        /// <summary>
-        /// 淡水接続、タイル資格、広域湿原規模を示す固定bitです。
-        /// 自然冠水Jobが設定し、公開後は固定生成結果として変更しません。
-        /// </summary>
-        public GeneratedHydrologyTileFlags Flags;
     }
 
     /// <summary>
@@ -194,10 +160,7 @@ namespace Farmware.WorldGeneration
 
                     hydrologyTiles[tileIndex] = new GeneratedHydrologyTile
                     {
-                        NaturalSoilSaturationPotential = saturation,
-                        // 後続C4-D2 Jobが全4096件を上書きします。枠再利用時の前回値を先に消します。
-                        NaturalFloodingPotential = 0,
-                        Flags = GeneratedHydrologyTileFlags.None
+                        NaturalSoilSaturationPotential = saturation
                     };
                 }
             }
@@ -326,14 +289,10 @@ namespace Farmware.WorldGeneration
         /// <summary>状態ハッシュへ1タイルの自然水文導出値を固定幅で追加します。</summary>
         /// <param name="currentHash">直前までの地形・水文・表流水を反映したハッシュです。</param>
         /// <param name="tile">追加するタイル別固定自然水文です。</param>
-        /// <returns>自然土壌飽和、自然冠水、湿原条件bitを固定順で混合した64bitハッシュです。</returns>
+        /// <returns>自然土壌飽和を混合した64bitハッシュです。</returns>
         internal static ulong HashTile(ulong currentHash, in GeneratedHydrologyTile tile)
         {
-            currentHash = WorldSeedUtility.Mix64(
-                currentHash ^ tile.NaturalSoilSaturationPotential);
-            currentHash = WorldSeedUtility.Mix64(
-                currentHash ^ tile.NaturalFloodingPotential);
-            return WorldSeedUtility.Mix64(currentHash ^ (ushort)tile.Flags);
+            return WorldSeedUtility.Mix64(currentHash ^ tile.NaturalSoilSaturationPotential);
         }
 
         /// <summary>水文セル中心の固定9地点で局所補正後透水性・保持力を64bit合計し、整数平均します。</summary>

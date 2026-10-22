@@ -409,8 +409,6 @@ namespace Farmware.WorldGeneration.Authoring
                 Groundwater = GroundwaterGenerationSettings.CreateDefault(),
                 // TERRAIN-01C4-Cの湖水収支・泉設定も調整値として重複させず、共有既定値をBakeします。
                 LakeSpring = LakeSpringGenerationSettings.CreateDefault(),
-                // TERRAIN-01C4-Dの自然冠水・湿原規模設定もGeneratorVersion対象の共有既定値をBakeします。
-                NaturalFlooding = NaturalFloodingGenerationSettings.CreateDefault(),
                 BiomeClassificationTransitionWidthInTiles =
                     biomeClassificationTransitionWidthInTiles,
                 BiomeTransitionWidthInTiles = biomeTransitionWidthInTiles,
