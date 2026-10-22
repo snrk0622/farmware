@@ -1,11 +1,11 @@
 # Unity Editorツール
 
-- 最終更新日: 2026-10-21
+- 最終更新日: 2026-10-22
 - 対象: `Assets/Farmware/Editor/WorldGeneration/`
 
 ## 1. 用途
 
-本書のメニュー・設定・表示は、TERRAIN-01C2-Bまでのdevelop、TERRAIN-01C3-D2、水文Lake表示へ先行反映したTERRAIN-01C4-Cの現行実装境界を説明する。C3-A〜D1がSimulationへ追加した固定水文の基礎格子、D8流向、固定下流終端、集水面積、自然流出、閉鎖流域境界、基礎湖面を、C3-D2で複数Seed分布監査、Debug Visualization、Map Viewerへ接続した。C4-Cは最終湖区分だけを両表示へ追加し、地下水、土壌飽和、泉、自然冠水、湿原候補の個別診断と分布監査はC4-Eに残す。Level 0〜6集約Summaryの利用・分解・キャッシュ統計は性能テストだけで記録し、Editor表示へは渡さない。2026-10-19の[改訂マップ仕様](../GameSpecification/RandomMapGenerationSpecification.md)の可変Block、最終18Biome、水中文脈表示はまだツールに実装されていない。
+本書のメニュー・設定・表示は、TERRAIN-01C2-Bまでのdevelop、TERRAIN-01C3-D2、水文Lake表示へ先行反映したTERRAIN-01C4-C、派生水文分布監査、Gameビュー診断、Map Viewer診断を追加したTERRAIN-01C4-E3の現行実装境界を説明する。C3-A〜D1がSimulationへ追加した固定水文の基礎格子、D8流向、固定下流終端、集水面積、自然流出、閉鎖流域境界、基礎湖面を、C3-D2で複数Seed分布監査、Debug Visualization、Map Viewerへ接続した。C4-E1bは地下水、土壌飽和、最終湖区分、泉、自然冠水、湿原候補を複数Seed分布監査へ接続し、C4-E2とE3は残る5分類をGameビューとMap Viewerへ接続する。Level 0〜6集約Summaryの利用・分解・キャッシュ統計は性能テストだけで記録し、Editor表示へは渡さない。2026-10-19の[改訂マップ仕様](../GameSpecification/RandomMapGenerationSpecification.md)の可変Block、最終18Biome、水中文脈表示はまだツールに実装されていない。
 
 開発者専用のUnity Editorツールは、ワールド生成結果の調査、調整前後の比較、確認用Sceneとフォールバック素材の構築に使用する。
 これらは製品版のプレイヤー操作へ含めず、ランタイムのゲーム状態を変更するデバッグ操作にも使用しない。
@@ -147,8 +147,13 @@ Gameビューでは`CameraPanController`の表示原点を使い、CameraとGrid
 | `Hydrology > Catchment` | 1〜4,096セルの集水面積を対数色で表示し、打切りセルを別色で表示 |
 | `Hydrology > Surface Water` | 固定結果の流れなし、渓流、河川 |
 | `Hydrology > Lake` | 閉鎖流域外、解決済み乾燥流域、打切り流域、固定湖候補、一時湖、恒久塩湖、閉鎖淡水湖、越流淡水湖を別色で表示 |
+| `Hydrology > Groundwater` | 固定地下水ポテンシャル0〜65,535と接続境界32,768 |
+| `Hydrology > Natural Soil Saturation` | 現在土壌水分と独立した固定自然土壌飽和ポテンシャル0〜65,535 |
+| `Hydrology > Spring` | 最終固定表流水の泉流と、それ以外のタイル |
+| `Hydrology > Natural Flooding` | 現在水位と独立した固定自然冠水ポテンシャル0〜65,535 |
+| `Hydrology > Wetland Candidate` | 湿原条件外、局所資格タイル、4水文セル以上の広域湿原規模 |
 
-水文表示は8×8タイルを担当する固定水文セル単位なので、同じ色が8×8タイルへ繰り返される。中央HUDはセル座標・代表標高、流向・下流座標、終端・辺数、集水面積・打切り、湿度・流出相当値、接続フラグ、流域面積、湖底・越流・湖面標高、充填率、越流辺、最終湖区分を表示する。`BasinTruncated`は固定湖候補と誤認しないマゼンタ、固定湖候補は濃青、一時湖は茶、恒久塩湖は紫、閉鎖淡水湖は青、越流淡水湖はシアンで区別する。最終区分は実際の湖面セルだけへ設定するため、流域共通の`Overflow`を持つ湖面より高い上流セルをシアンにはしない。
+流向から地下水までの水文セル表示は8×8タイル単位、自然土壌飽和、泉、自然冠水、湿原候補は1タイル単位で表示する。中央HUDは従来の水文セル値に加え、固定地下水、自然土壌飽和、自然冠水、泉、淡水接続、湿原資格、広域湿原規模を表示する。`BasinTruncated`は固定湖候補と誤認しないマゼンタ、固定湖候補は濃青、一時湖は茶、恒久塩湖は紫、閉鎖淡水湖は青、越流淡水湖はシアンで区別する。最終区分は実際の湖面セルだけへ設定するため、流域共通の`Overflow`を持つ湖面より高い上流セルをシアンにはしない。派生5モードは生成済みの`GeneratedHydrologyCell`、`GeneratedSurfaceWaterTile`、`GeneratedHydrologyTile`だけを読み、現在降雨、灌水、排水、現在土壌水分、現在水位を固定生成色へ混ぜない。
 
 #### 次の修正をしたら確認する
 
@@ -169,8 +174,9 @@ Gameビューでは`CameraPanController`の表示原点を使い、CameraとGrid
 5. 正負の遠方へ明示的にCameraを移した場合も、色面が表示中のTilemapと同じ絶対セルへ重なり、中央HUDがCamera中央の絶対タイル情報を示す。
 6. `Animal Population`で候補外、候補タイル、確定個体が凡例どおりの3色になり、確定個体色が候補色より優先される。草原陸地でも木・石などの資源があるセルは候補外になる。
 7. 地質7モードで分類・3特性・フラグ・支配サイト・サイト境界が個別表示され、中央HUDの分類、フラグ、特性、サイト座標と一致する。サイト境界は同じ支配サイト内部へ出ず、隣接1タイルでサイトが変わる箇所へ出る。
-8. 水文5モードがチャンク境界をまたいでも8×8セル単位で連続し、中央HUDと凡例が生成済み`GeneratedHydrologyCell`に一致する。Lakeでは打切り流域と固定湖候補が別色になる。
-9. `Off`へ戻すと通常表示へ完全に戻る。
+8. 基礎水文5モードがチャンク境界をまたいでも8×8セル単位で連続し、中央HUDと凡例が生成済み`GeneratedHydrologyCell`に一致する。Lakeでは打切り流域と固定湖候補が別色になる。
+9. 派生水文5モードが個別に切り替わり、地下水は接続境界、自然飽和・自然冠水は連続値、泉は最終`SpringStream`、湿原候補は条件外・局所候補・広域規模を凡例どおりに表示する。中央HUDが生成済み3 Bufferと一致し、現在水文を表示しない。高速移動で1チャンク先読みを超えた場合は一時的な表示遅延を許容するが、停止後に生成済みチャンクの表示へ収束し、例外や永続的な欠落がないことを確認する。
+10. `Off`へ戻すと通常表示へ完全に戻る。
 
 TERRAIN-01C1で、旧7Biomeの代表土壌との差だけを見る`Biome Transition`と、旧7Biome互換値だけを見る`Weirdness`モードを削除した。旧`Weirdness`データはTERRAIN-01C5まで内部互換生成に残るが、火山活動の診断には使用しない。
 
@@ -271,7 +277,26 @@ Consoleレポートには、次の比較材料を出力する。
 3. 解決済み、打切り、固定湖候補の流域数と、集水面積・流出相当値・流域面積の最大値が表示される。
 4. 同一コード・同一条件で再実行した署名と集計値が一致する。
 
-### 2.8 Map Viewer
+### 2.8 Analyze Derived Hydrology Distribution
+
+- メニュー: `Farmware > World Generation > Analyze Derived Hydrology Distribution`
+- 実装: `HydrologyDistributionAuditMenu`、`DerivedHydrologyDistributionAnalyzer`、`HydrologyDiagnosticChunk`
+- PlayMode: 不要。既定ではバックグラウンドで実行する。
+
+#### 用途
+
+固定3 Seedについて原点の各1チャンクをC3、C4-A〜Dの製品Generatorと同じ順序で完成生成し、合計192水文セルと12,288タイルを集計する。地下水接続、自然土壌飽和、最終湖4区分、泉流、自然冠水、湿原資格、広域湿原規模の件数・割合、3ポテンシャルの最大値、監査対象値の比較署名をConsoleへ表示する。Scene、Prefab、ECS World、生成アセットは変更しない。
+
+一時湖、塩湖、閉鎖淡水湖、泉などが既定の有限試料で0件でも監査失敗にはしない。0件を省略せず表示し、Seedまたは生成設定を変えた同条件のレポート、C4-E2／E3の可視化、境界値の固定テストを合わせて判断する。既定3 Seedの実行中は同じ監査を二重起動できない。
+
+#### 確認内容
+
+1. Consoleへ開始ログと完了レポートが1回ずつ出る。
+2. 3チャンク、192水文セル、12,288タイルを集計し、各分類の0件も明示する。
+3. 地下水、自然飽和、自然冠水、湿原資格、広域規模の件数が対応する母数以内で、最終湖4区分の合計が水文セル総数以内になる。
+4. 同一コード・同一条件でMain ThreadとThreadPoolから再実行した署名とレポートが一致する。
+
+### 2.9 Map Viewer
 
 - メニュー: `Farmware > World Generation > Map Viewer`
 - 実装: `WorldGenerationMapViewerWindow`、`WorldGenerationMapSampler`
@@ -291,12 +316,14 @@ Farmwareのワールドは無限なので「全体」を有限画像へ収める
 - 設定SubSceneの全Root・全子孫を検査し、`WorldGenerationAuthoring`が0件または複数件なら生成を停止する。同じRoot配下の兄弟GameObjectにある重複も設定エラーとして扱う。
 - PlayModeでは、`ChunkGenerationSystem`が使用中のECS Singletonを直接読む。
 - 各代表タイルは`DeterministicChunkGenerator.GenerateTile`で生成し、ビューア専用の簡易バイオーム計算は持たない。
-- 表示領域が生成Textureの上限を超える場合は、縦横共通の縮小率でTextureを生成し、正方形のタイルとグリッドを保つ。通常モードは最大768サンプル、水文モードは1サンプルごとに最大4,096セルの集水・流域探索を行うため最大64サンプルとする。Windowリサイズで縦横比が変わった場合は、操作停止後に新しい比率のTextureを自動再生成する。生成TextureとCanvasの表示倍率はPointer座標、パン、ズーム、境界線、原点表示へ反映する。Pointer座標とカーソル中心ズームは、Point Filterで実際に表示されるTextureピクセルの代表タイルへ一致させる。カーソル中心ズームの次解像度も表示生成と同じモード別上限を使い、水文モードを未描画の768サンプルとして逆算しない。グリッドと原点表示は、Texture解像度が奇数の場合も地形生成と同じ整数中央のサンプル境界へ揃える。ツールバーの＋・－ButtonはCanvas中央をPointerへ変換せず、現在の中心タイル座標を直接維持する。再生成直後のHover情報もCanvas中央の境界をPointerとして解釈せず、Side Panelと同じ中心タイルを直接表示する。
+- 表示領域が生成Textureの上限を超える場合は、縦横共通の縮小率でTextureを生成し、正方形のタイルとグリッドを保つ。通常モードは最大768サンプル、C3基礎水文5モードは1サンプルごとに最大4,096セルの集水・流域探索を行うため最大64サンプルとする。C4派生水文5モードは1チャンク数秒の完成診断生成を行うため、縮尺ごとに代表タイルの所有チャンクが各軸最大3件となる1〜64サンプルへさらに制限する。担当8×8セルが正側隣接チャンクに属する場合はその完成チャンクも生成するため、完了表示には実際に使った完成水文チャンク数を示す。Windowリサイズで縦横比が変わった場合は、操作停止後に新しい比率のTextureを自動再生成する。生成TextureとCanvasの表示倍率はPointer座標、パン、ズーム、境界線、原点表示へ反映する。Pointer座標とカーソル中心ズームは、Point Filterで実際に表示されるTextureピクセルの代表タイルへ一致させる。カーソル中心ズームの次解像度も表示生成と同じモード別上限を使い、水文モードを未描画の768サンプルとして逆算しない。グリッドと原点表示は、Texture解像度が奇数の場合も地形生成と同じ整数中央のサンプル境界へ揃える。ツールバーの＋・－ButtonはCanvas中央をPointerへ変換せず、現在の中心タイル座標を直接維持する。再生成直後のHover情報もCanvas中央の境界をPointerとして解釈せず、Side Panelと同じ中心タイルを直接表示する。
 - 実設定を取得できない場合は生成を停止し、別の既定値へフォールバックしない。
-- 初回はCanvasの両辺が有限値かつ64ポイント以上になるまで生成を待ち、未確定の`NaN`寸法から1×1画像を作らない。画像完成までは地図領域の中央と画面下部へ生成進捗の割合を表示する。再生成時は前の画像を維持し、下部の進捗を更新する。Hover情報は初回から地質サイトを含む5行分の高さを確保し、情報が増えたことによる再生成を避ける。
+- 初回はCanvasの両辺が有限値かつ64ポイント以上になるまで生成を待ち、未確定の`NaN`寸法から1×1画像を作らない。画像完成までは地図領域の中央と画面下部へ生成進捗の割合を表示する。通常モードと基礎水文は完成行数、派生水文は処理時間の大半を占める完成チャンク数へ95%、色・Hoverコピーを作る画像行へ残り5%を割り当てる。派生水文はGate待機開始時に1%を通知し、16行未満の低解像度でも完成まで0%のままにしない。再生成時は前の画像を維持し、下部の進捗を更新する。Hover情報は初回から派生水文を含む8行分の高さを確保し、完成後に情報欄が地図を縮めて重い完成チャンクを二度生成しないようにする。
 
 `Terrain`は7バイオームの基準色だけを使い、SoilTypeを反映せず、淡水、海水、マグマ、岩壁を優先した最終地形を表示する。土壌分布はMap Viewerのプレイヤー向け地形と混ぜず、PlayMode中の`Debug Visualization > Soil`で確認する。
-`Biome`は水域や障害物の下も含む論理バイオームを表示する。`Elevation`、`Base Temperature`、`Terrain Temperature`、`Base Moisture`、`Woody Vegetation Potential`、`Terrain Ruggedness`、`Coastal Influence`、`Volcanic Activity Potential`はGameビューのDebug Visualizationと同じRGBで連続環境軸を表示する。`Geology Class`、3基礎特性、`Geology Flags`、`Geology Dominant Site`、`Geology Site Boundary`もGameビューと同じ色定義を使う。`Geology Dominant Site`の凡例色は固定の分類色ではなく、サイト座標から生成される実際の色の例であるため、地図には凡例と異なる色も表示される。同じサイトは同じ色を保ち、正確な境界確認には`Geology Site Boundary`を使う。サイト境界は広域縮小でも確認できるよう、上下左右の隣接代表サンプルとのサイト差を表示するため、Gameビューの隣接1タイル判定より太く見える場合がある。水文5モードはGameビューと同じRGBで、流向、終端、集水面積、渓流・河川、流域・湖を表示する。`Hydrology Lake`だけはC4-Cの水収支まで生成し、一時湖、恒久塩湖、閉鎖淡水湖、越流淡水湖をGameビューと同じ色で表示する。Hoverと中央情報には対応する固定水文セルの全診断値と最終湖区分を追加し、Lake凡例では打切り流域を`Truncated basin (not a fixed lake)`として固定湖候補と区別する。木、石、砂の資源分布は現時点では対象外である。
+`Biome`は水域や障害物の下も含む論理バイオームを表示する。`Elevation`、`Base Temperature`、`Terrain Temperature`、`Base Moisture`、`Woody Vegetation Potential`、`Terrain Ruggedness`、`Coastal Influence`、`Volcanic Activity Potential`はGameビューのDebug Visualizationと同じRGBで連続環境軸を表示する。`Geology Class`、3基礎特性、`Geology Flags`、`Geology Dominant Site`、`Geology Site Boundary`もGameビューと同じ色定義を使う。`Geology Dominant Site`の凡例色は固定の分類色ではなく、サイト座標から生成される実際の色の例であるため、地図には凡例と異なる色も表示される。同じサイトは同じ色を保ち、正確な境界確認には`Geology Site Boundary`を使う。サイト境界は広域縮小でも確認できるよう、上下左右の隣接代表サンプルとのサイト差を表示するため、Gameビューの隣接1タイル判定より太く見える場合がある。
+
+C3基礎水文5モードはGameビューと同じRGBで、流向、終端、集水面積、渓流・河川、流域・湖を表示する。`Hydrology Lake`だけはC4-Cの水収支まで生成し、一時湖、恒久塩湖、閉鎖淡水湖、越流淡水湖をGameビューと同じ色で表示する。C4派生水文5モードはC4-E1aの完成チャンクをバックグラウンドで生成・再利用し、`Hydrology Groundwater`、`Hydrology Natural Soil Saturation`、`Hydrology Spring`、`Hydrology Natural Flooding`、`Hydrology Wetland Candidate`を表示する。RGBと分類条件はC4-E2のGameビュー色変換APIを共有する。完成チャンク生成はEditorプロセス内で同時に1要求へ制限し、連続操作で取消済み要求と最新要求の大容量Native配列が重複しないようにする。取消済み要求は実行中1チャンクの完成後に終了するため、最新要求の開始まで数秒待つ場合があるが、Editorメインスレッドは停止しない。生成中に前の画像を維持する場合、Hover診断もDropdownの新モードではなく画面へ適用済みの旧画像モードを参照し、未完成の派生水文を取得失敗として表示しない。完成チャンクのNative配列は画像生成後に破棄し、Hover／中央情報には生成時にManaged値へコピーした地下水、接続状態、自然飽和、泉、自然冠水、淡水接続、湿原資格、広域規模を表示するため、Pointer移動で重い再生成を行わない。現在降雨・灌水・排水・現在土壌水分・現在水位は表示しない。基礎水文のHoverと中央情報には固定水文セルの全診断値と最終湖区分を追加し、Lake凡例では打切り流域を`Truncated basin (not a fixed lake)`として固定湖候補と区別する。木、石、砂の資源分布は現時点では対象外である。
 
 #### 画面上部の入力欄・ボタン
 
@@ -304,7 +331,7 @@ Farmwareのワールドは無限なので「全体」を有限画像へ収める
 | --- | --- |
 | `Seed` | 確認するワールドのシード文字列。値を変更して`移動・再生成`を押すと、Sceneの設定を変更せずに別シードを比較できる。 |
 | `X` / `Y` | 画像中央に表示するタイル座標。負座標も指定できる。 |
-| `表示` | `Terrain`は最終地形、`Biome`は論理バイオーム、TERRAIN-01C1の8連続環境軸、TERRAIN-01C2の地質7モード、TERRAIN-01C3の水文5モードへ切り替える。変更すると現在位置を再生成する。 |
+| `表示` | `Terrain`は最終地形、`Biome`は論理バイオーム、TERRAIN-01C1の8連続環境軸、TERRAIN-01C2の地質7モード、TERRAIN-01C3の基礎水文5モード、TERRAIN-01C4の派生水文5モードへ切り替える。変更すると現在位置を再生成する。 |
 | `Grid` | 16×16タイルのサブチャンク境界と64×64タイルの論理チャンク境界の表示を切り替える。生成結果自体は変化しない。 |
 | `移動・再生成` | 入力中のSeedとX/Yを確定し、その地点の画像を生成し直す。 |
 | `実設定を再読込` | EditModeではAuthoring、PlayModeでは実行中ECSから生成設定とSeedを読み直し、現在位置を再生成する。入力した一時的なSeedは破棄される。 |
@@ -318,14 +345,15 @@ Farmwareのワールドは無限なので「全体」を有限画像へ収める
 
 - `WorldGenerationAuthoring`の地形設定、Baker、設定SubSceneを変更した。
 - `DeterministicChunkGenerator`、`GeneratedTile`、Biome、Ground、水域、地質分類・特性・サイトの生成を変更した。
+- `HydrologyDiagnosticChunk`、地下水、自然飽和、泉、自然冠水、湿原候補の固定値または分類条件を変更した。
 - チャンク・サブチャンク寸法、負座標変換、シード変換、GeneratorVersionを変更した。
 - Map Viewerの色、凡例、座標変換、パン、ズーム、非同期処理を変更した。
 
 #### 確認内容
 
-1. 原点付近と既知の遠距離座標で、Map ViewerとGameビューのバイオーム・水域・マグマ・岩壁、8つの連続環境軸、地質7モード、水文5モードが一致する。同じBiome内では標準・肥沃・砂質の土地表示が同じであり、`Debug Visualization > Soil`へ切り替えた場合だけ3種類を別色で確認できる。サイト境界は、Gameビューでは隣接1タイル、Map Viewerでは隣接代表サンプルという縮尺差を踏まえて同じ支配サイト変化を示す。水文Lakeでは打切り流域と固定湖候補が別色になり、一時湖、恒久塩湖、閉鎖淡水湖、越流淡水湖の色・凡例・最終区分表示が両画面で一致する。
+1. 原点付近と既知の遠距離座標で、Map ViewerとGameビューのバイオーム・水域・マグマ・岩壁、8つの連続環境軸、地質7モード、C3基礎水文5モード、C4派生水文5モードが一致する。同じBiome内では標準・肥沃・砂質の土地表示が同じであり、`Debug Visualization > Soil`へ切り替えた場合だけ3種類を別色で確認できる。サイト境界は、Gameビューでは隣接1タイル、Map Viewerでは隣接代表サンプルという縮尺差を踏まえて同じ支配サイト変化を示す。水文Lakeでは打切り流域と固定湖候補が別色になり、一時湖、恒久塩湖、閉鎖淡水湖、越流淡水湖の色・凡例・最終区分表示が両画面で一致する。派生水文では5つの凡例、色面、Hover／中央固定値が選択モードと一致する。
 2. `実設定を再読込`後のSeed、WorldSeed、GeneratorVersion、設定取得元が想定どおり表示される。
-3. 負座標への移動、ドラッグ、ホイール、＋・－Buttonで中心と縮尺が正しく変化する。＋・－ButtonではTexture解像度が奇数・偶数のどちらでも中心タイル座標を動かさない。再生成直後のHover情報は、偶数解像度でもSide Panelと同じ中心座標を示す。Windowを768ポイントより大きくした場合と、生成Textureの幅または高さが奇数になる大きさにした場合のどちらでも、カーソル下の座標、グリッド、原点印が地形とずれず、正方形のグリッドが維持される。水文モードを通常サイズで表示し、中央以外へPointerを置いてホイールズームした場合も、64サンプルのTexture上でPointer下の代表タイルを維持する。
+3. 負座標への移動、ドラッグ、ホイール、＋・－Buttonで中心と縮尺が正しく変化する。＋・－ButtonではTexture解像度が奇数・偶数のどちらでも中心タイル座標を動かさない。再生成直後のHover情報は、偶数解像度でもSide Panelと同じ中心座標を示す。Windowを768ポイントより大きくした場合と、生成Textureの幅または高さが奇数になる大きさにした場合のどちらでも、カーソル下の座標、グリッド、原点印が地形とずれず、正方形のグリッドが維持される。基礎水文を通常サイズで表示し、中央以外へPointerを置いてホイールズームした場合も、64サンプルのTexture上でPointer下の代表タイルを維持する。派生水文では縮尺に応じた低解像度へ切り替わっても同じ地点を維持し、連続操作時は前の要求をキャンセルして最新画像だけを反映する。
 4. 同じSeed・座標・縮尺へ戻ると同じ画像になる。
 5. 開いた直後に単色の1×1画像を引き伸ばさず、地図領域に生成進捗が表示され、完成後に画像へ切り替わる。連続操作で古い非同期結果や進捗が後から上書きされず、Editorが長時間応答不能にならない。
 
@@ -338,6 +366,7 @@ Farmwareのワールドは無限なので「全体」を有限画像へ収める
 | バイオームや地形の広域分布、隣接関係、決定性 | Analyze Distribution |
 | 動物の候補地形、確定位置、群れ・密度・重複 | Animal Population表示、Analyze Animal Population |
 | 水文の流向・終端・集水・河川・湖分布 | Hydrology表示、Analyze Hydrology Distribution、Map Viewer |
+| 地下水、自然飽和、最終湖区分、泉、自然冠水、湿原の分布 | Analyze Derived Hydrology Distribution、Map Viewer、Debug Visualization |
 | 広域形状、特定Seed・遠距離座標の探索 | Map Viewer |
 | 生成規則と表示の両方 | Analyze Distribution、Map Viewer、Debug Visualization |
 

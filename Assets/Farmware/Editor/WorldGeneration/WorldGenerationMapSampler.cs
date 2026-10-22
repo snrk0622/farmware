@@ -1,4 +1,4 @@
-// このファイルは、Editorの広域マップビューアへ渡す色付きサンプルを、実ゲームと同じ決定論的地形・水文・最終湖区分から作ります。
+// このファイルは、Editorの広域マップビューアへ渡す色付きサンプルを、実ゲームと同じ決定論的地形・完成派生水文から作ります。
 // EditorWindowのUIやTexture2D生成から純粋計算を分離し、バックグラウンド実行とEditModeテストを可能にします。
 
 using System;
@@ -81,7 +81,52 @@ namespace Farmware.WorldGeneration.Editor
         HydrologySurfaceWater = 20,
 
         /// <summary>閉鎖流域、固定湖、湖面、越流、打切り流域を表示します。</summary>
-        HydrologyLake = 21
+        HydrologyLake = 21,
+
+        /// <summary>完成チャンクの固定地下水ポテンシャルと接続境界を表示します。</summary>
+        HydrologyGroundwater = 22,
+
+        /// <summary>完成チャンクの固定自然土壌飽和ポテンシャルを表示します。</summary>
+        HydrologyNaturalSoilSaturation = 23,
+
+        /// <summary>完成チャンクで最終確定した固定泉流を表示します。</summary>
+        HydrologySpring = 24,
+
+        /// <summary>完成チャンクの固定自然冠水ポテンシャルを表示します。</summary>
+        HydrologyNaturalFlooding = 25,
+
+        /// <summary>完成チャンクの湿原条件外、局所資格、広域規模を表示します。</summary>
+        HydrologyWetlandCandidate = 26
+    }
+
+    /// <summary>
+    /// Map Viewerが完成チャンクから取得した、1つの代表タイルに対応するC4派生水文値です。
+    /// Managed配列へ値コピーして保持するため、元のPersistent NativeArrayを破棄した後もHover表示から安全に参照できます。
+    /// </summary>
+    public readonly struct DerivedHydrologyMapSample
+    {
+        /// <summary>代表タイルを担当する8×8固定水文セルです。地下水と接続状態を保持します。</summary>
+        public readonly GeneratedHydrologyCell Cell;
+
+        /// <summary>代表タイルの最終固定表流水です。泉流判定に使用します。</summary>
+        public readonly GeneratedSurfaceWaterTile SurfaceWaterTile;
+
+        /// <summary>代表タイルの自然飽和、自然冠水、湿原フラグです。</summary>
+        public readonly GeneratedHydrologyTile HydrologyTile;
+
+        /// <summary>完成診断チャンクからコピーした3種類の固定生成値をまとめます。</summary>
+        /// <param name="cell">代表タイルを担当する固定水文セルです。</param>
+        /// <param name="surfaceWaterTile">代表タイルの最終固定表流水です。</param>
+        /// <param name="hydrologyTile">代表タイルの固定自然水文値です。</param>
+        public DerivedHydrologyMapSample(
+            in GeneratedHydrologyCell cell,
+            in GeneratedSurfaceWaterTile surfaceWaterTile,
+            in GeneratedHydrologyTile hydrologyTile)
+        {
+            Cell = cell;
+            SurfaceWaterTile = surfaceWaterTile;
+            HydrologyTile = hydrologyTile;
+        }
     }
 
     /// <summary>
@@ -111,8 +156,23 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>画像1ピクセルが代表するワールドタイル幅です。</summary>
         public int TilesPerPixel { get; }
 
+        /// <summary>
+        /// この結果を生成した表示モードです。
+        /// 次の重い非同期生成中も前画像を保持するため、現在のDropdownではなく適用済み画像とHover診断を対応させます。
+        /// </summary>
+        public WorldGenerationMapViewMode ViewMode { get; }
+
         /// <summary>Texture2D.SetPixels32へ直接渡せる、下端行から並んだ色配列です。</summary>
         public Color32[] PixelColors { get; }
+
+        /// <summary>C4派生水文サンプルの生成に使用した完成診断チャンク数です。ほかのモードでは0です。</summary>
+        public int DiagnosticChunkCount { get; }
+
+        /// <summary>
+        /// 派生水文モードのHover表示へ渡す代表タイル別の値コピーです。
+        /// 外部から内容を書き換えないよう非公開Dictionaryとして保持し、検索メソッドだけを公開します。
+        /// </summary>
+        private readonly Dictionary<long, DerivedHydrologyMapSample> derivedHydrologySamples;
 
         /// <summary>
         /// 完成済みの画像情報と色配列をまとめます。
@@ -124,7 +184,10 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="centerTileX">中央の水平タイル座標です。</param>
         /// <param name="centerTileY">中央の垂直タイル座標です。</param>
         /// <param name="tilesPerPixel">画像1ピクセルあたりのタイル幅です。</param>
+        /// <param name="viewMode">この結果を生成した地形・環境・地質・水文の表示モードです。</param>
         /// <param name="pixelColors">下端行から行優先で並べた色配列です。</param>
+        /// <param name="diagnosticChunkCount">派生水文生成に使用した完成診断チャンク数です。</param>
+        /// <param name="derivedHydrologySamples">Hover用に値コピーした代表タイル別派生水文です。</param>
         internal WorldGenerationMapSampleResult(
             int width,
             int height,
@@ -133,7 +196,10 @@ namespace Farmware.WorldGeneration.Editor
             int centerTileX,
             int centerTileY,
             int tilesPerPixel,
-            Color32[] pixelColors)
+            WorldGenerationMapViewMode viewMode,
+            Color32[] pixelColors,
+            int diagnosticChunkCount,
+            Dictionary<long, DerivedHydrologyMapSample> derivedHydrologySamples)
         {
             Width = width;
             Height = height;
@@ -142,7 +208,43 @@ namespace Farmware.WorldGeneration.Editor
             CenterTileX = centerTileX;
             CenterTileY = centerTileY;
             TilesPerPixel = tilesPerPixel;
+            ViewMode = viewMode;
             PixelColors = pixelColors;
+            DiagnosticChunkCount = diagnosticChunkCount;
+            this.derivedHydrologySamples = derivedHydrologySamples;
+        }
+
+        /// <summary>
+        /// 派生水文Textureと同時に生成した代表タイルの固定値を取得します。
+        /// Pointerが指す座標はPoint Filter後も画像が実際に使った代表座標へ変換されるため、再生成は不要です。
+        /// </summary>
+        /// <param name="worldTileX">画像がサンプリングした絶対タイルX座標です。</param>
+        /// <param name="worldTileY">画像がサンプリングした絶対タイルY座標です。</param>
+        /// <param name="sample">成功時に地下水、表流水、自然水文の値コピーを返します。</param>
+        /// <returns>現在結果が指定代表タイルの派生水文値を保持する場合はtrueです。</returns>
+        public bool TryGetDerivedHydrologySample(
+            int worldTileX,
+            int worldTileY,
+            out DerivedHydrologyMapSample sample)
+        {
+            if (derivedHydrologySamples == null)
+            {
+                sample = default;
+                return false;
+            }
+
+            return derivedHydrologySamples.TryGetValue(
+                CreateCoordinateKey(worldTileX, worldTileY),
+                out sample);
+        }
+
+        /// <summary>符号付き絶対タイルX/Yを衝突しない64bit検索キーへ詰めます。</summary>
+        /// <param name="coordinateX">水平絶対タイル座標です。</param>
+        /// <param name="coordinateY">垂直絶対タイル座標です。</param>
+        /// <returns>Xを上位32bit、Yを下位32bitへ保持する可逆キーです。</returns>
+        private static long CreateCoordinateKey(int coordinateX, int coordinateY)
+        {
+            return ((long)coordinateX << 32) | (uint)coordinateY;
         }
 
         /// <summary>
@@ -197,8 +299,60 @@ namespace Farmware.WorldGeneration.Editor
         /// </summary>
         public const int MaximumHydrologyResolution = 64;
 
+        /// <summary>
+        /// C4完成チャンクを再構築する派生水文モードで、1軸に生成してよい代表チャンク数です。
+        /// 3×3を上限にして、1チャンク数秒の診断生成がパン・ズーム1回で無制限に増えないようにします。
+        /// </summary>
+        public const int MaximumDerivedHydrologySampledChunksPerAxis = 3;
+
         /// <summary>進捗通知でEditorのイベントキューを埋めないための通知間隔です。単位は生成画像の行です。</summary>
         private const int ProgressReportRowInterval = 16;
+
+        /// <summary>
+        /// 派生水文では完成チャンク生成が処理時間の大半を占めるため、進捗の95%をチャンク完成数へ割り当てます。
+        /// 残り5%は完成値から色とHoverコピーを作る画像行処理へ割り当て、最後の通知を必ず100%にします。
+        /// </summary>
+        private const float DerivedHydrologyChunkProgressLimit = 0.95f;
+
+        /// <summary>
+        /// Gate待機中も停止と誤認されないよう、派生水文要求を受け付けた直後に表示する準備割合です。
+        /// 完成チャンク1件目の通知より十分小さくし、実作業以上に進んだ表示へなりにくくします。
+        /// </summary>
+        private const float DerivedHydrologyPreparationProgress = 0.01f;
+
+        /// <summary>
+        /// 大容量Persistent作業領域を使う完成水文生成を、Editorプロセス内で同時に1要求へ制限します。
+        /// パンやズームを連続したとき、取消済み要求と最新要求が並列にNative配列を確保してメモリとCPUを増幅しないためです。
+        /// </summary>
+        private static readonly SemaphoreSlim DerivedHydrologyGenerationGate =
+            new SemaphoreSlim(1, 1);
+
+        /// <summary>
+        /// 派生水文の代表座標が各軸最大3論理チャンクへ収まる、現在縮尺用の画像1辺上限を求めます。
+        /// 64タイル未満の間隔では開始位置がチャンク末端でも3件以内になるSpanを使い、64以上では各サンプルを別チャンクとして数えます。
+        /// </summary>
+        /// <param name="tilesPerPixel">1画像ピクセルごとに進める1以上のワールドタイル数です。</param>
+        /// <returns>1以上64以下の派生水文サンプル上限です。</returns>
+        public static int CalculateMaximumDerivedHydrologyResolution(int tilesPerPixel)
+        {
+            if (tilesPerPixel <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(tilesPerPixel));
+            }
+
+            if (tilesPerPixel >= WorldGridConstants.LogicalChunkSize)
+            {
+                // 1サンプルの間隔が1チャンク以上なら、サンプル数そのものが軸上の最大チャンク数になります。
+                return MaximumDerivedHydrologySampledChunksPerAxis;
+            }
+
+            // 開始座標がチャンク末端63でも3チャンク以内に収まる最大距離は128タイルです。
+            // 「最初の1サンプル + 距離内へ置ける間隔数」とし、通常水文の64サンプル上限も越えません。
+            int maximumSpan =
+                (MaximumDerivedHydrologySampledChunksPerAxis - 1)
+                * WorldGridConstants.LogicalChunkSize;
+            return Math.Min(MaximumHydrologyResolution, (maximumSpan / tilesPerPixel) + 1);
+        }
 
         /// <summary>
         /// Canvasの縦横比を保ちながら、1辺が上限以内に収まるTextureサンプル数を求めます。
@@ -322,7 +476,7 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="width">画像の横ピクセル数です。</param>
         /// <param name="height">画像の縦ピクセル数です。</param>
         /// <param name="tilesPerPixel">1ピクセルごとに進めるワールドタイル数です。</param>
-        /// <param name="viewMode">最終地形、論理バイオーム、連続環境軸の表示モードです。</param>
+        /// <param name="viewMode">最終地形、環境、地質、基礎水文、派生水文の表示モードです。</param>
         /// <param name="cancellationToken">新しい操作で不要になった走査を中止するためのTokenです。</param>
         /// <returns>Texture2Dへ適用できる色配列と座標情報です。</returns>
         public static WorldGenerationMapSampleResult Sample(
@@ -358,12 +512,12 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="width">画像の横ピクセル数です。</param>
         /// <param name="height">画像の縦ピクセル数です。</param>
         /// <param name="tilesPerPixel">1ピクセルごとに進めるワールドタイル数です。</param>
-        /// <param name="viewMode">最終地形、論理バイオーム、連続環境軸の表示モードです。</param>
+        /// <param name="viewMode">最終地形、環境、地質、基礎水文、派生水文の表示モードです。</param>
         /// <param name="cancellationToken">新しい操作で不要になった走査を中止するためのTokenです。</param>
         /// <param name="progress">完了割合0〜1の任意通知先です。呼出元でメインスレッドへ戻すProgressを渡し、省略時は通知しません。</param>
         /// <returns>Texture2Dへ適用できる色配列、レイヤー、座標情報です。</returns>
         /// <exception cref="InvalidOperationException">
-        /// 座標端で固定サンプル範囲を安全に確保できないなど、地形生成を完了できない場合に発生します。
+        /// 座標端で固定サンプル範囲を安全に確保できない場合や、完成派生水文を生成できない場合に発生します。
         /// </exception>
         public static WorldGenerationMapSampleResult Sample(
             in WorldGenerationSettings settings,
@@ -399,157 +553,258 @@ namespace Farmware.WorldGeneration.Editor
 
             Color32[] pixelColors = new Color32[width * height];
             bool hasGeneratedData = layer == WorldLayer.Surface;
-            bool isHydrologyViewMode = IsHydrologyViewMode(viewMode);
+            bool isBaseHydrologyViewMode = IsBaseHydrologyViewMode(viewMode);
+            bool isDerivedHydrologyViewMode = IsDerivedHydrologyViewMode(viewMode);
             Dictionary<long, GeneratedHydrologyCell> hydrologyCellCache =
-                isHydrologyViewMode
+                isBaseHydrologyViewMode
                     ? new Dictionary<long, GeneratedHydrologyCell>()
+                    : null;
+            Dictionary<long, HydrologyDiagnosticChunk> diagnosticChunkCache =
+                isDerivedHydrologyViewMode
+                    ? new Dictionary<long, HydrologyDiagnosticChunk>()
+                    : null;
+            Dictionary<long, DerivedHydrologyMapSample> derivedHydrologySamples =
+                isDerivedHydrologyViewMode
+                    ? new Dictionary<long, DerivedHydrologyMapSample>(pixelColors.Length)
                     : null;
             // Map ViewerはThreadPoolでSampleを実行し、4フレームを超える場合があります。Temp系Allocatorの簡易APIを避け、
             // 水文モード中だけPersistent作業領域を1組確保して全ピクセルで再利用し、usingで必ず破棄します。
             using NativeArray<HydrologyUpstreamCandidate> hydrologyFrontier =
-                isHydrologyViewMode
+                isBaseHydrologyViewMode
                     ? new NativeArray<HydrologyUpstreamCandidate>(
                         DeterministicHydrologyCatchmentResolver.MaximumFrontierCapacity,
                         Allocator.Persistent,
                         NativeArrayOptions.UninitializedMemory)
                     : default;
             using NativeArray<HydrologyUpstreamCandidate> hydrologyBasinMembers =
-                isHydrologyViewMode
+                isBaseHydrologyViewMode
                     ? new NativeArray<HydrologyUpstreamCandidate>(
                         DeterministicHydrologyLakeResolver.MaximumBasinMembers,
                         Allocator.Persistent,
                         NativeArrayOptions.UninitializedMemory)
                     : default;
             using NativeArray<HydrologyBasinLookupSlot> hydrologyBasinLookup =
-                isHydrologyViewMode
+                isBaseHydrologyViewMode
                     ? new NativeArray<HydrologyBasinLookupSlot>(
                         DeterministicHydrologyLakeResolver.LookupCapacity,
                         Allocator.Persistent,
                         NativeArrayOptions.ClearMemory)
                     : default;
             HydrologyLakeBasinCache hydrologyBasinCache = default;
+            int diagnosticChunkCount = 0;
+            bool enteredDerivedHydrologyGenerationGate = false;
 
-            // Texture2Dの配列は下端行から始まるため、pixelYの増加をワールドYの増加へそのまま対応させます。
-            for (int pixelY = 0; pixelY < height; pixelY++)
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                int worldTileY = CalculateSampleCoordinate(
-                    centerTileY,
-                    pixelY,
-                    height,
-                    tilesPerPixel);
-
-                for (int pixelX = 0; pixelX < width; pixelX++)
+                if (isDerivedHydrologyViewMode && hasGeneratedData)
                 {
-                    // 1行が長い場合も操作後のキャンセルへ早く反応できるよう、32ピクセルごとに確認します。
-                    if ((pixelX & 31) == 0)
+                    List<ChunkCoordinate> requiredDiagnosticChunks =
+                        CollectRequiredDiagnosticChunkCoordinates(
+                            settings,
+                            layer,
+                            centerTileX,
+                            centerTileY,
+                            width,
+                            height,
+                            tilesPerPixel);
+
+                    // 直前要求の1チャンク完了待ちでも0%に見え続けないよう、Gate待機へ入る直前に準備開始を通知します。
+                    progress?.Report(DerivedHydrologyPreparationProgress);
+                    // 取消待ちの要求はGate取得中にもTokenで終了し、古い要求を順番に実生成しません。
+                    DerivedHydrologyGenerationGate.Wait(cancellationToken);
+                    enteredDerivedHydrologyGenerationGate = true;
+
+                    // 派生水文の重い処理は最初の画像行へ偏るため、先に必要チャンクを列挙順で完成させ、
+                    // 画像行ではなくチャンク完成数に対応した進捗をユーザーへ返します。
+                    for (int chunkIndex = 0;
+                        chunkIndex < requiredDiagnosticChunks.Count;
+                        chunkIndex++)
                     {
-                        cancellationToken.ThrowIfCancellationRequested();
-                    }
-
-                    int worldTileX = CalculateSampleCoordinate(
-                        centerTileX,
-                        pixelX,
-                        width,
-                        tilesPerPixel);
-                    if (hasGeneratedData)
-                    {
-                        if (isHydrologyViewMode)
-                        {
-                            if (!DeterministicHydrologyGenerator.TryGetCellCoordinate(
-                                    settings.Hydrology,
-                                    worldTileX,
-                                    worldTileY,
-                                    out int hydrologyCellX,
-                                    out int hydrologyCellY))
-                            {
-                                throw new InvalidOperationException(
-                                    $"水文セル座標へ変換できません: ({worldTileX}, {worldTileY})");
-                            }
-
-                            long hydrologyKey = CreateCoordinateKey(hydrologyCellX, hydrologyCellY);
-                            if (!hydrologyCellCache.TryGetValue(
-                                    hydrologyKey,
-                                    out GeneratedHydrologyCell hydrologyCell))
-                            {
-                                // 同じ8×8セルを複数ピクセルが指す拡大表示では、最大4,096件の集水・湖探索を一度だけ行います。
-                                if (!TryGenerateHydrologyCellWithReusableWorkspace(
-                                        settings,
-                                        hydrologyCellX,
-                                        hydrologyCellY,
-                                        viewMode == WorldGenerationMapViewMode.HydrologyLake,
-                                        hydrologyFrontier,
-                                        hydrologyBasinMembers,
-                                        hydrologyBasinLookup,
-                                        ref hydrologyBasinCache,
-                                        out hydrologyCell))
-                                {
-                                    throw new InvalidOperationException(
-                                        $"固定水文セルを生成できません: ({hydrologyCellX}, {hydrologyCellY})");
-                                }
-
-                                hydrologyCellCache.Add(hydrologyKey, hydrologyCell);
-                            }
-
-                            pixelColors[(pixelY * width) + pixelX] =
-                                GetHydrologyDisplayColor(viewMode, hydrologyCell);
-                            continue;
-                        }
-
-                        // int座標端で近傍サンプルを確保できない場合は、値0の地形を本物の結果として表示せず、
-                        // EditorWindow側のエラー表示へ伝えます。これにより診断画像とSimulationの失敗判定が一致します。
-                        if (!DeterministicChunkGenerator.TryGenerateTile(
-                                settings,
-                                worldTileX,
-                                worldTileY,
-                                out GeneratedTile generatedTile))
-                        {
-                            throw new InvalidOperationException(
-                                $"地形生成に必要な固定サンプル範囲を確保できません: ({worldTileX}, {worldTileY})");
-                        }
-
-                        GeologySiteData geologySite = default;
-                        bool isGeologySiteBoundary = false;
-                        if (viewMode == WorldGenerationMapViewMode.GeologyDominantSite
-                            || viewMode == WorldGenerationMapViewMode.GeologySiteBoundary)
-                        {
-                            // サイト情報はGeneratedTileへ常駐しないため、この2モードだけで診断用に再生成します。
-                            // 境界は隣接する画像サンプル間で比較し、広域ズームでも1ピクセル以上の線として見えるようにします。
-                            int boundaryProbeDistance = viewMode
-                                    == WorldGenerationMapViewMode.GeologySiteBoundary
-                                ? tilesPerPixel
-                                : 0;
-                            if (!WorldGenerationDebugVisualizationOverlay.TryGetGeologySiteVisualizationData(
-                                    settings,
-                                    worldTileX,
-                                    worldTileY,
-                                    boundaryProbeDistance,
-                                    out geologySite,
-                                    out isGeologySiteBoundary))
-                            {
-                                throw new InvalidOperationException(
-                                    $"地質サイト診断に必要な固定サンプル範囲を確保できません: ({worldTileX}, {worldTileY})");
-                            }
-                        }
-
-                        pixelColors[(pixelY * width) + pixelX] = GetDisplayColor(
-                            viewMode,
-                            generatedTile,
-                            geologySite,
-                            isGeologySiteBoundary);
-                    }
-                    else
-                    {
-                        // 未接続層へ地上Generatorを流用すると、別層が正しく生成されたように見えてしまいます。
-                        // 暗い透明度なしの固定色で「データなし」を示し、座標操作自体は検証できるようにします。
-                        pixelColors[(pixelY * width) + pixelX] = new Color32(24, 28, 36, 255);
+                        GetOrCreateDiagnosticChunk(
+                            settings,
+                            requiredDiagnosticChunks[chunkIndex],
+                            diagnosticChunkCache,
+                            cancellationToken);
+                        float completedChunkFraction =
+                            (chunkIndex + 1f) / requiredDiagnosticChunks.Count;
+                        progress?.Report(
+                            completedChunkFraction * DerivedHydrologyChunkProgressLimit);
                     }
                 }
 
-                // ピクセルごとではなく一定行数と最終行で通知し、正しい地形計算を省略せず待ち時間を可視化します。
-                if ((pixelY + 1) % ProgressReportRowInterval == 0 || pixelY + 1 == height)
+                // Texture2Dの配列は下端行から始まるため、pixelYの増加をワールドYの増加へそのまま対応させます。
+                for (int pixelY = 0; pixelY < height; pixelY++)
                 {
-                    progress?.Report((float)(pixelY + 1) / height);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    int worldTileY = CalculateSampleCoordinate(
+                        centerTileY,
+                        pixelY,
+                        height,
+                        tilesPerPixel);
+
+                    for (int pixelX = 0; pixelX < width; pixelX++)
+                    {
+                        // 1行が長い場合も操作後のキャンセルへ早く反応できるよう、32ピクセルごとに確認します。
+                        if ((pixelX & 31) == 0)
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                        }
+
+                        int worldTileX = CalculateSampleCoordinate(
+                            centerTileX,
+                            pixelX,
+                            width,
+                            tilesPerPixel);
+                        if (hasGeneratedData)
+                        {
+                            if (isDerivedHydrologyViewMode)
+                            {
+                                DerivedHydrologyMapSample derivedSample =
+                                    GetDerivedHydrologySample(
+                                        settings,
+                                        layer,
+                                        worldTileX,
+                                        worldTileY,
+                                        diagnosticChunkCache,
+                                        cancellationToken);
+                                derivedHydrologySamples[
+                                    CreateCoordinateKey(worldTileX, worldTileY)] = derivedSample;
+                                pixelColors[(pixelY * width) + pixelX] =
+                                    GetHydrologyDisplayColor(
+                                        viewMode,
+                                        derivedSample.Cell,
+                                        derivedSample.HydrologyTile,
+                                        derivedSample.SurfaceWaterTile);
+                                continue;
+                            }
+
+                            if (isBaseHydrologyViewMode)
+                            {
+                                if (!DeterministicHydrologyGenerator.TryGetCellCoordinate(
+                                        settings.Hydrology,
+                                        worldTileX,
+                                        worldTileY,
+                                        out int hydrologyCellX,
+                                        out int hydrologyCellY))
+                                {
+                                    throw new InvalidOperationException(
+                                        $"水文セル座標へ変換できません: ({worldTileX}, {worldTileY})");
+                                }
+
+                                long hydrologyKey = CreateCoordinateKey(hydrologyCellX, hydrologyCellY);
+                                if (!hydrologyCellCache.TryGetValue(
+                                        hydrologyKey,
+                                        out GeneratedHydrologyCell hydrologyCell))
+                                {
+                                    // 同じ8×8セルを複数ピクセルが指す拡大表示では、最大4,096件の集水・湖探索を一度だけ行います。
+                                    if (!TryGenerateHydrologyCellWithReusableWorkspace(
+                                            settings,
+                                            hydrologyCellX,
+                                            hydrologyCellY,
+                                            viewMode == WorldGenerationMapViewMode.HydrologyLake,
+                                            hydrologyFrontier,
+                                            hydrologyBasinMembers,
+                                            hydrologyBasinLookup,
+                                            ref hydrologyBasinCache,
+                                            out hydrologyCell))
+                                    {
+                                        throw new InvalidOperationException(
+                                            $"固定水文セルを生成できません: ({hydrologyCellX}, {hydrologyCellY})");
+                                    }
+
+                                    hydrologyCellCache.Add(hydrologyKey, hydrologyCell);
+                                }
+
+                                pixelColors[(pixelY * width) + pixelX] =
+                                    GetHydrologyDisplayColor(viewMode, hydrologyCell);
+                                continue;
+                            }
+
+                            // int座標端で近傍サンプルを確保できない場合は、値0の地形を本物の結果として表示せず、
+                            // EditorWindow側のエラー表示へ伝えます。これにより診断画像とSimulationの失敗判定が一致します。
+                            if (!DeterministicChunkGenerator.TryGenerateTile(
+                                    settings,
+                                    worldTileX,
+                                    worldTileY,
+                                    out GeneratedTile generatedTile))
+                            {
+                                throw new InvalidOperationException(
+                                    $"地形生成に必要な固定サンプル範囲を確保できません: ({worldTileX}, {worldTileY})");
+                            }
+
+                            GeologySiteData geologySite = default;
+                            bool isGeologySiteBoundary = false;
+                            if (viewMode == WorldGenerationMapViewMode.GeologyDominantSite
+                                || viewMode == WorldGenerationMapViewMode.GeologySiteBoundary)
+                            {
+                                // サイト情報はGeneratedTileへ常駐しないため、この2モードだけで診断用に再生成します。
+                                // 境界は隣接する画像サンプル間で比較し、広域ズームでも1ピクセル以上の線として見えるようにします。
+                                int boundaryProbeDistance = viewMode
+                                        == WorldGenerationMapViewMode.GeologySiteBoundary
+                                    ? tilesPerPixel
+                                    : 0;
+                                if (!WorldGenerationDebugVisualizationOverlay.TryGetGeologySiteVisualizationData(
+                                        settings,
+                                        worldTileX,
+                                        worldTileY,
+                                        boundaryProbeDistance,
+                                        out geologySite,
+                                        out isGeologySiteBoundary))
+                                {
+                                    throw new InvalidOperationException(
+                                        $"地質サイト診断に必要な固定サンプル範囲を確保できません: ({worldTileX}, {worldTileY})");
+                                }
+                            }
+
+                            pixelColors[(pixelY * width) + pixelX] = GetDisplayColor(
+                                viewMode,
+                                generatedTile,
+                                geologySite,
+                                isGeologySiteBoundary);
+                        }
+                        else
+                        {
+                            // 未接続層へ地上Generatorを流用すると、別層が正しく生成されたように見えてしまいます。
+                            // 暗い透明度なしの固定色で「データなし」を示し、座標操作自体は検証できるようにします。
+                            pixelColors[(pixelY * width) + pixelX] = new Color32(24, 28, 36, 255);
+                        }
+                    }
+
+                    // ピクセルごとではなく一定行数と最終行で通知し、正しい地形計算を省略せず待ち時間を可視化します。
+                    if ((pixelY + 1) % ProgressReportRowInterval == 0 || pixelY + 1 == height)
+                    {
+                        float completedRowFraction = (float)(pixelY + 1) / height;
+                        float reportedFraction = isDerivedHydrologyViewMode
+                            ? DerivedHydrologyChunkProgressLimit
+                                + ((1f - DerivedHydrologyChunkProgressLimit)
+                                    * completedRowFraction)
+                            : completedRowFraction;
+                        progress?.Report(reportedFraction);
+                    }
+                }
+
+                diagnosticChunkCount = diagnosticChunkCache?.Count ?? 0;
+            }
+            finally
+            {
+                try
+                {
+                    if (diagnosticChunkCache != null)
+                    {
+                        // 完成チャンクの出力配列はSampleだけが所有し、Managedな値コピーを作った後にすべて破棄します。
+                        foreach (HydrologyDiagnosticChunk diagnosticChunk in diagnosticChunkCache.Values)
+                        {
+                            diagnosticChunk.Dispose();
+                        }
+                    }
+                }
+                finally
+                {
+                    if (enteredDerivedHydrologyGenerationGate)
+                    {
+                        // 破棄例外時もGateを占有したままにせず、後続のMap Viewer要求が永久待機することを防ぎます。
+                        DerivedHydrologyGenerationGate.Release();
+                    }
                 }
             }
 
@@ -561,16 +816,241 @@ namespace Farmware.WorldGeneration.Editor
                 centerTileX,
                 centerTileY,
                 tilesPerPixel,
-                pixelColors);
+                viewMode,
+                pixelColors,
+                diagnosticChunkCount,
+                derivedHydrologySamples);
         }
 
-        /// <summary>Map Viewerモードが固定水文セルの再計算を必要とするかを返します。</summary>
+        /// <summary>
+        /// 派生水文画像とHoverコピーに必要な完成診断チャンクを、最初に現れる順で重複なく列挙します。
+        /// 先に総数を確定することで、画像行へ偏らない「完成チャンク数／必要チャンク数」の進捗を表示できます。
+        /// </summary>
+        /// <param name="settings">代表タイルから中心基準8×8水文セルを求める固定設定です。</param>
+        /// <param name="layer">全代表タイルが属する固定ワールドレイヤーです。</param>
+        /// <param name="centerTileX">画像中央の水平タイル座標です。</param>
+        /// <param name="centerTileY">画像中央の垂直タイル座標です。</param>
+        /// <param name="width">画像の横サンプル数です。</param>
+        /// <param name="height">画像の縦サンプル数です。</param>
+        /// <param name="tilesPerPixel">代表サンプル間のワールドタイル数です。</param>
+        /// <returns>タイル所有者と水文セル所有者を含む一意な完成診断チャンク座標です。</returns>
+        private static List<ChunkCoordinate> CollectRequiredDiagnosticChunkCoordinates(
+            in WorldGenerationSettings settings,
+            WorldLayer layer,
+            int centerTileX,
+            int centerTileY,
+            int width,
+            int height,
+            int tilesPerPixel)
+        {
+            List<ChunkCoordinate> requiredChunks = new List<ChunkCoordinate>();
+            HashSet<long> requiredChunkKeys = new HashSet<long>();
+
+            for (int pixelY = 0; pixelY < height; pixelY++)
+            {
+                int worldTileY = CalculateSampleCoordinate(
+                    centerTileY,
+                    pixelY,
+                    height,
+                    tilesPerPixel);
+                for (int pixelX = 0; pixelX < width; pixelX++)
+                {
+                    int worldTileX = CalculateSampleCoordinate(
+                        centerTileX,
+                        pixelX,
+                        width,
+                        tilesPerPixel);
+                    AddRequiredDiagnosticChunk(
+                        WorldGrid.ToChunkCoordinate(layer, worldTileX, worldTileY),
+                        requiredChunkKeys,
+                        requiredChunks);
+
+                    if (!DeterministicHydrologyGenerator.TryGetCellCoordinate(
+                            settings.Hydrology,
+                            worldTileX,
+                            worldTileY,
+                            out int cellX,
+                            out int cellY))
+                    {
+                        throw new InvalidOperationException(
+                            $"派生水文の担当セル座標へ変換できません: Tile=({worldTileX}, {worldTileY})");
+                    }
+
+                    int cellOwnerChunkX = WorldGrid.FloorDivide(
+                        cellX,
+                        DeterministicHydrologyGenerator.CellsPerChunkAxis);
+                    int cellOwnerChunkY = WorldGrid.FloorDivide(
+                        cellY,
+                        DeterministicHydrologyGenerator.CellsPerChunkAxis);
+                    AddRequiredDiagnosticChunk(
+                        new ChunkCoordinate(layer, cellOwnerChunkX, cellOwnerChunkY),
+                        requiredChunkKeys,
+                        requiredChunks);
+                }
+            }
+
+            return requiredChunks;
+        }
+
+        /// <summary>完成診断チャンク座標を、同じX/Yが未登録の場合だけ進捗用の順序付き一覧へ追加します。</summary>
+        /// <param name="coordinate">追加候補の固定レイヤー付き論理チャンク座標です。</param>
+        /// <param name="requiredChunkKeys">登録済みX/Yを判定する検索集合です。呼出元が所有します。</param>
+        /// <param name="requiredChunks">最初に現れた順を保持する座標一覧です。呼出元が所有します。</param>
+        private static void AddRequiredDiagnosticChunk(
+            ChunkCoordinate coordinate,
+            HashSet<long> requiredChunkKeys,
+            List<ChunkCoordinate> requiredChunks)
+        {
+            long key = CreateCoordinateKey(coordinate.X, coordinate.Y);
+            if (requiredChunkKeys.Add(key))
+            {
+                requiredChunks.Add(coordinate);
+            }
+        }
+
+        /// <summary>
+        /// 代表タイルを含む完成診断チャンクと、担当水文セルを所有する完成診断チャンクからC4固定値を取得します。
+        /// 水文セルは中心基準のためチャンク正側4タイルで隣接チャンク所有となり、地形チャンクだけでは取得できません。
+        /// </summary>
+        /// <param name="settings">C3とC4-A〜Dを製品順に再構築する固定設定です。</param>
+        /// <param name="layer">代表タイルが属する固定ワールドレイヤーです。</param>
+        /// <param name="worldTileX">代表タイルの絶対X座標です。</param>
+        /// <param name="worldTileY">代表タイルの絶対Y座標です。</param>
+        /// <param name="diagnosticChunkCache">このSample呼出し中だけ完成チャンクを再利用する所有キャッシュです。</param>
+        /// <param name="cancellationToken">次の重いチャンク生成へ進む前に中止を検出するTokenです。</param>
+        /// <returns>元NativeArrayからManaged値へコピーした派生水文サンプルです。</returns>
+        private static DerivedHydrologyMapSample GetDerivedHydrologySample(
+            in WorldGenerationSettings settings,
+            WorldLayer layer,
+            int worldTileX,
+            int worldTileY,
+            Dictionary<long, HydrologyDiagnosticChunk> diagnosticChunkCache,
+            CancellationToken cancellationToken)
+        {
+            ChunkCoordinate tileChunkCoordinate = WorldGrid.ToChunkCoordinate(
+                layer,
+                worldTileX,
+                worldTileY);
+            HydrologyDiagnosticChunk tileChunk = GetOrCreateDiagnosticChunk(
+                settings,
+                tileChunkCoordinate,
+                diagnosticChunkCache,
+                cancellationToken);
+            ChunkLocalTileCoordinate localTile = WorldGrid.ToLocalTileCoordinate(
+                worldTileX,
+                worldTileY);
+            int tileIndex = WorldGrid.ToTileIndex(localTile.X, localTile.Y);
+            GeneratedSurfaceWaterTile surfaceWaterTile = tileChunk.SurfaceWaterTiles[tileIndex];
+            GeneratedHydrologyTile hydrologyTile = tileChunk.HydrologyTiles[tileIndex];
+
+            if (!DeterministicHydrologyGenerator.TryGetCellCoordinate(
+                    settings.Hydrology,
+                    worldTileX,
+                    worldTileY,
+                    out int cellX,
+                    out int cellY))
+            {
+                throw new InvalidOperationException(
+                    $"派生水文の担当セル座標へ変換できません: Tile=({worldTileX}, {worldTileY})");
+            }
+
+            int cellOwnerChunkX = WorldGrid.FloorDivide(
+                cellX,
+                DeterministicHydrologyGenerator.CellsPerChunkAxis);
+            int cellOwnerChunkY = WorldGrid.FloorDivide(
+                cellY,
+                DeterministicHydrologyGenerator.CellsPerChunkAxis);
+            ChunkCoordinate cellOwnerCoordinate = new ChunkCoordinate(
+                layer,
+                cellOwnerChunkX,
+                cellOwnerChunkY);
+            HydrologyDiagnosticChunk cellOwnerChunk = GetOrCreateDiagnosticChunk(
+                settings,
+                cellOwnerCoordinate,
+                diagnosticChunkCache,
+                cancellationToken);
+            int localCellX = cellX
+                - (cellOwnerChunkX * DeterministicHydrologyGenerator.CellsPerChunkAxis);
+            int localCellY = cellY
+                - (cellOwnerChunkY * DeterministicHydrologyGenerator.CellsPerChunkAxis);
+            int cellIndex = (localCellY * DeterministicHydrologyGenerator.CellsPerChunkAxis)
+                + localCellX;
+            if (localCellX < 0
+                || localCellX >= DeterministicHydrologyGenerator.CellsPerChunkAxis
+                || localCellY < 0
+                || localCellY >= DeterministicHydrologyGenerator.CellsPerChunkAxis
+                || cellIndex < 0
+                || cellIndex >= cellOwnerChunk.HydrologyCells.Length)
+            {
+                throw new InvalidOperationException(
+                    $"派生水文セルのチャンク内Indexが範囲外です: Cell=({cellX}, {cellY}), Owner=({cellOwnerChunkX}, {cellOwnerChunkY})");
+            }
+
+            GeneratedHydrologyCell cell = cellOwnerChunk.HydrologyCells[cellIndex];
+            return new DerivedHydrologyMapSample(cell, surfaceWaterTile, hydrologyTile);
+        }
+
+        /// <summary>
+        /// 指定論理チャンクをC4-Dまで完成生成し、同じSample呼出し中は再利用します。
+        /// 生成途中の失敗段階を例外へ含め、乾燥結果と生成失敗を同じ色として扱いません。
+        /// </summary>
+        /// <param name="settings">完成チャンク生成に使う固定設定です。</param>
+        /// <param name="coordinate">生成または再利用するSurface論理チャンク座標です。</param>
+        /// <param name="diagnosticChunkCache">Sample終了時に全要素を破棄する所有キャッシュです。</param>
+        /// <param name="cancellationToken">未生成チャンクへ進む前に中止を検出するTokenです。</param>
+        /// <returns>全4配列を完成済みの診断チャンクです。</returns>
+        private static HydrologyDiagnosticChunk GetOrCreateDiagnosticChunk(
+            in WorldGenerationSettings settings,
+            ChunkCoordinate coordinate,
+            Dictionary<long, HydrologyDiagnosticChunk> diagnosticChunkCache,
+            CancellationToken cancellationToken)
+        {
+            long key = CreateCoordinateKey(coordinate.X, coordinate.Y);
+            if (diagnosticChunkCache.TryGetValue(key, out HydrologyDiagnosticChunk cached))
+            {
+                return cached;
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!HydrologyDiagnosticChunk.TryGenerate(
+                    settings,
+                    coordinate,
+                    out HydrologyDiagnosticChunk generated,
+                    out HydrologyDiagnosticGenerationStage stage))
+            {
+                throw new InvalidOperationException(
+                    $"派生水文の完成診断チャンクを生成できません: Chunk=({coordinate.X}, {coordinate.Y}), Stage={stage}");
+            }
+
+            diagnosticChunkCache.Add(key, generated);
+            return generated;
+        }
+
+        /// <summary>Map Viewerモードが固定水文の再計算を必要とするかを返します。</summary>
         /// <param name="viewMode">判定する広域表示モードです。</param>
-        /// <returns>流向から湖までの5水文モードならtrueです。</returns>
+        /// <returns>流向から湿原候補までの10水文モードならtrueです。</returns>
         public static bool IsHydrologyViewMode(WorldGenerationMapViewMode viewMode)
         {
             return viewMode >= WorldGenerationMapViewMode.HydrologyFlowDirection
+                && viewMode <= WorldGenerationMapViewMode.HydrologyWetlandCandidate;
+        }
+
+        /// <summary>C3基礎水文セルだけを単独生成する既存5モードかを返します。</summary>
+        /// <param name="viewMode">判定する広域表示モードです。</param>
+        /// <returns>流向から湖までならtrueです。</returns>
+        public static bool IsBaseHydrologyViewMode(WorldGenerationMapViewMode viewMode)
+        {
+            return viewMode >= WorldGenerationMapViewMode.HydrologyFlowDirection
                 && viewMode <= WorldGenerationMapViewMode.HydrologyLake;
+        }
+
+        /// <summary>C4-E1aの完成診断チャンクを必要とする派生水文5モードかを返します。</summary>
+        /// <param name="viewMode">判定する広域表示モードです。</param>
+        /// <returns>地下水から湿原候補までならtrueです。</returns>
+        public static bool IsDerivedHydrologyViewMode(WorldGenerationMapViewMode viewMode)
+        {
+            return viewMode >= WorldGenerationMapViewMode.HydrologyGroundwater
+                && viewMode <= WorldGenerationMapViewMode.HydrologyWetlandCandidate;
         }
 
         /// <summary>
@@ -1182,6 +1662,64 @@ namespace Farmware.WorldGeneration.Editor
 
             Color32 color = WorldGenerationDebugVisualizationOverlay
                 .GetHydrologyVisualizationColor(overlayMode, cell, hasCell);
+            color.a = byte.MaxValue;
+            return color;
+        }
+
+        /// <summary>
+        /// 完成チャンクの水文セル、表流水、自然水文タイルをMap Viewer用の不透明色へ変換します。
+        /// GameビューOverlayと同じ色関数へ同じ固定値を渡し、RGBと分類境界を2つの診断ツールで共有します。
+        /// </summary>
+        /// <param name="viewMode">地下水、自然飽和、泉、自然冠水、湿原候補の広域表示モードです。</param>
+        /// <param name="cell">地下水ポテンシャルと接続状態を持つ完成水文セルです。</param>
+        /// <param name="hydrologyTile">自然飽和、自然冠水、湿原フラグを持つ完成タイルです。</param>
+        /// <param name="surfaceWaterTile">最終確定した泉流を持つ完成表流水タイルです。</param>
+        /// <param name="hasCell">担当水文セルが完成している場合はtrueです。</param>
+        /// <param name="hasTile">2つのタイルBufferが完成している場合はtrueです。</param>
+        /// <returns>Map Viewer背景へ直接設定できるAlpha 255の色です。</returns>
+        public static Color32 GetHydrologyDisplayColor(
+            WorldGenerationMapViewMode viewMode,
+            in GeneratedHydrologyCell cell,
+            in GeneratedHydrologyTile hydrologyTile,
+            in GeneratedSurfaceWaterTile surfaceWaterTile,
+            bool hasCell = true,
+            bool hasTile = true)
+        {
+            if (IsBaseHydrologyViewMode(viewMode))
+            {
+                return GetHydrologyDisplayColor(viewMode, cell, hasCell);
+            }
+
+            WorldGenerationDebugVisualizationMode overlayMode;
+            switch (viewMode)
+            {
+                case WorldGenerationMapViewMode.HydrologyGroundwater:
+                    overlayMode = WorldGenerationDebugVisualizationMode.HydrologyGroundwater;
+                    break;
+                case WorldGenerationMapViewMode.HydrologyNaturalSoilSaturation:
+                    overlayMode = WorldGenerationDebugVisualizationMode.HydrologyNaturalSoilSaturation;
+                    break;
+                case WorldGenerationMapViewMode.HydrologySpring:
+                    overlayMode = WorldGenerationDebugVisualizationMode.HydrologySpring;
+                    break;
+                case WorldGenerationMapViewMode.HydrologyNaturalFlooding:
+                    overlayMode = WorldGenerationDebugVisualizationMode.HydrologyNaturalFlooding;
+                    break;
+                case WorldGenerationMapViewMode.HydrologyWetlandCandidate:
+                    overlayMode = WorldGenerationDebugVisualizationMode.HydrologyWetlandCandidate;
+                    break;
+                default:
+                    return new Color32(0, 0, 0, 0);
+            }
+
+            Color32 color = WorldGenerationDebugVisualizationOverlay
+                .GetHydrologyVisualizationColor(
+                    overlayMode,
+                    cell,
+                    hydrologyTile,
+                    surfaceWaterTile,
+                    hasCell,
+                    hasTile);
             color.a = byte.MaxValue;
             return color;
         }

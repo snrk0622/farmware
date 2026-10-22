@@ -163,8 +163,8 @@
 }
 
 .hover-label {
-    /* 初回から5行分を確保し、地質サイトを含むHover表示で地図が縮んで二度生成されることを防ぎます。 */
-    min-height: 86px;
+    /* 初回から派生水文を含む8行分を確保し、完成後に地図が縮んで重い完成チャンクを二度生成することを防ぎます。 */
+    min-height: 134px;
     flex-shrink: 0;
     padding: 5px 8px;
     background-color: #1b1f26;

@@ -2,8 +2,8 @@
 
 - 更新日: 2026-10-22
 - 対象PR: TERRAIN-01C4-A/B/C/D/E
-- 状態: C4-AはPR #39のmerge commit `2abaa0c5`、C4-BはPR #40のmerge commit `98a67b64`、C4-CはPR #41のmerge commit `cd154385`で完了。C4-DはD1「自然冠水の純粋計算」とD2「湿原規模・ECS接続」の実装・AI検証・人間確認・commitを完了。次の独立した変更単位はC4-E「監査・診断表示」
-- 作業ブランチ: `terrain-01c4d-natural-flooding-wetland`
+- 状態: C4-AはPR #39のmerge commit `2abaa0c5`、C4-BはPR #40のmerge commit `98a67b64`、C4-CはPR #41のmerge commit `cd154385`で完了。C4-DはD1「自然冠水の純粋計算」とD2「湿原規模・ECS接続」の実装・AI検証・人間確認・commitを完了。C4-E1a「完成チャンク診断経路」、E1b「複数Seed集計」、E2「Gameビュー診断」は実装・AI検証・人間確認・commitを完了した。E3「Map Viewer診断」も実装・AI検証・人間確認を完了し、commit許可を受領したためC4-E全体を完了とする。
+- 作業ブランチ: `terrain-01c4e3-hydrology-map-viewer-diagnostics`
 
 ## 1. 目的と前提
 
@@ -22,7 +22,10 @@ TERRAIN-01C4は、TERRAIN-01C2の固定地質とTERRAIN-01C3の8×8水文セル�
 - C4-C 湖水収支・泉: 湖候補を淡水・塩水・一時湖へ確定し、抑制済み泉源と固定淡水小川を追加する。
 - C4-D1 自然冠水の純粋計算: 半径32タイルの恒久淡水源探索、整数平方根、安定同点順、距離・比高・平坦さ・水域規模の整数合成を確定する。固定設定をWorldGenerationSettingsへ追加するが、ECS Bufferは変更しない。
 - C4-D2 湿原規模・ECS接続: チャンク境界を含む水源再構築、4096タイルの自然冠水度、セル内16適格タイル、上下左右4水文セルの広域規模判定をECS・状態ハッシュ・性能記録へ接続する。
-- C4-E 監査・診断表示: 複数Seed監査、Gameビュー、Map Viewer、凡例、中央タイル情報を接続する。
+- C4-E1a 完成チャンク診断経路: 製品Generatorと同じC3、C4-A〜Dの順序で、地形、水文セル、表流水、自然水文を再構築するEditor専用境界を追加する。
+- C4-E1b 複数Seed集計: E1aを有限範囲へ適用し、地下水、自然土壌飽和、湖区分、泉、自然冠水、湿原候補の分布と比較署名をEditorメニューから記録する。
+- C4-E2 Gameビュー診断: 生成済みECS Bufferから個別表示、凡例、中央タイル情報を追加する。
+- C4-E3 Map Viewer診断: E1aの完成チャンク診断経路を広域サンプリングへ再利用し、個別表示、凡例、Hover情報を追加してC4-Eを完了する。
 
 各項目は実装、初心者向け日本語コメント、関連EditMode／PlayModeテスト、文書更新、AI確認を同じ変更単位に含める。人間確認とcommit許可を受けるまでcommitせず、次項目へ自動着手しない。
 
@@ -111,7 +114,31 @@ C4-Cは既存ECS Buffer要素を拡張せず、Persistent生成枠へ21×21の`G
 
 `GeneratedHydrologyTile`は自然飽和、自然冠水、`FreshwaterConnected`・`WetlandTileEligible`・`LargeWetlandExtent`のflagsを持つ6 bytesとなる。`ChunkGenerationSystem`は湖・泉Job後に、周囲8チャンクを4担当ずつ2波で再構築する並列Jobと、担当0〜7を固定順で結合して4096タイルを評価する最終Jobを実行する。`ChunkGenerationNaturalFloodingWait`で完成済みHandleの確定費用を分離し、失敗通知、5 Buffer一括公開、状態ハッシュ、固定Tick境界は既存契約を維持する。PresentationとC4-Cまでの湖表示は変更せず、自然冠水・湿原の診断表示はC4-Eへ残す。
 
-## 8. 現在の検証状態
+## 8. C4-E1aの完成チャンク診断経路
+
+`HydrologyDiagnosticChunk`はEditor専用の完成チャンク生成境界として、C3水文セル、C4-A表流水候補、4096地形タイル、C4-B地下水・自然飽和、C4-C最終湖区分・泉、C4-D自然冠水・湿原規模を製品と同じ順序で実行する。出力は1チャンク分のPersistent `NativeArray`として所有し、成功・失敗・確保例外・生成例外の各経路で破棄する。Surface以外の未接続WorldLayerは配列確保前に拒否し、地上結果を流用しない。Scene、Prefab、ECS World、製品Buffer、生成設定、生成アセットは変更しない。C4-E1bとE3はこの経路を再利用し、診断側へ生成式を複製しない。
+
+### 8.1 C4-E1bの複数Seed集計
+
+`DerivedHydrologyDistributionAnalyzer`は既存の有限`HydrologyDistributionAuditSettings`を受け取り、Seed、チャンクY、チャンクXの固定順で`HydrologyDiagnosticChunk`を生成・破棄する。水文セルでは地下水接続、地下水最大値、最終湖4区分を、タイルでは自然土壌飽和、泉流、自然冠水、湿原資格、広域湿原規模、2ポテンシャルの最大値を集計する。比較署名には水文セルの絶対座標・地下水・接続bit・最終湖区分と、製品状態ハッシュと同じ関数による表流水・自然水文の全固定値を含める。
+
+Editorメニュー`Farmware > World Generation > Analyze Derived Hydrology Distribution`は既定3 Seedの各原点1チャンクをThreadPoolで生成し、Editor操作を止めずにConsoleへ結果を返す。同じ監査の二重起動だけを無効化し、Scene、Prefab、ECS World、製品生成結果、生成設定、アセットは変更しない。有限試料で分類が0件でも異常終了させず、0件を明示したレポート、境界値テスト、後続C4-E2／E3の可視化を合わせて判断する。
+
+既定条件では3チャンク、192水文セル、12,288タイルを15.91秒で完走した。地下水接続6セル、自然飽和56タイル、越流淡水湖4セル、自然冠水3,570タイル、湿原資格2,211タイル、広域湿原規模2,688タイルを観測し、最大地下水48,737、最大自然飽和40,236、最大自然冠水64,281、比較署名`28C93E4ACD468FBD`となった。一時湖、恒久塩湖、閉鎖淡水湖、泉流はこの既定試料で0件だが、各分類の生成可能性はC4-Cの境界テストで別に固定している。
+
+### 8.2 C4-E2のGameビュー診断
+
+`WorldGenerationDebugVisualizationOverlay`は、完成チャンクEntityの`GeneratedHydrologyCell`、`GeneratedSurfaceWaterTile`、`GeneratedHydrologyTile`を読み、地下水、自然土壌飽和、泉、自然冠水、湿原候補を5つの独立したEditorメニューへ接続する。地下水は8×8水文セルのポテンシャルと接続境界32,768、自然飽和と自然冠水は1タイルごとの0〜65,535連続値、泉は最終`SpringStream`、湿原候補は条件外、局所資格、広域規模を色分けする。中央HUDは3 Bufferの固定値と資格bitを表示し、凡例も実描画と同じ色変換APIを使う。
+
+可視化は完成済みECS Bufferの読み取りだけを行い、生成式を再実装せず、ECS状態も変更しない。現在降雨、灌水、排水、現在土壌水分、現在水位は入力に取らないため、固定生成値と現在水文は混在しない。C4-E2ではGameビューだけを対象とし、Map Viewerの完成チャンクサンプリング、広域表示、Hover情報はC4-E3へ残す。Scene、Prefab、SimulationのBuffer構造、生成設定、状態ハッシュは変更しない。
+
+### 8.3 C4-E3のMap Viewer診断
+
+`WorldGenerationMapSampler`は、地下水、自然土壌飽和、泉、自然冠水、湿原候補の5モードでC4-E1aの`HydrologyDiagnosticChunk`をThreadPoolから生成し、同じ要求内では論理チャンク座標ごとに再利用する。代表タイルの表流水・自然水文はタイル所有チャンクから、中心基準8×8水文セルは担当セル所有チャンクから取得する。正側境界4タイルで両者の所有チャンクが分かれる場合も、隣接完成チャンクを明示的に取得する。完成Native配列は画像生成の成功・取消・失敗にかかわらず要求終了時に破棄し、Hover用の固定値だけをManaged値へコピーする。
+
+完成チャンク生成は1件数秒を要するため、通常768、基礎水文64とは別に、現在の`Tiles Per Pixel`で代表タイルの所有チャンクが各軸最大3件となる動的解像度上限を設ける。担当セル用の隣接チャンクを含む実生成数は完了表示へ記録する。生成は既存の非同期要求、進捗、取消を使い、Pointer移動では再生成しない。大容量Persistent作業領域を持つ派生水文要求はEditorプロセス内で1本に直列化し、連続操作時は取消済み要求が現在の1チャンクを破棄してから最新要求へ生成権を渡す。5モードのRGBと分類条件、凡例はC4-E2のGameビュー色変換APIを共有し、Hover／中央情報へ地下水値・接続、自然飽和、泉、自然冠水、淡水接続、湿原資格、広域規模を表示する。派生水文を含む8行分のHover高をUSSで初回から確保し、完成直後のGeometry変更による二重生成を防ぐ。Scene、Prefab、Simulation Buffer、生成設定、状態ハッシュ、UXML構造は変更しない。
+
+## 9. 現在の検証状態
 
 - ブランチ作成前の`develop`はPR #38のmerge commit `1857386c`で、作業ツリーはクリーンだった。
 - C4-A1では、河道Anchor用と経路同点解決用のSaltを分離し、最低標高Anchor、最大16×16・256ノードの8近傍経路、無効入力時の部分結果非公開を純粋計算として追加した。最大標高だけを第1探索で確定し、その標高以下へ制限した第2探索で上り合計、辺数、標高合計、安定順位を比較する。これにより、後段の高地で最大標高が同値化したときに、上り合計の良い別経路を早く破棄しない。
@@ -143,3 +170,10 @@ C4-Cは既存ECS Buffer要素を拡張せず、Persistent生成枠へ21×21の`G
 - 初期の直列製品JobはPlayModeストリーミング3件で300フレーム上限を超えたため、周囲8チャンクを4担当ずつ2波へ分割し、最終結合だけを固定順で行う形へ変更した。8担当一波も比較したが、製品統合テストの短縮が1.3408秒から1.2956秒の小差に留まり、1枠約5MiBの追加常駐領域に見合わないため採用していない。BatchModeの高速空フレームは実プレイよりWorker時間が短いため、PlayMode待機は300フレーム上限を保ったまま1未完了フレーム当たり10msだけWorkerへ譲る。
 - PR #42レビュー修正後の最終ソースでは、塩湖・一時湖・未分類湖をLake由来の淡水接続から除外し、越流淡水湖・閉鎖淡水湖だけを認める境界10件を追加した。対象25件（明示的性能3件を含む）は61.29秒、World Generation EditMode 542件は276.43秒、PlayMode 56件は38.65秒で全件成功し、厳格再コンパイルはエラー0件・警告0件だった。C4-D2の実装・AI検証・性能／メモリ記録は完了した。SampleSceneの通常移動、チャンク境界往復、体感停止、Console、Profilerの`ChunkGenerationNaturalFloodingWait`と左移動時の先読み修正は、2026-10-22に人間確認を完了した。
 - 初回人間確認で、初期配置から左へ移動したときに左隣チャンクが一時的に未描画となる回帰が見つかった。C4-D2の負荷増加に対し、既存先読み順が左隣より左下・左上角を先に予約していたことが原因である。`ChunkStreamingSystem`を中心、上下左右、角の順へ修正し、修正後のAI SampleScene再現では中心のActive化時に左隣もInactiveとして生成済みで、左移動後に描画空白がないことを確認した。同時生成上限2、生成算式、固定ハッシュ、メモリ容量は変更しない。修正後のEditMode 532件とPlayMode 56件は全件成功し、人間再確認でも描画空白が解消したことを確認した。
+- C4-E1aでは完成チャンク診断器をEditor Assemblyへ追加し、成功時の4配列、Surface以外の拒否、重複Disposeを対象テストで確認した。Unity 6000.3.8f1 Editorの厳格再コンパイルは警告0件・エラー0件、最終対象EditMode 2件は8.70秒、World Generation EditMode Assembly 544件は283.63秒で全件成功した。Unity CLIと既存Pipeline間の旧コマンド名照会エラーだけを内容確認後に消去し、最終Console実状態もエラー0件・警告0件である。複数Seed集計、比較署名、EditorメニューはC4-E1bへ分離した。Scene、Prefab、ECS World、製品生成結果、生成設定、アセットは変更していない。2026-10-22に人間確認を完了し、commit許可を受けた。
+- C4-E1bではC4-E1aの完成チャンクを使う複数Seed集計器、非同期Editorメニュー、1 Seed・1 Chunkの決定論テストを追加した。Unity 6000.3.8f1 Editorの厳格再コンパイルは警告0件・エラー0件、最終対象EditMode 1件は9.88秒、World Generation EditMode Assembly 545件は293.98秒で全件成功した。既定3 Seed監査も15.91秒で完走し、0件分類を含む件数・極値・比較署名をConsoleへ記録した。Unity CLI 1.0.0-beta.14と既存Pipeline 0.8.0-exp.1間の旧コマンド名照会エラーは監査処理と無関係であり、内容確認後の最終Console実状態はコンパイル失敗なし、エラー0件、警告0件である。2026-10-22に人間が実メニューの完走、192水文セル、12,288タイル、比較署名`28C93E4ACD468FBD`の一致を確認し、commitを許可した。
+- C4-E2では完成チャンクEntityの3 Bufferを読むGameビュー用の地下水、自然土壌飽和、泉、自然冠水、湿原候補メニュー、色、凡例、中央情報を追加した。Unity 6000.3.8f1 Editorの厳格再コンパイルは警告0件・エラー0件、対象`HydrologyVisualizationTests` 9件は0.49秒、World Generation EditMode Assembly 547件は294.90秒で全件成功した。PlayMode AssemblyはCLIの旧`editor status`エラー混入で初回56件中1件だけログ未許可となったが、同じ1件を分離再実行して18.68秒で成功した。AIはSampleSceneで全5メニュー、進行フレーム、色面、凡例、中央固定値を確認し、最終Consoleをエラー0件・警告0件とした。現在水文、Map Viewer、Scene、Prefab、Simulation Buffer、生成設定、状態ハッシュは変更していない。2026-10-22の人間確認では、高速移動中に秒単位の一時的な表示遅延が見られたが、停止後に表示が収束することを確認し、開発者専用診断として許容した。AIの同一入力による診断ON／OFF比較では追加の入力遅延を確認せず、人間確認とcommit許可を完了した。
+- C4-E3ではMap Viewerへ完成派生水文5モード、共有色、凡例、8行Hover、動的解像度上限、要求直列化、実完成チャンク数表示を追加した。Unity 6000.3.8f1 Editorの厳格再コンパイルは警告0件・エラー0件、`HydrologyVisualizationTests` 11件は21.03秒、`WorldGenerationMapViewerTests` 52件は6.01秒で全件成功した。正側境界でタイル所有チャンクと水文セル所有チャンクが分かれるThreadPool統合テストは、2完成チャンクを13.876秒で生成して値・座標・Hover・色の一致を確認した。実Windowの`Hydrology Wetland Candidate`は495サンプル・6完成チャンクを51.31秒で一度だけ生成し、凡例、色面、8行の中央／Hover固定値、完了後に自動再生成しないことを確認した。全World Generation EditMode一括実行はUnityの`RunFinished`後もPipelineの分離ジョブが`running`のまま結果を返さず、収集済みの成功件数を確定できなかったため未検証として残す。Scene、Prefab、Simulation Buffer、生成設定、状態ハッシュ、UXML構造は変更していない。2026-10-22に人間確認とcommit許可を完了した。
+- Groundwaterの人間確認で、重い新モードの生成中に旧画像を保持している間、Hoverだけが新Dropdownモードを参照して「完成派生水文サンプルを取得できません」と表示する問題が見つかった。サンプル結果へ生成時の表示モードを保存し、Hoverと基礎水文の詳細生成を適用済み画像モードへ合わせた。修正後の厳格再コンパイルは成功し、`HydrologyVisualizationTests` 11件は17.33秒、`WorldGenerationMapViewerTests` 52件は0.46秒で全件成功した。実WindowでもGroundwater開始直後に旧Terrain画像とTerrain情報を維持し、誤った取得失敗を表示しないことを確認した。修正後の人間再確認も完了した。
+- 同じ人間確認で派生水文5モードが長時間0%に見える問題も見つかった。低解像度の高さ15行に対して既存通知間隔が16行だったうえ、重い完成チャンク生成が最初の行へ集中していたことが原因であり、処理自体は継続していた。必要なタイル所有・水文セル所有チャンクを先に重複なく列挙し、Gate待機開始1%、完成チャンク生成95%、画像行処理5%として通知するよう修正した。厳格再コンパイルは警告0件・エラー0件、進捗回帰を含む`HydrologyVisualizationTests` 11件は17.18秒、通常行進捗を含む`WorldGenerationMapViewerTests` 52件は0.61秒で全件成功した。
+- 2026-10-22に人間が派生水文の段階進捗、生成完了、Hover情報を再確認し、C4-E3のcommitを許可した。

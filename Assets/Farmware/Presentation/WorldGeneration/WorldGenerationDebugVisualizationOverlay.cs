@@ -1,4 +1,4 @@
-// このファイルは、ECSで生成済みの可視タイルと固定水文・最終湖区分をPlayMode中だけ色分けして、生成結果を確認できるようにします。
+// このファイルは、ECSで生成済みの可視タイルと固定水文・派生水文をPlayMode中だけ色分けして、生成結果を確認できるようにします。
 // 操作入口はEditor AssemblyのWorldGenerationDebugVisualizationMenuに置き、Simulationとプレイヤー用F3/F4入力から分離します。
 
 using System.Collections.Generic;
@@ -107,7 +107,22 @@ namespace Farmware.WorldGeneration.Presentation
         HydrologySurfaceWater = 28,
 
         /// <summary>閉鎖流域、固定湖候補、湖面、越流、打切り流域を固定色で表示します。</summary>
-        HydrologyLake = 29
+        HydrologyLake = 29,
+
+        /// <summary>0〜65,535の固定地下水ポテンシャルを低値から高値の連続色で表示します。</summary>
+        HydrologyGroundwater = 30,
+
+        /// <summary>0〜65,535の固定自然土壌飽和ポテンシャルを乾燥側から飽和側の連続色で表示します。</summary>
+        HydrologyNaturalSoilSaturation = 31,
+
+        /// <summary>固定表流水Bufferで最終確定した泉流を、ほかの表流水と分けて表示します。</summary>
+        HydrologySpring = 32,
+
+        /// <summary>0〜65,535の固定自然冠水ポテンシャルを低値から高値の連続色で表示します。</summary>
+        HydrologyNaturalFlooding = 33,
+
+        /// <summary>湿原条件外、局所湿原候補、広域湿原規模を3種類の固定色で表示します。</summary>
+        HydrologyWetlandCandidate = 34
     }
 
     /// <summary>
@@ -361,6 +376,9 @@ namespace Farmware.WorldGeneration.Presentation
                         default,
                         default,
                         false,
+                        default,
+                        false,
+                        default,
                         default,
                         default,
                         default);
@@ -715,16 +733,16 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// 指定モードがGeneratedHydrologyCellを読むTERRAIN-01C3診断表示かを返します。
+        /// 指定モードが固定生成の水文Bufferを読む診断表示かを返します。
         /// Overlay、Map Viewer、凡例が同じ判定を共有し、水文Bufferを不要な表示で走査しないために使用します。
         /// </summary>
         /// <param name="mode">判定する開発者用可視化モードです。</param>
-        /// <returns>流向・終端・集水・表流水・湖のいずれかならtrueです。</returns>
+        /// <returns>C3の基礎水文またはC4の派生水文を表示するモードならtrueです。</returns>
         public static bool IsHydrologyVisualizationMode(
             WorldGenerationDebugVisualizationMode mode)
         {
             return mode >= WorldGenerationDebugVisualizationMode.HydrologyFlowDirection
-                && mode <= WorldGenerationDebugVisualizationMode.HydrologyLake;
+                && mode <= WorldGenerationDebugVisualizationMode.HydrologyWetlandCandidate;
         }
 
         /// <summary>
@@ -852,6 +870,90 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
+        /// 生成済みの水文セル、固定表流水、自然水文タイルを、C4派生水文の診断色へ変換します。
+        /// 降雨、灌水、排水などの現在状態は引数に取らず、固定生成値と現在水文を混在させません。
+        /// </summary>
+        /// <param name="mode">地下水、自然飽和、泉、自然冠水、湿原候補のいずれかです。</param>
+        /// <param name="cell">地下水ポテンシャルを持つ固定水文セルです。</param>
+        /// <param name="hydrologyTile">自然飽和、自然冠水、湿原フラグを持つ固定タイルです。</param>
+        /// <param name="surfaceWaterTile">最終確定した泉流を持つ固定表流水タイルです。</param>
+        /// <param name="hasCell">対象タイルを担当する生成済み水文セルが存在する場合はtrueです。</param>
+        /// <param name="hasTile">対象チャンクの2つのタイルBufferが完成している場合はtrueです。</param>
+        /// <returns>Gameビューへ重ねる半透明RGBA色です。対象外モードは既存水文色または透明色を返します。</returns>
+        public static Color GetHydrologyVisualizationColor(
+            WorldGenerationDebugVisualizationMode mode,
+            in GeneratedHydrologyCell cell,
+            in GeneratedHydrologyTile hydrologyTile,
+            in GeneratedSurfaceWaterTile surfaceWaterTile,
+            bool hasCell = true,
+            bool hasTile = true)
+        {
+            if (mode <= WorldGenerationDebugVisualizationMode.HydrologyLake)
+            {
+                // C3由来の5モードは従来と同じ水文セルだけを正とし、C4 Buffer追加で色を変えません。
+                return GetHydrologyVisualizationColor(mode, cell, hasCell);
+            }
+
+            if (!hasTile
+                || (mode == WorldGenerationDebugVisualizationMode.HydrologyGroundwater && !hasCell))
+            {
+                // 生成待ちを値0と誤認しないよう、既存水文診断と同じ専用色を使用します。
+                return new Color32(54, 34, 62, 210);
+            }
+
+            switch (mode)
+            {
+                case WorldGenerationDebugVisualizationMode.HydrologyGroundwater:
+                    bool isGroundwaterConnected = (cell.ConnectionFlags
+                        & HydrologyConnectionFlags.Groundwater) != 0;
+                    if (!isGroundwaterConnected)
+                    {
+                        float disconnectedValue = cell.GroundwaterPotential / 32767f;
+                        return Color.Lerp(
+                            new Color32(72, 50, 38, 220),
+                            new Color32(196, 164, 76, 236),
+                            Mathf.Clamp01(disconnectedValue));
+                    }
+
+                    float connectedValue = (cell.GroundwaterPotential - 32768) / 32767f;
+                    return Color.Lerp(
+                        new Color32(42, 158, 170, 238),
+                        new Color32(78, 238, 246, 246),
+                        Mathf.Clamp01(connectedValue));
+
+                case WorldGenerationDebugVisualizationMode.HydrologyNaturalSoilSaturation:
+                    return Color.Lerp(
+                        new Color32(112, 70, 38, 224),
+                        new Color32(72, 206, 132, 244),
+                        hydrologyTile.NaturalSoilSaturationPotential / (float)ushort.MaxValue);
+
+                case WorldGenerationDebugVisualizationMode.HydrologySpring:
+                    return surfaceWaterTile.Type == SurfaceWaterTileType.SpringStream
+                        ? new Color32(62, 236, 246, 248)
+                        : new Color32(46, 46, 54, 210);
+
+                case WorldGenerationDebugVisualizationMode.HydrologyNaturalFlooding:
+                    return Color.Lerp(
+                        new Color32(74, 66, 58, 220),
+                        new Color32(52, 118, 238, 246),
+                        hydrologyTile.NaturalFloodingPotential / (float)ushort.MaxValue);
+
+                case WorldGenerationDebugVisualizationMode.HydrologyWetlandCandidate:
+                    if ((hydrologyTile.Flags & GeneratedHydrologyTileFlags.LargeWetlandExtent) != 0)
+                    {
+                        return new Color32(62, 212, 104, 246);
+                    }
+
+                    return (hydrologyTile.Flags & GeneratedHydrologyTileFlags.WetlandTileEligible) != 0
+                        ? new Color32(226, 196, 68, 242)
+                        : new Color32(54, 50, 46, 210);
+
+                default:
+                    return Color.clear;
+            }
+        }
+
+        /// <summary>
         /// 地質の安定分類を、GameビューとMap Viewerで共有する識別色へ変換します。
         /// 色は観察専用であり、分類抽選やゲーム判定には使用しません。
         /// </summary>
@@ -933,7 +1035,9 @@ namespace Farmware.WorldGeneration.Presentation
                 ComponentType.ReadOnly<ChunkGenerationStatus>(),
                 ComponentType.ReadOnly<GeneratedTile>(),
                 ComponentType.ReadOnly<GeneratedResourceTile>(),
-                ComponentType.ReadOnly<GeneratedHydrologyCell>());
+                ComponentType.ReadOnly<GeneratedHydrologyCell>(),
+                ComponentType.ReadOnly<GeneratedSurfaceWaterTile>(),
+                ComponentType.ReadOnly<GeneratedHydrologyTile>());
             settingsQuery = entityManager.CreateEntityQuery(ComponentType.ReadOnly<WorldGenerationSettings>());
             resourceSettingsQuery = entityManager.CreateEntityQuery(
                 ComponentType.ReadOnly<ResourceGenerationSettings>());
@@ -973,6 +1077,9 @@ namespace Farmware.WorldGeneration.Presentation
             GeneratedResourceTile centerResource = default;
             bool hasCenterHydrologyCell = false;
             GeneratedHydrologyCell centerHydrologyCell = default;
+            bool hasCenterHydrologyTile = false;
+            GeneratedHydrologyTile centerHydrologyTile = default;
+            GeneratedSurfaceWaterTile centerSurfaceWaterTile = default;
             EntityManager entityManager = presentationWorld.EntityManager;
             bool hasGenerationSettings = settingsQuery.CalculateEntityCount() == 1;
             WorldGenerationSettings settings = hasGenerationSettings
@@ -1041,8 +1148,14 @@ namespace Farmware.WorldGeneration.Presentation
                     entityManager.GetBuffer<GeneratedTile>(entities[entityIndex], true);
                 DynamicBuffer<GeneratedResourceTile> resources =
                     entityManager.GetBuffer<GeneratedResourceTile>(entities[entityIndex], true);
+                DynamicBuffer<GeneratedSurfaceWaterTile> surfaceWaterTiles =
+                    entityManager.GetBuffer<GeneratedSurfaceWaterTile>(entities[entityIndex], true);
+                DynamicBuffer<GeneratedHydrologyTile> hydrologyTiles =
+                    entityManager.GetBuffer<GeneratedHydrologyTile>(entities[entityIndex], true);
                 if (tiles.Length != WorldGridConstants.TilesPerChunk
-                    || resources.Length != WorldGridConstants.TilesPerChunk)
+                    || resources.Length != WorldGridConstants.TilesPerChunk
+                    || surfaceWaterTiles.Length != WorldGridConstants.TilesPerChunk
+                    || hydrologyTiles.Length != WorldGridConstants.TilesPerChunk)
                 {
                     continue;
                 }
@@ -1062,6 +1175,8 @@ namespace Farmware.WorldGeneration.Presentation
                         int tileIndex = (localY * WorldGridConstants.LogicalChunkSize) + localX;
                         GeneratedTile tile = tiles[tileIndex];
                         GeneratedResourceTile resource = resources[tileIndex];
+                        GeneratedSurfaceWaterTile surfaceWaterTile = surfaceWaterTiles[tileIndex];
+                        GeneratedHydrologyTile hydrologyTile = hydrologyTiles[tileIndex];
                         float rockWallShadowOpacity =
                             currentMode == WorldGenerationDebugVisualizationMode.RockWall
                             && hasGenerationSettings
@@ -1122,6 +1237,8 @@ namespace Farmware.WorldGeneration.Presentation
                             ? GetHydrologyVisualizationColor(
                                 currentMode,
                                 hydrologyCell,
+                                hydrologyTile,
+                                surfaceWaterTile,
                                 hasHydrologyCell)
                             : GetVisualizationColor(
                                 currentMode,
@@ -1144,6 +1261,9 @@ namespace Farmware.WorldGeneration.Presentation
                             centerResource = resource;
                             hasCenterHydrologyCell = hasHydrologyCell;
                             centerHydrologyCell = hydrologyCell;
+                            hasCenterHydrologyTile = true;
+                            centerHydrologyTile = hydrologyTile;
+                            centerSurfaceWaterTile = surfaceWaterTile;
                         }
                     }
                 }
@@ -1157,6 +1277,9 @@ namespace Farmware.WorldGeneration.Presentation
                 centerResource,
                 hasCenterHydrologyCell,
                 centerHydrologyCell,
+                hasCenterHydrologyTile,
+                centerHydrologyTile,
+                centerSurfaceWaterTile,
                 settings,
                 resourceSettings);
         }
@@ -1641,6 +1764,9 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="centerResource">取得できた中央GeneratedResourceTileです。</param>
         /// <param name="hasCenterHydrologyCell">中央タイルに対応する生成済み水文セルを取得できた場合はtrueです。</param>
         /// <param name="centerHydrologyCell">中央タイルを担当する8×8水文セルの固定生成結果です。</param>
+        /// <param name="hasCenterHydrologyTile">中央タイルの派生水文と固定表流水を取得できた場合はtrueです。</param>
+        /// <param name="centerHydrologyTile">中央タイルの自然飽和、自然冠水、湿原フラグです。</param>
+        /// <param name="centerSurfaceWaterTile">中央タイルへ最終確定した固定表流水です。</param>
         /// <param name="settings">現在の生成閾値を保持するSingleton値です。</param>
         /// <param name="resourceSettings">現在の資源最低間隔と群半径を保持するSingleton値です。</param>
         private void DrawInformationPanel(
@@ -1650,12 +1776,14 @@ namespace Farmware.WorldGeneration.Presentation
             GeneratedResourceTile centerResource,
             bool hasCenterHydrologyCell,
             GeneratedHydrologyCell centerHydrologyCell,
+            bool hasCenterHydrologyTile,
+            GeneratedHydrologyTile centerHydrologyTile,
+            GeneratedSurfaceWaterTile centerSurfaceWaterTile,
             WorldGenerationSettings settings,
             ResourceGenerationSettings resourceSettings)
         {
             const int generatedTileInformationLineCount = 26;
             const int waitingInformationLineCount = 1;
-            const int hydrologyInformationLineCount = 6;
             const float bottomPadding = 6f;
             bool showsTwoLegendRows = currentMode == WorldGenerationDebugVisualizationMode.Biome
                 || currentMode == WorldGenerationDebugVisualizationMode.GeologyClass
@@ -1869,15 +1997,42 @@ namespace Farmware.WorldGeneration.Presentation
                     {
                         centerInformation += "\nHydrology cell is waiting for generation.";
                     }
+
+                    if (hasCenterHydrologyTile)
+                    {
+                        // タイル別の固定生成値は専用Bufferから読み、現在水分や現在冠水へ置き換えません。
+                        string groundwaterValue = hasCenterHydrologyCell
+                            ? centerHydrologyCell.GroundwaterPotential.ToString()
+                            : "Unavailable";
+                        bool hasSpring = centerSurfaceWaterTile.Type
+                            == SurfaceWaterTileType.SpringStream;
+                        bool isFreshwaterConnected = (centerHydrologyTile.Flags
+                            & GeneratedHydrologyTileFlags.FreshwaterConnected) != 0;
+                        bool isWetlandEligible = (centerHydrologyTile.Flags
+                            & GeneratedHydrologyTileFlags.WetlandTileEligible) != 0;
+                        bool isLargeWetland = (centerHydrologyTile.Flags
+                            & GeneratedHydrologyTileFlags.LargeWetlandExtent) != 0;
+                        centerInformation += "\n"
+                            + $"Groundwater={groundwaterValue}  "
+                            + $"NaturalSaturation={centerHydrologyTile.NaturalSoilSaturationPotential}  "
+                            + $"NaturalFlooding={centerHydrologyTile.NaturalFloodingPotential}\n"
+                            + $"Spring={(hasSpring ? "Yes" : "No")}  "
+                            + $"Freshwater={(isFreshwaterConnected ? "Yes" : "No")}  "
+                            + $"WetlandEligible={(isWetlandEligible ? "Yes" : "No")}  "
+                            + $"LargeWetland={(isLargeWetland ? "Yes" : "No")}";
+                    }
+                    else
+                    {
+                        centerInformation += "\nDerived hydrology tile is waiting for generation.";
+                    }
                 }
             }
+            int hydrologyInformationLineCount = IsHydrologyVisualizationMode(currentMode)
+                ? (hasCenterHydrologyCell ? 6 : 1) + (hasCenterHydrologyTile ? 2 : 1)
+                : 0;
             int informationLineCount = hasCenterTile
                 ? generatedTileInformationLineCount
-                    + (IsHydrologyVisualizationMode(currentMode)
-                        ? hasCenterHydrologyCell
-                            ? hydrologyInformationLineCount
-                            : 1
-                        : 0)
+                    + hydrologyInformationLineCount
                 : waitingInformationLineCount;
 
             // 長い閾値情報を2行へ分け、実際の行高からパネル下端を求めることで、見切れと余分な下余白を同時に防ぎます。
@@ -2058,6 +2213,31 @@ namespace Farmware.WorldGeneration.Presentation
             if (mode == WorldGenerationDebugVisualizationMode.HydrologyLake)
             {
                 return "Hydrology Lake";
+            }
+
+            if (mode == WorldGenerationDebugVisualizationMode.HydrologyGroundwater)
+            {
+                return "Hydrology Groundwater";
+            }
+
+            if (mode == WorldGenerationDebugVisualizationMode.HydrologyNaturalSoilSaturation)
+            {
+                return "Hydrology Natural Soil Saturation";
+            }
+
+            if (mode == WorldGenerationDebugVisualizationMode.HydrologySpring)
+            {
+                return "Hydrology Spring";
+            }
+
+            if (mode == WorldGenerationDebugVisualizationMode.HydrologyNaturalFlooding)
+            {
+                return "Hydrology Natural Flooding";
+            }
+
+            if (mode == WorldGenerationDebugVisualizationMode.HydrologyWetlandCandidate)
+            {
+                return "Hydrology Wetland Candidate";
             }
 
             return mode == WorldGenerationDebugVisualizationMode.VolcanicActivityPotential
@@ -2577,6 +2757,78 @@ namespace Farmware.WorldGeneration.Presentation
                 case WorldGenerationDebugVisualizationMode.HydrologyLake:
                     DrawHydrologyLakeLegend(ref nextX, startX, y);
                     break;
+                case WorldGenerationDebugVisualizationMode.HydrologyGroundwater:
+                    DrawDerivedHydrologyLegendEntry(
+                        mode, ref nextX, y,
+                        new GeneratedHydrologyCell { GroundwaterPotential = 0 },
+                        default, default, "0 (Dry)", 76f);
+                    DrawDerivedHydrologyLegendEntry(
+                        mode, ref nextX, y,
+                        new GeneratedHydrologyCell { GroundwaterPotential = 32767 },
+                        default, default, "32767 (No Link)", 112f);
+                    DrawDerivedHydrologyLegendEntry(
+                        mode, ref nextX, y,
+                        new GeneratedHydrologyCell
+                        {
+                            GroundwaterPotential = 32768,
+                            ConnectionFlags = HydrologyConnectionFlags.Groundwater
+                        },
+                        default, default, "32768 (Link)", 104f);
+                    DrawDerivedHydrologyLegendEntry(
+                        mode, ref nextX, y,
+                        new GeneratedHydrologyCell
+                        {
+                            GroundwaterPotential = ushort.MaxValue,
+                            ConnectionFlags = HydrologyConnectionFlags.Groundwater
+                        },
+                        default, default, "65535", 64f);
+                    break;
+                case WorldGenerationDebugVisualizationMode.HydrologyNaturalSoilSaturation:
+                    DrawDerivedHydrologyLegendEntry(
+                        mode, ref nextX, y, default, default, default, "0 (Dry)", 88f);
+                    DrawDerivedHydrologyLegendEntry(
+                        mode, ref nextX, y, default,
+                        new GeneratedHydrologyTile
+                        {
+                            NaturalSoilSaturationPotential = ushort.MaxValue
+                        },
+                        default, "65535 (Wet)", 108f);
+                    break;
+                case WorldGenerationDebugVisualizationMode.HydrologySpring:
+                    DrawDerivedHydrologyLegendEntry(
+                        mode, ref nextX, y, default, default, default, "No Spring", 96f);
+                    DrawDerivedHydrologyLegendEntry(
+                        mode, ref nextX, y, default, default,
+                        new GeneratedSurfaceWaterTile { Type = SurfaceWaterTileType.SpringStream },
+                        "Spring Stream", 112f);
+                    break;
+                case WorldGenerationDebugVisualizationMode.HydrologyNaturalFlooding:
+                    DrawDerivedHydrologyLegendEntry(
+                        mode, ref nextX, y, default, default, default, "0 (Dry)", 88f);
+                    DrawDerivedHydrologyLegendEntry(
+                        mode, ref nextX, y, default,
+                        new GeneratedHydrologyTile { NaturalFloodingPotential = ushort.MaxValue },
+                        default, "65535 (Flooded)", 128f);
+                    break;
+                case WorldGenerationDebugVisualizationMode.HydrologyWetlandCandidate:
+                    DrawDerivedHydrologyLegendEntry(
+                        mode, ref nextX, y, default, default, default, "Ineligible", 88f);
+                    DrawDerivedHydrologyLegendEntry(
+                        mode, ref nextX, y, default,
+                        new GeneratedHydrologyTile
+                        {
+                            Flags = GeneratedHydrologyTileFlags.WetlandTileEligible
+                        },
+                        default, "Local Candidate", 118f);
+                    DrawDerivedHydrologyLegendEntry(
+                        mode, ref nextX, y, default,
+                        new GeneratedHydrologyTile
+                        {
+                            Flags = GeneratedHydrologyTileFlags.WetlandTileEligible
+                                | GeneratedHydrologyTileFlags.LargeWetlandExtent
+                        },
+                        default, "Large Extent", 104f);
+                    break;
                 default:
                     GUI.Label(new Rect(nextX, y - 2f, 40f, 18f), "Off", informationStyle);
                     break;
@@ -2727,6 +2979,33 @@ namespace Farmware.WorldGeneration.Presentation
                 ref nextX,
                 y,
                 GetHydrologyVisualizationColor(mode, cell),
+                label,
+                entryWidth);
+        }
+
+        /// <summary>C4の固定水文入力を実描画と同じ色関数へ渡し、派生水文の凡例へ追加します。</summary>
+        /// <param name="mode">色の意味を決める派生水文表示モードです。</param>
+        /// <param name="nextX">次に描画するX座標です。</param>
+        /// <param name="y">凡例行の上端です。</param>
+        /// <param name="cell">地下水凡例に使う固定水文セルです。</param>
+        /// <param name="hydrologyTile">自然飽和・自然冠水・湿原凡例に使う固定タイルです。</param>
+        /// <param name="surfaceWaterTile">泉凡例に使う固定表流水タイルです。</param>
+        /// <param name="label">分類または値域の表示名です。</param>
+        /// <param name="entryWidth">次の要素まで確保する横幅です。</param>
+        private void DrawDerivedHydrologyLegendEntry(
+            WorldGenerationDebugVisualizationMode mode,
+            ref float nextX,
+            float y,
+            GeneratedHydrologyCell cell,
+            GeneratedHydrologyTile hydrologyTile,
+            GeneratedSurfaceWaterTile surfaceWaterTile,
+            string label,
+            float entryWidth)
+        {
+            DrawLegendEntry(
+                ref nextX,
+                y,
+                GetHydrologyVisualizationColor(mode, cell, hydrologyTile, surfaceWaterTile),
                 label,
                 entryWidth);
         }

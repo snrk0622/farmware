@@ -1,4 +1,4 @@
-// このファイルは、PlayMode中の地形・資源・動物個体群の開発者用可視化をUnity Editorメニューから切り替えます。
+// このファイルは、PlayMode中の地形・資源・固定水文の開発者用可視化をUnity Editorメニューから切り替えます。
 // Editor Assemblyだけに属し、プレイヤー用入力や製品版ビルドへ開発者専用の操作UIを追加しません。
 
 using Farmware.Simulation;
@@ -129,6 +129,26 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>閉鎖流域・固定湖・打切り流域表示へ切り替えるメニューパスです。</summary>
         private const string HydrologyLakeMenuPath =
             "Farmware/World Generation/Debug Visualization/Hydrology/Lake";
+
+        /// <summary>固定地下水ポテンシャル表示へ切り替えるメニューパスです。</summary>
+        private const string HydrologyGroundwaterMenuPath =
+            "Farmware/World Generation/Debug Visualization/Hydrology/Groundwater";
+
+        /// <summary>固定自然土壌飽和表示へ切り替えるメニューパスです。</summary>
+        private const string HydrologyNaturalSoilSaturationMenuPath =
+            "Farmware/World Generation/Debug Visualization/Hydrology/Natural Soil Saturation";
+
+        /// <summary>最終確定した固定泉流表示へ切り替えるメニューパスです。</summary>
+        private const string HydrologySpringMenuPath =
+            "Farmware/World Generation/Debug Visualization/Hydrology/Spring";
+
+        /// <summary>固定自然冠水表示へ切り替えるメニューパスです。</summary>
+        private const string HydrologyNaturalFloodingMenuPath =
+            "Farmware/World Generation/Debug Visualization/Hydrology/Natural Flooding";
+
+        /// <summary>固定湿原候補と広域規模表示へ切り替えるメニューパスです。</summary>
+        private const string HydrologyWetlandCandidateMenuPath =
+            "Farmware/World Generation/Debug Visualization/Hydrology/Wetland Candidate";
 
         /// <summary>地上レイヤーを診断対象にするメニューパスです。</summary>
         private const string SurfaceLayerMenuPath =
@@ -350,6 +370,41 @@ namespace Farmware.WorldGeneration.Editor
         private static void SelectHydrologyLake()
         {
             SelectMode(WorldGenerationDebugVisualizationMode.HydrologyLake);
+        }
+
+        /// <summary>PlayMode中の固定地下水ポテンシャルと接続境界を色分けします。</summary>
+        [MenuItem(HydrologyGroundwaterMenuPath, false, 232)]
+        private static void SelectHydrologyGroundwater()
+        {
+            SelectMode(WorldGenerationDebugVisualizationMode.HydrologyGroundwater);
+        }
+
+        /// <summary>PlayMode中の固定自然土壌飽和ポテンシャルを色分けします。</summary>
+        [MenuItem(HydrologyNaturalSoilSaturationMenuPath, false, 233)]
+        private static void SelectHydrologyNaturalSoilSaturation()
+        {
+            SelectMode(WorldGenerationDebugVisualizationMode.HydrologyNaturalSoilSaturation);
+        }
+
+        /// <summary>PlayMode中の最終確定した固定泉流を色分けします。</summary>
+        [MenuItem(HydrologySpringMenuPath, false, 234)]
+        private static void SelectHydrologySpring()
+        {
+            SelectMode(WorldGenerationDebugVisualizationMode.HydrologySpring);
+        }
+
+        /// <summary>PlayMode中の固定自然冠水ポテンシャルを色分けします。</summary>
+        [MenuItem(HydrologyNaturalFloodingMenuPath, false, 235)]
+        private static void SelectHydrologyNaturalFlooding()
+        {
+            SelectMode(WorldGenerationDebugVisualizationMode.HydrologyNaturalFlooding);
+        }
+
+        /// <summary>PlayMode中の湿原条件外、局所候補、広域規模を色分けします。</summary>
+        [MenuItem(HydrologyWetlandCandidateMenuPath, false, 236)]
+        private static void SelectHydrologyWetlandCandidate()
+        {
+            SelectMode(WorldGenerationDebugVisualizationMode.HydrologyWetlandCandidate);
         }
 
         /// <summary>PlayMode中の診断検索を地上レイヤーへ切り替えます。</summary>
@@ -651,6 +706,56 @@ namespace Farmware.WorldGeneration.Editor
             return ValidateMode(
                 HydrologyLakeMenuPath,
                 WorldGenerationDebugVisualizationMode.HydrologyLake);
+        }
+
+        /// <summary>Hydrology Groundwater項目の有効状態とチェック表示を更新します。</summary>
+        /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
+        [MenuItem(HydrologyGroundwaterMenuPath, true)]
+        private static bool ValidateHydrologyGroundwater()
+        {
+            return ValidateMode(
+                HydrologyGroundwaterMenuPath,
+                WorldGenerationDebugVisualizationMode.HydrologyGroundwater);
+        }
+
+        /// <summary>Hydrology Natural Soil Saturation項目の有効状態とチェック表示を更新します。</summary>
+        /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
+        [MenuItem(HydrologyNaturalSoilSaturationMenuPath, true)]
+        private static bool ValidateHydrologyNaturalSoilSaturation()
+        {
+            return ValidateMode(
+                HydrologyNaturalSoilSaturationMenuPath,
+                WorldGenerationDebugVisualizationMode.HydrologyNaturalSoilSaturation);
+        }
+
+        /// <summary>Hydrology Spring項目の有効状態とチェック表示を更新します。</summary>
+        /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
+        [MenuItem(HydrologySpringMenuPath, true)]
+        private static bool ValidateHydrologySpring()
+        {
+            return ValidateMode(
+                HydrologySpringMenuPath,
+                WorldGenerationDebugVisualizationMode.HydrologySpring);
+        }
+
+        /// <summary>Hydrology Natural Flooding項目の有効状態とチェック表示を更新します。</summary>
+        /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
+        [MenuItem(HydrologyNaturalFloodingMenuPath, true)]
+        private static bool ValidateHydrologyNaturalFlooding()
+        {
+            return ValidateMode(
+                HydrologyNaturalFloodingMenuPath,
+                WorldGenerationDebugVisualizationMode.HydrologyNaturalFlooding);
+        }
+
+        /// <summary>Hydrology Wetland Candidate項目の有効状態とチェック表示を更新します。</summary>
+        /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
+        [MenuItem(HydrologyWetlandCandidateMenuPath, true)]
+        private static bool ValidateHydrologyWetlandCandidate()
+        {
+            return ValidateMode(
+                HydrologyWetlandCandidateMenuPath,
+                WorldGenerationDebugVisualizationMode.HydrologyWetlandCandidate);
         }
 
         /// <summary>Surfaceレイヤー項目の有効状態とチェック表示を更新します。</summary>
