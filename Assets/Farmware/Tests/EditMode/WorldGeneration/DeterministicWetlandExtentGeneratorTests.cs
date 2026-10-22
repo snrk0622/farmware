@@ -69,6 +69,42 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// 河川・地下水接続と各湖区分を個別に準備し、Lake bitだけでは塩湖や一時湖を淡水へ昇格させないことを保証します。
+        /// </summary>
+        /// <param name="connectionFlags">完成水文セルに設定する重複可能な接続フラグです。</param>
+        /// <param name="lakeClassification">C4-Cで確定した湖の水収支区分です。</param>
+        /// <param name="expected">湿原資格へ渡す淡水接続の期待値です。</param>
+        [TestCase(HydrologyConnectionFlags.Stream, LakeWaterBalanceClassification.None, true)]
+        [TestCase(HydrologyConnectionFlags.River, LakeWaterBalanceClassification.None, true)]
+        [TestCase(HydrologyConnectionFlags.Groundwater, LakeWaterBalanceClassification.None, true)]
+        [TestCase(HydrologyConnectionFlags.Lake, LakeWaterBalanceClassification.OverflowFreshwater, true)]
+        [TestCase(HydrologyConnectionFlags.Lake, LakeWaterBalanceClassification.ClosedFreshwater, true)]
+        [TestCase(HydrologyConnectionFlags.Lake, LakeWaterBalanceClassification.PermanentSaltwater, false)]
+        [TestCase(HydrologyConnectionFlags.Lake, LakeWaterBalanceClassification.Temporary, false)]
+        [TestCase(HydrologyConnectionFlags.Lake, LakeWaterBalanceClassification.None, false)]
+        [TestCase(HydrologyConnectionFlags.None, LakeWaterBalanceClassification.ClosedFreshwater, false)]
+        [TestCase(
+            HydrologyConnectionFlags.Stream | HydrologyConnectionFlags.Lake,
+            LakeWaterBalanceClassification.PermanentSaltwater,
+            true)]
+        public void HydrologyCellFreshwaterConnection_RequiresFreshwaterLakeClassification(
+            HydrologyConnectionFlags connectionFlags,
+            LakeWaterBalanceClassification lakeClassification,
+            bool expected)
+        {
+            var hydrologyCell = new GeneratedHydrologyCell
+            {
+                ConnectionFlags = connectionFlags,
+                LakeClassification = lakeClassification
+            };
+
+            bool actual = DeterministicWetlandExtentGenerator
+                .IsHydrologyCellFreshwaterConnected(hydrologyCell);
+
+            Assert.That(actual, Is.EqualTo(expected));
+        }
+
+        /// <summary>
         /// 中央9×9の左端から外側探索帯へ伸びる3セルと4セルを準備し、チャンク境界相当でも最低4セルだけを認めます。
         /// </summary>
         [Test]

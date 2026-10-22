@@ -468,6 +468,36 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>
+        /// 完成水文セルの接続フラグと最終湖区分から、湿原資格に使える淡水接続かを判定します。
+        /// </summary>
+        /// <param name="hydrologyCell">河川・地下水接続とC4-Cの最終湖区分を持つ完成水文セルです。</param>
+        /// <returns>河川・地下水、または恒久淡水湖へ接続する場合はtrueです。</returns>
+        internal static bool IsHydrologyCellFreshwaterConnected(
+            in GeneratedHydrologyCell hydrologyCell)
+        {
+            HydrologyConnectionFlags directFreshwaterFlags = HydrologyConnectionFlags.Stream
+                | HydrologyConnectionFlags.River
+                | HydrologyConnectionFlags.Groundwater;
+            if ((hydrologyCell.ConnectionFlags & directFreshwaterFlags) != 0)
+            {
+                // 湖の水質とは独立した河川・地下水接続があるセルは、その接続自体を淡水として扱います。
+                return true;
+            }
+
+            if ((hydrologyCell.ConnectionFlags & HydrologyConnectionFlags.Lake) == 0)
+            {
+                // 最終湖区分だけが残る不整合な入力を淡水へ昇格させず、明示された接続だけを使用します。
+                return false;
+            }
+
+            // Lake bitは固定湖面の存在だけを表すため、一時湖と恒久塩湖を水質区分で除外します。
+            return hydrologyCell.LakeClassification
+                    == LakeWaterBalanceClassification.OverflowFreshwater
+                || hydrologyCell.LakeClassification
+                    == LakeWaterBalanceClassification.ClosedFreshwater;
+        }
+
+        /// <summary>
         /// 一つの8×8水文セルが広域湿原候補になる最低資格タイル数を満たすか判定します。
         /// </summary>
         /// <param name="settings">最低資格タイル数16を持つ固定自然冠水設定です。</param>
@@ -1002,11 +1032,7 @@ namespace Farmware.WorldGeneration
             out int eligibleTileCount)
         {
             eligibleTileCount = 0;
-            HydrologyConnectionFlags freshwaterFlags = HydrologyConnectionFlags.Stream
-                | HydrologyConnectionFlags.River
-                | HydrologyConnectionFlags.Lake
-                | HydrologyConnectionFlags.Groundwater;
-            bool cellFreshwaterConnected = (hydrologyCell.ConnectionFlags & freshwaterFlags) != 0;
+            bool cellFreshwaterConnected = IsHydrologyCellFreshwaterConnected(hydrologyCell);
             long centerTileX = (long)cellX * TilesPerHydrologyCellAxis;
             long centerTileY = (long)cellY * TilesPerHydrologyCellAxis;
             for (int tileOffsetY = ResponsibilityMinimumOffset;
