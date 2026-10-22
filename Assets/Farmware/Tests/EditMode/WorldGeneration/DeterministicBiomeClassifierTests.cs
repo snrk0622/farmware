@@ -1,4 +1,4 @@
-// このファイルは、TERRAIN-01C5-B1の通常Biome候補評価、台形型適性、64bit加重和、候補別Variationを検証します。
+// このファイルは、TERRAIN-01C5-B1/B2の通常Biome候補評価、整数Score、候補別Variation、安定順位を検証します。
 // ECS生成と旧7Biomeはまだ切り替えず、新18Biome分類器の純粋計算だけをSceneなしのEditModeテストで固定します。
 
 using NUnit.Framework;
@@ -6,7 +6,7 @@ using NUnit.Framework;
 namespace Farmware.WorldGeneration.Tests
 {
     /// <summary>
-    /// 通常Biomeの候補ゲート、軸別適性、スコア、BiomeVariationを保証します。
+    /// 通常Biomeの候補ゲート、軸別適性、スコア、BiomeVariation、上位2候補の安定順位を保証します。
     /// </summary>
     public sealed class DeterministicBiomeClassifierTests
     {
@@ -285,6 +285,154 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// Score差が1でもVariationで逆転せず、Score同点だけでVariation、さらに安定IDの順へ進むことを保証します。
+        /// </summary>
+        [Test]
+        public void NormalRanking_UsesScoreVariationAndStableIdInThatOrder()
+        {
+            BiomeCandidateEvaluation higherScore = CreateEvaluation(
+                stableId: 18,
+                score: 1001,
+                variation: 0);
+            BiomeCandidateEvaluation lowerScoreWithMaximumVariation = CreateEvaluation(
+                stableId: 1,
+                score: 1000,
+                variation: ushort.MaxValue);
+            BiomeCandidateEvaluation higherVariation = CreateEvaluation(
+                stableId: 18,
+                score: 1000,
+                variation: 50001);
+            BiomeCandidateEvaluation lowerStableId = CreateEvaluation(
+                stableId: 2,
+                score: 1000,
+                variation: 50000);
+            BiomeCandidateEvaluation higherStableId = CreateEvaluation(
+                stableId: 3,
+                score: 1000,
+                variation: 50000);
+
+            Assert.That(DeterministicBiomeClassifier.IsPreferredNormalCandidate(
+                higherScore,
+                lowerScoreWithMaximumVariation), Is.True);
+            Assert.That(DeterministicBiomeClassifier.IsPreferredNormalCandidate(
+                lowerScoreWithMaximumVariation,
+                higherScore), Is.False);
+            Assert.That(DeterministicBiomeClassifier.IsPreferredNormalCandidate(
+                higherVariation,
+                lowerStableId), Is.True);
+            Assert.That(DeterministicBiomeClassifier.IsPreferredNormalCandidate(
+                lowerStableId,
+                higherStableId), Is.True);
+            Assert.That(DeterministicBiomeClassifier.IsPreferredNormalCandidate(
+                higherStableId,
+                lowerStableId), Is.False);
+        }
+
+        /// <summary>
+        /// 最高Score・Variationが3候補で同点でも、挿入順に関係なくID昇順の先頭2件を保持することを保証します。
+        /// </summary>
+        [Test]
+        public void NormalRanking_ThreeWayTieKeepsStableTopTwoForAnyInsertionOrder()
+        {
+            BiomeCandidateEvaluation idThree = CreateEvaluation(3, 1000, 50000);
+            BiomeCandidateEvaluation idOne = CreateEvaluation(1, 1000, 50000);
+            BiomeCandidateEvaluation idTwo = CreateEvaluation(2, 1000, 50000);
+            NormalBiomeCandidateRanking forward = default;
+            NormalBiomeCandidateRanking reverse = default;
+
+            DeterministicBiomeClassifier.InsertNormalCandidate(ref forward, idThree);
+            DeterministicBiomeClassifier.InsertNormalCandidate(ref forward, idOne);
+            DeterministicBiomeClassifier.InsertNormalCandidate(ref forward, idTwo);
+            DeterministicBiomeClassifier.InsertNormalCandidate(ref reverse, idTwo);
+            DeterministicBiomeClassifier.InsertNormalCandidate(ref reverse, idOne);
+            DeterministicBiomeClassifier.InsertNormalCandidate(ref reverse, idThree);
+
+            Assert.That(forward.CandidateCount, Is.EqualTo(3));
+            Assert.That(forward.HasSecond, Is.True);
+            Assert.That(forward.First.StableId, Is.EqualTo(1));
+            Assert.That(forward.Second.StableId, Is.EqualTo(2));
+            AssertEvaluationEquals(forward.First, reverse.First);
+            AssertEvaluationEquals(forward.Second, reverse.Second);
+            Assert.That(reverse.CandidateCount, Is.EqualTo(forward.CandidateCount));
+        }
+
+        /// <summary>
+        /// 3件の通常候補から上位2件を保持し、Definition登録順を逆転しても全順位情報が一致することを保証します。
+        /// </summary>
+        [Test]
+        public void NormalRanking_ReturnsTopTwoIndependentOfDefinitionOrder()
+        {
+            const ulong worldSeed = 0x123456789ABCDEF0UL;
+            const int generatorVersion = 9;
+            BiomeClassificationSettings forwardSettings = BiomeDefinitionCatalog.CreateDefault();
+            BiomeClassificationSettings reverseSettings = forwardSettings;
+            ReverseDefinitions(ref reverseSettings);
+            BiomeClassificationInput input = CreateInput(
+                terrainTemperature: 35000,
+                baseMoisture: 39500,
+                elevation: 30000,
+                woodyVegetation: 50000,
+                ruggedness: 20000,
+                coastalInfluence: 0,
+                volcanicActivity: 0,
+                geologyClass: GeologyClass.UnconsolidatedSediment,
+                warpedSampleX: -257,
+                warpedSampleY: 511);
+
+            Assert.That(DeterministicBiomeClassifier.TryRankNormalCandidates(
+                forwardSettings,
+                worldSeed,
+                generatorVersion,
+                input,
+                out NormalBiomeCandidateRanking forward), Is.True);
+            Assert.That(DeterministicBiomeClassifier.TryRankNormalCandidates(
+                reverseSettings,
+                worldSeed,
+                generatorVersion,
+                input,
+                out NormalBiomeCandidateRanking reverse), Is.True);
+
+            Assert.That(forward.CandidateCount, Is.EqualTo(3));
+            Assert.That(forward.HasSecond, Is.True);
+            Assert.That(forward.First.StableId, Is.Not.EqualTo(forward.Second.StableId));
+            AssertEvaluationEquals(forward.First, reverse.First);
+            AssertEvaluationEquals(forward.Second, reverse.Second);
+            Assert.That(reverse.CandidateCount, Is.EqualTo(forward.CandidateCount));
+            Assert.That(reverse.HasSecond, Is.EqualTo(forward.HasSecond));
+        }
+
+        /// <summary>
+        /// 海面下で通常候補が0件の場合は明示的に失敗し、首位や途中件数を公開しないことを保証します。
+        /// </summary>
+        [Test]
+        public void NormalRanking_NoEligibleCandidateReturnsFalseAndDefaultResult()
+        {
+            BiomeClassificationSettings settings = BiomeDefinitionCatalog.CreateDefault();
+            BiomeClassificationInput input = CreateInput(
+                terrainTemperature: 30000,
+                baseMoisture: 38000,
+                elevation: 19999,
+                woodyVegetation: 20000,
+                ruggedness: 10000,
+                coastalInfluence: 0,
+                volcanicActivity: 0,
+                geologyClass: GeologyClass.UnconsolidatedSediment);
+
+            bool succeeded = DeterministicBiomeClassifier.TryRankNormalCandidates(
+                settings,
+                123UL,
+                1,
+                input,
+                out NormalBiomeCandidateRanking ranking);
+
+            Assert.That(succeeded, Is.False);
+            Assert.That(ranking.CandidateCount, Is.Zero);
+            Assert.That(ranking.HasSecond, Is.False);
+            Assert.That(ranking.First.StableId, Is.EqualTo(BiomeStableIds.None));
+            Assert.That(ranking.Second.StableId, Is.EqualTo(BiomeStableIds.None));
+        }
+
+        /// <summary>
         /// 台形型適性の成否と値を1行で比較し、境界ケースの期待値を読みやすく保ちます。
         /// </summary>
         /// <param name="range">評価する許容・代表範囲です。</param>
@@ -321,6 +469,64 @@ namespace Farmware.WorldGeneration.Tests
                 definition,
                 input,
                 out _);
+        }
+
+        /// <summary>
+        /// 順位規則だけを境界値で検査するため、比較に必要な3値を持つ候補評価を作ります。
+        /// </summary>
+        /// <param name="stableId">最終同点解決へ使う安定IDです。</param>
+        /// <param name="score">最初に比較する整数Scoreです。</param>
+        /// <param name="variation">Score同点時だけ比較する候補別Variationです。</param>
+        /// <returns>順位比較へ直接渡せる最小限の候補評価です。</returns>
+        private static BiomeCandidateEvaluation CreateEvaluation(
+            byte stableId,
+            long score,
+            ushort variation)
+        {
+            return new BiomeCandidateEvaluation
+            {
+                StableId = stableId,
+                Score = score,
+                CandidateVariation = variation
+            };
+        }
+
+        /// <summary>
+        /// FixedListの前後を交換し、同じDefinition集合を逆登録順にします。
+        /// </summary>
+        /// <param name="settings">Definitionsだけを逆順へ変更するテスト用設定です。</param>
+        private static void ReverseDefinitions(ref BiomeClassificationSettings settings)
+        {
+            int lastIndex = settings.Definitions.Length - 1;
+            for (int leftIndex = 0; leftIndex < settings.Definitions.Length / 2; leftIndex++)
+            {
+                int rightIndex = lastIndex - leftIndex;
+                BiomeDefinition left = settings.Definitions[leftIndex];
+                settings.Definitions[leftIndex] = settings.Definitions[rightIndex];
+                settings.Definitions[rightIndex] = left;
+            }
+        }
+
+        /// <summary>
+        /// 順位結果に含む全フィールドを比較し、登録順が診断情報にも影響しないことを保証します。
+        /// </summary>
+        /// <param name="expected">正順設定から得た候補評価です。</param>
+        /// <param name="actual">逆順設定から得た候補評価です。</param>
+        private static void AssertEvaluationEquals(
+            in BiomeCandidateEvaluation expected,
+            in BiomeCandidateEvaluation actual)
+        {
+            Assert.That(actual.StableId, Is.EqualTo(expected.StableId));
+            Assert.That(actual.TerrainTemperatureFit, Is.EqualTo(expected.TerrainTemperatureFit));
+            Assert.That(actual.BaseMoistureFit, Is.EqualTo(expected.BaseMoistureFit));
+            Assert.That(actual.ElevationFit, Is.EqualTo(expected.ElevationFit));
+            Assert.That(actual.WoodyVegetationFit, Is.EqualTo(expected.WoodyVegetationFit));
+            Assert.That(actual.TerrainRuggednessFit, Is.EqualTo(expected.TerrainRuggednessFit));
+            Assert.That(actual.GeologyFit, Is.EqualTo(expected.GeologyFit));
+            Assert.That(actual.VolcanicActivityFit, Is.EqualTo(expected.VolcanicActivityFit));
+            Assert.That(actual.CoastalInfluenceFit, Is.EqualTo(expected.CoastalInfluenceFit));
+            Assert.That(actual.Score, Is.EqualTo(expected.Score));
+            Assert.That(actual.CandidateVariation, Is.EqualTo(expected.CandidateVariation));
         }
 
         /// <summary>

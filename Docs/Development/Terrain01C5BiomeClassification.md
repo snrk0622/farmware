@@ -1,7 +1,7 @@
 # TERRAIN-01C5 Biome分類と環境境界の実装記録
 
 - 最終更新日: 2026-10-23
-- 状態: C5-A完了、C5-B1 AI確認完了・人間確認待ち
+- 状態: C5-A・C5-B1・C5-B2完了
 - 対象ブランチ: `terrain-01c5b-biome-classification`
 - 正仕様: [バイオーム・生態コンテンツ仕様](../GameSpecification/BiomeEcologyContentSpecification.md)、[ランダムマップ・可変地形仕様](../GameSpecification/RandomMapGenerationSpecification.md)
 
@@ -84,3 +84,31 @@ C5-B1はECS生成、旧7Biome分類、状態ハッシュ、Scene、Prefab、Pres
 2026-10-23の接続済みUnity 6000.3.8f1 Editorでは、厳格再コンパイルがエラー0件・警告0件、`DeterministicBiomeClassifierTests` 8件、`BiomeDefinitionCatalogTests` 8件、World Generation EditMode 565件がすべて成功した。全体テスト中の警告6件は既知のテスト用System Group順序属性であり、分類器のJob・Allocator警告ではない。Unity CLI `1.0.0-beta.14`がPipeline `0.8.0-exp.1`へ旧コマンド名を照会した互換エラー7件も内容確認後にConsoleから消去し、最終実状態はコンパイル失敗なし、エラー0件、警告0件である。
 
 差分レビューではP0・P1のブロッカー、空白エラー、旧7Biome生成への接続、Scene・Prefab・Presentation変更がないことを確認した。純粋計算だけの変更であるためPlayModeと性能計測は実行せず、旧7Biome表示へ意図しない変化がないことの人間確認を残す。
+
+C5-B1は2026-10-23に人間確認とcommit許可を受け、commit `390fa41e`へ記録した。
+
+## 8. C5-B2の実装契約
+
+C5-B2では、C5-B1が返す全通常候補を次の変更禁止順序で比較し、最終選択前の首位と診断用次点を純粋計算として保持する。
+
+1. `Score`降順。
+2. `Score`が完全同点の場合だけ`CandidateVariation`降順。
+3. 両方が同点の場合は安定Definition ID昇順。
+
+- VariationをScoreへ加算せず、Score差が1でもある候補の順位を地域ノイズで逆転させない。
+- 全順序で1件ずつ挿入し、追加配列、管理確保、全件ソートを使わずに首位と次点だけを更新する。3件目以降も診断用の候補総数へ数える。
+- Definition登録順を反転しても、首位、次点、各候補の軸適性、Score、Variation、候補総数が一致する。
+- 通常候補が0件の場合は`false`と既定値を返し、部分的な首位や件数を公開しない。候補1件の場合は首位だけを有効とし、次点なしを明示する。
+- タイルごとのHot Pathで固定表全体を二重走査しないため、`BiomeClassificationSettings`はC5-Aの読込時に`ValidateSettings`を通す契約とする。分類時はDefinition件数とVariation固定値を軽量確認し、各Definitionの候補評価と順位挿入を1回の走査で行う。
+
+C5-B2はECS Buffer、旧7Biome分類、状態ハッシュ、Scene、Prefab、Presentationへ接続しない。活動的火山中核、水文特殊Biome、通常首位からの最終選択はC5-B3へ残す。
+
+## 9. C5-B2の検証
+
+`DeterministicBiomeClassifierTests`へ、Score差1とVariation最大値の比較、Score同点時のVariation降順、Variation同点時の安定ID昇順、最高Scoreが3候補で完全同点の異なる挿入順、実Definition 3候補の登録逆順、上位2候補と候補総数、海面下の通常候補なしと結果既定値を追加した。
+
+2026-10-23の接続済みUnity 6000.3.8f1 Editorでは、厳格再コンパイルが失敗なし、`DeterministicBiomeClassifierTests` 12件、World Generation EditMode 569件がすべて成功した。全体テスト中の警告6件は既知のテスト用System Group順序属性であり、分類器のJob・Allocator警告ではない。Unity CLIがPipeline `0.8.0-exp.1`へ旧コマンド名を照会した既知の互換エラーも内容確認後にConsoleから消去し、最終実状態はコンパイル失敗なし、エラー0件、警告0件である。
+
+差分レビューではP0・P1のブロッカー、空白エラー、仕様と異なる順位分岐、旧7Biome生成への接続、Scene・Prefab・Presentation変更がないことを確認した。ゲーム仕様は既存の確定順位を実装しただけで変更せず、`EditorTools.md`はEditor機能変更なし、`Docs/README.md`は文書追加・移動なしのため更新不要と判断した。
+
+純粋計算だけの変更で製品生成と表示を変えないため、PlayModeと性能計測は実行しない。2026-10-23の人間確認では、旧7Biome表示へC5-B2起因の意図しない変化がないことを確認し、commit許可を得た。Shift高速移動時の一時的な描画空白は、製品生成・表示へ未接続のC5-B2による回帰ではなく、既存の1チャンク先読みを移動が上回る条件として切り分けた。速度別先読みと生成待ちの対応は`VEHICLE-01B`・`VEHICLE-01F`およびロードマップ末尾の性能確認方針に既に含まれるため、本変更へ混在させない。

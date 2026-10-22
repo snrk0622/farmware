@@ -1,5 +1,5 @@
-// このファイルは、TERRAIN-01C5-B1の新18Biome Definitionから1件の通常候補を評価します。
-// C5-CでECS生成へ接続する前に、候補ゲート、台形型適性、64bit加重和、BiomeVariationを純粋計算として固定します。
+// このファイルは、TERRAIN-01C5-Bの新18Biome Definitionから通常候補を評価し、安定順位で上位2件を選びます。
+// C5-CでECS生成へ接続する前に、候補ゲート、整数Score、BiomeVariation、列挙順に依存しない順位を純粋計算として固定します。
 
 namespace Farmware.WorldGeneration
 {
@@ -63,14 +63,145 @@ namespace Farmware.WorldGeneration
     }
 
     /// <summary>
-    /// 新18Biomeの1つの通常候補を、管理確保や浮動小数点を使わず決定論的に評価します。
-    /// Definition登録順やJob実行順を参照しないため、後続の安定順位処理とBurst Jobから同じ値を得られます。
+    /// 1タイルで資格を得た通常Biome候補の首位と診断用次点を保持します。
+    /// 最終Biome選択はC5-B3の特殊優先を適用してから行うため、この値だけではまだ確定しません。
+    /// </summary>
+    public struct NormalBiomeCandidateRanking
+    {
+        /// <summary>通常候補の安定順位で首位になった評価です。分類成功時は必ず有効です。</summary>
+        public BiomeCandidateEvaluation First;
+
+        /// <summary>通常候補の安定順位で2位になった診断用評価です。HasSecondがfalseなら未設定です。</summary>
+        public BiomeCandidateEvaluation Second;
+
+        /// <summary>全Definitionのうち、通常候補ゲートを通過した件数です。</summary>
+        public byte CandidateCount;
+
+        /// <summary>Secondへ2位候補が格納されているかを示します。</summary>
+        public bool HasSecond;
+    }
+
+    /// <summary>
+    /// 新18Biomeの通常候補を、管理確保や浮動小数点を使わず決定論的に評価・順位付けします。
+    /// 安定IDまで含む全順序を使うため、Definition登録順やJob実行順が変わっても同じ上位2候補を得られます。
     /// </summary>
     public static class DeterministicBiomeClassifier
     {
         /// <summary>通常Biomeの理論上の最大スコアです。65,535と重み合計256の積です。</summary>
         public const long MaximumBiomeScore = (long)ushort.MaxValue
             * BiomeDefinitionCatalog.RequiredNormalWeightTotal;
+
+        /// <summary>
+        /// 2つの通常候補をScore、Variation、安定IDの順で比較し、左候補が上位かを返します。
+        /// </summary>
+        /// <param name="candidate">現在の順位へ挿入できるか調べる候補です。</param>
+        /// <param name="current">現在その順位にいる比較対象です。</param>
+        /// <returns>Score降順、同点Variation降順、最終同点ID昇順でcandidateが上位ならtrueです。</returns>
+        public static bool IsPreferredNormalCandidate(
+            in BiomeCandidateEvaluation candidate,
+            in BiomeCandidateEvaluation current)
+        {
+            if (candidate.Score != current.Score)
+            {
+                // VariationはScoreの完全同点だけに使い、1点でも高いScoreを地域ノイズで逆転させません。
+                return candidate.Score > current.Score;
+            }
+
+            if (candidate.CandidateVariation != current.CandidateVariation)
+            {
+                return candidate.CandidateVariation > current.CandidateVariation;
+            }
+
+            // ScoreとVariationが同じ場合も、変更禁止の安定IDで一意な全順序へ収束させます。
+            return candidate.StableId < current.StableId;
+        }
+
+        /// <summary>
+        /// 検証済み18Biome設定の全Definitionを評価し、登録順に依存しない通常候補の上位2件を返します。
+        /// </summary>
+        /// <param name="settings">事前にBiomeDefinitionCatalog.ValidateSettingsを通した固定設定です。</param>
+        /// <param name="worldSeed">ワールド寿命中に固定する64bit Seedです。</param>
+        /// <param name="generatorVersion">生成規則の互換境界を表す固定Versionです。</param>
+        /// <param name="input">対象タイルの固定環境と地質です。</param>
+        /// <param name="ranking">成功時に首位、存在すれば次点、候補総数を返します。</param>
+        /// <returns>通常候補が1件以上あればtrue、候補なしまたは設定の外形が不正ならfalseです。</returns>
+        public static bool TryRankNormalCandidates(
+            in BiomeClassificationSettings settings,
+            ulong worldSeed,
+            int generatorVersion,
+            in BiomeClassificationInput input,
+            out NormalBiomeCandidateRanking ranking)
+        {
+            ranking = default;
+            if (settings.Definitions.Length != BiomeDefinitionCatalog.RequiredDefinitionCount
+                || settings.VariationCellSizeInTiles
+                    != BiomeDefinitionCatalog.RequiredVariationCellSizeInTiles
+                || settings.VariationOctaveCount
+                    != BiomeDefinitionCatalog.RequiredVariationOctaveCount)
+            {
+                return false;
+            }
+
+            for (int definitionIndex = 0;
+                definitionIndex < settings.Definitions.Length;
+                definitionIndex++)
+            {
+                BiomeDefinition definition = settings.Definitions[definitionIndex];
+                if (!TryEvaluateNormalCandidate(
+                        settings,
+                        worldSeed,
+                        generatorVersion,
+                        definition,
+                        input,
+                        out BiomeCandidateEvaluation candidate))
+                {
+                    continue;
+                }
+
+                InsertNormalCandidate(ref ranking, candidate);
+            }
+
+            if (ranking.CandidateCount == 0)
+            {
+                // 候補なしでは途中値を公開せず、呼び出し側が明示的な分類失敗として扱えるようにします。
+                return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// 評価済み通常候補を現在の上位2件へ挿入し、3件目以降も候補総数だけは保持します。
+        /// </summary>
+        /// <param name="ranking">これまでに処理した候補の首位、次点、総数です。</param>
+        /// <param name="candidate">候補ゲートと軸評価を通過した、今回追加する1件です。</param>
+        internal static void InsertNormalCandidate(
+            ref NormalBiomeCandidateRanking ranking,
+            in BiomeCandidateEvaluation candidate)
+        {
+            // 固定18件中の通常候補は最大16件なので、byteで件数を保持しても周回しません。
+            ranking.CandidateCount++;
+            if (ranking.CandidateCount == 1)
+            {
+                ranking.First = candidate;
+                return;
+            }
+
+            if (IsPreferredNormalCandidate(candidate, ranking.First))
+            {
+                // 新しい首位が来た場合、以前の首位は必ず次点なので、既存の次点と再比較する必要はありません。
+                ranking.Second = ranking.First;
+                ranking.First = candidate;
+                ranking.HasSecond = true;
+                return;
+            }
+
+            if (!ranking.HasSecond || IsPreferredNormalCandidate(candidate, ranking.Second))
+            {
+                ranking.Second = candidate;
+                ranking.HasSecond = true;
+            }
+        }
 
         /// <summary>
         /// 連続軸の値を、候補許容範囲と代表範囲から0〜65,535の台形型適性へ変換します。
