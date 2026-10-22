@@ -51,7 +51,7 @@ namespace Farmware.WorldGeneration
             NativeArray<GeneratedTile> tiles,
             NativeArray<GeneratedHydrologyCell> hydrologyCells,
             NativeArray<GeneratedHydrologyCell> intersectingCells,
-            NativeArray<byte> surfaceRechargeCandidates,
+            NativeArray<SurfaceRechargeCandidate> surfaceRechargeCandidates,
             NativeArray<GeneratedHydrologyTile> hydrologyTiles)
         {
             if (!DeterministicGroundwaterGenerator.ValidateSettings(settings.Groundwater)
@@ -89,7 +89,7 @@ namespace Farmware.WorldGeneration
                         || !TryGenerateCellGroundwater(
                             settings,
                             cell,
-                            surfaceRechargeCandidates[cellIndex] != 0,
+                            surfaceRechargeCandidates[cellIndex].HasRecharge != 0,
                             out ushort groundwaterPotential))
                     {
                         return false;
@@ -302,7 +302,7 @@ namespace Farmware.WorldGeneration
         /// <param name="adjustedPermeability">成功時の固定9地点補正後透水性平均です。</param>
         /// <param name="adjustedGroundwaterStorage">成功時の固定9地点補正後保持力平均です。</param>
         /// <returns>全サンプル座標と地質を生成できた場合はtrueです。</returns>
-        private static bool TrySampleAdjustedGeologyAverage(
+        internal static bool TrySampleAdjustedGeologyAverage(
             in WorldGenerationSettings settings,
             int cellX,
             int cellY,

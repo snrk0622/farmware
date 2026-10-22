@@ -1,4 +1,4 @@
-// このファイルは、ECSで生成済みの可視タイルをPlayMode中だけ色分けして、地形・資源・動物個体群の生成結果を確認できるようにします。
+// このファイルは、ECSで生成済みの可視タイルと固定水文・最終湖区分をPlayMode中だけ色分けして、生成結果を確認できるようにします。
 // 操作入口はEditor AssemblyのWorldGenerationDebugVisualizationMenuに置き、Simulationとプレイヤー用F3/F4入力から分離します。
 
 using System.Collections.Generic;
@@ -810,8 +810,21 @@ namespace Farmware.WorldGeneration.Presentation
                         return new Color32(220, 70, 210, 244);
                     }
 
-                    // Overflowは流域共通フラグなので、実際に水面となるセルだけを越流色にします。
-                    // この条件がないと、湖面より高い乾いた上流セルまでシアンで塗られてしまいます。
+                    // C4-Cで確定した区分を最優先し、一時湖を固定水面の青で誤表示せず、塩湖と淡水湖も区別します。
+                    // 区分はSurfaceCellだけへ設定されるため、流域内の高い乾燥セルを湖面色へ塗りません。
+                    switch (cell.LakeClassification)
+                    {
+                        case LakeWaterBalanceClassification.Temporary:
+                            return new Color32(210, 150, 72, 240);
+                        case LakeWaterBalanceClassification.PermanentSaltwater:
+                            return new Color32(164, 92, 202, 244);
+                        case LakeWaterBalanceClassification.ClosedFreshwater:
+                            return new Color32(48, 126, 232, 244);
+                        case LakeWaterBalanceClassification.OverflowFreshwater:
+                            return new Color32(58, 228, 238, 246);
+                    }
+
+                    // C3-Dだけを生成した旧診断入力も、SurfaceCellとOverflowの既存色で読み取れるように維持します。
                     if ((cell.LakeFlags
                             & (HydrologyLakeFlags.SurfaceCell | HydrologyLakeFlags.Overflow))
                         == (HydrologyLakeFlags.SurfaceCell | HydrologyLakeFlags.Overflow))
@@ -1842,7 +1855,8 @@ namespace Farmware.WorldGeneration.Presentation
                             + $"MaxDistance={centerHydrologyCell.MaximumContributingDistance}\n"
                             + $"Connections={centerHydrologyCell.ConnectionFlags}  "
                             + $"BasinArea={centerHydrologyCell.BasinAreaCells}  "
-                            + $"LakeFlags={centerHydrologyCell.LakeFlags}\n"
+                            + $"LakeFlags={centerHydrologyCell.LakeFlags}  "
+                            + $"LakeClass={centerHydrologyCell.LakeClassification}\n"
                             + $"LakeHeight: Bottom={centerHydrologyCell.LakeBottomHeight}  "
                             + $"Spill={centerHydrologyCell.SpillHeight}  "
                             + $"Surface={centerHydrologyCell.LakeSurfaceHeight}  "
@@ -2613,7 +2627,7 @@ namespace Farmware.WorldGeneration.Presentation
                 entryWidth);
         }
 
-        /// <summary>湖状態を2行へ分け、打切り・固定湖候補・湖面・越流を別色で案内します。</summary>
+        /// <summary>湖状態を2行へ分け、流域状態と最終水収支区分を別色で案内します。</summary>
         /// <param name="nextX">1行目で次に描画するX座標です。</param>
         /// <param name="startX">2行目を揃える凡例左端です。</param>
         /// <param name="y">1行目の上端です。</param>
@@ -2621,21 +2635,28 @@ namespace Farmware.WorldGeneration.Presentation
         {
             WorldGenerationDebugVisualizationMode mode =
                 WorldGenerationDebugVisualizationMode.HydrologyLake;
-            DrawHydrologyLegendEntry(mode, ref nextX, y, default, "Not Basin", 88f);
+            DrawHydrologyLegendEntry(mode, ref nextX, y, default, "Not Basin", 82f);
             DrawHydrologyLegendEntry(
                 mode,
                 ref nextX,
                 y,
                 new GeneratedHydrologyCell { LakeFlags = HydrologyLakeFlags.BasinResolved },
                 "Dry Basin",
-                84f);
+                80f);
             DrawHydrologyLegendEntry(
                 mode,
                 ref nextX,
                 y,
                 new GeneratedHydrologyCell { LakeFlags = HydrologyLakeFlags.BasinTruncated },
                 "Truncated",
-                86f);
+                84f);
+            DrawHydrologyLegendEntry(
+                mode,
+                ref nextX,
+                y,
+                new GeneratedHydrologyCell { LakeFlags = HydrologyLakeFlags.FixedLake },
+                "Lake Basin",
+                88f);
 
             nextX = startX + 48f;
             float secondRowY = y + 18f;
@@ -2643,19 +2664,35 @@ namespace Farmware.WorldGeneration.Presentation
                 mode,
                 ref nextX,
                 secondRowY,
-                new GeneratedHydrologyCell { LakeFlags = HydrologyLakeFlags.FixedLake },
-                "Fixed Lake",
-                88f);
+                new GeneratedHydrologyCell
+                {
+                    LakeFlags = HydrologyLakeFlags.FixedLake | HydrologyLakeFlags.SurfaceCell,
+                    LakeClassification = LakeWaterBalanceClassification.Temporary
+                },
+                "Temporary",
+                90f);
             DrawHydrologyLegendEntry(
                 mode,
                 ref nextX,
                 secondRowY,
                 new GeneratedHydrologyCell
                 {
-                    LakeFlags = HydrologyLakeFlags.FixedLake | HydrologyLakeFlags.SurfaceCell
+                    LakeFlags = HydrologyLakeFlags.FixedLake | HydrologyLakeFlags.SurfaceCell,
+                    LakeClassification = LakeWaterBalanceClassification.PermanentSaltwater
                 },
-                "Surface",
-                78f);
+                "Salt Lake",
+                82f);
+            DrawHydrologyLegendEntry(
+                mode,
+                ref nextX,
+                secondRowY,
+                new GeneratedHydrologyCell
+                {
+                    LakeFlags = HydrologyLakeFlags.FixedLake | HydrologyLakeFlags.SurfaceCell,
+                    LakeClassification = LakeWaterBalanceClassification.ClosedFreshwater
+                },
+                "Fresh Lake",
+                86f);
             DrawHydrologyLegendEntry(
                 mode,
                 ref nextX,
@@ -2664,7 +2701,8 @@ namespace Farmware.WorldGeneration.Presentation
                 {
                     LakeFlags = HydrologyLakeFlags.FixedLake
                         | HydrologyLakeFlags.SurfaceCell
-                        | HydrologyLakeFlags.Overflow
+                        | HydrologyLakeFlags.Overflow,
+                    LakeClassification = LakeWaterBalanceClassification.OverflowFreshwater
                 },
                 "Overflow",
                 82f);

@@ -321,6 +321,12 @@ namespace Farmware.WorldGeneration
         /// </summary>
         public GroundwaterGenerationSettings Groundwater;
 
+        /// <summary>
+        /// 地下水計算後の湖水収支区分と泉生成を再計算する固定設定です。
+        /// GeneratorVersionと一緒にワールド寿命中は変更しません。
+        /// </summary>
+        public LakeSpringGenerationSettings LakeSpring;
+
         /// <summary>7バイオームの適性が閾値付近で滑らかに入れ替わる帯のおおよその幅です。単位はタイルです。</summary>
         public int BiomeClassificationTransitionWidthInTiles;
 
@@ -475,6 +481,7 @@ namespace Farmware.WorldGeneration
                 Geology = GeologyGenerationSettings.CreateDefault(),
                 Hydrology = HydrologyGenerationSettings.CreateDefault(),
                 Groundwater = GroundwaterGenerationSettings.CreateDefault(),
+                LakeSpring = LakeSpringGenerationSettings.CreateDefault(),
                 BiomeClassificationTransitionWidthInTiles = 12,
                 BiomeTransitionWidthInTiles = 6,
                 SeaLevelThreshold = DefaultSeaLevelThreshold,

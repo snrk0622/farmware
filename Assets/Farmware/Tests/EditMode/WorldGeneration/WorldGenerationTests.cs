@@ -1802,6 +1802,105 @@ namespace Farmware.WorldGeneration.Tests
                 AssertResourceEqual(DeterministicResourceGenerator.GenerateResource(
                     settings, resourceSettings, expected, x, y), resources[index], x, y);
             }
+
+            int temporaryLakeTiles = 0;
+            int saltLakeTiles = 0;
+            int freshwaterLakeTiles = 0;
+            int springStreamTiles = 0;
+            for (int index = 0; index < surfaceWater.Length; index++)
+            {
+                // C4-C固有Typeを数え、固定Seedの統合試料として利用できる区分が含まれるか診断します。
+                switch (surfaceWater[index].Type)
+                {
+                    case SurfaceWaterTileType.LakeCandidate:
+                        temporaryLakeTiles++;
+                        break;
+                    case SurfaceWaterTileType.PermanentSaltwaterLake:
+                        saltLakeTiles++;
+                        break;
+                    case SurfaceWaterTileType.PermanentFreshwaterLake:
+                        freshwaterLakeTiles++;
+                        break;
+                    case SurfaceWaterTileType.SpringStream:
+                        springStreamTiles++;
+                        break;
+                }
+            }
+            TestContext.WriteLine(
+                $"C4-C sample counts: temporary={temporaryLakeTiles}, salt={saltLakeTiles}, "
+                + $"fresh={freshwaterLakeTiles}, spring={springStreamTiles}");
+            Assert.That(
+                freshwaterLakeTiles,
+                Is.GreaterThan(0),
+                $"C4-C sample counts: temporary={temporaryLakeTiles}, salt={saltLakeTiles}, "
+                    + $"fresh={freshwaterLakeTiles}, spring={springStreamTiles}");
+        }
+
+        /// <summary>
+        /// 最終湖面を含む固定Seedのチャンクを製品Jobで生成し、公開水文BufferへC4-Cの区分が保存されることを保証します。
+        /// </summary>
+        [Test]
+        public void ChunkGenerationSystem_PublishesFinalLakeClassification()
+        {
+            using World world = new World("WorldGenerationLakeClassificationTests");
+            EntityManager entityManager = world.EntityManager;
+            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.FromString("ecs-system-test"),
+                1);
+
+            Entity settingsEntity = entityManager.CreateEntity();
+            entityManager.AddComponentData(settingsEntity, settings);
+            entityManager.AddComponentData(settingsEntity, ResourceGenerationSettings.CreateDefault());
+
+            Entity chunkEntity = entityManager.CreateEntity();
+            entityManager.AddComponentData(
+                chunkEntity,
+                new ChunkCoordinateComponent
+                {
+                    Layer = WorldLayer.Surface,
+                    X = 0,
+                    Y = -3
+                });
+            entityManager.AddComponentData(
+                chunkEntity,
+                new ChunkGenerationStatus
+                {
+                    Phase = ChunkGenerationPhase.Queued,
+                    GeneratedWithVersion = 0
+                });
+            entityManager.AddComponent<ChunkGenerationRequest>(chunkEntity);
+            entityManager.AddBuffer<GeneratedTile>(chunkEntity);
+            entityManager.AddBuffer<GeneratedResourceTile>(chunkEntity);
+            entityManager.AddBuffer<GeneratedHydrologyCell>(chunkEntity);
+            entityManager.AddBuffer<GeneratedSurfaceWaterTile>(chunkEntity);
+            entityManager.AddBuffer<GeneratedHydrologyTile>(chunkEntity);
+
+            // 製品と同じ二段階公開を通し、Job完了後にだけ固定水文Bufferを読み取ります。
+            SystemHandle system = world.GetOrCreateSystem<ChunkGenerationSystem>();
+            system.Update(world.Unmanaged);
+            entityManager.CompleteAllTrackedJobs();
+            WaitForChunkGeneration(world, system, chunkEntity);
+
+            DynamicBuffer<GeneratedHydrologyCell> hydrology =
+                entityManager.GetBuffer<GeneratedHydrologyCell>(chunkEntity);
+            const int LakeLocalX = 2;
+            const int LakeLocalY = 0;
+            GeneratedHydrologyCell lakeCell = hydrology[
+                (LakeLocalY * DeterministicHydrologyGenerator.CellsPerChunkAxis) + LakeLocalX];
+
+            Assert.That(lakeCell.CellX, Is.EqualTo(2));
+            Assert.That(lakeCell.CellY, Is.EqualTo(-24));
+            Assert.That(
+                (lakeCell.LakeFlags & HydrologyLakeFlags.SurfaceCell) != 0,
+                Is.True,
+                "固定Seedの検証セルは、最終区分を公開する湖面セルである必要があります。");
+            Assert.That(
+                lakeCell.LakeClassification,
+                Is.EqualTo(LakeWaterBalanceClassification.OverflowFreshwater));
+            Assert.That(
+                (lakeCell.ConnectionFlags & HydrologyConnectionFlags.Lake) != 0,
+                Is.True,
+                "越流淡水湖は最終区分とLake接続を同時に公開する必要があります。");
         }
 
         /// <summary>
@@ -1842,6 +1941,58 @@ namespace Farmware.WorldGeneration.Tests
                 Assert.That(timer.Elapsed.TotalSeconds, Is.LessThan(30), "地下水失敗結果が有限時間で確定しませんでした。");
                 system.Update(world.Unmanaged);
                 // 実製品の描画フレームと同様にWorkerへ実行時間を渡し、待機側のCPU占有を避けます。
+                System.Threading.Thread.Yield();
+            }
+
+            ChunkGenerationStatus status =
+                entityManager.GetComponentData<ChunkGenerationStatus>(chunkEntity);
+            Assert.That(status.Phase, Is.EqualTo(ChunkGenerationPhase.Failed));
+            Assert.That(status.GeneratedWithVersion, Is.Zero);
+            Assert.That(entityManager.GetBuffer<GeneratedTile>(chunkEntity).Length, Is.Zero);
+            Assert.That(entityManager.GetBuffer<GeneratedResourceTile>(chunkEntity).Length, Is.Zero);
+            Assert.That(entityManager.GetBuffer<GeneratedHydrologyCell>(chunkEntity).Length, Is.Zero);
+            Assert.That(entityManager.GetBuffer<GeneratedSurfaceWaterTile>(chunkEntity).Length, Is.Zero);
+            Assert.That(entityManager.GetBuffer<GeneratedHydrologyTile>(chunkEntity).Length, Is.Zero);
+        }
+
+        /// <summary>
+        /// C4-Cだけが拒否する不正な湖水収支比重を準備し、地下水まで完成しても5種類のECS Bufferを部分公開しないことを保証します。
+        /// </summary>
+        [Test]
+        public void ChunkGenerationSystem_LakeSpringFailureDoesNotPublishAnyBuffer()
+        {
+            using World world = new World("ChunkGenerationLakeSpringFailureTests");
+            EntityManager entityManager = world.EntityManager;
+            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.FromString("ecs-lake-spring-failure-test"),
+                1);
+            // 湖水収支の比重合計4だけを崩し、C4-B2までの全入力は有効な状態を維持します。
+            settings.LakeSpring.LakeWeightTotal = 3;
+
+            Entity settingsEntity = entityManager.CreateEntity();
+            entityManager.AddComponentData(settingsEntity, settings);
+            entityManager.AddComponentData(settingsEntity, ResourceGenerationSettings.CreateDefault());
+            Entity chunkEntity = CreateChunkEntity(
+                entityManager,
+                1,
+                -1,
+                ChunkGenerationPhase.Queued,
+                true);
+            SystemHandle system = world.GetOrCreateSystem<ChunkGenerationSystem>();
+
+            system.Update(world.Unmanaged);
+            entityManager.CompleteAllTrackedJobs();
+            Assert.That(
+                entityManager.GetComponentData<ChunkGenerationStatus>(chunkEntity).Phase,
+                Is.EqualTo(ChunkGenerationPhase.GeneratingData));
+
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+            while (entityManager.GetComponentData<ChunkGenerationStatus>(chunkEntity).Phase
+                == ChunkGenerationPhase.GeneratingData)
+            {
+                Assert.That(timer.Elapsed.TotalSeconds, Is.LessThan(30), "湖・泉失敗結果が有限時間で確定しませんでした。");
+                system.Update(world.Unmanaged);
+                // 製品の描画フレームと同様にWorkerへ実行時間を渡し、待機側のCPU占有を避けます。
                 System.Threading.Thread.Yield();
             }
 

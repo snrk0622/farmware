@@ -1,5 +1,5 @@
-// このファイルは、TERRAIN-01C3-A〜Dの8×8水文セル、D8流向、下流終端、集水・自然流出、基礎湖面を決定論的に生成します。
-// ChunkGenerationSystem、状態ハッシュ、湖Resolverが同じ純粋計算を共有し、ロード順や表示状態による差を防ぎます。
+// このファイルは、TERRAIN-01C3-A〜Dの8×8水文セル、D8流向、下流終端、集水・自然流出、基礎湖面と、C4-Cの最終湖区分を保持します。
+// ChunkGenerationSystem、状態ハッシュ、湖Resolver、診断表示が同じ固定水文値を共有し、ロード順や表示状態による差を防ぎます。
 
 using System;
 using Unity.Collections;
@@ -328,6 +328,12 @@ namespace Farmware.WorldGeneration
 
         /// <summary>閉鎖流域の解決状態、湖にならない理由、湖面・越流の有無です。</summary>
         public HydrologyLakeFlags LakeFlags;
+
+        /// <summary>
+        /// C4-Cの水収支で確定した湖面セルの最終区分です。
+        /// 湖面候補以外はNoneとし、Simulation、Gameビュー、Map Viewerが同じ分類を参照します。
+        /// </summary>
+        public LakeWaterBalanceClassification LakeClassification;
 
         /// <summary>
         /// このセルが中心タイルの陸海判定による海洋流出口かを返します。
@@ -1322,9 +1328,14 @@ namespace Farmware.WorldGeneration
                     DeterministicGroundwaterHydrologyGenerator.IntersectingCellCount,
                     Allocator.Temp,
                     NativeArrayOptions.UninitializedMemory);
-            using NativeArray<byte> surfaceRechargeCandidates =
-                new NativeArray<byte>(
+            using NativeArray<SurfaceRechargeCandidate> surfaceRechargeCandidates =
+                new NativeArray<SurfaceRechargeCandidate>(
                     DeterministicGroundwaterHydrologyGenerator.IntersectingCellCount,
+                    Allocator.Temp,
+                    NativeArrayOptions.ClearMemory);
+            using NativeArray<SurfaceRechargeCandidate> springSurfaceRechargeCandidates =
+                new NativeArray<SurfaceRechargeCandidate>(
+                    DeterministicLakeSpringGenerator.SpringRechargeCandidateCount,
                     Allocator.Temp,
                     NativeArrayOptions.ClearMemory);
             if (!DeterministicSurfaceWaterGenerator.TryGenerateChunk(
@@ -1341,6 +1352,7 @@ namespace Farmware.WorldGeneration
                     floodQueue,
                     intersectingCells,
                     surfaceRechargeCandidates,
+                    springSurfaceRechargeCandidates,
                     surfaceWater))
             {
                 // 表流水だけが失敗した場合も通常の空Bufferと区別し、決定性監査が欠落を見逃さないようにします。
@@ -1388,7 +1400,37 @@ namespace Farmware.WorldGeneration
                 return WorldSeedUtility.Mix64(currentHash ^ 0xC4B2FA11ED000002UL);
             }
 
-            // 地下水JobがConnectionFlagsとGroundwaterPotentialを確定した後の64セルを固定順で混合します。
+            using NativeArray<GeneratedHydrologyCell> springHydrologyCells =
+                new NativeArray<GeneratedHydrologyCell>(
+                    DeterministicLakeSpringGenerator.SpringHydrologyCellCount,
+                    Allocator.Temp,
+                    NativeArrayOptions.UninitializedMemory);
+            using NativeArray<SpringCandidate> springCandidates =
+                new NativeArray<SpringCandidate>(
+                    DeterministicLakeSpringGenerator.SpringCandidateCellCount,
+                    Allocator.Temp,
+                    NativeArrayOptions.UninitializedMemory);
+            if (!DeterministicLakeSpringGenerator.TryFinalizeChunk(
+                    settings,
+                    chunkCoordinate.X,
+                    chunkCoordinate.Y,
+                    cells,
+                    intersectingCells,
+                    surfaceWater,
+                    frontier,
+                    basinMembers,
+                    basinLookup,
+                    pathWorkspace,
+                    pathTiles,
+                    springSurfaceRechargeCandidates,
+                    springHydrologyCells,
+                    springCandidates))
+            {
+                // C4-Cの湖最終区分または泉生成に失敗した状態を、通常の水面なしチャンクと区別します。
+                return WorldSeedUtility.Mix64(currentHash ^ 0xC4C0FA11ED000001UL);
+            }
+
+            // 湖水収支・泉JobがLake・Stream接続まで確定した後の64セルを固定順で混合します。
             for (int index = 0; index < CellsPerChunk; index++)
             {
                 currentHash = HashCell(currentHash, cells[index]);
@@ -1646,6 +1688,7 @@ namespace Farmware.WorldGeneration
                 catchmentValues |= (ulong)cell.MaximumContributingDistance << 48;
                 ulong basinArea = cell.BasinAreaCells;
                 basinArea |= (ulong)(byte)cell.LakeFlags << 32;
+                basinArea |= (ulong)(byte)cell.LakeClassification << 40;
                 ulong spillInside = (uint)cell.SpillInsideCellX;
                 spillInside |= (ulong)(uint)cell.SpillInsideCellY << 32;
                 ulong spillOutside = (uint)cell.SpillOutsideCellX;
