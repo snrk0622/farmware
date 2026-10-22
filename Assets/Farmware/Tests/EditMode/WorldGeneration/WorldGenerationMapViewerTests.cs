@@ -406,10 +406,16 @@ namespace Farmware.WorldGeneration.Tests
                 WorldGenerationMapViewerWindow.ResolveViewModeChoiceIndex(21),
                 Is.EqualTo(WorldGenerationMapViewMode.HydrologyLake));
             Assert.That(
+                WorldGenerationMapViewerWindow.ResolveViewModeChoiceIndex(22),
+                Is.EqualTo(WorldGenerationMapViewMode.HydrologyGroundwater));
+            Assert.That(
+                WorldGenerationMapViewerWindow.ResolveViewModeChoiceIndex(26),
+                Is.EqualTo(WorldGenerationMapViewMode.HydrologyWetlandCandidate));
+            Assert.That(
                 WorldGenerationMapViewerWindow.ResolveViewModeChoiceIndex(-1),
                 Is.EqualTo(WorldGenerationMapViewMode.Terrain));
             Assert.That(
-                WorldGenerationMapViewerWindow.ResolveViewModeChoiceIndex(22),
+                WorldGenerationMapViewerWindow.ResolveViewModeChoiceIndex(27),
                 Is.EqualTo(WorldGenerationMapViewMode.Terrain));
             Assert.That(
                 WorldGenerationMapViewerWindow.ResolveViewModeChoiceIndex(byte.MaxValue + 1),
@@ -678,11 +684,11 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// Map Viewerのモード別上限判定を直接呼び、水文モードだけが64サンプルへ制限されることを保証します。
-        /// 描画・リサイズ・ホイールズームが共有する判定を対象にし、ズーム時だけ通常上限へ戻る退行を防ぎます。
+        /// Map Viewerのモード別上限判定を直接呼び、基礎水文は64、派生水文は縮尺に応じた完成チャンク上限になることを保証します。
+        /// 描画・リサイズ・ホイールズームが共有する判定を対象にし、派生水文だけ無制限なチャンク生成へ戻る退行を防ぎます。
         /// </summary>
         [Test]
-        public void GetMaximumSampleResolution_HydrologyUsesReducedLimit()
+        public void GetMaximumSampleResolution_HydrologyUsesBoundedLimits()
         {
             MethodInfo getMaximumSampleResolution = typeof(WorldGenerationMapViewerWindow).GetMethod(
                 "GetMaximumSampleResolution",
@@ -691,15 +697,25 @@ namespace Farmware.WorldGeneration.Tests
 
             int terrainLimit = (int)getMaximumSampleResolution.Invoke(
                 null,
-                new object[] { WorldGenerationMapViewMode.Terrain });
-            int hydrologyLimit = (int)getMaximumSampleResolution.Invoke(
+                new object[] { WorldGenerationMapViewMode.Terrain, 4 });
+            int baseHydrologyLimit = (int)getMaximumSampleResolution.Invoke(
                 null,
-                new object[] { WorldGenerationMapViewMode.HydrologyLake });
+                new object[] { WorldGenerationMapViewMode.HydrologyLake, 4 });
+            int derivedNearLimit = (int)getMaximumSampleResolution.Invoke(
+                null,
+                new object[] { WorldGenerationMapViewMode.HydrologyGroundwater, 4 });
+            int derivedFarLimit = (int)getMaximumSampleResolution.Invoke(
+                null,
+                new object[] { WorldGenerationMapViewMode.HydrologyNaturalFlooding, 256 });
 
             Assert.That(terrainLimit, Is.EqualTo(WorldGenerationMapSampler.MaximumResolution));
             Assert.That(
-                hydrologyLimit,
+                baseHydrologyLimit,
                 Is.EqualTo(WorldGenerationMapSampler.MaximumHydrologyResolution));
+            Assert.That(derivedNearLimit, Is.EqualTo(33));
+            Assert.That(
+                derivedFarLimit,
+                Is.EqualTo(WorldGenerationMapSampler.MaximumDerivedHydrologySampledChunksPerAxis));
         }
 
         /// <summary>

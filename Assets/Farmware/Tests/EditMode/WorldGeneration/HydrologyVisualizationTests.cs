@@ -1,8 +1,10 @@
-// このファイルは、TERRAIN-01C3-D2とC4-E2のGameビューが固定水文・派生水文を正しい分類色へ変換することを検証します。
+// このファイルは、TERRAIN-01C3-D2とC4-E2／E3のGameビュー・Map Viewerが固定水文を同じ分類色へ変換することを検証します。
 // SceneやECS Worldを作らず、色写像、低解像度上限、決定論的サンプリングを純粋EditModeテストで確認します。
 
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Farmware.Simulation;
 using Farmware.WorldGeneration.Editor;
 using Farmware.WorldGeneration.Presentation;
 using NUnit.Framework;
@@ -10,7 +12,7 @@ using UnityEngine;
 
 namespace Farmware.WorldGeneration.Tests
 {
-    /// <summary>流向・終端・集水・河川・湖・派生水文の診断色とMap Viewer接続を保証します。</summary>
+    /// <summary>流向・終端・集水・河川・湖・派生水文の共有診断色とMap Viewer完成チャンク接続を保証します。</summary>
     public sealed class HydrologyVisualizationTests
     {
         /// <summary>
@@ -342,6 +344,67 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// C4派生水文5モードへ同じ完成値を渡し、Map ViewerがGameビューOverlayとRGB・分類境界を共有することを保証します。
+        /// </summary>
+        [Test]
+        public void MapViewerDerivedHydrologyColors_MatchOverlayRgbAndAreOpaque()
+        {
+            GeneratedHydrologyCell cell = new GeneratedHydrologyCell
+            {
+                GroundwaterPotential = 48737,
+                ConnectionFlags = HydrologyConnectionFlags.Groundwater
+            };
+            GeneratedHydrologyTile hydrologyTile = new GeneratedHydrologyTile
+            {
+                NaturalSoilSaturationPotential = 40236,
+                NaturalFloodingPotential = 64281,
+                Flags = GeneratedHydrologyTileFlags.FreshwaterConnected
+                    | GeneratedHydrologyTileFlags.WetlandTileEligible
+                    | GeneratedHydrologyTileFlags.LargeWetlandExtent
+            };
+            GeneratedSurfaceWaterTile surfaceWaterTile = new GeneratedSurfaceWaterTile
+            {
+                Type = SurfaceWaterTileType.SpringStream
+            };
+            WorldGenerationMapViewMode[] mapModes =
+            {
+                WorldGenerationMapViewMode.HydrologyGroundwater,
+                WorldGenerationMapViewMode.HydrologyNaturalSoilSaturation,
+                WorldGenerationMapViewMode.HydrologySpring,
+                WorldGenerationMapViewMode.HydrologyNaturalFlooding,
+                WorldGenerationMapViewMode.HydrologyWetlandCandidate
+            };
+            WorldGenerationDebugVisualizationMode[] overlayModes =
+            {
+                WorldGenerationDebugVisualizationMode.HydrologyGroundwater,
+                WorldGenerationDebugVisualizationMode.HydrologyNaturalSoilSaturation,
+                WorldGenerationDebugVisualizationMode.HydrologySpring,
+                WorldGenerationDebugVisualizationMode.HydrologyNaturalFlooding,
+                WorldGenerationDebugVisualizationMode.HydrologyWetlandCandidate
+            };
+
+            for (int index = 0; index < mapModes.Length; index++)
+            {
+                Color32 mapColor = WorldGenerationMapSampler.GetHydrologyDisplayColor(
+                    mapModes[index],
+                    cell,
+                    hydrologyTile,
+                    surfaceWaterTile);
+                Color32 overlayColor = WorldGenerationDebugVisualizationOverlay
+                    .GetHydrologyVisualizationColor(
+                        overlayModes[index],
+                        cell,
+                        hydrologyTile,
+                        surfaceWaterTile);
+
+                Assert.That(mapColor.r, Is.EqualTo(overlayColor.r), mapModes[index].ToString());
+                Assert.That(mapColor.g, Is.EqualTo(overlayColor.g), mapModes[index].ToString());
+                Assert.That(mapColor.b, Is.EqualTo(overlayColor.b), mapModes[index].ToString());
+                Assert.That(mapColor.a, Is.EqualTo(byte.MaxValue), mapModes[index].ToString());
+            }
+        }
+
+        /// <summary>
         /// 小さな水文地図を生成し、各ピクセルが同じ座標へ直接生成した固定水文セルの色と一致することを保証します。
         /// </summary>
         [Test]
@@ -421,6 +484,78 @@ namespace Farmware.WorldGeneration.Tests
 
             Assert.That(result.PixelColors, Has.Length.EqualTo(4));
             Assert.That(result.HasGeneratedData, Is.True);
+        }
+
+        /// <summary>
+        /// 実Windowと同じThreadPoolで、表示タイルと担当水文セルの所有チャンクが分かれる代表タイルを生成します。
+        /// 2つの完成チャンクを正しく使い分け、生成時モード、C4派生水文色、Hover値が同じ結果へ保存されることを保証します。
+        /// あわせて、16行未満でも準備・各完成チャンク・最終行の順に0%より大きい進捗が通知されることを確認します。
+        /// </summary>
+        [Test]
+        public void Sample_DerivedHydrologyUsesCompletedChunkAndStoresHoverValues()
+        {
+            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.FromString("derived-hydrology-map-viewer-test"),
+                1);
+            RecordingProgress progress = new RecordingProgress();
+
+            WorldGenerationMapSampleResult result = Task.Run(
+                    () => WorldGenerationMapSampler.Sample(
+                        settings,
+                        WorldLayer.Surface,
+                        60,
+                        0,
+                        1,
+                        1,
+                        1,
+                        WorldGenerationMapViewMode.HydrologyNaturalFlooding,
+                        CancellationToken.None,
+                        progress))
+                .GetAwaiter()
+                .GetResult();
+
+            // 8x8セルはタイル中心基準なので、X=60はタイル用Chunk(0,0)とセル用Chunk(1,0)の両方を必要とします。
+            Assert.That(
+                result.ViewMode,
+                Is.EqualTo(WorldGenerationMapViewMode.HydrologyNaturalFlooding));
+            Assert.That(result.DiagnosticChunkCount, Is.EqualTo(2));
+            Assert.That(
+                result.TryGetDerivedHydrologySample(
+                    60,
+                    0,
+                    out DerivedHydrologyMapSample sample),
+                Is.True);
+            Assert.That(sample.Cell.CellX, Is.EqualTo(8));
+            Assert.That(sample.Cell.CellY, Is.EqualTo(0));
+            Color32 expected = WorldGenerationMapSampler.GetHydrologyDisplayColor(
+                WorldGenerationMapViewMode.HydrologyNaturalFlooding,
+                sample.Cell,
+                sample.HydrologyTile,
+                sample.SurfaceWaterTile);
+            Assert.That(result.PixelColors, Has.Length.EqualTo(1));
+            Assert.That(result.PixelColors[0], Is.EqualTo(expected));
+            Assert.That(progress.Values, Has.Count.EqualTo(4));
+            Assert.That(progress.Values[0], Is.EqualTo(0.01f));
+            Assert.That(progress.Values[1], Is.GreaterThan(progress.Values[0]));
+            Assert.That(progress.Values[2], Is.GreaterThan(progress.Values[1]));
+            Assert.That(progress.Values[3], Is.EqualTo(1f));
+        }
+
+        /// <summary>
+        /// 派生水文のバックグラウンド進捗を通知順に保存するテスト専用受け口です。
+        /// UIスレッドへの非同期配送を使わず、完成チャンクごとの割合を同じテスト内で決定的に比較します。
+        /// </summary>
+        private sealed class RecordingProgress : System.IProgress<float>
+        {
+            /// <summary>Sampleが通知した0〜1の進捗割合を、受信した順序で保持します。</summary>
+            public List<float> Values { get; } = new List<float>();
+
+            /// <summary>副作用を加えず、受け取った進捗割合を一覧末尾へ追加します。</summary>
+            /// <param name="value">準備、完成チャンク、画像行に対応する0〜1の割合です。</param>
+            public void Report(float value)
+            {
+                Values.Add(value);
+            }
         }
 
         /// <summary>水文用64サンプル上限でもCanvasの縦横比を保ち、通常768上限と分離されることを保証します。</summary>
