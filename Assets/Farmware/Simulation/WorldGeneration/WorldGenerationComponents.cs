@@ -327,6 +327,12 @@ namespace Farmware.WorldGeneration
         /// </summary>
         public LakeSpringGenerationSettings LakeSpring;
 
+        /// <summary>
+        /// 恒久淡水源からの自然冠水度と、後続の広域湿原規模を再計算する固定設定です。
+        /// GeneratorVersionと一緒にワールド寿命中は変更しません。
+        /// </summary>
+        public NaturalFloodingGenerationSettings NaturalFlooding;
+
         /// <summary>7バイオームの適性が閾値付近で滑らかに入れ替わる帯のおおよその幅です。単位はタイルです。</summary>
         public int BiomeClassificationTransitionWidthInTiles;
 
@@ -482,6 +488,7 @@ namespace Farmware.WorldGeneration
                 Hydrology = HydrologyGenerationSettings.CreateDefault(),
                 Groundwater = GroundwaterGenerationSettings.CreateDefault(),
                 LakeSpring = LakeSpringGenerationSettings.CreateDefault(),
+                NaturalFlooding = NaturalFloodingGenerationSettings.CreateDefault(),
                 BiomeClassificationTransitionWidthInTiles = 12,
                 BiomeTransitionWidthInTiles = 6,
                 SeaLevelThreshold = DefaultSeaLevelThreshold,

@@ -1,4 +1,4 @@
-// このファイルは、地形・資源・固定水文・表流水・地下水・湖水収支・泉をECS外の作業領域で生成し、完成結果だけをECSへ公開します。
+// このファイルは、地形・資源・固定水文・表流水・地下水・湖水収支・泉・自然冠水をECS外の作業領域で生成し、完成結果だけをECSへ公開します。
 // ChunkStreamingSystemが要求と寿命、Presentationが確定済みBufferの表示、固定Tick公開Systemが個体群の決定論境界を担当します。
 
 using System;
@@ -15,7 +15,7 @@ using Farmware.Simulation.Animals;
 namespace Farmware.WorldGeneration
 {
     /// <summary>
-    /// 有効なChunkGenerationRequestを持つチャンクだけを生成し、地形・資源・固定水文・表流水・地下水・湖水収支・泉を対応付けるECS Systemです。
+    /// 有効なChunkGenerationRequestを持つチャンクだけを生成し、地形・資源・固定水文・表流水・地下水・湖水収支・泉・自然冠水を対応付けるECS Systemです。
     /// 開始時に要求を無効化します。動物個体群があるWorldでは固定Tick境界で一括公開し、Job完了順を論理状態へ持ち込みません。
     /// 個体群Worldでは通常フレームで先行投入し、未完了中は固定Tickを延期して、完成バッチだけをTick入口で公開します。
     /// </summary>
@@ -57,6 +57,10 @@ namespace Farmware.WorldGeneration
         // 完成済みの湖最終区分・泉Handleを安全に確定する時間です。
         private static readonly ProfilerMarker LakeSpringWaitProfilerMarker =
             new ProfilerMarker("Farmware.WorldGeneration.ChunkGenerationLakeSpringWait");
+
+        // 完成済みの自然冠水・湿地広がりHandleを安全に確定する時間です。
+        private static readonly ProfilerMarker NaturalFloodingWaitProfilerMarker =
+            new ProfilerMarker("Farmware.WorldGeneration.ChunkGenerationNaturalFloodingWait");
 
         // 完成確認済みの地形・資源Handleを安全に確定する時間です。
         private static readonly ProfilerMarker TerrainWaitProfilerMarker =
@@ -190,6 +194,10 @@ namespace Farmware.WorldGeneration
                 {
                     CompleteRunningStage(GenerationStage.LakeSpring);
                 }
+                using (NaturalFloodingWaitProfilerMarker.Auto())
+                {
+                    CompleteRunningStage(GenerationStage.NaturalFlooding);
+                }
             }
 
             PublishCompletedResults(manager);
@@ -238,7 +246,7 @@ namespace Farmware.WorldGeneration
         /// <summary>
         /// 実行中の全枠から指定系列の完成済みHandleだけを結合し、Native Containerの安全性状態を確定します。
         /// </summary>
-        /// <param name="stage">基礎水文、湖、表流水、地形・資源、地下水のうち確定費用を分離する系列です。</param>
+        /// <param name="stage">基礎水文から自然冠水まで、確定費用を分離する生成系列です。</param>
         private void CompleteRunningStage(GenerationStage stage)
         {
             JobHandle combined = default;
@@ -268,8 +276,11 @@ namespace Farmware.WorldGeneration
                     case GenerationStage.Groundwater:
                         stageHandle = slot.GroundwaterHandle;
                         break;
-                    default:
+                    case GenerationStage.LakeSpring:
                         stageHandle = slot.LakeSpringHandle;
+                        break;
+                    default:
+                        stageHandle = slot.NaturalFloodingHandle;
                         break;
                 }
                 combined = JobHandle.CombineDependencies(combined, stageHandle);
@@ -315,6 +326,18 @@ namespace Farmware.WorldGeneration
                 slot.SurfaceWaterGenerationFailed.Dispose();
                 slot.GroundwaterGenerationFailed.Dispose();
                 slot.LakeSpringGenerationFailed.Dispose();
+                slot.NaturalFloodingScratchHydrologyCells.Dispose();
+                slot.NaturalFloodingScratchIntersectingHydrologyCells.Dispose();
+                slot.NaturalFloodingScratchSurfaceRechargeCandidates.Dispose();
+                slot.NaturalFloodingScratchSurfaceWater.Dispose();
+                slot.NaturalFloodingSourceWater.Dispose();
+                slot.WetlandEvaluationHydrologyCells.Dispose();
+                slot.WetlandEvaluationHydrologyCellWritten.Dispose();
+                slot.WetlandCandidateCells.Dispose();
+                slot.LargeWetlandExtentCells.Dispose();
+                slot.WetlandVisitedCells.Dispose();
+                slot.WetlandCellQueue.Dispose();
+                slot.NaturalFloodingGenerationFailed.Dispose();
             }
 
             // Systemだけが先に破棄されるテストWorldでも、存在しない生成Jobを理由に固定Tickを止め続けません。
@@ -368,6 +391,7 @@ namespace Farmware.WorldGeneration
                         generationFailed |= slot.SurfaceWaterGenerationFailed[0] != 0;
                         generationFailed |= slot.GroundwaterGenerationFailed[0] != 0;
                         generationFailed |= slot.LakeSpringGenerationFailed[0] != 0;
+                        generationFailed |= slot.NaturalFloodingGenerationFailed[0] != 0;
 
                         if (generationFailed)
                         {
@@ -460,6 +484,12 @@ namespace Farmware.WorldGeneration
                 slot.SurfaceWaterGenerationFailed[0] = 0;
                 slot.GroundwaterGenerationFailed[0] = 0;
                 slot.LakeSpringGenerationFailed[0] = 0;
+                for (int sourceLaneIndex = 0;
+                    sourceLaneIndex < slot.NaturalFloodingGenerationFailed.Length;
+                    sourceLaneIndex++)
+                {
+                    slot.NaturalFloodingGenerationFailed[sourceLaneIndex] = 0;
+                }
                 for (int workItemIndex = 0;
                     workItemIndex < slot.LakeSpringHydrologyGenerationFailed.Length;
                     workItemIndex++)
@@ -565,12 +595,68 @@ namespace Farmware.WorldGeneration
                     SpringHydrologyGenerationFailed = slot.LakeSpringHydrologyGenerationFailed,
                     GenerationFailed = slot.LakeSpringGenerationFailed
                 };
+                GenerateNaturalFloodingSourceChunksJob naturalFloodingFirstWaveJob =
+                    new GenerateNaturalFloodingSourceChunksJob
+                    {
+                        Settings = settings,
+                        Coordinate = slot.Coordinate,
+                        SourceLaneOffset = 0,
+                        HydrologyCatchmentFrontier = slot.HydrologyCatchmentFrontier,
+                        HydrologyBasinMembers = slot.HydrologyBasinMembers,
+                        HydrologyBasinLookup = slot.HydrologyBasinLookup,
+                        PathWorkspace = slot.SurfaceWaterPathWorkspace,
+                        PathTiles = slot.SurfaceWaterPathTiles,
+                        FloodVisited = slot.SurfaceWaterFloodVisited,
+                        FloodQueue = slot.SurfaceWaterFloodQueue,
+                        ScratchHydrologyCells = slot.NaturalFloodingScratchHydrologyCells,
+                        ScratchIntersectingHydrologyCells =
+                            slot.NaturalFloodingScratchIntersectingHydrologyCells,
+                        ScratchSurfaceRechargeCandidates =
+                            slot.NaturalFloodingScratchSurfaceRechargeCandidates,
+                        ScratchSurfaceWater = slot.NaturalFloodingScratchSurfaceWater,
+                        SourceWaterArea = slot.NaturalFloodingSourceWater,
+                        LakeSpringGenerationFailed = slot.LakeSpringGenerationFailed,
+                        GenerationFailed = slot.NaturalFloodingGenerationFailed
+                    };
+                GenerateNaturalFloodingSourceChunksJob naturalFloodingSecondWaveJob =
+                    naturalFloodingFirstWaveJob;
+                naturalFloodingSecondWaveJob.SourceLaneOffset =
+                    DeterministicWetlandExtentGenerator.ParallelSourceWorkspaceLaneCount;
+                FinalizeNaturalFloodingWetlandJob naturalFloodingJob =
+                    new FinalizeNaturalFloodingWetlandJob
+                    {
+                        Settings = settings,
+                        Coordinate = slot.Coordinate,
+                        Tiles = slot.Tiles,
+                        HydrologyTiles = slot.HydrologyTiles,
+                        SurfaceWater = slot.SurfaceWater,
+                        SpringHydrologyCells = slot.SpringHydrologyCells,
+                        HydrologyCatchmentFrontier = slot.HydrologyCatchmentFrontier,
+                        HydrologyBasinMembers = slot.HydrologyBasinMembers,
+                        HydrologyBasinLookup = slot.HydrologyBasinLookup,
+                        ScratchIntersectingHydrologyCells =
+                            slot.NaturalFloodingScratchIntersectingHydrologyCells,
+                        ScratchSurfaceRechargeCandidates =
+                            slot.NaturalFloodingScratchSurfaceRechargeCandidates,
+                        SourceWaterArea = slot.NaturalFloodingSourceWater,
+                        EvaluationHydrologyCells = slot.WetlandEvaluationHydrologyCells,
+                        EvaluationHydrologyCellWritten =
+                            slot.WetlandEvaluationHydrologyCellWritten,
+                        CandidateCells = slot.WetlandCandidateCells,
+                        LargeExtentCells = slot.LargeWetlandExtentCells,
+                        VisitedCells = slot.WetlandVisitedCells,
+                        CellQueue = slot.WetlandCellQueue,
+                        LakeSpringGenerationFailed = slot.LakeSpringGenerationFailed,
+                        GenerationFailed = slot.NaturalFloodingGenerationFailed
+                    };
 
                 // 基礎水文の完了後に閉鎖末端を一度分類し、異なる流域を最大8担当へ分けます。
                 // 湖系列全体を、独立した地形・資源Jobとは並行させます。
                 // 湖面確定後に表流水を細分化し、地形・資源Jobは引き続き独立して並行させます。
                 // 地下水Jobは完成した地形と表流水の両方へ依存します。
-                // 湖水収支・泉Jobは地下水の完成後に湖候補を確定し、同じ5 Bufferの一括公開境界を維持します。
+                // 湖水収支・泉Job後は、周囲8チャンクを4担当ずつ2波で再構築してから最終評価します。
+                // 4件分の巨大Flood Fill領域を再利用し、8件分を常駐させずにWorker並列性を確保します。
+                // 公開先Bufferは増やさず、拡張した自然水文Bufferを含む同じ5 Bufferの一括公開境界を維持します。
                 JobHandle hydrologyHandle = hydrologyJob.Schedule(HydrologyRowWorkItemCount, 1);
                 JobHandle prepareLakeHandle = prepareLakeJob.Schedule(hydrologyHandle);
                 JobHandle lakeHandle = lakeJob.Schedule(HydrologyRowWorkItemCount, 1, prepareLakeHandle);
@@ -584,13 +670,24 @@ namespace Farmware.WorldGeneration
                     1,
                     groundwaterHandle);
                 JobHandle lakeSpringHandle = lakeSpringJob.Schedule(lakeSpringHydrologyHandle);
+                JobHandle naturalFloodingFirstWaveHandle = naturalFloodingFirstWaveJob.Schedule(
+                    DeterministicWetlandExtentGenerator.ParallelSourceWorkspaceLaneCount,
+                    1,
+                    lakeSpringHandle);
+                JobHandle naturalFloodingSecondWaveHandle = naturalFloodingSecondWaveJob.Schedule(
+                    DeterministicWetlandExtentGenerator.ParallelSourceWorkspaceLaneCount,
+                    1,
+                    naturalFloodingFirstWaveHandle);
+                JobHandle naturalFloodingHandle = naturalFloodingJob.Schedule(
+                    naturalFloodingSecondWaveHandle);
                 slot.HydrologyBaseHandle = hydrologyHandle;
                 slot.LakeHandle = lakeHandle;
                 slot.SurfaceWaterHandle = surfaceWaterHandle;
                 slot.TerrainHandle = terrainHandle;
                 slot.GroundwaterHandle = groundwaterHandle;
                 slot.LakeSpringHandle = lakeSpringHandle;
-                slot.Handle = lakeSpringHandle;
+                slot.NaturalFloodingHandle = naturalFloodingHandle;
+                slot.Handle = naturalFloodingHandle;
                 slots[slotIndex] = slot;
                 status.Phase = ChunkGenerationPhase.GeneratingData;
                 manager.SetComponentData(entity, status);
@@ -678,19 +775,23 @@ namespace Farmware.WorldGeneration
                     Allocator.Persistent,
                     NativeArrayOptions.UninitializedMemory),
                 SurfaceWaterPathWorkspace = new NativeArray<SurfaceWaterPathSearchNode>(
-                    DeterministicSurfaceWaterPathGenerator.MaximumSearchNodeCount,
+                    DeterministicSurfaceWaterPathGenerator.MaximumSearchNodeCount
+                        * DeterministicWetlandExtentGenerator.ParallelSourceWorkspaceLaneCount,
                     Allocator.Persistent,
                     NativeArrayOptions.UninitializedMemory),
                 SurfaceWaterPathTiles = new NativeArray<SurfaceWaterPathTile>(
-                    DeterministicSurfaceWaterPathGenerator.MaximumSearchNodeCount,
+                    DeterministicSurfaceWaterPathGenerator.MaximumSearchNodeCount
+                        * DeterministicWetlandExtentGenerator.ParallelSourceWorkspaceLaneCount,
                     Allocator.Persistent,
                     NativeArrayOptions.UninitializedMemory),
                 SurfaceWaterFloodVisited = new NativeArray<byte>(
-                    DeterministicSurfaceWaterGenerator.MaximumFloodTileCount,
+                    DeterministicSurfaceWaterGenerator.MaximumFloodTileCount
+                        * DeterministicWetlandExtentGenerator.ParallelSourceWorkspaceLaneCount,
                     Allocator.Persistent,
                     NativeArrayOptions.UninitializedMemory),
                 SurfaceWaterFloodQueue = new NativeArray<int>(
-                    DeterministicSurfaceWaterGenerator.MaximumFloodTileCount,
+                    DeterministicSurfaceWaterGenerator.MaximumFloodTileCount
+                        * DeterministicWetlandExtentGenerator.ParallelSourceWorkspaceLaneCount,
                     Allocator.Persistent,
                     NativeArrayOptions.UninitializedMemory),
                 IntersectingHydrologyCells = new NativeArray<GeneratedHydrologyCell>(
@@ -740,6 +841,60 @@ namespace Farmware.WorldGeneration
                 LakeSpringGenerationFailed = new NativeArray<byte>(
                     1,
                     Allocator.Persistent,
+                    NativeArrayOptions.ClearMemory),
+                NaturalFloodingScratchHydrologyCells = new NativeArray<GeneratedHydrologyCell>(
+                    DeterministicHydrologyGenerator.CellsPerChunk
+                        * DeterministicWetlandExtentGenerator.ParallelSourceWorkspaceLaneCount,
+                    Allocator.Persistent,
+                    NativeArrayOptions.UninitializedMemory),
+                NaturalFloodingScratchIntersectingHydrologyCells =
+                    new NativeArray<GeneratedHydrologyCell>(
+                        DeterministicGroundwaterHydrologyGenerator.IntersectingCellCount
+                            * DeterministicWetlandExtentGenerator.SourceChunkLaneCount,
+                        Allocator.Persistent,
+                        NativeArrayOptions.UninitializedMemory),
+                NaturalFloodingScratchSurfaceRechargeCandidates =
+                    new NativeArray<SurfaceRechargeCandidate>(
+                        DeterministicGroundwaterHydrologyGenerator.IntersectingCellCount
+                            * DeterministicWetlandExtentGenerator.SourceChunkLaneCount,
+                        Allocator.Persistent,
+                        NativeArrayOptions.UninitializedMemory),
+                NaturalFloodingScratchSurfaceWater = new NativeArray<GeneratedSurfaceWaterTile>(
+                    WorldGridConstants.TilesPerChunk
+                        * DeterministicWetlandExtentGenerator.ParallelSourceWorkspaceLaneCount,
+                    Allocator.Persistent,
+                    NativeArrayOptions.UninitializedMemory),
+                WetlandEvaluationHydrologyCells = new NativeArray<GeneratedHydrologyCell>(
+                    DeterministicWetlandExtentGenerator.EvaluationCellCount,
+                    Allocator.Persistent,
+                    NativeArrayOptions.UninitializedMemory),
+                WetlandEvaluationHydrologyCellWritten = new NativeArray<byte>(
+                    DeterministicWetlandExtentGenerator.EvaluationCellCount,
+                    Allocator.Persistent,
+                    NativeArrayOptions.UninitializedMemory),
+                NaturalFloodingSourceWater = new NativeArray<GeneratedSurfaceWaterTile>(
+                    DeterministicWetlandExtentGenerator.SourceAreaTileCount,
+                    Allocator.Persistent,
+                    NativeArrayOptions.UninitializedMemory),
+                WetlandCandidateCells = new NativeArray<byte>(
+                    DeterministicWetlandExtentGenerator.EvaluationCellCount,
+                    Allocator.Persistent,
+                    NativeArrayOptions.UninitializedMemory),
+                LargeWetlandExtentCells = new NativeArray<byte>(
+                    DeterministicWetlandExtentGenerator.EvaluationCellCount,
+                    Allocator.Persistent,
+                    NativeArrayOptions.UninitializedMemory),
+                WetlandVisitedCells = new NativeArray<byte>(
+                    DeterministicWetlandExtentGenerator.EvaluationCellCount,
+                    Allocator.Persistent,
+                    NativeArrayOptions.UninitializedMemory),
+                WetlandCellQueue = new NativeArray<int>(
+                    DeterministicWetlandExtentGenerator.EvaluationCellCount,
+                    Allocator.Persistent,
+                    NativeArrayOptions.UninitializedMemory),
+                NaturalFloodingGenerationFailed = new NativeArray<byte>(
+                    DeterministicWetlandExtentGenerator.SourceChunkLaneCount,
+                    Allocator.Persistent,
                     NativeArrayOptions.ClearMemory)
             });
             return slots.Length - 1;
@@ -770,6 +925,8 @@ namespace Farmware.WorldGeneration
             public JobHandle GroundwaterHandle;
             /// <summary>地下水後に湖最終区分と泉を表流水・水文へ反映する最終系列のHandleです。</summary>
             public JobHandle LakeSpringHandle;
+            /// <summary>湖・泉確定後に自然冠水と広域湿原を生成する最終系列のHandleです。</summary>
+            public JobHandle NaturalFloodingHandle;
             /// <summary>地形4096件の作業配列です。枠の再利用中は保持し、System終了時にDisposeします。</summary>
             public NativeArray<GeneratedTile> Tiles;
             /// <summary>資源4096件の作業配列です。地形配列と同じ所有・解放規則です。</summary>
@@ -790,13 +947,13 @@ namespace Farmware.WorldGeneration
             public NativeArray<int> HydrologyLakeWorkItemCount;
             /// <summary>河道、河川幅、湖面候補を行優先4096件で保持し、完成時にECSへコピーする配列です。</summary>
             public NativeArray<GeneratedSurfaceWaterTile> SurfaceWater;
-            /// <summary>一つの最大16×16河道探索へ貸し、経路ごとに再利用する256ノード配列です。</summary>
+            /// <summary>通常生成は先頭、自然冠水は4担当へ分割して使う河道探索ノード配列です。</summary>
             public NativeArray<SurfaceWaterPathSearchNode> SurfaceWaterPathWorkspace;
-            /// <summary>一つの河道中心線を開始から終了まで一時保持する256タイル配列です。</summary>
+            /// <summary>通常生成は先頭、自然冠水は4担当へ分割して使う河道経路配列です。</summary>
             public NativeArray<SurfaceWaterPathTile> SurfaceWaterPathTiles;
-            /// <summary>最大4,096セル×64タイルの湖Flood Fill訪問状態を保持する固定作業配列です。</summary>
+            /// <summary>通常生成は先頭、自然冠水は4担当へ分割して使う湖Flood Fill訪問配列です。</summary>
             public NativeArray<byte> SurfaceWaterFloodVisited;
-            /// <summary>最大262,144タイルの湖Flood Fill待ち行列を保持する固定作業配列です。</summary>
+            /// <summary>通常生成は先頭、自然冠水は4担当へ分割して使う湖Flood Fill待ち行列です。</summary>
             public NativeArray<int> SurfaceWaterFloodQueue;
             /// <summary>64×64チャンクと交差する9×9完成水文を地下水Jobへ渡す中間配列です。</summary>
             public NativeArray<GeneratedHydrologyCell> IntersectingHydrologyCells;
@@ -822,6 +979,32 @@ namespace Farmware.WorldGeneration
             public NativeArray<byte> GroundwaterGenerationFailed;
             /// <summary>湖水収支・泉Jobが失敗時に先頭へ1を書き、5 Bufferの公開を止める通知領域です。</summary>
             public NativeArray<byte> LakeSpringGenerationFailed;
+            /// <summary>周辺4チャンクの64水文セルを同時再構築し、2波で再利用する自然冠水作業配列です。</summary>
+            public NativeArray<GeneratedHydrologyCell> NaturalFloodingScratchHydrologyCells;
+            /// <summary>周囲8チャンク分の交差9×9水文を、2波をまたいで保持する作業配列です。</summary>
+            public NativeArray<GeneratedHydrologyCell>
+                NaturalFloodingScratchIntersectingHydrologyCells;
+            /// <summary>周囲8チャンク分の交差9×9涵養有無を、2波をまたいで保持する作業配列です。</summary>
+            public NativeArray<SurfaceRechargeCandidate>
+                NaturalFloodingScratchSurfaceRechargeCandidates;
+            /// <summary>周辺4チャンクの4096表流水を同時再構築し、2波で再利用する作業配列です。</summary>
+            public NativeArray<GeneratedSurfaceWaterTile> NaturalFloodingScratchSurfaceWater;
+            /// <summary>中心を含む3×3チャンクの恒久淡水源を保持する192×192配列です。</summary>
+            public NativeArray<GeneratedSurfaceWaterTile> NaturalFloodingSourceWater;
+            /// <summary>湿原評価に必要な15×15の地下水・最終湖区分完成水文を保持します。</summary>
+            public NativeArray<GeneratedHydrologyCell> WetlandEvaluationHydrologyCells;
+            /// <summary>15×15水文が周囲再構築ですべて埋まったかを0／1で保持します。</summary>
+            public NativeArray<byte> WetlandEvaluationHydrologyCellWritten;
+            /// <summary>15×15水文セルが湿原候補かを0／1で保持する再利用配列です。</summary>
+            public NativeArray<byte> WetlandCandidateCells;
+            /// <summary>対象9×9セルが4セル以上の成分へ属するかを0／1で保持する配列です。</summary>
+            public NativeArray<byte> LargeWetlandExtentCells;
+            /// <summary>湿原成分の有限探索ごとに初期化して再利用する訪問配列です。</summary>
+            public NativeArray<byte> WetlandVisitedCells;
+            /// <summary>湿原成分を上下左右へ探索する最大225件のFIFO配列です。</summary>
+            public NativeArray<int> WetlandCellQueue;
+            /// <summary>周囲8担当または最終湿原評価の失敗時に1を書き、5 Bufferの公開を止めます。</summary>
+            public NativeArray<byte> NaturalFloodingGenerationFailed;
         }
 
         /// <summary>固定Tick境界で残り時間を個別計測する生成Job系列です。</summary>
@@ -843,7 +1026,10 @@ namespace Farmware.WorldGeneration
             Groundwater = 4,
 
             /// <summary>地下水後の湖最終区分と抑制済み泉を生成する系列です。</summary>
-            LakeSpring = 5
+            LakeSpring = 5,
+
+            /// <summary>半径32の自然冠水と4セル以上の湿原広がりを生成する最終系列です。</summary>
+            NaturalFlooding = 6
         }
 
         /// <summary>値コピーの設定と絶対座標だけから、8行の基礎水文を並列生成するBurst Jobです。</summary>
@@ -1340,6 +1526,216 @@ namespace Farmware.WorldGeneration
                         SpringSurfaceRechargeCandidates,
                         SpringHydrologyCells,
                         SpringCandidates))
+                {
+                    GenerationFailed[0] = 1;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 周囲8チャンクを4担当ずつ2波で再構築するBurst並列Jobです。
+        /// 各担当は独立した作業領域と共有水源内の重ならない64×64領域だけを書きます。
+        /// </summary>
+        [BurstCompile]
+        private struct GenerateNaturalFloodingSourceChunksJob : IJobParallelFor
+        {
+            /// <summary>表流水、地下水、湖区分を再現する固定設定です。</summary>
+            public WorldGenerationSettings Settings;
+
+            /// <summary>生成対象となるSurface上の絶対論理チャンク座標です。</summary>
+            public ChunkCoordinateComponent Coordinate;
+
+            /// <summary>第1波は0、第2波は4で、担当内0〜3を全体0〜7へ変換します。</summary>
+            public int SourceLaneOffset;
+
+            /// <summary>4担当へ一つずつ貸す集水Heap連結配列です。</summary>
+            [NativeDisableParallelForRestriction]
+            public NativeArray<HydrologyUpstreamCandidate> HydrologyCatchmentFrontier;
+
+            /// <summary>4担当へ一つずつ貸す閉鎖流域セル連結配列です。</summary>
+            [NativeDisableParallelForRestriction]
+            public NativeArray<HydrologyUpstreamCandidate> HydrologyBasinMembers;
+
+            /// <summary>4担当へ一つずつ貸す流域Hash連結配列です。</summary>
+            [NativeDisableParallelForRestriction]
+            public NativeArray<HydrologyBasinLookupSlot> HydrologyBasinLookup;
+
+            /// <summary>4担当分の河道探索ノードを連結した作業配列です。</summary>
+            [NativeDisableParallelForRestriction]
+            public NativeArray<SurfaceWaterPathSearchNode> PathWorkspace;
+
+            /// <summary>4担当分の河道経路を連結した作業配列です。</summary>
+            [NativeDisableParallelForRestriction]
+            public NativeArray<SurfaceWaterPathTile> PathTiles;
+
+            /// <summary>4担当分の湖Flood Fill訪問状態を連結した作業配列です。</summary>
+            [NativeDisableParallelForRestriction]
+            public NativeArray<byte> FloodVisited;
+
+            /// <summary>4担当分の湖Flood Fill待ち行列を連結した作業配列です。</summary>
+            [NativeDisableParallelForRestriction]
+            public NativeArray<int> FloodQueue;
+
+            /// <summary>4担当分の64水文セルを連結した作業配列です。</summary>
+            [NativeDisableParallelForRestriction]
+            public NativeArray<GeneratedHydrologyCell> ScratchHydrologyCells;
+
+            /// <summary>周囲8担当分を保持し、2波の上書きを避ける交差9×9水文出力です。</summary>
+            [NativeDisableParallelForRestriction]
+            public NativeArray<GeneratedHydrologyCell> ScratchIntersectingHydrologyCells;
+
+            /// <summary>周囲8担当分を保持し、2波の上書きを避ける交差9×9涵養出力です。</summary>
+            [NativeDisableParallelForRestriction]
+            public NativeArray<SurfaceRechargeCandidate> ScratchSurfaceRechargeCandidates;
+
+            /// <summary>4担当分の4096表流水を連結し、第2波で再利用する作業配列です。</summary>
+            [NativeDisableParallelForRestriction]
+            public NativeArray<GeneratedSurfaceWaterTile> ScratchSurfaceWater;
+
+            /// <summary>各担当が重ならない64×64位置へ書く、共有192×192水源配列です。</summary>
+            [NativeDisableParallelForRestriction]
+            public NativeArray<GeneratedSurfaceWaterTile> SourceWaterArea;
+
+            /// <summary>先行する湖・泉生成が失敗済みなら、未完成値を読まないために確認する通知です。</summary>
+            [ReadOnly]
+            public NativeArray<byte> LakeSpringGenerationFailed;
+
+            /// <summary>各周囲担当が失敗時に自分の全体担当番号へ1を書く通知配列です。</summary>
+            [NativeDisableParallelForRestriction]
+            public NativeArray<byte> GenerationFailed;
+
+            /// <summary>担当内番号から全体担当と専用部分配列を求め、周囲1チャンクを再構築します。</summary>
+            /// <param name="workspaceLaneIndex">現在の波で使用する0〜3の作業領域番号です。</param>
+            public void Execute(int workspaceLaneIndex)
+            {
+                int sourceLaneIndex = SourceLaneOffset + workspaceLaneIndex;
+                int frontierCapacity = DeterministicHydrologyCatchmentResolver.MaximumFrontierCapacity;
+                int basinMemberCapacity = DeterministicHydrologyLakeResolver.MaximumBasinMembers;
+                int basinLookupCapacity = DeterministicHydrologyLakeResolver.LookupCapacity;
+                int pathCapacity = DeterministicSurfaceWaterPathGenerator.MaximumSearchNodeCount;
+                int floodCapacity = DeterministicSurfaceWaterGenerator.MaximumFloodTileCount;
+                int hydrologyCapacity = DeterministicHydrologyGenerator.CellsPerChunk;
+                int intersectingCapacity =
+                    DeterministicGroundwaterHydrologyGenerator.IntersectingCellCount;
+                int surfaceWaterCapacity = WorldGridConstants.TilesPerChunk;
+
+                if (LakeSpringGenerationFailed[0] != 0
+                    || !DeterministicWetlandExtentGenerator.TryGenerateSourceChunkLane(
+                        Settings,
+                        Coordinate.X,
+                        Coordinate.Y,
+                        sourceLaneIndex,
+                        HydrologyCatchmentFrontier.GetSubArray(
+                            workspaceLaneIndex * frontierCapacity,
+                            frontierCapacity),
+                        HydrologyBasinMembers.GetSubArray(
+                            workspaceLaneIndex * basinMemberCapacity,
+                            basinMemberCapacity),
+                        HydrologyBasinLookup.GetSubArray(
+                            workspaceLaneIndex * basinLookupCapacity,
+                            basinLookupCapacity),
+                        PathWorkspace.GetSubArray(workspaceLaneIndex * pathCapacity, pathCapacity),
+                        PathTiles.GetSubArray(workspaceLaneIndex * pathCapacity, pathCapacity),
+                        FloodVisited.GetSubArray(workspaceLaneIndex * floodCapacity, floodCapacity),
+                        FloodQueue.GetSubArray(workspaceLaneIndex * floodCapacity, floodCapacity),
+                        ScratchHydrologyCells.GetSubArray(
+                            workspaceLaneIndex * hydrologyCapacity,
+                            hydrologyCapacity),
+                        ScratchIntersectingHydrologyCells.GetSubArray(
+                            sourceLaneIndex * intersectingCapacity,
+                            intersectingCapacity),
+                        ScratchSurfaceRechargeCandidates.GetSubArray(
+                            sourceLaneIndex * intersectingCapacity,
+                            intersectingCapacity),
+                        ScratchSurfaceWater.GetSubArray(
+                            workspaceLaneIndex * surfaceWaterCapacity,
+                            surfaceWaterCapacity),
+                        SourceWaterArea))
+                {
+                    GenerationFailed[sourceLaneIndex] = 1;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 2波で完成した周囲表流水・交差水文を固定順で結合し、自然冠水と湿原規模を確定する最終Burst Jobです。
+        /// </summary>
+        [BurstCompile]
+        private struct FinalizeNaturalFloodingWetlandJob : IJob
+        {
+            /// <summary>自然冠水、地形、水文、地下水、湖区分を再現する固定設定です。</summary>
+            public WorldGenerationSettings Settings;
+            /// <summary>生成対象となるSurface上の絶対論理チャンク座標です。</summary>
+            public ChunkCoordinateComponent Coordinate;
+            /// <summary>低地判定へ使う完成済み4096地形です。</summary>
+            [ReadOnly] public NativeArray<GeneratedTile> Tiles;
+            /// <summary>自然飽和を読み、自然冠水と湿原bitを追加する4096自然水文タイルです。</summary>
+            public NativeArray<GeneratedHydrologyTile> HydrologyTiles;
+            /// <summary>中心チャンクの湖・泉確定済み4096表流水です。</summary>
+            [ReadOnly] public NativeArray<GeneratedSurfaceWaterTile> SurfaceWater;
+            /// <summary>中央9×9の完成地下水・湖区分を再利用するC4-Cキャッシュです。</summary>
+            [ReadOnly] public NativeArray<GeneratedHydrologyCell> SpringHydrologyCells;
+            /// <summary>外周水文の最終湖区分へ順次再利用する集水Heapです。</summary>
+            public NativeArray<HydrologyUpstreamCandidate> HydrologyCatchmentFrontier;
+            /// <summary>外周水文の最終湖区分へ順次再利用する閉鎖流域配列です。</summary>
+            public NativeArray<HydrologyUpstreamCandidate> HydrologyBasinMembers;
+            /// <summary>外周水文の最終湖区分へ順次再利用する流域Hash表です。</summary>
+            public NativeArray<HydrologyBasinLookupSlot> HydrologyBasinLookup;
+            /// <summary>8担当分を保持する交差9×9水文です。</summary>
+            public NativeArray<GeneratedHydrologyCell> ScratchIntersectingHydrologyCells;
+            /// <summary>8担当分を保持する交差9×9涵養状態です。</summary>
+            [ReadOnly] public NativeArray<SurfaceRechargeCandidate> ScratchSurfaceRechargeCandidates;
+            /// <summary>周囲8担当が配置済みで、中心を追加する192×192表流水です。</summary>
+            public NativeArray<GeneratedSurfaceWaterTile> SourceWaterArea;
+            /// <summary>15×15湿原候補の完成水文を保持する作業配列です。</summary>
+            public NativeArray<GeneratedHydrologyCell> EvaluationHydrologyCells;
+            /// <summary>15×15各水文セルの書込完了を示す0／1配列です。</summary>
+            public NativeArray<byte> EvaluationHydrologyCellWritten;
+            /// <summary>15×15水文セルが16資格タイル以上を持つかを保持します。</summary>
+            public NativeArray<byte> CandidateCells;
+            /// <summary>中央9×9セルが4セル以上の成分へ属するかを保持します。</summary>
+            public NativeArray<byte> LargeExtentCells;
+            /// <summary>連結探索ごとに初期化して再利用する訪問状態です。</summary>
+            public NativeArray<byte> VisitedCells;
+            /// <summary>連結探索へ再利用する最大225件のFIFOです。</summary>
+            public NativeArray<int> CellQueue;
+            /// <summary>先行する湖・泉生成の失敗通知です。</summary>
+            [ReadOnly] public NativeArray<byte> LakeSpringGenerationFailed;
+            /// <summary>周囲8担当と最終評価の失敗を保持し、5 Buffer一括公開を止めます。</summary>
+            public NativeArray<byte> GenerationFailed;
+
+            /// <summary>先行失敗を集約し、成功時だけ固定順の結合と4096件の最終評価を実行します。</summary>
+            public void Execute()
+            {
+                bool failed = LakeSpringGenerationFailed[0] != 0;
+                for (int sourceLaneIndex = 0;
+                    sourceLaneIndex < DeterministicWetlandExtentGenerator.SourceChunkLaneCount;
+                    sourceLaneIndex++)
+                {
+                    failed |= GenerationFailed[sourceLaneIndex] != 0;
+                }
+
+                if (failed
+                    || !DeterministicWetlandExtentGenerator.TryFinalizeParallelChunk(
+                        Settings,
+                        Coordinate.X,
+                        Coordinate.Y,
+                        Tiles,
+                        HydrologyTiles,
+                        SurfaceWater,
+                        SpringHydrologyCells,
+                        HydrologyCatchmentFrontier,
+                        HydrologyBasinMembers,
+                        HydrologyBasinLookup,
+                        ScratchIntersectingHydrologyCells,
+                        ScratchSurfaceRechargeCandidates,
+                        SourceWaterArea,
+                        EvaluationHydrologyCells,
+                        EvaluationHydrologyCellWritten,
+                        CandidateCells,
+                        LargeExtentCells,
+                        VisitedCells,
+                        CellQueue))
                 {
                     GenerationFailed[0] = 1;
                 }
