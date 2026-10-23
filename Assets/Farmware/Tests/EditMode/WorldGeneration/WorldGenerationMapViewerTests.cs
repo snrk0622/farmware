@@ -21,6 +21,22 @@ namespace Farmware.WorldGeneration.Tests
     public sealed class WorldGenerationMapViewerTests
     {
         /// <summary>
+        /// Map Viewerの最小Window寸法を取得し、地図と17行Hover診断を上下の固定UIと同時表示できる高さを保証します。
+        /// レビュー対応前の480pxへ戻り、最小サイズで地図または診断が切れる退行を防ぎます。
+        /// </summary>
+        [Test]
+        public void MinimumWindowSize_ContainsMapAndExpandedHoverDiagnostics()
+        {
+            Vector2 minimumWindowSize = WorldGenerationMapViewerWindow.MinimumWindowSize;
+
+            Assert.That(minimumWindowSize.x, Is.EqualTo(720f));
+            Assert.That(
+                minimumWindowSize.y,
+                Is.EqualTo(700f),
+                "地図240px、Hover診断280px、ヘッダー・操作欄・状態欄を最小Window内へ同時に収める必要があります。");
+        }
+
+        /// <summary>
         /// 1つのRoot配下の兄弟GameObjectへAuthoringを2件配置し、設定取得が重複を見逃さないことを保証します。
         /// Bakerが複数の設定Entityを生成するSceneをMap Viewerだけが正常と誤認する退行を防ぎます。
         /// </summary>
@@ -83,6 +99,7 @@ namespace Farmware.WorldGeneration.Tests
                 8,
                 WorldGenerationMapViewMode.Terrain,
                 CancellationToken.None);
+            bool foundLandBiome = false;
 
             // 全ピクセルを同時保存した完成地形と比較し、座標変換・配列順・C5-C色変換をまとめて保証します。
             for (int pixelY = 0; pixelY < result.Height; pixelY++)
@@ -107,8 +124,226 @@ namespace Farmware.WorldGeneration.Tests
                         result.PixelColors[(pixelY * result.Width) + pixelX],
                         Is.EqualTo(expectedColor),
                         $"pixel=({pixelX}, {pixelY}), tile=({worldTileX}, {worldTileY})");
+
+                    if (finalizedTile.Biome != BiomeId.None)
+                    {
+                        foundLandBiome = true;
+                        bool foundBiomeDiagnostics = result.TryGetBiomeClassificationSample(
+                            worldTileX,
+                            worldTileY,
+                            out BiomeClassificationMapSample biomeSample);
+                        Assert.That(foundBiomeDiagnostics, Is.True,
+                            $"地上Biomeの選択診断がありません: tile=({worldTileX}, {worldTileY})");
+                        Assert.That(
+                            biomeSample.Selection.StableId,
+                            Is.EqualTo((byte)finalizedTile.Biome),
+                            $"完成地形と選択診断が不一致です: tile=({worldTileX}, {worldTileY})");
+                    }
                 }
             }
+
+            Assert.That(foundLandBiome, Is.True, "固定テスト範囲に地上Biomeがなく、選択診断を検証できませんでした。");
+        }
+
+        /// <summary>
+        /// 製品分類器の値型結果を診断文字列へ変換し、最終理由、首位・次点、8軸適性が12行へ収まることを保証します。
+        /// 5桁の適性値でもGameビューの右端を切らず、Map Viewerの予約高を自動折り返しで超えない構造を固定します。
+        /// </summary>
+        [Test]
+        public void BiomeSelectionDiagnostics_FormatsReasonCandidatesAndAllAxisFits()
+        {
+            FinalBiomeSelection selection = new FinalBiomeSelection
+            {
+                StableId = BiomeStableIds.SwampForest,
+                Reason = BiomeSelectionReason.SwampForestPromotion,
+                NormalCandidates = new NormalBiomeCandidateRanking
+                {
+                    CandidateCount = 3,
+                    HasSecond = true,
+                    First = CreateBiomeCandidateEvaluation(
+                        BiomeStableIds.WarmTemperateEvergreenForest,
+                        1000,
+                        2000),
+                    Second = CreateBiomeCandidateEvaluation(
+                        BiomeStableIds.TemperateDeciduousForest,
+                        900,
+                        1500)
+                }
+            };
+
+            string text = WorldGenerationDebugVisualizationOverlay
+                .FormatBiomeSelectionDiagnostics(selection);
+            string[] lines = text.Split('\n');
+
+            Assert.That(text, Does.Contain("Final=SwampForest"));
+            Assert.That(text, Does.Contain("Reason=SwampForestPromotion"));
+            Assert.That(text, Does.Contain("Candidates=3"));
+            Assert.That(text, Does.Contain("First=WarmTemperateEvergreenForest"));
+            Assert.That(text, Does.Contain("Second=TemperateDeciduousForest"));
+            Assert.That(
+                lines,
+                Has.Length.EqualTo(12),
+                "診断はGameビューの行数計算とMap Viewerの最大17行予約に合わせて12行を維持する必要があります。");
+            Assert.That(lines[0], Is.EqualTo("BiomeSelection Final=SwampForest"));
+            Assert.That(lines[1], Is.EqualTo("Reason=SwampForestPromotion  Candidates=3"));
+            Assert.That(lines[2], Is.EqualTo("First=WarmTemperateEvergreenForest"));
+            Assert.That(lines[3], Is.EqualTo("FirstRank: Score=1000  Variation=2000"));
+            Assert.That(lines[4], Is.EqualTo("FirstFit[1/3]: Temp=60001  Moist=60002  Elev=60003"));
+            Assert.That(lines[5], Is.EqualTo("FirstFit[2/3]: Woody=60004  Rugged=60005  Geology=60006"));
+            Assert.That(lines[6], Is.EqualTo("FirstFit[3/3]: Volcanic=60007  Coastal=60008"));
+            Assert.That(lines[7], Is.EqualTo("Second=TemperateDeciduousForest"));
+            Assert.That(lines[8], Is.EqualTo("SecondRank: Score=900  Variation=1500"));
+            Assert.That(lines[9], Is.EqualTo("SecondFit[1/3]: Temp=60001  Moist=60002  Elev=60003"));
+            Assert.That(lines[10], Is.EqualTo("SecondFit[2/3]: Woody=60004  Rugged=60005  Geology=60006"));
+            Assert.That(lines[11], Is.EqualTo("SecondFit[3/3]: Volcanic=60007  Coastal=60008"));
+        }
+
+        /// <summary>
+        /// 次点がない分類結果でも診断を同じ12行で表示し、Hover対象によってCanvasの高さが変わらないことを保証します。
+        /// </summary>
+        [Test]
+        public void BiomeSelectionDiagnostics_WithoutSecondCandidate_PreservesReservedLineCount()
+        {
+            FinalBiomeSelection selection = new FinalBiomeSelection
+            {
+                StableId = BiomeStableIds.TropicalRainforest,
+                Reason = BiomeSelectionReason.NormalCandidate,
+                NormalCandidates = new NormalBiomeCandidateRanking
+                {
+                    CandidateCount = 1,
+                    HasSecond = false,
+                    First = CreateBiomeCandidateEvaluation(
+                        BiomeStableIds.TropicalRainforest,
+                        1234,
+                        5678)
+                }
+            };
+
+            string text = WorldGenerationDebugVisualizationOverlay
+                .FormatBiomeSelectionDiagnostics(selection);
+            string[] lines = text.Split('\n');
+
+            Assert.That(
+                lines,
+                Has.Length.EqualTo(12),
+                "次点がなくてもHover対象の変更で表示高を変えないため、診断は12行を維持する必要があります。");
+            Assert.That(lines[7], Is.EqualTo("Second=None"));
+            Assert.That(lines[8], Is.EqualTo("SecondRank: Score=N/A  Variation=N/A"));
+            Assert.That(lines[9], Is.EqualTo("SecondFit[1/3]: N/A"));
+            Assert.That(lines[10], Is.EqualTo("SecondFit[2/3]: N/A"));
+            Assert.That(lines[11], Is.EqualTo("SecondFit[3/3]: N/A"));
+        }
+
+        /// <summary>
+        /// 実際に確認する960×540のGameビューと、Biomeの全診断を縦積みした内容高を準備します。
+        /// 情報パネルが画面内へ収まり、見切れる内容量がスクロール可能量として残ることを保証します。
+        /// </summary>
+        [Test]
+        public void InformationPanelScrollLayout_At960By540_ClipsBiomeContentAndPreservesRemainder()
+        {
+            const float viewportWidth = 960f;
+            const float viewportHeight = 540f;
+            const float contentHeight = 729f;
+
+            WorldGenerationDebugVisualizationOverlay.CalculateInformationPanelScrollLayout(
+                viewportWidth,
+                viewportHeight,
+                contentHeight,
+                out Rect panelRect,
+                out Rect contentViewportRect,
+                out Rect scrollbarRect,
+                out float maximumScrollOffset);
+
+            Assert.That(
+                panelRect.yMax,
+                Is.LessThanOrEqualTo(viewportHeight),
+                "長いBiome診断でも情報パネル外枠はGameビュー下端を越えてはいけません。");
+            Assert.That(
+                maximumScrollOffset,
+                Is.EqualTo(contentHeight - panelRect.height),
+                "クリップした末尾を縦バーで確認できるよう、隠れた高さを最大移動量へ保持する必要があります。");
+            Assert.That(
+                contentViewportRect.xMax,
+                Is.EqualTo(scrollbarRect.xMin),
+                "診断文字と縦スクロールバーが重ならないよう、それぞれ隣接する矩形へ分ける必要があります。");
+            Assert.That(
+                contentViewportRect.width,
+                Is.EqualTo(430f),
+                "縦バーを追加しても、5桁の8軸診断と18Biome凡例に必要な430pxの内容幅を維持する必要があります。");
+            Assert.That(
+                scrollbarRect.yMin,
+                Is.EqualTo(panelRect.yMin),
+                "内容が超過したときの縦スクロールバーは、パネル上端から操作できる必要があります。");
+            Assert.That(
+                scrollbarRect.yMax,
+                Is.EqualTo(panelRect.yMax),
+                "内容が超過したときの縦スクロールバーは、パネル下端まで操作できる必要があります。");
+            Assert.That(
+                scrollbarRect.width,
+                Is.GreaterThan(0f),
+                "内容がGameビューの高さを超えた場合だけ、明示操作用の縦スクロールバーを表示する必要があります。");
+        }
+
+        /// <summary>
+        /// 画面高より短い一般モードの情報を準備し、共通スクロール配置を計算します。
+        /// スクロール不要なら縦バーを隠し、430pxのパネル全幅を内容へ使うことを保証します。
+        /// </summary>
+        [Test]
+        public void InformationPanelScrollLayout_WhenContentFits_HidesScrollbarAndUsesFullWidth()
+        {
+            const float viewportWidth = 960f;
+            const float viewportHeight = 540f;
+            const float contentHeight = 300f;
+
+            WorldGenerationDebugVisualizationOverlay.CalculateInformationPanelScrollLayout(
+                viewportWidth,
+                viewportHeight,
+                contentHeight,
+                out Rect panelRect,
+                out Rect contentViewportRect,
+                out Rect scrollbarRect,
+                out float maximumScrollOffset);
+
+            Assert.That(panelRect.height, Is.EqualTo(contentHeight));
+            Assert.That(maximumScrollOffset, Is.Zero);
+            Assert.That(scrollbarRect.width, Is.Zero);
+            Assert.That(contentViewportRect.width, Is.EqualTo(panelRect.width));
+            Assert.That(panelRect.width, Is.EqualTo(430f));
+        }
+
+        /// <summary>
+        /// HUD内の要素座標とスクロール量を準備し、内容座標だけが上へ移動することを保証します。
+        /// 明示クリップ範囲を上下枠より内側へ固定し、途中行がHUD外や枠上へ出る退行を防ぐ契約です。
+        /// </summary>
+        [Test]
+        public void InformationPanelScrollOffset_MovesContentAndKeepsInsetClip()
+        {
+            const float contentY = 198f;
+            const float scrollOffset = 120f;
+            Rect contentViewportRect = new Rect(514f, 8f, 430f, 524f);
+
+            float scrolledY =
+                WorldGenerationDebugVisualizationOverlay.CalculateScrolledInformationY(
+                    contentY,
+                    scrollOffset);
+            Rect contentClipRect =
+                WorldGenerationDebugVisualizationOverlay.CalculateInformationContentClipRect(
+                    contentViewportRect);
+
+            Assert.That(
+                scrolledY,
+                Is.EqualTo(78f),
+                "HUDの固定クリップ境界は動かさず、表示要素のY座標からだけスクロール量を差し引く必要があります。");
+            Assert.That(contentClipRect.x, Is.EqualTo(contentViewportRect.x));
+            Assert.That(contentClipRect.width, Is.EqualTo(contentViewportRect.width));
+            Assert.That(
+                contentClipRect.y,
+                Is.EqualTo(contentViewportRect.y + 2f),
+                "途中行が上枠へ重ならないよう、文字のクリップ境界をパネル上端より内側へ置く必要があります。");
+            Assert.That(
+                contentClipRect.yMax,
+                Is.EqualTo(contentViewportRect.yMax - 2f),
+                "途中行が下枠へ重ならないよう、文字のクリップ境界をパネル下端より内側へ置く必要があります。");
         }
 
         /// <summary>
@@ -424,6 +659,87 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// 全27モードをCatalogから順に取得し、Dropdown名、実行経路、解像度、進捗、Hover契約が欠落なく一対一であることを保証します。
+        /// 新モード追加時にWindowの選択肢だけ増え、サンプラーが古い経路や768上限へ戻る退行を防ぎます。
+        /// </summary>
+        [Test]
+        public void ViewModeCatalog_AllModesHaveOneConsistentExecutionContract()
+        {
+            System.Array modes = System.Enum.GetValues(typeof(WorldGenerationMapViewMode));
+            Assert.That(modes.Length, Is.EqualTo(WorldGenerationMapViewModeCatalog.ModeCount));
+            Assert.That(
+                WorldGenerationMapViewModeCatalog.OrderedDisplayNames.Count,
+                Is.EqualTo(WorldGenerationMapViewModeCatalog.ModeCount));
+            HashSet<string> uniqueDisplayNames = new HashSet<string>();
+
+            for (int index = 0; index < modes.Length; index++)
+            {
+                WorldGenerationMapViewMode mode = (WorldGenerationMapViewMode)modes.GetValue(index);
+                WorldGenerationMapViewModeDefinition definition =
+                    WorldGenerationMapViewModeCatalog.Get(mode);
+
+                Assert.That((int)mode, Is.EqualTo(index), $"{mode}のenum値がCatalog順と一致しません。");
+                Assert.That(definition.Mode, Is.EqualTo(mode));
+                Assert.That(definition.DisplayName, Is.Not.Empty);
+                Assert.That(uniqueDisplayNames.Add(definition.DisplayName), Is.True,
+                    $"表示名が重複しています: {definition.DisplayName}");
+                Assert.That(
+                    WorldGenerationMapViewModeCatalog.OrderedDisplayNames[index],
+                    Is.EqualTo(definition.DisplayName));
+                Assert.That(
+                    WorldGenerationMapViewModeCatalog.ResolveChoiceIndex(index),
+                    Is.EqualTo(mode));
+
+                // 完成チャンクを使う2経路だけが、動的上限、二段階進捗、生成時コピーのHover契約を持つ必要があります。
+                bool usesCompletedChunks = definition.SamplingPath
+                        == WorldGenerationMapSamplingPath.CompletedTerrainChunk
+                    || definition.SamplingPath
+                        == WorldGenerationMapSamplingPath.CompletedHydrologyChunk;
+                Assert.That(
+                    definition.ResolutionPolicy
+                        == WorldGenerationMapResolutionPolicy.CompletedChunks,
+                    Is.EqualTo(usesCompletedChunks),
+                    $"{mode}の解像度契約が生成経路と一致しません。");
+                Assert.That(
+                    definition.ProgressPolicy
+                        == WorldGenerationMapProgressPolicy.CompletedChunksThenPixelRows,
+                    Is.EqualTo(usesCompletedChunks),
+                    $"{mode}の進捗契約が生成経路と一致しません。");
+
+                if (definition.SamplingPath == WorldGenerationMapSamplingPath.DirectTile)
+                {
+                    Assert.That(
+                        definition.HoverDataContract,
+                        Is.EqualTo(WorldGenerationMapHoverDataContract.GeneratedTile));
+                }
+                else if (definition.SamplingPath
+                    == WorldGenerationMapSamplingPath.BaseHydrologyCell)
+                {
+                    Assert.That(
+                        definition.ResolutionPolicy,
+                        Is.EqualTo(WorldGenerationMapResolutionPolicy.BaseHydrology));
+                    Assert.That(
+                        definition.HoverDataContract,
+                        Is.EqualTo(WorldGenerationMapHoverDataContract.BaseHydrologyCell));
+                }
+                else if (definition.SamplingPath
+                    == WorldGenerationMapSamplingPath.CompletedTerrainChunk)
+                {
+                    Assert.That(
+                        definition.HoverDataContract,
+                        Is.EqualTo(
+                            WorldGenerationMapHoverDataContract.FinalizedTerrainAndBiomeSelection));
+                }
+                else
+                {
+                    Assert.That(
+                        definition.HoverDataContract,
+                        Is.EqualTo(WorldGenerationMapHoverDataContract.DerivedHydrologyTile));
+                }
+            }
+        }
+
+        /// <summary>
         /// 左上原点のPointer座標を実際のTextureピクセルへ変換し、負座標とY反転を含む代表タイルへ一致することを検証します。
         /// </summary>
         [Test]
@@ -689,31 +1005,26 @@ namespace Farmware.WorldGeneration.Tests
         /// 描画・リサイズ・ホイールズームが共有する判定を対象にし、Terrain・Biomeだけ768サンプルへ戻る退行を防ぎます。
         /// </summary>
         [Test]
-        public void GetMaximumSampleResolution_HydrologyUsesBoundedLimits()
+        public void ViewModeCatalog_GetMaximumSampleResolutionUsesBoundedLimits()
         {
-            MethodInfo getMaximumSampleResolution = typeof(WorldGenerationMapViewerWindow).GetMethod(
-                "GetMaximumSampleResolution",
-                BindingFlags.Static | BindingFlags.NonPublic);
-            Assert.That(getMaximumSampleResolution, Is.Not.Null);
-
-            int terrainLimit = (int)getMaximumSampleResolution.Invoke(
-                null,
-                new object[] { WorldGenerationMapViewMode.Terrain, 4 });
-            int biomeLimit = (int)getMaximumSampleResolution.Invoke(
-                null,
-                new object[] { WorldGenerationMapViewMode.Biome, 4 });
-            int environmentLimit = (int)getMaximumSampleResolution.Invoke(
-                null,
-                new object[] { WorldGenerationMapViewMode.Elevation, 4 });
-            int baseHydrologyLimit = (int)getMaximumSampleResolution.Invoke(
-                null,
-                new object[] { WorldGenerationMapViewMode.HydrologyLake, 4 });
-            int derivedNearLimit = (int)getMaximumSampleResolution.Invoke(
-                null,
-                new object[] { WorldGenerationMapViewMode.HydrologyGroundwater, 4 });
-            int derivedFarLimit = (int)getMaximumSampleResolution.Invoke(
-                null,
-                new object[] { WorldGenerationMapViewMode.HydrologyNaturalFlooding, 256 });
+            int terrainLimit = WorldGenerationMapViewModeCatalog.GetMaximumSampleResolution(
+                WorldGenerationMapViewMode.Terrain,
+                4);
+            int biomeLimit = WorldGenerationMapViewModeCatalog.GetMaximumSampleResolution(
+                WorldGenerationMapViewMode.Biome,
+                4);
+            int environmentLimit = WorldGenerationMapViewModeCatalog.GetMaximumSampleResolution(
+                WorldGenerationMapViewMode.Elevation,
+                4);
+            int baseHydrologyLimit = WorldGenerationMapViewModeCatalog.GetMaximumSampleResolution(
+                WorldGenerationMapViewMode.HydrologyLake,
+                4);
+            int derivedNearLimit = WorldGenerationMapViewModeCatalog.GetMaximumSampleResolution(
+                WorldGenerationMapViewMode.HydrologyGroundwater,
+                4);
+            int derivedFarLimit = WorldGenerationMapViewModeCatalog.GetMaximumSampleResolution(
+                WorldGenerationMapViewMode.HydrologyNaturalFlooding,
+                256);
 
             Assert.That(terrainLimit, Is.EqualTo(33));
             Assert.That(biomeLimit, Is.EqualTo(33));
@@ -725,6 +1036,11 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(
                 derivedFarLimit,
                 Is.EqualTo(WorldGenerationMapSampler.MaximumCompletedChunkSampledChunksPerAxis));
+            Assert.That(
+                () => WorldGenerationMapViewModeCatalog.GetMaximumSampleResolution(
+                    WorldGenerationMapViewMode.Elevation,
+                    0),
+                Throws.TypeOf<System.ArgumentOutOfRangeException>());
         }
 
         /// <summary>
@@ -1233,6 +1549,34 @@ namespace Farmware.WorldGeneration.Tests
             {
                 Object.DestroyImmediate(authoringObject);
             }
+        }
+
+        /// <summary>
+        /// 診断文字列テストへ、8軸を識別できる固定値と順位値を持つ候補を用意します。
+        /// </summary>
+        /// <param name="stableId">候補の新18Biome安定IDです。</param>
+        /// <param name="score">通常候補の整数総合Scoreです。</param>
+        /// <param name="variation">Score同点時だけ使う地域Variationです。</param>
+        /// <returns>各軸へ5桁の60001〜60008を保持する候補評価です。</returns>
+        private static BiomeCandidateEvaluation CreateBiomeCandidateEvaluation(
+            byte stableId,
+            long score,
+            ushort variation)
+        {
+            return new BiomeCandidateEvaluation
+            {
+                StableId = stableId,
+                TerrainTemperatureFit = 60001,
+                BaseMoistureFit = 60002,
+                ElevationFit = 60003,
+                WoodyVegetationFit = 60004,
+                TerrainRuggednessFit = 60005,
+                GeologyFit = 60006,
+                VolcanicActivityFit = 60007,
+                CoastalInfluenceFit = 60008,
+                Score = score,
+                CandidateVariation = variation
+            };
         }
 
         /// <summary>

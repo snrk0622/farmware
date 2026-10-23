@@ -35,7 +35,7 @@ namespace Farmware.WorldGeneration
 
     /// <summary>
     /// 1つの通常Biome候補について、候補資格を通過した各軸の整数適性と順位情報を保持します。
-    /// C5-Eの診断は同じ純粋評価を再利用でき、表示側で分類式を作り直しません。
+    /// C5-Dの診断は同じ純粋評価を再利用でき、表示側で分類式を作り直しません。
     /// </summary>
     public struct BiomeCandidateEvaluation
     {
@@ -94,7 +94,7 @@ namespace Farmware.WorldGeneration
 
     /// <summary>
     /// 最終Biomeをどの優先段階で選んだかを表します。
-    /// C5-Eの診断表示はこの値を読み、表示側で分類条件を再実装しません。
+    /// C5-Dの診断表示はこの値を読み、表示側で分類条件を再実装しません。
     /// </summary>
     public enum BiomeSelectionReason : byte
     {

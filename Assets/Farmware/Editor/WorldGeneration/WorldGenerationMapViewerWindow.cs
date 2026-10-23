@@ -7,6 +7,7 @@ using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using Farmware.Simulation;
+using Farmware.WorldGeneration.Presentation;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -35,37 +36,17 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>未レイアウトのCanvasを生成対象にしないための最小表示寸法です。単位はEditorポイントです。</summary>
         private const float MinimumViewportSize = 64f;
 
-        /// <summary>Toolbarの表示名とenumを対応させる固定選択肢です。</summary>
-        private static readonly List<string> ViewModeChoices = new List<string>
-        {
-            "Terrain",
-            "Biome",
-            "Elevation",
-            "Base Temperature",
-            "Terrain Temperature",
-            "Base Moisture",
-            "Woody Vegetation Potential",
-            "Terrain Ruggedness",
-            "Coastal Influence",
-            "Volcanic Activity Potential",
-            "Geology Class",
-            "Geology Permeability",
-            "Geology Groundwater Storage",
-            "Geology Erosion Resistance",
-            "Geology Flags",
-            "Geology Dominant Site",
-            "Geology Site Boundary",
-            "Hydrology Flow Direction",
-            "Hydrology Terminal",
-            "Hydrology Catchment",
-            "Hydrology Surface Water",
-            "Hydrology Lake",
-            "Hydrology Groundwater",
-            "Hydrology Natural Soil Saturation",
-            "Hydrology Spring",
-            "Hydrology Natural Flooding",
-            "Hydrology Wetland Candidate"
-        };
+        /// <summary>
+        /// Map Viewerへ許可する最小Window寸法です。単位はEditorポイントです。
+        /// 横幅は操作欄とSide Panelを保ち、高さは地図240px、Hover診断280px、ヘッダー・操作欄・状態欄を同時表示できる値です。
+        /// </summary>
+        public static Vector2 MinimumWindowSize => new Vector2(720f, 700f);
+
+        /// <summary>
+        /// Toolbarへ渡す表示名です。順序と生成契約はCatalogを正とし、UI Toolkitが要求するListへ一度だけコピーします。
+        /// </summary>
+        private static readonly List<string> ViewModeChoices =
+            new List<string>(WorldGenerationMapViewModeCatalog.OrderedDisplayNames);
 
         /// <summary>Toolbarの表示名と固定ワールドレイヤーを対応させる選択肢です。</summary>
         private static readonly List<string> LayerChoices = new List<string>
@@ -182,7 +163,8 @@ namespace Farmware.WorldGeneration.Editor
         {
             WorldGenerationMapViewerWindow window =
                 GetWindow<WorldGenerationMapViewerWindow>("Farmware Map Viewer");
-            window.minSize = new Vector2(720f, 480f);
+            // Hover診断を17行へ拡張した後も地図と上下の操作欄を切らず、最小サイズだけで全情報を確認できるようにします。
+            window.minSize = MinimumWindowSize;
             window.Show();
         }
 
@@ -354,7 +336,7 @@ namespace Farmware.WorldGeneration.Editor
                         displayedSample.Height,
                         mapCanvas.contentRect.width,
                         mapCanvas.contentRect.height,
-                        GetMaximumSampleResolution(
+                        WorldGenerationMapViewModeCatalog.GetMaximumSampleResolution(
                             serializedViewMode,
                             displayedSample.TilesPerPixel))))
             {
@@ -412,28 +394,6 @@ namespace Farmware.WorldGeneration.Editor
                 && height >= MinimumViewportSize
                 && !float.IsInfinity(width)
                 && !float.IsInfinity(height);
-        }
-
-        /// <summary>
-        /// 表示モードと縮尺に応じて、Map Viewerが1辺へ生成してよい最大サンプル数を返します。
-        /// 基礎水文は64、完成チャンクを使うTerrain・Biome・派生水文は対象チャンク数が各軸3件以内になる動的上限を共有します。
-        /// </summary>
-        /// <param name="viewMode">生成負荷を判定する現在の表示モードです。</param>
-        /// <param name="tilesPerPixel">現在の1サンプルあたりワールドタイル数です。</param>
-        /// <returns>通常768、基礎水文64、完成チャンク使用モード1〜64の最大サンプル数です。状態は変更しません。</returns>
-        private static int GetMaximumSampleResolution(
-            WorldGenerationMapViewMode viewMode,
-            int tilesPerPixel)
-        {
-            if (WorldGenerationMapSampler.RequiresCompletedDiagnosticChunk(viewMode))
-            {
-                return WorldGenerationMapSampler.CalculateMaximumCompletedChunkResolution(
-                    tilesPerPixel);
-            }
-
-            return WorldGenerationMapSampler.IsBaseHydrologyViewMode(viewMode)
-                ? WorldGenerationMapSampler.MaximumHydrologyResolution
-                : WorldGenerationMapSampler.MaximumResolution;
         }
 
         /// <summary>
@@ -523,7 +483,9 @@ namespace Farmware.WorldGeneration.Editor
             WorldGenerationMapSampler.CalculateSampleResolution(
                 mapCanvas.contentRect.width,
                 mapCanvas.contentRect.height,
-                GetMaximumSampleResolution(viewMode, tilesPerPixel),
+                WorldGenerationMapViewModeCatalog.GetMaximumSampleResolution(
+                    viewMode,
+                    tilesPerPixel),
                 out int width,
                 out int height);
             int centerTileX = serializedCenterTileX;
@@ -593,7 +555,7 @@ namespace Farmware.WorldGeneration.Editor
                 else if (result.DiagnosticChunkCount > 0)
                 {
                     completionMessage =
-                        $"完了: {result.Width * result.Height:N0} samples / 完成水文{result.DiagnosticChunkCount:N0} chunks / {stopwatch.Elapsed.TotalSeconds:F2}秒";
+                        $"完了: {result.Width * result.Height:N0} samples / 完成診断{result.DiagnosticChunkCount:N0} chunks / {stopwatch.Elapsed.TotalSeconds:F2}秒";
                 }
                 else
                 {
@@ -794,13 +756,17 @@ namespace Farmware.WorldGeneration.Editor
             WorldGenerationMapSampler.CalculateSampleResolution(
                 mapCanvas.contentRect.width,
                 mapCanvas.contentRect.height,
-                GetMaximumSampleResolution(serializedViewMode, oldTilesPerPixel),
+                WorldGenerationMapViewModeCatalog.GetMaximumSampleResolution(
+                    serializedViewMode,
+                    oldTilesPerPixel),
                 out int requestedOldSampleWidth,
                 out int requestedOldSampleHeight);
             WorldGenerationMapSampler.CalculateSampleResolution(
                 mapCanvas.contentRect.width,
                 mapCanvas.contentRect.height,
-                GetMaximumSampleResolution(serializedViewMode, newTilesPerPixel),
+                WorldGenerationMapViewModeCatalog.GetMaximumSampleResolution(
+                    serializedViewMode,
+                    newTilesPerPixel),
                 out int requestedNewSampleWidth,
                 out int requestedNewSampleHeight);
             int oldSampleWidth = displayedSample?.Width ?? requestedOldSampleWidth;
@@ -881,18 +847,7 @@ namespace Farmware.WorldGeneration.Editor
         /// <returns>定義済みの表示モード、または安全な既定値のTerrainです。</returns>
         public static WorldGenerationMapViewMode ResolveViewModeChoiceIndex(int selectedIndex)
         {
-            if (selectedIndex < byte.MinValue || selectedIndex > byte.MaxValue)
-            {
-                return WorldGenerationMapViewMode.Terrain;
-            }
-
-            // WorldGenerationMapViewModeの基底型はbyteです。intをEnum.IsDefinedへ直接渡すと
-            // 基底型不一致のArgumentExceptionになるため、範囲確認後にenum型そのものへ変換します。
-            WorldGenerationMapViewMode candidate =
-                (WorldGenerationMapViewMode)(byte)selectedIndex;
-            return Enum.IsDefined(typeof(WorldGenerationMapViewMode), candidate)
-                ? candidate
-                : WorldGenerationMapViewMode.Terrain;
+            return WorldGenerationMapViewModeCatalog.ResolveChoiceIndex(selectedIndex);
         }
 
         /// <summary>レイヤー選択文字列を保存IDへ変換し、未知の表示値はSurfaceへ戻します。</summary>
@@ -1012,7 +967,33 @@ namespace Farmware.WorldGeneration.Editor
                     + $"DistanceSquared {geologyInfo.Site.DistanceSquared}"
                 : "サイト情報生成失敗";
             string hydrologyText = string.Empty;
-            if (WorldGenerationMapSampler.IsDerivedHydrologyViewMode(displayedSample.ViewMode))
+            string biomeSelectionText = string.Empty;
+            WorldGenerationMapHoverDataContract hoverDataContract =
+                WorldGenerationMapViewModeCatalog.Get(displayedSample.ViewMode).HoverDataContract;
+            if (hoverDataContract
+                == WorldGenerationMapHoverDataContract.FinalizedTerrainAndBiomeSelection)
+            {
+                if (tile.Biome == BiomeId.None)
+                {
+                    biomeSelectionText = "\nBiomeSelection: not applicable (ocean)";
+                }
+                else if (displayedSample.TryGetBiomeClassificationSample(
+                        worldTileX,
+                        worldTileY,
+                        out BiomeClassificationMapSample biomeSample))
+                {
+                    // 画像生成時の完成チャンクから保存した値を使い、Pointer移動ごとに重い水文と分類を再実行しません。
+                    biomeSelectionText = "\n"
+                        + WorldGenerationDebugVisualizationOverlay
+                            .FormatBiomeSelectionDiagnostics(biomeSample.Selection);
+                }
+                else
+                {
+                    biomeSelectionText = "\nBiomeSelection: completed sample unavailable";
+                }
+            }
+
+            if (hoverDataContract == WorldGenerationMapHoverDataContract.DerivedHydrologyTile)
             {
                 if (displayedSample.TryGetDerivedHydrologySample(
                         worldTileX,
@@ -1046,7 +1027,7 @@ namespace Farmware.WorldGeneration.Editor
                     hydrologyText = "\n完成派生水文サンプルを取得できません。";
                 }
             }
-            else if (WorldGenerationMapSampler.IsBaseHydrologyViewMode(displayedSample.ViewMode))
+            else if (hoverDataContract == WorldGenerationMapHoverDataContract.BaseHydrologyCell)
             {
                 if (TryGetHoverHydrologyCell(
                         worldTileX,
@@ -1086,6 +1067,7 @@ namespace Farmware.WorldGeneration.Editor
                 + $"Permeability {tile.GeologyPermeability} / Groundwater {tile.GeologyGroundwaterStorage} / "
                 + $"Erosion {tile.GeologyErosionResistance}\n"
                 + $"Geology Site: {geologySiteText}"
+                + biomeSelectionText
                 + hydrologyText;
         }
 

@@ -11,7 +11,7 @@
 .map-viewer-root {
     flex-grow: 1;
     min-width: 720px;
-    min-height: 480px;
+    min-height: 700px;
     background-color: var(--map-bg);
     color: var(--text-main);
 }
@@ -163,8 +163,8 @@
 }
 
 .hover-label {
-    /* 初回から派生水文を含む8行分を確保し、完成後に地図が縮んで重い完成チャンクを二度生成することを防ぎます。 */
-    min-height: 134px;
+    /* 初回からBiome選択診断を含む最大17行分を確保し、完成後に地図が縮んで重い完成チャンクを二度生成することを防ぎます。 */
+    min-height: 280px;
     flex-shrink: 0;
     padding: 5px 8px;
     background-color: #1b1f26;

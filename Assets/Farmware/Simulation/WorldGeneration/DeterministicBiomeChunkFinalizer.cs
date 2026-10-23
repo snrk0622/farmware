@@ -10,6 +10,61 @@ namespace Farmware.WorldGeneration
     public static class DeterministicBiomeChunkFinalizer
     {
         /// <summary>
+        /// 完成済み地形と自然水文から、製品最終化と同じBiome選択理由・上位候補を診断用に再取得します。
+        /// ECSへ診断専用Componentを常駐させず、Map ViewerとGameビュー中央1タイルだけが必要時に呼びます。
+        /// </summary>
+        /// <param name="worldSettings">Seed、GeneratorVersion、海面を含む製品生成設定です。</param>
+        /// <param name="biomeSettings">製品Jobが使用する検証済み18Biome Definitionです。</param>
+        /// <param name="worldTileX">診断する符号付きワールド水平タイル座標です。</param>
+        /// <param name="worldTileY">診断する符号付きワールド垂直タイル座標です。</param>
+        /// <param name="finalizedTile">C5-CでBiome確定済みの地形タイルです。</param>
+        /// <param name="hydrologyTile">同じ座標のC4自然水文タイルです。</param>
+        /// <param name="selection">成功時に最終理由、通常首位、次点、候補数、軸適性を返します。</param>
+        /// <returns>地上タイルを同じ入力で再評価でき、保存済みBiomeと一致した場合はtrueです。</returns>
+        public static bool TryGetBiomeSelectionDiagnostics(
+            in WorldGenerationSettings worldSettings,
+            in BiomeClassificationSettings biomeSettings,
+            int worldTileX,
+            int worldTileY,
+            in GeneratedTile finalizedTile,
+            in GeneratedHydrologyTile hydrologyTile,
+            out FinalBiomeSelection selection)
+        {
+            selection = default;
+            if (!DeterministicEnvironmentGenerator.TryGenerate(
+                    worldSettings,
+                    worldTileX,
+                    worldTileY,
+                    out GeneratedEnvironmentData environment)
+                || environment.Elevation < worldSettings.SeaLevelThreshold)
+            {
+                // 地上18Biomeを持たない海域は診断対象外です。Noneを通常候補として偽装しません。
+                return false;
+            }
+
+            BiomeClassificationInput input = new BiomeClassificationInput
+            {
+                Environment = environment,
+                GeologyClass = finalizedTile.GeologyClass,
+                GeologyFlags = finalizedTile.GeologyFlags,
+                SeaLevelThreshold = worldSettings.SeaLevelThreshold,
+                HydrologyFlags = hydrologyTile.Flags
+            };
+            if (!DeterministicBiomeClassifier.TrySelectFinalBiome(
+                    biomeSettings,
+                    worldSettings.WorldSeed,
+                    worldSettings.GeneratorVersion,
+                    input,
+                    out selection))
+            {
+                return false;
+            }
+
+            // 診断の再計算が製品Bufferと食い違う場合、もっともらしい別理由を表示せず不一致として失敗させます。
+            return selection.StableId == (byte)finalizedTile.Biome;
+        }
+
+        /// <summary>
         /// 1タイルの環境を再現し、特殊優先を含むBiome分類後に水面・マグマ・岩壁・陸地の優先順を適用します。
         /// </summary>
         /// <param name="worldSettings">Seed、GeneratorVersion、地形とマグマの固定設定です。</param>
