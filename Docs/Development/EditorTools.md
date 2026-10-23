@@ -1,11 +1,11 @@
 # Unity Editorツール
 
-- 最終更新日: 2026-10-23
+- 最終更新日: 2026-10-24
 - 対象: `Assets/Farmware/Editor/WorldGeneration/`
 
 ## 1. 用途
 
-本書のメニュー・設定・表示は、TERRAIN-01C2-Bまでのdevelop、TERRAIN-01C3-D2、水文Lake表示へ先行反映したTERRAIN-01C4-C、派生水文分布監査、Gameビュー診断、Map Viewer診断を追加したTERRAIN-01C4-E3、最終18Biomeを接続したTERRAIN-01C5-C、Map Viewerモード契約とBiome選択診断を整理したTERRAIN-01C5-Dの現行実装境界を説明する。C3-A〜D1がSimulationへ追加した固定水文の基礎格子、D8流向、固定下流終端、集水面積、自然流出、閉鎖流域境界、基礎湖面を、C3-D2で複数Seed分布監査、Debug Visualization、Map Viewerへ接続した。C4-E1bは地下水、土壌飽和、最終湖区分、泉、自然冠水、湿原候補を複数Seed分布監査へ接続し、C4-E2とE3は残る5分類をGameビューとMap Viewerへ接続した。C5-CはC4完成チャンクを18Biomeへ確定し、GameビューとMap ViewerのTerrain・Biome表示へ接続した。C5-Dは製品分類器と同じ最終理由・通常上位候補・8軸適性を両画面の中央情報へ追加し、Map Viewer全27モードの生成契約を単一Catalogへ集約した。Level 0〜6集約Summaryの利用・分解・キャッシュ統計は性能テストだけで記録し、Editor表示へは渡さない。2026-10-19の[改訂マップ仕様](../GameSpecification/RandomMapGenerationSpecification.md)の可変Blockと水中文脈表示はまだツールに実装されていない。
+本書のメニュー・設定・表示は、TERRAIN-01C2-Bまでのdevelop、TERRAIN-01C3-D2、水文Lake表示へ先行反映したTERRAIN-01C4-C、派生水文分布監査、Gameビュー診断、Map Viewer診断を追加したTERRAIN-01C4-E3、最終18Biomeを接続したTERRAIN-01C5-C、Map Viewerモード契約とBiome選択診断を整理したTERRAIN-01C5-D、完成チャンクの分布・境界監査へ置換したTERRAIN-01C5-Eの現行実装境界を説明する。C3-A〜D1がSimulationへ追加した固定水文の基礎格子、D8流向、固定下流終端、集水面積、自然流出、閉鎖流域境界、基礎湖面を、C3-D2で複数Seed分布監査、Debug Visualization、Map Viewerへ接続した。C4-E1bは地下水、土壌飽和、最終湖区分、泉、自然冠水、湿原候補を複数Seed分布監査へ接続し、C4-E2とE3は残る5分類をGameビューとMap Viewerへ接続した。C5-CはC4完成チャンクを18Biomeへ確定し、GameビューとMap ViewerのTerrain・Biome表示へ接続した。C5-Dは製品分類器と同じ最終理由・通常上位候補・8軸適性を両画面の中央情報へ追加し、Map Viewer全27モードの生成契約を単一Catalogへ集約した。C5-Eは停止中だった分布メニューを再有効化し、製品と同じ完成チャンクから候補・面積・境界・領域を集計する。Level 0〜6集約Summaryの利用・分解・キャッシュ統計は性能テストだけで記録し、Editor表示へは渡さない。2026-10-19の[改訂マップ仕様](../GameSpecification/RandomMapGenerationSpecification.md)の可変Blockと水中文脈表示はまだツールに実装されていない。
 
 開発者専用のUnity Editorツールは、ワールド生成結果の調査、調整前後の比較、確認用Sceneとフォールバック素材の構築に使用する。
 これらは製品版のプレイヤー操作へ含めず、ランタイムのゲーム状態を変更するデバッグ操作にも使用しない。
@@ -185,23 +185,25 @@ TERRAIN-01C2-Aでは地質DefinitionとSimulation生成結果だけを先に接�
 ### 2.4 Analyze Distribution
 
 - メニュー: `Farmware > World Generation > Analyze Distribution`
-- 実装: `WorldGenerationDistributionAuditMenu`、`WorldGenerationDistributionAnalyzer`
+- 実装: `WorldGenerationDistributionAuditMenu`、`BiomeDistributionAnalyzer`
 - PlayMode: 不要。EditModeとPlayModeのどちらからでも開始できるが、比較条件を揃えるためEditModeを推奨する。
 
 #### 用途
 
-C5-Cで、完成水文より前の単一タイル生成を使う旧分布監査は停止し、メニューを無効化した。基礎生成の`BiomeId.None`を新18Biome分布として誤集計しないためである。C5-EでC4完成チャンク、候補適性、選択理由、153ペアの境界診断を使う監査へ置換して再有効化する。
+C5-Eで、完成水文より前の単一タイル生成を使う旧分布監査を削除し、C3〜C5-Cを製品と同じ順序で実行する完成チャンク監査へ置換してメニューを再有効化した。既定条件は`biome-audit-temperate`、`biome-audit-hydrology`、`biome-audit-volcanic`の3 Seed、それぞれ原点を中心とする3×3チャンクである。処理はバックグラウンドで直列実行し、同じメニューの多重実行を禁止する。実行中もEditor操作は継続でき、完了時にConsoleへレポートと所要秒を表示する。全153ペアをConsoleの1メッセージ上限で欠落させないよう、レポートは行を分断せず約12,000文字ごとの`part`へ分ける。
 
 Consoleレポートには、次の比較材料を出力する。
 
-- バイオーム、Ground、水域の件数と比率。
-- 直接隣接するバイオームの組み合わせ。
-- 強く隣接抑制する組み合わせが直接接した件数。
-- 32タイル間隔で見た概算領域数、平均面積、孤立領域数。
-- 64×64論理チャンク境界でバイオームが変化した比率。
-- 同じ入力から同じ結果が得られたか比較する署名。
+- 18Biomeごとの最終面積率、通常候補率、通常首位率、候補8軸の平均適性とDefinition重み込みの平均Score寄与。
+- 4近傍の領域数、最大面積、1〜3タイルの小領域数、監査窓端へ接した領域数。
+- 全153異種Biomeペアをゼロ件も省略せず、境界辺数、全陸地辺比、異種辺比として記録した台帳。
+- 各異種ペアの地形気温、基礎湿度、標高、木本植生、起伏、火山活動度、海洋影響の平均絶対差と最大絶対差。
+- 通常首位、7軸の離散区分、地質、最終選択理由、固定水文の差を重複可能な11理由として数えた接続根拠。
+- 火山中核・通常候補の火山周縁、淡水湿原・湿地林への水文Host昇格件数、同じ入力から同じ結果が得られたか比較する署名。
 
-このレポートはバランスの合否を自動決定しない。変更前後の差と、Gameビューで見た地形の遊びやすさを合わせて判断する。
+候補なし、完成Bufferと再分類の不一致、火山中核条件、水文特殊Host契約、完成チャンク生成のいずれかが失敗した場合は、部分的な正常レポートを出さず例外としてConsoleへ記録する。海域は`BiomeId.None`の正常値として地上候補監査から分離する。通常候補資格を持たない水文特殊2Biomeは、候補率ではなくHost昇格件数と最終面積で確認する。
+
+このレポートはバランスの合否を自動決定しない。C6の最終Block表示後にC7で同一条件を比較し、Gameビューで見た地形の遊びやすさと合わせて合格範囲を決める。
 
 #### 次の修正をしたら確認する
 
