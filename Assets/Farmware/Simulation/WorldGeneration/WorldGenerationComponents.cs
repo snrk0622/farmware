@@ -378,7 +378,7 @@ namespace Farmware.WorldGeneration
         /// </summary>
         public ushort SeaLevelThreshold;
 
-        /// <summary>火山バイオームの広いマグマ海を決める大域ノイズ格子サイズです。単位はタイルです。</summary>
+        /// <summary>活動度段階5の火山中核内で、広いマグマ面を決める大域ノイズ格子サイズです。単位はタイルです。</summary>
         public int MagmaCellSizeInTiles;
 
         /// <summary>火山マグマの入り江、半島、島を作る細部ノイズ格子サイズです。単位はタイルです。</summary>
@@ -390,10 +390,10 @@ namespace Farmware.WorldGeneration
         /// <summary>火山マグマの大域形状へ重ねるノイズ解像度の数です。</summary>
         public int MagmaOctaveCount;
 
-        /// <summary>火山バイオームをマグマ本体へ変換する0〜65535の専用ノイズ下限です。大きいほど陸地が増えます。</summary>
+        /// <summary>活動度段階5の火山中核をマグマ本体へ変換する0〜65535の専用ノイズ下限です。大きいほど陸地が増えます。</summary>
         public ushort MagmaNoiseThreshold;
 
-        /// <summary>火山内でマグマを追加制限する0〜65535の連続火山適性下限です。既定値0では離散火山全域を許可します。</summary>
+        /// <summary>活動度段階5の火山中核内で、マグマをさらに制限する0〜65535の追加下限です。既定値0でも段階5未満は許可しません。</summary>
         public ushort MagmaMinimumVolcanicInfluence;
 
         /// <summary>岩壁の大きな塊を決めるノイズ格子の1辺です。単位はタイルです。</summary>

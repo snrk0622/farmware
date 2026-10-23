@@ -1657,7 +1657,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 0f,
                 GeneratedResourceType.None,
                 true);
-            Color magmaInfluenceColor =
+            Color magmaCandidateColor =
                 WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
                     WorldGenerationDebugVisualizationMode.Magma,
                     forestTransitionTile,
@@ -1668,8 +1668,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
                     WorldGenerationDebugVisualizationMode.Magma,
                     forestTransitionTile);
-            Assert.That(magmaColor, Is.Not.EqualTo(magmaInfluenceColor));
-            Assert.That(magmaInfluenceColor, Is.Not.EqualTo(magmaOutsideColor));
+            Assert.That(magmaColor, Is.Not.EqualTo(magmaCandidateColor));
+            Assert.That(magmaCandidateColor, Is.Not.EqualTo(magmaOutsideColor));
 
             Color treeResourceColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
                 WorldGenerationDebugVisualizationMode.Resources,

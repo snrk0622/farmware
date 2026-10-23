@@ -108,6 +108,52 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>
+        /// 確定Biomeと火山活動度が、自然露出マグマを置ける活動中核かを判定します。
+        /// </summary>
+        /// <param name="settings">段階5より厳しく絞る場合の追加活動度下限を持つ生成設定です。</param>
+        /// <param name="biome">新分類器が確定したBiomeです。</param>
+        /// <param name="volcanicActivityPotential">対象タイルの0〜65,535の火山活動度です。</param>
+        /// <returns>火山・地熱地帯で、段階5と追加下限の両方を満たす場合はtrueです。</returns>
+        public static bool IsMagmaActivityEligible(
+            in WorldGenerationSettings settings,
+            BiomeId biome,
+            ushort volcanicActivityPotential)
+        {
+            if (biome != BiomeId.VolcanicGeothermal
+                || volcanicActivityPotential
+                    < DeterministicEnvironmentGenerator.EnvironmentBand5Threshold)
+            {
+                // 段階4は通常比較で選ばれる火山周縁なので、同じBiome IDでも露出マグマを許可しません。
+                return false;
+            }
+
+            // Inspectorの追加下限は活動中核をさらに狭める用途だけに使い、段階5の必須条件を緩和しません。
+            return volcanicActivityPotential >= settings.MagmaMinimumVolcanicInfluence;
+        }
+
+        /// <summary>
+        /// 活動中核の条件と専用形状ノイズを両方評価し、自然露出マグマ候補かを判定します。
+        /// 製品生成、開発者用色面、中央HUDが同じ条件を共有するための純粋計算です。
+        /// </summary>
+        /// <param name="settings">活動度の追加下限とマグマ形状閾値を持つ生成設定です。</param>
+        /// <param name="biome">新分類器が確定したBiomeです。</param>
+        /// <param name="volcanicActivityPotential">対象タイルの0〜65,535の火山活動度です。</param>
+        /// <param name="worldTileX">形状ノイズを読む符号付きワールド水平タイル座標です。</param>
+        /// <param name="worldTileY">形状ノイズを読む符号付きワールド垂直タイル座標です。</param>
+        /// <returns>活動中核かつ形状密度が閾値以上の場合はtrueです。</returns>
+        public static bool IsMagmaCandidate(
+            in WorldGenerationSettings settings,
+            BiomeId biome,
+            ushort volcanicActivityPotential,
+            int worldTileX,
+            int worldTileY)
+        {
+            return IsMagmaActivityEligible(settings, biome, volcanicActivityPotential)
+                && DeterministicMagmaGenerator.SampleDensity(settings, worldTileX, worldTileY)
+                    >= settings.MagmaNoiseThreshold;
+        }
+
+        /// <summary>
         /// 海、活動的火山のマグマ、固定表流水、基礎岩壁、陸地の順で既存GroundTypeへ一時反映します。
         /// C6でBlockとLiquidへ置換するまでの表示・通行用境界で、Biome分類や固定水文そのものは変更しません。
         /// </summary>
@@ -141,11 +187,13 @@ namespace Farmware.WorldGeneration
                 return GroundType.Water;
             }
 
-            // 旧Weirdnessと旧Rockland特例は使わず、新火山Biomeと専用火山活動度だけからマグマ候補を判定します。
-            if (biome == BiomeId.VolcanicGeothermal
-                && environment.VolcanicActivityPotential >= settings.MagmaMinimumVolcanicInfluence
-                && DeterministicMagmaGenerator.SampleDensity(settings, worldTileX, worldTileY)
-                    >= settings.MagmaNoiseThreshold)
+            // 段階4の火山周縁へマグマを漏らさないよう、表示と共有する活動中核・形状判定を使います。
+            if (IsMagmaCandidate(
+                    settings,
+                    biome,
+                    environment.VolcanicActivityPotential,
+                    worldTileX,
+                    worldTileY))
             {
                 return GroundType.Magma;
             }

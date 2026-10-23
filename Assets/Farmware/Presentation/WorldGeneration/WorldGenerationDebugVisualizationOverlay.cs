@@ -1174,10 +1174,13 @@ namespace Farmware.WorldGeneration.Presentation
                         if (currentMode == WorldGenerationDebugVisualizationMode.Magma
                             && hasGenerationSettings)
                         {
-                            // C5-C以降は旧岩地Profileや淡水抑制域を使わず、新火山Biomeと連続火山活動度だけを背景候補として表示します。
-                            isMagmaCandidate = tile.Biome == BiomeId.VolcanicGeothermal
-                                && tile.VolcanicActivityPotential
-                                    >= settings.MagmaMinimumVolcanicInfluence;
+                            // 製品生成と同じ段階5・追加活動度下限・形状密度を使い、色面と中央HUDを一致させます。
+                            isMagmaCandidate = DeterministicBiomeChunkFinalizer.IsMagmaCandidate(
+                                settings,
+                                tile.Biome,
+                                tile.VolcanicActivityPotential,
+                                tileX,
+                                tileY);
                         }
                         bool isAnimalCandidate = hasAnimalCatalog
                             && IsEligibleForAnyAnimalSpecies(tile, resource, animalCatalog);
@@ -1767,11 +1770,16 @@ namespace Farmware.WorldGeneration.Presentation
                     settings,
                     centerCoordinate.x,
                     centerCoordinate.y);
-                bool isMagmaEligible = centerTile.Biome == BiomeId.VolcanicGeothermal
-                    && centerTile.VolcanicActivityPotential
-                        >= settings.MagmaMinimumVolcanicInfluence;
-                bool isMagmaCandidate = isMagmaEligible
-                    && magmaDensity >= settings.MagmaNoiseThreshold;
+                bool isMagmaEligible = DeterministicBiomeChunkFinalizer.IsMagmaActivityEligible(
+                    settings,
+                    centerTile.Biome,
+                    centerTile.VolcanicActivityPotential);
+                bool isMagmaCandidate = DeterministicBiomeChunkFinalizer.IsMagmaCandidate(
+                    settings,
+                    centerTile.Biome,
+                    centerTile.VolcanicActivityPotential,
+                    centerCoordinate.x,
+                    centerCoordinate.y);
                 string finalState = !rockWallInfo.FinalCandidate
                     ? "Outside"
                     : centerTile.Ground == GroundType.Water
@@ -2464,8 +2472,8 @@ namespace Farmware.WorldGeneration.Presentation
                         ref nextX,
                         y,
                         GetVisualizationColor(mode, new GeneratedTile(), 0f, GeneratedResourceType.None, true),
-                        "Freshwater suppressed",
-                        142f);
+                        "Candidate",
+                        82f);
                     DrawLegendEntry(
                         ref nextX,
                         y,

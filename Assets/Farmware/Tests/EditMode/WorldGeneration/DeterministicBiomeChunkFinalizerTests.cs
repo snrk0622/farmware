@@ -29,6 +29,91 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// 火山・地熱地帯の活動度段階4と5、追加下限を直接入力し、自然露出マグマを段階5の活動中核だけへ限定することを保証します。
+        /// </summary>
+        [Test]
+        public void MagmaActivityEligibility_RequiresBandFiveAndAdditionalThreshold()
+        {
+            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.FromString("c5-c-magma-activity"),
+                WorldGenerationSettings.CurrentGeneratorVersion);
+            settings.MagmaNoiseThreshold = 0;
+            ushort bandFive = DeterministicEnvironmentGenerator.EnvironmentBand5Threshold;
+
+            Assert.That(
+                DeterministicBiomeChunkFinalizer.IsMagmaActivityEligible(
+                    settings,
+                    BiomeId.TemperateGrassland,
+                    ushort.MaxValue),
+                Is.False,
+                "活動度が高くても火山・地熱地帯以外をマグマ候補にしてはいけません。");
+            Assert.That(
+                DeterministicBiomeChunkFinalizer.IsMagmaActivityEligible(
+                    settings,
+                    BiomeId.VolcanicGeothermal,
+                    (ushort)(bandFive - 1)),
+                Is.False,
+                "通常候補として選ばれる段階4の火山周縁へ露出マグマを生成してはいけません。");
+            Assert.That(
+                DeterministicBiomeChunkFinalizer.IsMagmaActivityEligible(
+                    settings,
+                    BiomeId.VolcanicGeothermal,
+                    bandFive),
+                Is.True,
+                "段階5の下端は活動中核として受理する必要があります。");
+
+            settings.MagmaMinimumVolcanicInfluence = (ushort)(bandFive + 1);
+            Assert.That(
+                DeterministicBiomeChunkFinalizer.IsMagmaActivityEligible(
+                    settings,
+                    BiomeId.VolcanicGeothermal,
+                    bandFive),
+                Is.False,
+                "Inspectorの追加下限は段階5内をさらに狭める条件として適用する必要があります。");
+            Assert.That(
+                DeterministicBiomeChunkFinalizer.IsMagmaActivityEligible(
+                    settings,
+                    BiomeId.VolcanicGeothermal,
+                    (ushort)(bandFive + 1)),
+                Is.True);
+        }
+
+        /// <summary>
+        /// 段階5の火山中核と形状密度の境界を準備し、密度閾値未満を可視化候補にも製品マグマにも含めないことを保証します。
+        /// </summary>
+        [Test]
+        public void MagmaCandidate_RequiresDensityThreshold()
+        {
+            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.FromString("c5-c-magma-density"),
+                WorldGenerationSettings.CurrentGeneratorVersion);
+            FindNonMaximumMagmaDensity(settings, out int tileX, out int tileY, out ushort density);
+            settings.MagmaMinimumVolcanicInfluence = 0;
+            settings.MagmaNoiseThreshold = density;
+
+            Assert.That(
+                DeterministicBiomeChunkFinalizer.IsMagmaCandidate(
+                    settings,
+                    BiomeId.VolcanicGeothermal,
+                    DeterministicEnvironmentGenerator.EnvironmentBand5Threshold,
+                    tileX,
+                    tileY),
+                Is.True,
+                "形状密度の閾値ちょうどはマグマ候補へ含めます。");
+
+            settings.MagmaNoiseThreshold = (ushort)(density + 1);
+            Assert.That(
+                DeterministicBiomeChunkFinalizer.IsMagmaCandidate(
+                    settings,
+                    BiomeId.VolcanicGeothermal,
+                    DeterministicEnvironmentGenerator.EnvironmentBand5Threshold,
+                    tileX,
+                    tileY),
+                Is.False,
+                "形状密度が閾値を1下回るタイルを候補色で塗ってはいけません。");
+        }
+
+        /// <summary>
         /// 地上の基礎タイルへ空の固定水文を渡し、新Definitionの1〜18だけが最終Biomeとして公開されることを保証します。
         /// </summary>
         [Test]
@@ -169,6 +254,42 @@ namespace Farmware.WorldGeneration.Tests
             tileX = 0;
             tileY = 0;
             return default;
+        }
+
+        /// <summary>
+        /// 閾値の両側を安全に作れる、最大値未満のマグマ形状密度を有限範囲から探します。
+        /// </summary>
+        /// <param name="settings">固定Seedとマグマ形状設定です。</param>
+        /// <param name="tileX">見つかった水平ワールドタイル座標です。</param>
+        /// <param name="tileY">見つかった垂直ワールドタイル座標です。</param>
+        /// <param name="density">見つかった0〜65,534の形状密度です。</param>
+        private static void FindNonMaximumMagmaDensity(
+            in WorldGenerationSettings settings,
+            out int tileX,
+            out int tileY,
+            out ushort density)
+        {
+            tileX = 0;
+            tileY = 0;
+            density = ushort.MaxValue;
+            for (int y = -16; y <= 16; y++)
+            {
+                for (int x = -16; x <= 16; x++)
+                {
+                    ushort candidate = DeterministicMagmaGenerator.SampleDensity(settings, x, y);
+                    if (candidate == ushort.MaxValue)
+                    {
+                        continue;
+                    }
+
+                    tileX = x;
+                    tileY = y;
+                    density = candidate;
+                    return;
+                }
+            }
+
+            Assert.Fail("有限テスト範囲に最大値未満のマグマ形状密度が必要です。");
         }
 
         /// <summary>

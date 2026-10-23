@@ -64,8 +64,8 @@ namespace Farmware.WorldGeneration.Authoring
         [SerializeField] private float waterThreshold =
             WorldGenerationSettings.DefaultSeaLevelThreshold / (float)ushort.MaxValue;
 
-        // 火山バイオームの約半分を占めるマグマ海と陸地を決めます。火山領域より格子が大きいと局所的に全域がマグマになるため、24タイルへ抑えます。
-        [Tooltip("火山バイオームのマグマ海を作るノイズ格子サイズです。単位はタイルです。大きくすると塊は広がりますが、小さな火山全域がマグマになる場合があります。")]
+        // 活動度段階5の火山中核内でマグマ面と陸地を分けます。中核より格子が大きいと局所的に全域がマグマになるため、24タイルへ抑えます。
+        [Tooltip("活動度段階5の火山中核内でマグマ面を作るノイズ格子サイズです。単位はタイルです。大きくすると塊は広がりますが、小さな中核全域がマグマになる場合があります。")]
         [Min(8)]
         [SerializeField] private int magmaCellSizeInTiles = 24;
 
@@ -84,13 +84,13 @@ namespace Farmware.WorldGeneration.Authoring
         [Range(1, 5)]
         [SerializeField] private int magmaOctaveCount = 3;
 
-        // 中央値に近い下限で火山のおよそ半分をマグマへ変換し、陸上設備を置ける島も残します。
-        [Tooltip("火山バイオームをマグマへ変換する専用ノイズ下限です。0〜1で指定し、小さくすると火山内のマグマが増えます。")]
+        // 中央値に近い下限で活動中核のおよそ半分をマグマへ変換し、陸上設備を置ける島も残します。
+        [Tooltip("活動度段階5の火山中核をマグマへ変換する専用ノイズ下限です。0〜1で指定し、小さくすると中核内のマグマが増えます。")]
         [Range(0f, 1f)]
         [SerializeField] private float magmaNoiseThreshold = 34000f / ushort.MaxValue;
 
-        // 離散火山内でさらに中心部へ絞りたい場合の追加下限です。既定値0では火山全域を面積比の母集団にします。
-        [Tooltip("火山内でマグマ本体を追加制限する連続火山適性の下限です。0〜1で指定し、既定値0では火山全域を許可します。")]
+        // 活動度段階5の火山中核内で、さらに中心部へ絞りたい場合だけ使う追加下限です。
+        [Tooltip("活動度段階5の火山中核内で、マグマ本体をさらに制限する追加下限です。0〜1で指定し、既定値0でも段階5未満は許可しません。")]
         [Range(0f, 1f)]
         [SerializeField] private float magmaMinimumVolcanicInfluence;
 

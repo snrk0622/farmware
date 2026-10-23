@@ -189,10 +189,10 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>マグマ輪郭へ重ねる試作ノイズ解像度数です。</summary>
         private const int PrototypeMagmaOctaveCount = 3;
 
-        /// <summary>火山バイオームのおよそ半分をマグマへ変換する固定小数点ノイズ下限です。</summary>
+        /// <summary>活動度段階5の火山中核のおよそ半分をマグマへ変換する固定小数点ノイズ下限です。</summary>
         private const float PrototypeMagmaNoiseThreshold = 34000f / ushort.MaxValue;
 
-        /// <summary>火山全域をマグマ面積比の母集団にする、追加火山適性下限の試作値です。</summary>
+        /// <summary>段階5の火山中核全域をマグマ面積比の母集団にする、追加火山活動度下限の試作値です。</summary>
         private const float PrototypeMagmaMinimumVolcanicInfluence = 0f;
 
         /// <summary>岩壁の大きな塊を作る試作ノイズ格子サイズです。単位はタイルです。</summary>
