@@ -1,7 +1,7 @@
-# Farmware タイルマップ用スプライト制作・導入チェックリスト v0.29
+# Farmware タイルマップ用スプライト制作・導入チェックリスト v0.30
 
 - 作成日: 2026-10-11
-- 最終更新日: 2026-10-20
+- 最終更新日: 2026-10-23
 - 対象: 地形・資源・生物、直接操作プレイヤー、海中・深海、施設、乗り物、補助物流
 - 関連仕様: [ランダムマップ生成仕様](../GameSpecification/RandomMapGenerationSpecification.md)
 - 関連仕様: [ゲームコンセプト仕様](../GameSpecification/2026-10-11_casual_factory_concept_v0.1.md)
@@ -11,13 +11,13 @@
 
 2026-10-19の仕様転換に伴い、ドローン・開始コアの制作計画を撤回し、第7.5・7.6節をプレイヤー・水中・乗り物へ置換した。既存のART-00受け入れ、16pxセル、土地16×24、岩壁16×28、接地点・Atlasの規則は再利用する。
 
-第4章等の7枚のBiome土地と単一岩壁は現行アセットの説明である。今後は固定BiomeとBlock素材を分け、同Biome内にも複数地面・壁を表示する。新しい通常表示はBlock定義を選択キーにし、「Biomeだけで常に同じTile」という現行規則を置換する。意味のないランダム模様を避ける方針は維持するが、異なる材質の識別を禁止しない。各地形材質は共通の所持品から設置先に応じてGround形態またはWall形態になるため、自然生成パレットに片方しか現れない材質も両形態のSpriteを制作対象とする。地形ブロックItemは再配置専用であり、クラフトに使う石材・鉱石等の資源Itemとは別物として制作する。同名材質でも、地形ブロックのItemアイコンと資源Itemアイコンを色だけの差分にせず、輪郭、割れ方、粒度または鉱脈表現で判別できるようにする。
+第4章等の7枚のBiome土地と単一岩壁はART-00時点の制作・受け入れ記録である。C5-Cで旧7Biome用土地はSceneとAtlasから取り外し、未制作の新18Biomeそれぞれに専用の仮色Tileを割り当てた。これらはC5-C分類の識別と欠落検出のための暫定表示であり、本番素材の制作完了を意味しない。今後は固定BiomeとBlock素材を分け、同Biome内にも複数地面・壁を表示する。新しい通常表示はBlock定義を選択キーにし、「Biomeだけで常に同じTile」というC6前の暫定規則を置換する。意味のないランダム模様を避ける方針は維持するが、異なる材質の識別を禁止しない。各地形材質は共通の所持品から設置先に応じてGround形態またはWall形態になるため、自然生成パレットに片方しか現れない材質も両形態のSpriteを制作対象とする。地形ブロックItemは再配置専用であり、クラフトに使う石材・鉱石等の資源Itemとは別物として制作する。同名材質でも、地形ブロックのItemアイコンと資源Itemアイコンを色だけの差分にせず、輪郭、割れ方、粒度または鉱脈表現で判別できるようにする。
 
 積雪版は雪原バイオームや地域の雪表現の素材であり、四季の追加を意味しない。夜は環境光、海中はLayerと水の表現を使い、夜だけの視界半径制限を画像で付けない。本書の改訂だけでScene・素材・Import設定を変更したとは扱わない。
 
 PixelLabだけで制作する製品用スプライトを漏れなく管理し、画風の固定、生成、Unityへのインポート、表示設定、実機確認を段階別に記録する。
 
-Editorの構築メニューが `Assets/Farmware/Art/WorldGeneration/Fallback/` へ生成する、上面をBiome基準色一色で塗った7種類の16×24土地Tile、3種類の16×16液体Tile、1種類の16×28岩壁Tile、3種類の資源Tile、淡水・海水・マグマの各4フレームAnimatedTileは表示を成立させるための仮素材である。現在、7バイオームの土地は`Terrain/Base/terrain_biomes_base.png`、岩壁は`Terrain/Base/terrain_rock_wall_01.png`の本番候補をSampleSceneへ適用済みで、対応するフォールバック素材は生成確認用として残す。本書のチェックは、本番候補へ置き換えた素材から付け、仮素材が存在するだけではチェックしない。
+Editorの構築メニューが `Assets/Farmware/Art/WorldGeneration/Fallback/` へ生成する、上面をBiome別の仮色一色で塗った18種類の16×24土地Tile、3種類の16×16液体Tile、1種類の16×28岩壁Tile、3種類の資源Tile、淡水・海水・マグマの各4フレームAnimatedTileは表示を成立させるための仮素材である。新18Biome土地の本番素材はまだなく、SampleSceneと`GroundTerrainAtlas`は18枚の仮色Tileを一対一で参照する。未制作Biomeを旧草原・森林等の近似Tileへフォールバックしない。本書のチェックは、本番候補へ置き換えた素材から付け、仮素材が存在するだけではチェックしない。
 
 2026-10-15時点で、`ChunkTilemapPresenter`には上面16 pxと断面8 pxを結合した土地、上面16 pxと側面12 pxを結合した岩壁、土地より8 px下へ投影する静止液面・液面アニメーション、岩壁上資源を16×16サブチャンク単位で表示・消去する仕組みを実装済みである。土地は論理バイオームだけを表示し、標準・肥沃・砂質のSoilType差は通常表示へ反映しない。本番用を含む7枚の通常土地Baseは、上面をBiome代表色一色、断面を対応する一色で構成し、草・葉・砂紋、ランダムな色むら、A・B差分、SoilType別派生を持たない。マップ全体の賑わいとバイオームらしさは、資源、植生、動物、地形障害物、プレイヤー配置物など、配置に意味を持つ別要素で表現する。断面は隣接判定で出し分けず、画面手前の一体型ブロックが奥側の断面を隠す。`Build Fallback Map Prototype`を実行すると必要レイヤーと仮素材を再生成し、本番用バイオーム土地と岩壁をSampleSceneへ再接続できる。
 
@@ -878,9 +878,9 @@ player_drone_idle_south.png
 equipment_starting_core_active.png
 ```
 
-現在の`ChunkTilemapPresenter`は、7バイオームの16×24土地を`Ground Tilemap`、淡水・海水・マグマを`Liquid Base Tilemap`へ排他的に表示する。静止液面と透明アニメーションは論理セルを変えず画面下へ8 px移動する。岩壁セルにもBiome由来の土地ブロックを残し、16×28岩壁を`Rock Wall Tilemap`へ同じ論理座標で重ねる。GroundとRock WallはIndividual ModeかつTop Left順でセルごとにYソートし、画面奥を先、手前を後に描いて奥側の断面・側面を手前ブロックで隠す。通常Resourceは直前方の岩壁有無から背面用と前面用の固定Tilemapへ振り分け、遠方座標でも手前岩壁との前後関係を維持する。岩壁の内部影と露出資源は岩壁上面に合わせて12 px上へ表示する。境界ハイライトは`Land Boundary Highlight Tilemap`を地表と同じ高さ、`Rock Wall Boundary Highlight Tilemap`を12 px上へ配置し、14基本Spriteから作る回転済みTileを共有して不透明度20%で描画する。
+現在の`ChunkTilemapPresenter`は、18Biomeの16×24仮色土地を`Ground Tilemap`、淡水・海水・マグマを`Liquid Base Tilemap`へ排他的に表示する。Biome配列は安定ID 1〜18順の18要素を必須とし、欠落時に他BiomeのTileを表示しない。静止液面と透明アニメーションは論理セルを変えず画面下へ8 px移動する。岩壁セルにもBiome由来の土地ブロックを残し、16×28岩壁を`Rock Wall Tilemap`へ同じ論理座標で重ねる。GroundとRock WallはIndividual ModeかつTop Left順でセルごとにYソートし、画面奥を先、手前を後に描いて奥側の断面・側面を手前ブロックで隠す。通常Resourceは直前方の岩壁有無から背面用と前面用の固定Tilemapへ振り分け、遠方座標でも手前岩壁との前後関係を維持する。岩壁の内部影と露出資源は岩壁上面に合わせて12 px上へ表示する。境界ハイライトは`Land Boundary Highlight Tilemap`を地表と同じ高さ、`Rock Wall Boundary Highlight Tilemap`を12 px上へ配置し、14基本Spriteから作る回転済みTileを共有して不透明度20%で描画する。
 
-Editor構築ツールとPlayerビルド前処理は、`terrain_biomes_base.png`を16×24 pxで左から7分割したBiome土地Spriteを`GroundTerrainAtlas`の1ページ、岩壁を`RockWallAtlas`、`terrain_boundary_highlights.png`を16×16 pxで左から14分割したSpriteを`BoundaryHighlightAtlas`へ自動登録・再パックする。各Atlasが複数ページへ分割された場合は、テストまたはビルドを失敗させる。
+Editor構築ツールとPlayerビルド前処理は、18Biomeの仮色土地PNGを`GroundTerrainAtlas`の1ページ、岩壁を`RockWallAtlas`、`terrain_boundary_highlights.png`を16×16 pxで左から14分割したSpriteを`BoundaryHighlightAtlas`へ自動登録・再パックする。各Atlasが複数ページへ分割された場合は、テストまたはビルドを失敗させる。C6でBlock用本番素材を導入する際は、この仮色Packableを同じ変更単位で置換する。
 
 - [x] 通常地形と低地の高さ分類をPresentationで判定できる
 - [x] 静止液面と透明アニメーションをGround Tilemapから分離し、同じ8 pxだけ画面下へ移動できる

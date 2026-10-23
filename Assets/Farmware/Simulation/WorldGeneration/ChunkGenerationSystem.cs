@@ -94,6 +94,7 @@ namespace Farmware.WorldGeneration
             slots = new NativeList<GenerationSlot>(
                 ChunkStreamingSettings.CreateDefault().MaximumConcurrentGenerations, Allocator.Persistent);
             state.RequireForUpdate<WorldGenerationSettings>();
+            state.RequireForUpdate<BiomeClassificationSettings>();
             state.RequireForUpdate<ResourceGenerationSettings>();
         }
 
@@ -127,8 +128,12 @@ namespace Farmware.WorldGeneration
             int limit = SystemAPI.TryGetSingleton(out ChunkStreamingSettings streamingSettings)
                 ? streamingSettings.MaximumConcurrentGenerations
                 : ChunkStreamingSettings.CreateDefault().MaximumConcurrentGenerations;
-            bool scheduled = ScheduleBatch(state.EntityManager, SystemAPI.GetSingleton<WorldGenerationSettings>(),
-                SystemAPI.GetSingleton<ResourceGenerationSettings>(), limit);
+            bool scheduled = ScheduleBatch(
+                state.EntityManager,
+                SystemAPI.GetSingleton<WorldGenerationSettings>(),
+                SystemAPI.GetSingleton<BiomeClassificationSettings>(),
+                SystemAPI.GetSingleton<ResourceGenerationSettings>(),
+                limit);
             RefreshFixedTickReadiness(state.EntityManager, fixedTickPublication && !isPaused, scheduled);
         }
 
@@ -137,17 +142,23 @@ namespace Farmware.WorldGeneration
         /// </summary>
         /// <param name="manager">このSystemと同じWorldのEntityManagerです。</param>
         /// <param name="settings">投入時点で固定する地形生成設定です。</param>
+        /// <param name="biomeSettings">投入時点で固定する新18Biome Definitionです。</param>
         /// <param name="resourceSettings">投入時点で固定する資源生成設定です。</param>
         /// <param name="maximumConcurrentGenerations">同時実行上限です。1未満は1へ正規化します。</param>
         /// <returns>この呼出しで1件以上の新しい生成Jobを投入した場合はtrueです。</returns>
-        public bool ScheduleBatch(EntityManager manager, WorldGenerationSettings settings,
-            ResourceGenerationSettings resourceSettings, int maximumConcurrentGenerations)
+        public bool ScheduleBatch(
+            EntityManager manager,
+            WorldGenerationSettings settings,
+            BiomeClassificationSettings biomeSettings,
+            ResourceGenerationSettings resourceSettings,
+            int maximumConcurrentGenerations)
         {
             using (ScheduleProfilerMarker.Auto())
             {
                 return ScheduleRequests(
                     manager,
                     settings,
+                    biomeSettings,
                     resourceSettings,
                     math.max(1, maximumConcurrentGenerations));
             }
@@ -427,8 +438,12 @@ namespace Farmware.WorldGeneration
         /// <param name="resourceSettings">値コピーしてJobへ渡す資源設定です。</param>
         /// <param name="limit">1以上へ正規化済みの同時生成上限です。</param>
         /// <returns>1件以上のQueued要求をJobへ投入した場合はtrueです。</returns>
-        private bool ScheduleRequests(EntityManager manager, WorldGenerationSettings settings,
-            ResourceGenerationSettings resourceSettings, int limit)
+        private bool ScheduleRequests(
+            EntityManager manager,
+            WorldGenerationSettings settings,
+            BiomeClassificationSettings biomeSettings,
+            ResourceGenerationSettings resourceSettings,
+            int limit)
         {
             int running = 0;
             for (int index = 0; index < slots.Length; index++)
@@ -508,10 +523,8 @@ namespace Farmware.WorldGeneration
                 GenerateTerrainJob terrainJob = new GenerateTerrainJob
                 {
                     Settings = settings,
-                    ResourceSettings = resourceSettings,
                     Coordinate = slot.Coordinate,
                     Tiles = slot.Tiles,
-                    Resources = slot.Resources,
                     GenerationFailed = slot.TerrainGenerationFailed
                 };
                 ResolveChunkLakesJob lakeJob = new ResolveChunkLakesJob
@@ -649,6 +662,18 @@ namespace Farmware.WorldGeneration
                         LakeSpringGenerationFailed = slot.LakeSpringGenerationFailed,
                         GenerationFailed = slot.NaturalFloodingGenerationFailed
                     };
+                FinalizeBiomeTerrainJob biomeTerrainJob = new FinalizeBiomeTerrainJob
+                {
+                    WorldSettings = settings,
+                    BiomeSettings = biomeSettings,
+                    ResourceSettings = resourceSettings,
+                    Coordinate = slot.Coordinate,
+                    Tiles = slot.Tiles,
+                    HydrologyTiles = slot.HydrologyTiles,
+                    SurfaceWater = slot.SurfaceWater,
+                    Resources = slot.Resources,
+                    GenerationFailed = slot.NaturalFloodingGenerationFailed
+                };
 
                 // 基礎水文の完了後に閉鎖末端を一度分類し、異なる流域を最大8担当へ分けます。
                 // 湖系列全体を、独立した地形・資源Jobとは並行させます。
@@ -680,6 +705,7 @@ namespace Farmware.WorldGeneration
                     naturalFloodingFirstWaveHandle);
                 JobHandle naturalFloodingHandle = naturalFloodingJob.Schedule(
                     naturalFloodingSecondWaveHandle);
+                JobHandle biomeTerrainHandle = biomeTerrainJob.Schedule(naturalFloodingHandle);
                 slot.HydrologyBaseHandle = hydrologyHandle;
                 slot.LakeHandle = lakeHandle;
                 slot.SurfaceWaterHandle = surfaceWaterHandle;
@@ -687,7 +713,7 @@ namespace Farmware.WorldGeneration
                 slot.GroundwaterHandle = groundwaterHandle;
                 slot.LakeSpringHandle = lakeSpringHandle;
                 slot.NaturalFloodingHandle = naturalFloodingHandle;
-                slot.Handle = naturalFloodingHandle;
+                slot.Handle = biomeTerrainHandle;
                 slots[slotIndex] = slot;
                 status.Phase = ChunkGenerationPhase.GeneratingData;
                 manager.SetComponentData(entity, status);
@@ -1052,7 +1078,11 @@ namespace Farmware.WorldGeneration
             [NativeDisableParallelForRestriction]
             public NativeArray<HydrologyUpstreamCandidate> HydrologyCatchmentFrontier;
 
-            /// <summary>各水文行が座標範囲外や不正設定を検出した場合、自分と同じ添字へ1を書きます。</summary>
+            /// <summary>
+            /// 各水文行が座標範囲外や不正設定を検出した場合、自分と同じ添字へ1を書きます。
+            /// IJobParallelForの安全性制限へ担当添字との対応を推論させず、Burst実行時も8担当の独立書き込みを許可します。
+            /// </summary>
+            [NativeDisableParallelForRestriction]
             public NativeArray<byte> GenerationFailed;
 
             /// <summary>Worker上で指定添字の水文1行を生成し、失敗時だけ通知欄を更新します。</summary>
@@ -1073,15 +1103,12 @@ namespace Farmware.WorldGeneration
             }
         }
 
-        /// <summary>水文Jobと独立して、地形・資源4096タイルを生成するBurst Jobです。</summary>
+        /// <summary>水文Jobと独立して、分類前の基礎地形4096タイルを生成するBurst Jobです。</summary>
         [BurstCompile]
         private struct GenerateTerrainJob : IJob
         {
             /// <summary>WorldのSingletonから値コピーした、Job実行中は読み取り専用の生成設定です。</summary>
             public WorldGenerationSettings Settings;
-
-            /// <summary>WorldのSingletonから値コピーした、資源群の大きさと密度設定です。</summary>
-            public ResourceGenerationSettings ResourceSettings;
 
             /// <summary>生成する絶対チャンク座標です。Jobの実行中は変化しません。</summary>
             public ChunkCoordinateComponent Coordinate;
@@ -1089,13 +1116,10 @@ namespace Farmware.WorldGeneration
             /// <summary>このJobだけが全4096件を上書きし、最終Handle完了後にSystemへ返す地形配列です。</summary>
             public NativeArray<GeneratedTile> Tiles;
 
-            /// <summary>このJobだけが書く、地形と同じ位置に対応した資源配列です。</summary>
-            public NativeArray<GeneratedResourceTile> Resources;
-
             /// <summary>生成失敗時に先頭へ1を書き、5 Bufferすべての公開を止める地形専用通知領域です。</summary>
             public NativeArray<byte> GenerationFailed;
 
-            /// <summary>地質キャッシュを一度構築し、全タイルの地形と対応資源を順に生成します。</summary>
+            /// <summary>地質キャッシュを一度構築し、全タイルの分類前地形を順に生成します。</summary>
             public void Execute()
             {
 
@@ -1126,16 +1150,9 @@ namespace Farmware.WorldGeneration
                             // このJobだけが地形欄へ書くため原子的操作は不要です。未定義配列も残しません。
                             GenerationFailed[0] = 1;
                             Tiles[tileIndex] = default;
-                            Resources[tileIndex] = default;
                             continue;
                         }
                         Tiles[tileIndex] = terrainTile;
-                        Resources[tileIndex] = DeterministicResourceGenerator.GenerateResource(
-                            Settings,
-                            ResourceSettings,
-                            terrainTile,
-                            worldTileX,
-                            worldTileY);
                     }
                 }
             }
@@ -1216,7 +1233,11 @@ namespace Farmware.WorldGeneration
             [ReadOnly]
             public NativeArray<int> HydrologyLakeWorkItemCount;
 
-            /// <summary>湖担当が失敗時に自分の添字へ1を書き、部分結果の公開を止める通知領域です。</summary>
+            /// <summary>
+            /// 湖担当が失敗時に自分の添字へ1を書き、部分結果の公開を止める通知領域です。
+            /// 各担当はlaneIndexと同じ要素だけを書きますが、呼出し先をまたぐため並列書き込み制限を明示的に解除します。
+            /// </summary>
+            [NativeDisableParallelForRestriction]
             public NativeArray<byte> GenerationFailed;
 
             /// <summary>指定担当に割り当てられた閉鎖流域を順に解決し、失敗時だけ自分の通知欄を更新します。</summary>
@@ -1414,7 +1435,11 @@ namespace Farmware.WorldGeneration
             [ReadOnly]
             public NativeArray<byte> GroundwaterGenerationFailed;
 
-            /// <summary>各担当が失敗時に自分の添字だけへ1を書く通知領域です。</summary>
+            /// <summary>
+            /// 各担当が失敗時に自分の添字だけへ1を書く通知領域です。
+            /// 8担当は重複しない要素だけを変更するため、ParallelForの単一要素制限を解除して安全な分割書き込みを許可します。
+            /// </summary>
+            [NativeDisableParallelForRestriction]
             public NativeArray<byte> GenerationFailed;
 
             /// <summary>担当番号と同じ剰余を持つ21行を生成し、失敗時だけ担当別通知を更新します。</summary>
@@ -1741,6 +1766,88 @@ namespace Farmware.WorldGeneration
                 }
             }
         }
+
+        /// <summary>
+        /// 完成したC3／C4水文の後で新18Biomeを確定し、既存GroundTypeと仮資源へ一括反映する最終Burst Jobです。
+        /// このJobが成功するまでBiomeIdを公開しないため、水文特殊Biomeを後から書き換える二重経路を作りません。
+        /// </summary>
+        [BurstCompile]
+        private struct FinalizeBiomeTerrainJob : IJob
+        {
+            /// <summary>Seed、GeneratorVersion、環境値、暫定地形規則を持つ固定設定です。</summary>
+            public WorldGenerationSettings WorldSettings;
+
+            /// <summary>新18Biomeの検証済みDefinitionと水文特殊Host集合です。</summary>
+            public BiomeClassificationSettings BiomeSettings;
+
+            /// <summary>C7まで維持する木・石・砂の仮資源生成設定です。</summary>
+            public ResourceGenerationSettings ResourceSettings;
+
+            /// <summary>生成対象となるSurface上の絶対論理チャンク座標です。</summary>
+            public ChunkCoordinateComponent Coordinate;
+
+            /// <summary>基礎環境・地質を読み、新Biomeと最終地面属性を書き戻す4096タイルです。</summary>
+            public NativeArray<GeneratedTile> Tiles;
+
+            /// <summary>水文特殊Biomeの判定に使う、完成済み自然水文4096タイルです。</summary>
+            [ReadOnly]
+            public NativeArray<GeneratedHydrologyTile> HydrologyTiles;
+
+            /// <summary>既存GroundTypeへ一時反映する、湖・泉まで確定済みの固定表流水です。</summary>
+            [ReadOnly]
+            public NativeArray<GeneratedSurfaceWaterTile> SurfaceWater;
+
+            /// <summary>最終地面と新Biomeに対応してこのJobが全件上書きする仮資源配列です。</summary>
+            public NativeArray<GeneratedResourceTile> Resources;
+
+            /// <summary>先行失敗を読み、分類失敗時は先頭へ1を書いて全Bufferの公開を止めます。</summary>
+            public NativeArray<byte> GenerationFailed;
+
+            /// <summary>4096タイルを固定順で分類し、1件でも失敗した場合は部分結果を公開しません。</summary>
+            public void Execute()
+            {
+                for (int failureIndex = 0; failureIndex < GenerationFailed.Length; failureIndex++)
+                {
+                    if (GenerationFailed[failureIndex] != 0)
+                    {
+                        return;
+                    }
+                }
+
+                for (int localY = 0; localY < WorldGridConstants.LogicalChunkSize; localY++)
+                {
+                    for (int localX = 0; localX < WorldGridConstants.LogicalChunkSize; localX++)
+                    {
+                        int tileIndex = WorldGrid.ToTileIndex(localX, localY);
+                        int worldTileX = WorldGrid.ToWorldTileX(Coordinate.X, localX);
+                        int worldTileY = WorldGrid.ToWorldTileY(Coordinate.Y, localY);
+                        if (!DeterministicBiomeChunkFinalizer.TryFinalizeTile(
+                                WorldSettings,
+                                BiomeSettings,
+                                worldTileX,
+                                worldTileY,
+                                Tiles[tileIndex],
+                                HydrologyTiles[tileIndex],
+                                SurfaceWater[tileIndex],
+                                out GeneratedTile finalizedTile))
+                        {
+                            GenerationFailed[0] = 1;
+                            Tiles[tileIndex] = default;
+                            Resources[tileIndex] = default;
+                            continue;
+                        }
+
+                        Tiles[tileIndex] = finalizedTile;
+                        Resources[tileIndex] = DeterministicResourceGenerator.GenerateResource(
+                            WorldSettings,
+                            ResourceSettings,
+                            finalizedTile,
+                            worldTileX,
+                            worldTileY);
+                    }
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -1759,6 +1866,7 @@ namespace Farmware.WorldGeneration
             state.RequireForUpdate<AnimalSpeciesCatalog>();
             state.RequireForUpdate<SimulationTickState>();
             state.RequireForUpdate<WorldGenerationSettings>();
+            state.RequireForUpdate<BiomeClassificationSettings>();
             state.RequireForUpdate<ResourceGenerationSettings>();
         }
 
@@ -1792,6 +1900,7 @@ namespace Farmware.WorldGeneration
             bool scheduled = generator.ScheduleBatch(
                 state.EntityManager,
                 SystemAPI.GetSingleton<WorldGenerationSettings>(),
+                SystemAPI.GetSingleton<BiomeClassificationSettings>(),
                 SystemAPI.GetSingleton<ResourceGenerationSettings>(),
                 limit);
             generator.RefreshFixedTickReadiness(state.EntityManager, true, scheduled);

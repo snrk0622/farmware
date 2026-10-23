@@ -149,3 +149,26 @@ PR #45のレビューで、`SeaLevelThreshold`を20,000未満へ設定すると�
 回帰確認は、海面19,999の設定・個別候補・全候補順位の拒否、Inspector値0から20,000への補正、海面20,000以上を使う海岸Anchorと岩壁境界を対象とする。新18BiomeはまだECS生成へ未接続のため、旧7Biomeの製品表示結果を変更しない。
 
 2026-10-23の接続済みUnity 6000.3.8f1 Editorでは、厳格再コンパイルがエラー0件・警告0件、`DeterministicBiomeClassifierTests` 19件、`DeterministicEnvironmentGeneratorTests` 13件、`DeterministicSurfaceWaterGeneratorTests` 10件、Authoring海面補正1件、岩壁境界PlayMode 1件がすべて成功した。World Generation全EditModeも実行したが、既存`AnimalPopulationGenerationTests.GenerationBoundary_MatchesAcrossFramePartitionsAndRequestCreationOrder`の実行中にPipeline既定300秒を超えて中断され、全体件数の合否は得られなかった。これは個別テスト失敗ではなく実行基盤のタイムアウトであり、同テスト中の既知のSystem Group順序属性警告以外に新しいコンパイル警告は確認していない。
+
+## 13. C5-CのECS生成切替契約
+
+C5-Cで`GeneratorVersion`を2へ更新し、C5前の版を移行・読み替えせず設定検証で拒否する。1チャンクの生成順は次で固定する。
+
+1. `DeterministicChunkGenerator`で連続環境、地質、陸海、岩壁候補だけを生成する。この中間値は`BiomeId.None`とし、新18Biomeを推測しない。
+2. C3の基礎水文とC4の河道・湖・地下水・泉・自然冠水・湿原規模を完成する。
+3. 最終Jobで`DeterministicBiomeClassifier.TrySelectFinalBiome`を呼び、火山中核、水文特殊、通常首位の順に地上Biome 1〜18を確定する。海面下だけは`BiomeId.None`と海水を公開する。
+4. C6までの暫定表現として、火山中核のマグマ、C4固定表流水、基礎岩壁、陸地の順に`GroundType`へ反映し、木・石・砂の旧3資源を最終地形から生成する。C6／C7でBlock・Liquid・28資源へ置換するまでの有限な中間契約である。
+
+1タイルで旧7Biome、淡水、マグマまで同時生成していた経路、第三Biomeを強制する橋遷移、旧`Weirdness`の設定・保持・ハッシュ、旧岩地マグマ特例、12×8建築可能領域と近傍資源を要求する初期スポーン探索は削除する。初期スポーンは、原点から最大半径2チャンクを段階的に要求し、完成済みECS Bufferの初期スポーン許可Biome、乾いた通行可能地面、資源なしを近い順に選ぶ。見つからない場合はScene座標や分類前地形へ退行せず明示失敗とする。
+
+新18Biomeの本番Tileは未制作であるため、C5-Cでは安定ID 1〜18に専用の16×24仮色Tileを各1枚用意する。`ChunkTilemapPresenter`は18要素すべてを必須とし、未設定IDを旧7Biomeの近似Tileや先頭Tileへフォールバックしない。旧7枚のフォールバック土地は削除し、`GroundTerrainAtlas`も18枚の仮色Spriteへ置換する。C6でBlockパレットと本番素材を導入する際に、このBiome直結の仮表示を置換する。
+
+C5-Cの新IDを製品生成へ接続した時点で旧型のままではコンパイルまたは誤判定になる利用側に限り、`AnimalBiomeMask`の18bit化、鶏Definition、状態ハッシュ、Gameビューの基本色、Map Viewerの`Terrain`／`Biome`を同じ変更単位で更新する。これは新旧IDの並行経路を残さないための最小垂直切片であり、C5-D全体の完了ではない。候補・選択理由を含む診断表示とC5-Eの153ペア監査は後続項目に残す。旧基礎タイルを使うBiome分布監査はC5-Eまで明示停止し、地質監査のBiomeクロスも偽の`None`を出力しない。
+
+## 14. C5-Cの検証状態
+
+2026-10-23の接続済みUnity 6000.3.8f1 Editorで、厳格再コンパイルのエラー0件・警告0件を確認した。World Generation EditMode初回は565件中561件が成功し、4件が旧`GeneratorVersion = 1`のテスト入力と旧版の特定座標分布への依存により失敗した。旧版を受理する互換分岐は追加せず、現行版を明示入力し、有限範囲から最初の閉鎖流域を選ぶようテストを更新した。さらに動物分布監査の入口でも旧版を拒否する1件を追加し、最終再実行ではEditMode 566件が283.05秒で全件成功した。
+
+PlayMode初回は56件中53件が成功し、SampleScene統合3件が旧契約に依存して失敗した。初期スポーンへ近傍資源を要求しない現行仕様に合わせて開始チャンクの資源表示を完了条件から外し、鶏が新`TemperateGrassland`に存在しない領域では0羽も正常とした。GeneratorVersion 1固定の期待値を現在版2へ更新し、C4水文Jobへ実時間を渡しながら初期チャンクと左隣の先読み完了を待つようにした。最終再実行ではPlayMode 56件が49.18秒で全件成功した。
+
+旧7Biome名・旧7bit Mask・`Weirdness`・旧開始領域探索・GeneratorVersion 1の製品経路が残っていないこと、`git diff --check`に問題がないことを検索と差分確認で検証した。最終Console実状態もコンパイル失敗なし、エラー0件、警告0件である。Gameビューの18仮色、淡水・海水・マグマ・岩壁の優先、初期スポーン、チャンク境界、Map Viewerとの一致は人間確認待ちである。C5-Dで完成チャンクを参照する境界Haloを含む表示利用側の残りを一括移行し、C5-Eで分布と全153ペア境界を監査する。

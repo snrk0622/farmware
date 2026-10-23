@@ -412,7 +412,7 @@ namespace Farmware.WorldGeneration.Tests
         {
             WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
                 WorldSeedUtility.FromString("hydrology-map-viewer-test"),
-                1);
+                WorldGenerationSettings.CurrentGeneratorVersion);
             WorldGenerationMapSampleResult result = WorldGenerationMapSampler.Sample(
                 settings,
                 0,
@@ -466,7 +466,7 @@ namespace Farmware.WorldGeneration.Tests
         {
             WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
                 WorldSeedUtility.FromString("hydrology-map-thread-test"),
-                1);
+                WorldGenerationSettings.CurrentGeneratorVersion);
 
             // EditorWindowの非同期描画経路と同じ実行位置で、固定水文セルと画像の完成まで待ちます。
             WorldGenerationMapSampleResult result = Task.Run(
@@ -496,7 +496,7 @@ namespace Farmware.WorldGeneration.Tests
         {
             WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
                 WorldSeedUtility.FromString("derived-hydrology-map-viewer-test"),
-                1);
+                WorldGenerationSettings.CurrentGeneratorVersion);
             RecordingProgress progress = new RecordingProgress();
 
             WorldGenerationMapSampleResult result = Task.Run(

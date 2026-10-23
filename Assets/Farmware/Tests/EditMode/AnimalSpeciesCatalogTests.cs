@@ -49,7 +49,7 @@ namespace Farmware.Tests.EditMode
                         chickenRuntimeId,
                         out AnimalSpeciesDefinitionBlob chicken),
                     Is.True);
-                Assert.That(chicken.AllowedBiomes, Is.EqualTo(AnimalBiomeMask.Grassland));
+                Assert.That(chicken.AllowedBiomes, Is.EqualTo(AnimalBiomeMask.TemperateGrassland));
                 Assert.That(chicken.AllowedGrounds, Is.EqualTo(AnimalGroundMask.Land));
                 Assert.That(chicken.MinimumHerdSize, Is.EqualTo(3));
                 Assert.That(chicken.MaximumHerdSize, Is.EqualTo(6));
@@ -62,12 +62,12 @@ namespace Farmware.Tests.EditMode
                 Assert.That(
                     AnimalSpeciesCatalogLookup.IsBiomeAllowed(
                         chicken.AllowedBiomes,
-                        AnimalBiomeMask.Grassland),
+                        AnimalBiomeMask.TemperateGrassland),
                     Is.True);
                 Assert.That(
                     AnimalSpeciesCatalogLookup.IsBiomeAllowed(
                         chicken.AllowedBiomes,
-                        AnimalBiomeMask.Forest),
+                        AnimalBiomeMask.TemperateDeciduousForest),
                     Is.False);
                 Assert.That(
                     AnimalSpeciesCatalogLookup.IsGroundAllowed(
@@ -265,12 +265,12 @@ namespace Farmware.Tests.EditMode
         /// <param name="invalidBiomeMask">検証する不正なバイオームMaskの数値です。</param>
         /// <param name="invalidGroundMask">検証する不正な基礎地形Maskの数値です。</param>
         /// <param name="expectedError">最初に検出すべきエラーです。</param>
-        [TestCase(0, (byte)AnimalGroundMask.Land, AnimalSpeciesCatalogValidationErrorCode.AllowedBiomesAreInvalid)]
-        [TestCase(128, (byte)AnimalGroundMask.Land, AnimalSpeciesCatalogValidationErrorCode.AllowedBiomesAreInvalid)]
-        [TestCase((byte)AnimalBiomeMask.Grassland, 0, AnimalSpeciesCatalogValidationErrorCode.AllowedGroundsAreInvalid)]
-        [TestCase((byte)AnimalBiomeMask.Grassland, 128, AnimalSpeciesCatalogValidationErrorCode.AllowedGroundsAreInvalid)]
+        [TestCase(0UL, (byte)AnimalGroundMask.Land, AnimalSpeciesCatalogValidationErrorCode.AllowedBiomesAreInvalid)]
+        [TestCase(1UL << 18, (byte)AnimalGroundMask.Land, AnimalSpeciesCatalogValidationErrorCode.AllowedBiomesAreInvalid)]
+        [TestCase((ulong)AnimalBiomeMask.TemperateGrassland, 0, AnimalSpeciesCatalogValidationErrorCode.AllowedGroundsAreInvalid)]
+        [TestCase((ulong)AnimalBiomeMask.TemperateGrassland, 128, AnimalSpeciesCatalogValidationErrorCode.AllowedGroundsAreInvalid)]
         public void TryBuild_RejectsInvalidEligibilityMasks(
-            byte invalidBiomeMask,
+            ulong invalidBiomeMask,
             byte invalidGroundMask,
             AnimalSpeciesCatalogValidationErrorCode expectedError)
         {
@@ -337,12 +337,13 @@ namespace Farmware.Tests.EditMode
             Assert.That(
                 AnimalSpeciesCatalogLookup.IsBiomeAllowed(
                     AnimalBiomeMask.All,
-                    AnimalBiomeMask.Grassland | AnimalBiomeMask.Forest),
+                    AnimalBiomeMask.TemperateGrassland | AnimalBiomeMask.TemperateDeciduousForest),
                 Is.False);
             Assert.That(
                 AnimalSpeciesCatalogLookup.IsBiomeAllowed(
                     AnimalBiomeMask.All,
-                    (AnimalBiomeMask)128),
+                    // 18種はbit 0〜17なので、その直後のbit 18を未定義値として使います。
+                    (AnimalBiomeMask)(1UL << 18)),
                 Is.False);
             Assert.That(
                 AnimalSpeciesCatalogLookup.IsGroundAllowed(
@@ -532,7 +533,7 @@ namespace Farmware.Tests.EditMode
             return new AnimalSpeciesDefinitionBuildEntry
             {
                 DefinitionGuid = CreateGuid(ChickenGuidLow),
-                AllowedBiomes = AnimalBiomeMask.Grassland,
+                AllowedBiomes = AnimalBiomeMask.TemperateGrassland,
                 AllowedGrounds = AnimalGroundMask.Land,
                 MinimumHerdSize = 3,
                 MaximumHerdSize = 6,

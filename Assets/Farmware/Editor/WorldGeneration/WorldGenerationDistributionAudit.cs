@@ -1,5 +1,5 @@
-// このファイルは、複数シードのバイオーム・基礎地形・土壌・水域・隣接関係を一定条件で集計し、調整前後を比較できる診断結果を作ります。
-// Editorメニューから呼ばれる開発専用処理であり、ランタイムのECS状態や実際のワールド生成結果は変更しません。
+// このファイルは、C5-Cで停止した旧バイオーム分布監査の設定・結果型を保持し、誤った旧経路の実行を明示的に拒否します。
+// 完成水文と新18Biome候補診断を扱う監査はC5-Eで置換し、それまではEditorメニューから実行できません。
 
 using System;
 using System.Collections.Generic;
@@ -90,7 +90,7 @@ namespace Farmware.WorldGeneration.Editor
                 },
                 64,
                 32,
-                1);
+                WorldGenerationSettings.CurrentGeneratorVersion);
         }
     }
 
@@ -142,9 +142,6 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>直接隣接ペアのうち、異なるBiomeId同士だった境界数です。</summary>
         public int DirectBiomeBoundaryCount { get; }
 
-        /// <summary>仕様上強く抑制する組み合わせが直接接続していた境界数です。</summary>
-        public int StronglySuppressedBoundaryCount { get; }
-
         /// <summary>64×64論理チャンク境界をまたいで調べた東西・南北ペア総数です。</summary>
         public int TotalChunkBoundaryAdjacencySamples { get; }
 
@@ -173,7 +170,6 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="samplesPerSeed">各シードの代表サンプル数です。</param>
         /// <param name="totalDirectAdjacencySamples">東・北へ調べた直接隣接ペアの総数です。</param>
         /// <param name="directBiomeBoundaryCount">異なるBiomeId同士だった直接境界数です。</param>
-        /// <param name="stronglySuppressedBoundaryCount">強い隣接抑制対象だった直接境界数です。</param>
         /// <param name="totalChunkBoundaryAdjacencySamples">論理チャンク境界をまたいで調べたペア総数です。</param>
         /// <param name="chunkBoundaryBiomeChangeCount">論理チャンク境界上でBiomeIdが変化したペア数です。</param>
         /// <param name="signature">走査順の分類結果から作った比較用64bit署名です。</param>
@@ -192,7 +188,6 @@ namespace Farmware.WorldGeneration.Editor
             int samplesPerSeed,
             int totalDirectAdjacencySamples,
             int directBiomeBoundaryCount,
-            int stronglySuppressedBoundaryCount,
             int totalChunkBoundaryAdjacencySamples,
             int chunkBoundaryBiomeChangeCount,
             ulong signature,
@@ -212,7 +207,6 @@ namespace Farmware.WorldGeneration.Editor
             TotalAnchorSamples = seedCount * samplesPerSeed;
             TotalDirectAdjacencySamples = totalDirectAdjacencySamples;
             DirectBiomeBoundaryCount = directBiomeBoundaryCount;
-            StronglySuppressedBoundaryCount = stronglySuppressedBoundaryCount;
             TotalChunkBoundaryAdjacencySamples = totalChunkBoundaryAdjacencySamples;
             ChunkBoundaryBiomeChangeCount = chunkBoundaryBiomeChangeCount;
             Signature = signature;
@@ -293,7 +287,7 @@ namespace Farmware.WorldGeneration.Editor
                 .Append(", Signature=0x").AppendLine(Signature.ToString("X16"));
             builder.AppendLine("Biome distribution:");
 
-            for (BiomeId biome = BiomeId.Grassland; biome <= BiomeId.Volcanic; biome++)
+            for (BiomeId biome = BiomeId.TemperateGrassland; biome <= BiomeId.VolcanicGeothermal; biome++)
             {
                 int biomeIndex = (int)biome;
                 int count = biomeCounts[biomeIndex];
@@ -341,11 +335,7 @@ namespace Farmware.WorldGeneration.Editor
 
             builder.Append("Direct biome boundaries: ")
                 .Append(DirectBiomeBoundaryCount)
-                .Append(", Strongly suppressed: ")
-                .Append(StronglySuppressedBoundaryCount)
-                .Append(" (")
-                .Append(FormatPercent(StronglySuppressedBoundaryCount, DirectBiomeBoundaryCount))
-                .AppendLine(")");
+                .AppendLine();
             builder.Append("Chunk-edge biome changes: ")
                 .Append(ChunkBoundaryBiomeChangeCount)
                 .Append(" / ").Append(TotalChunkBoundaryAdjacencySamples)
@@ -355,10 +345,10 @@ namespace Farmware.WorldGeneration.Editor
                     TotalChunkBoundaryAdjacencySamples))
                 .AppendLine(")");
 
-            for (BiomeId first = BiomeId.Grassland; first <= BiomeId.Volcanic; first++)
+            for (BiomeId first = BiomeId.TemperateGrassland; first <= BiomeId.VolcanicGeothermal; first++)
             {
                 for (BiomeId second = (BiomeId)((int)first + 1);
-                     second <= BiomeId.Volcanic;
+                     second <= BiomeId.VolcanicGeothermal;
                      second++)
                 {
                     int count = GetBiomeAdjacencyCount(first, second);
@@ -367,12 +357,8 @@ namespace Farmware.WorldGeneration.Editor
                         continue;
                     }
 
-                    // 強い抑制対象へ印を付け、許可隣接と見分けられるようにします。件数自体には合否を設けず調整材料として扱います。
-                    string marker = DeterministicChunkGenerator.IsStronglySuppressedBiomePair(first, second)
-                        ? " [suppressed]"
-                        : string.Empty;
                     builder.Append("  ").Append(first).Append(" <-> ").Append(second)
-                        .Append(": ").Append(count).AppendLine(marker);
+                        .Append(": ").Append(count).AppendLine();
                 }
             }
 
@@ -413,7 +399,7 @@ namespace Farmware.WorldGeneration.Editor
         private const ulong SignaturePrime = 1099511628211UL;
 
         /// <summary>BiomeId.NoneからVolcanicまでを格納できる配列スロット数です。</summary>
-        private const int BiomeSlotCount = (int)BiomeId.Volcanic + 1;
+        private const int BiomeSlotCount = (int)BiomeId.VolcanicGeothermal + 1;
 
         /// <summary>予約済みの旧IDを含め、GroundType.LandからMagmaまでを格納できる配列スロット数です。</summary>
         private const int GroundSlotCount = (int)GroundType.Magma + 1;
@@ -438,6 +424,14 @@ namespace Farmware.WorldGeneration.Editor
                 throw new ArgumentNullException(nameof(auditSettings));
             }
 
+            if (auditSettings.GeneratorVersion > 0)
+            {
+                // 旧監査は水文完成前の単一タイル生成を前提としており、C5-CではBiome=Noneしか得られません。
+                // 誤った分布を成功扱いせず、C5-Eで完成チャンクと候補診断を使う監査へ置換するまで明示停止します。
+                throw new NotSupportedException(
+                    "旧ワールド生成分布監査はC5-Cで停止しました。新18Biome監査はC5-Eで実装します。");
+            }
+
             int gridWidth = (auditSettings.SampleRadiusInSteps * 2) + 1;
             int samplesPerSeed = gridWidth * gridWidth;
             int[] biomeCounts = new int[BiomeSlotCount];
@@ -450,7 +444,6 @@ namespace Farmware.WorldGeneration.Editor
             int[] isolatedRegionCounts = new int[BiomeSlotCount];
             int totalAdjacencySamples = 0;
             int directBoundaryCount = 0;
-            int suppressedBoundaryCount = 0;
             int totalChunkBoundarySamples = 0;
             int chunkBoundaryBiomeChangeCount = 0;
             ulong signature = SignatureOffsetBasis;
@@ -495,15 +488,13 @@ namespace Farmware.WorldGeneration.Editor
                             east.Biome,
                             adjacencyCounts,
                             ref totalAdjacencySamples,
-                            ref directBoundaryCount,
-                            ref suppressedBoundaryCount);
+                            ref directBoundaryCount);
                         CountAdjacency(
                             anchor.Biome,
                             north.Biome,
                             adjacencyCounts,
                             ref totalAdjacencySamples,
-                            ref directBoundaryCount,
-                            ref suppressedBoundaryCount);
+                            ref directBoundaryCount);
 
                         // 件数が同じでも配置が変わった場合を検出できるよう、走査順の分類値を署名へ順番に混ぜます。
                         MixSignature(ref signature, (byte)anchor.Biome);
@@ -543,7 +534,6 @@ namespace Farmware.WorldGeneration.Editor
                 samplesPerSeed,
                 totalAdjacencySamples,
                 directBoundaryCount,
-                suppressedBoundaryCount,
                 totalChunkBoundarySamples,
                 chunkBoundaryBiomeChangeCount,
                 signature,
@@ -551,21 +541,19 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>
-        /// 1組の直接隣接を順不同の行列へ加算し、異種境界と強い抑制対象を同時に数えます。
+        /// 1組の直接隣接を順不同の行列へ加算し、異種Biome境界を数えます。
         /// </summary>
         /// <param name="first">代表地点側のバイオームです。</param>
         /// <param name="second">東または北へ1タイル離れた地点のバイオームです。</param>
         /// <param name="adjacencyCounts">順不同ペアの件数を蓄積する二次元配列相当です。</param>
         /// <param name="totalAdjacencySamples">調査した直接隣接ペア総数へ1を加えます。</param>
         /// <param name="directBoundaryCount">異なるバイオーム同士の境界総数へ必要なら1を加えます。</param>
-        /// <param name="suppressedBoundaryCount">強い隣接抑制対象の境界総数へ必要なら1を加えます。</param>
         private static void CountAdjacency(
             BiomeId first,
             BiomeId second,
             int[] adjacencyCounts,
             ref int totalAdjacencySamples,
-            ref int directBoundaryCount,
-            ref int suppressedBoundaryCount)
+            ref int directBoundaryCount)
         {
             int firstIndex = Math.Min((int)first, (int)second);
             int secondIndex = Math.Max((int)first, (int)second);
@@ -578,10 +566,6 @@ namespace Farmware.WorldGeneration.Editor
             }
 
             directBoundaryCount++;
-            if (DeterministicChunkGenerator.IsStronglySuppressedBiomePair(first, second))
-            {
-                suppressedBoundaryCount++;
-            }
         }
 
         /// <summary>

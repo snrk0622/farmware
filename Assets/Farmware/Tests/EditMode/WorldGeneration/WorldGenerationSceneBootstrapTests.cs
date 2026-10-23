@@ -158,8 +158,8 @@ namespace Farmware.WorldGeneration.Tests
                     chickenSettings.FindPropertyRelative("definitionGuid").stringValue,
                     Is.EqualTo("1728e39573b24efa996020e9493cc742"));
                 Assert.That(
-                    chickenSettings.FindPropertyRelative("allowedBiomes").intValue,
-                    Is.EqualTo((int)AnimalBiomeMask.Grassland));
+                    chickenSettings.FindPropertyRelative("allowedBiomeBits").intValue,
+                    Is.EqualTo((int)AnimalBiomeMask.TemperateGrassland));
                 Assert.That(
                     chickenSettings.FindPropertyRelative("allowedGrounds").intValue,
                     Is.EqualTo((int)AnimalGroundMask.Land));

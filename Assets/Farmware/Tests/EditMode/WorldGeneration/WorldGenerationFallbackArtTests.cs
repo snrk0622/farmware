@@ -1,5 +1,5 @@
-// このファイルは、Editor構築ツールが生成したバイオーム色だけの一体型土地・岩壁PNGと、廃止アセットの削除を検証します。
-// 地形分類とは分け、7種類の土地上面、断面、岩壁側面が指定寸法の一枚画像として欠けずに生成されることを保証します。
+// このファイルは、Editor構築ツールが生成した新18Biome色だけの一体型土地・岩壁PNGと、廃止アセットの削除を検証します。
+// 地形分類とは分け、18種類の土地上面、断面、岩壁側面が指定寸法の一枚画像として欠けずに生成されることを保証します。
 
 using System.IO;
 using NUnit.Framework;
@@ -21,16 +21,33 @@ namespace Farmware.WorldGeneration.Tests
         // 上面16pxと岩壁側面12pxを合わせた岩壁画像の高さです。
         private const int ExpectedRockWallHeight = 28;
 
-        // 構築ツールが生成する7種類の一体型土地PNGです。
+        // 構築ツールがBiomeId 1〜18と同じ順で生成する一体型土地PNGです。
         private static readonly string[] TerrainTextureNames =
         {
-            "Grassland.png",
-            "Forest.png",
-            "Desert.png",
-            "Rockland.png",
-            "Wetland.png",
-            "Snowfield.png",
-            "Volcanic.png"
+            "TemperateGrassland.png",
+            "TropicalSavannaWoodland.png",
+            "TemperateDeciduousForest.png",
+            "WarmTemperateEvergreenForest.png",
+            "TemperateMontaneBambooForest.png",
+            "TropicalRainforest.png",
+            "TropicalSeasonalForest.png",
+            "SubtropicalOceanicForest.png",
+            "BorealConiferForest.png",
+            "Steppe.png",
+            "DryShrublandWoodland.png",
+            "CactusDesertDryPlateau.png",
+            "HotDesert.png",
+            "FreshwaterMarshFloodplain.png",
+            "SwampForest.png",
+            "TundraPolarBarrens.png",
+            "AlpineRockland.png",
+            "VolcanicGeothermal.png"
+        };
+
+        // C5-Cで新18IDへ意味が変わるため、旧7Biomeの基準PNGとTileも暗黙流用せず削除します。
+        private static readonly string[] ObsoleteLegacyBiomeNames =
+        {
+            "Grassland", "Forest", "Desert", "Rockland", "Wetland", "Snowfield", "Volcanic"
         };
 
         // 旧仕様で独立していた断面PNGは、一体化後に残してはいけません。
@@ -65,7 +82,7 @@ namespace Farmware.WorldGeneration.Tests
             }
         }
 
-        /// <summary>7枚の土地上面に草・葉・砂紋やSoil模様がなく、各Biome色だけで塗られることを検証します。</summary>
+        /// <summary>18枚の土地上面に草・葉・砂紋やSoil模様がなく、各Biome色だけで塗られることを検証します。</summary>
         [Test]
         public void TerrainTextures_SurfaceUsesSingleBiomeColor()
         {
@@ -125,6 +142,19 @@ namespace Farmware.WorldGeneration.Tests
                 string tilePath = GetFallbackAssetPath(assetName + ".asset");
                 Assert.That(File.Exists(texturePath), Is.False, $"旧Soil派生PNGが残っています: {texturePath}");
                 Assert.That(File.Exists(tilePath), Is.False, $"旧Soil派生Tileが残っています: {tilePath}");
+            }
+        }
+
+        /// <summary>旧7Biomeの基準PNGとTileが残らず、新IDへ同名・同色で暗黙流用されないことを検証します。</summary>
+        [Test]
+        public void ObsoleteLegacyBiomeAssets_DoNotRemain()
+        {
+            foreach (string assetName in ObsoleteLegacyBiomeNames)
+            {
+                string texturePath = GetFallbackAssetPath(assetName + ".png");
+                string tilePath = GetFallbackAssetPath(assetName + ".asset");
+                Assert.That(File.Exists(texturePath), Is.False, $"旧Biome PNGが残っています: {texturePath}");
+                Assert.That(File.Exists(tilePath), Is.False, $"旧Biome Tileが残っています: {tilePath}");
             }
         }
 

@@ -155,33 +155,9 @@ namespace Farmware.WorldGeneration.Presentation
         private readonly Stack<ChunkLocalTilemapPresentation> pooledChunkLocalPresentations =
             new Stack<ChunkLocalTilemapPresentation>();
 
-        // 草原Biomeの土地へ使用するTileです。プレイヤー表示にはSoilTypeを反映せず、バイオームの識別だけに使います。
-        [Tooltip("草原バイオームの土地に表示するTileです。SoilTypeによる見た目の差は付けません。")]
-        [SerializeField] private TileBase grasslandTile;
-
-        // 森林Biomeの土地へ使用するTileです。異なる土壌でも同じ森林表示を維持します。
-        [Tooltip("森林バイオームの土地に表示するTileです。SoilTypeによる見た目の差は付けません。")]
-        [SerializeField] private TileBase forestTile;
-
-        // 砂漠Biomeの土地へ使用するTileです。異なる土壌でも同じ砂漠表示を維持します。
-        [Tooltip("砂漠バイオームの土地に表示するTileです。SoilTypeによる見た目の差は付けません。")]
-        [SerializeField] private TileBase desertTile;
-
-        // 岩地Biomeの土地へ使用するTileです。障害物の岩壁Tileとは別で、SoilTypeは表示へ反映しません。
-        [Tooltip("岩地バイオームの土地に表示するTileです。岩壁とは別で、SoilTypeによる見た目の差は付けません。")]
-        [SerializeField] private TileBase rocklandTile;
-
-        // 湿地Biomeの土地へ使用するTileです。水域セルでは専用Tileを優先し、SoilTypeは表示へ反映しません。
-        [Tooltip("湿地バイオームの土地に表示するTileです。川・池・海の水域セルでは専用Tileを優先します。")]
-        [SerializeField] private TileBase wetlandTile;
-
-        // 雪原Biomeの土地へ使用するTileです。水域セルでは専用Tileを優先し、SoilTypeは表示へ反映しません。
-        [Tooltip("雪原バイオームの土地に表示するTileです。水域セルでは専用Tileを優先します。")]
-        [SerializeField] private TileBase snowfieldTile;
-
-        // 火山Biomeの土地へ使用するTileです。マグマセルでは専用Tileを優先し、SoilTypeは表示へ反映しません。
-        [Tooltip("火山バイオームの土地に表示するTileです。マグマセルでは専用Tileを優先します。")]
-        [SerializeField] private TileBase volcanicTile;
+        // 配列の0番をBiomeId 1へ対応させ、新18Biomeのどれを描いたかを旧7種の近似へ潰さず保持します。
+        [Tooltip("BiomeId 1〜18の順に対応する土地Tileです。18要素すべてを設定し、未設定Biomeを別Biomeへフォールバックさせないでください。")]
+        [SerializeField] private TileBase[] biomeTiles = new TileBase[BiomeStableIds.Count];
 
         // GroundType.Magmaへ使用する表示専用Tileで、水域や火山地面とは別のゲームルールを視覚化します。
         [Tooltip("マグマ地形に表示するTileです。通常設備・通常ベルト・通常移動の禁止と、橋の耐熱要件はECSデータで判定します。")]
@@ -382,13 +358,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// </summary>
         /// <param name="terrainTilemap">水・マグマを除く生成地形だけを描画する専用Tilemapです。</param>
         /// <param name="generatedResourceTilemap">生成資源だけを描画する専用Tilemapです。</param>
-        /// <param name="grassland">草原バイオームの通常地面に表示するTileです。</param>
-        /// <param name="forest">森林バイオームの地面に表示するTileです。</param>
-        /// <param name="desert">砂漠バイオームの地面に表示するTileです。</param>
-        /// <param name="rockland">岩地バイオームの地面に表示するTileです。</param>
-        /// <param name="wetland">湿地バイオームの地面に表示するTileです。</param>
-        /// <param name="snowfield">雪原バイオームの地面に表示するTileです。</param>
-        /// <param name="volcanic">火山バイオームの地面に表示するTileです。</param>
+        /// <param name="biomeBaseTiles">BiomeId 1〜18の順に対応する18枚の土地Tileです。</param>
         /// <param name="magma">GroundType.Magmaの全セルに表示するTileです。</param>
         /// <param name="freshWater">淡水の川と池に表示するTileです。</param>
         /// <param name="saltWater">海水の海に表示するTileです。</param>
@@ -399,13 +369,7 @@ namespace Farmware.WorldGeneration.Presentation
         public void Configure(
             Tilemap terrainTilemap,
             Tilemap generatedResourceTilemap,
-            TileBase grassland,
-            TileBase forest,
-            TileBase desert,
-            TileBase rockland,
-            TileBase wetland,
-            TileBase snowfield,
-            TileBase volcanic,
+            TileBase[] biomeBaseTiles,
             TileBase magma,
             TileBase freshWater,
             TileBase saltWater,
@@ -416,13 +380,8 @@ namespace Farmware.WorldGeneration.Presentation
         {
             targetTilemap = terrainTilemap;
             resourceTilemap = generatedResourceTilemap;
-            grasslandTile = grassland;
-            forestTile = forest;
-            desertTile = desert;
-            rocklandTile = rockland;
-            wetlandTile = wetland;
-            snowfieldTile = snowfield;
-            volcanicTile = volcanic;
+            // 呼び出し元の配列が後から差し替えられて表示契約が変わらないよう、参照配列だけを複製します。
+            biomeTiles = biomeBaseTiles == null ? null : (TileBase[])biomeBaseTiles.Clone();
             magmaTile = magma;
             freshWaterTile = freshWater;
             saltWaterTile = saltWater;
@@ -1885,43 +1844,23 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// 論理Biomeを7枚の基準土地Tileへ変換します。
+        /// 論理Biomeを安定ID順の18枚の基準土地Tileへ変換します。
         /// </summary>
         /// <param name="biome">Simulationが決定した論理バイオームです。</param>
-        /// <returns>指定Biomeの基準Tileです。未設定値は草原へ安全にフォールバックします。</returns>
+        /// <returns>指定Biomeの基準Tileです。範囲外ID、要素不足、未設定参照ではnullを返します。</returns>
         private TileBase SelectBiomeBaseTile(BiomeId biome)
         {
-            if (biome == BiomeId.Forest)
+            int stableId = (int)biome;
+            if (stableId < BiomeStableIds.First
+                || stableId > BiomeStableIds.Last
+                || biomeTiles == null
+                || biomeTiles.Length != BiomeStableIds.Count)
             {
-                return forestTile;
+                // 旧草原Tileへ黙って読み替えると欠落した新Biomeを発見できないため、描画なしを明示します。
+                return null;
             }
 
-            if (biome == BiomeId.Desert)
-            {
-                return desertTile;
-            }
-
-            if (biome == BiomeId.Rockland)
-            {
-                return rocklandTile;
-            }
-
-            if (biome == BiomeId.Wetland)
-            {
-                return wetlandTile;
-            }
-
-            if (biome == BiomeId.Snowfield)
-            {
-                return snowfieldTile;
-            }
-
-            if (biome == BiomeId.Volcanic)
-            {
-                return volcanicTile;
-            }
-
-            return grasslandTile;
+            return biomeTiles[stableId - BiomeStableIds.First];
         }
 
         /// <summary>現在のBufferと準備済み外周の4方向を調べ、資源を残す露出面と内部を区別します。</summary>

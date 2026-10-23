@@ -1,5 +1,5 @@
 // このファイルは、TERRAIN-01C5-B1〜B3の通常候補評価、安定順位、特殊優先、最終Biome選択を検証します。
-// ECS生成と旧7Biomeはまだ切り替えず、新18Biome分類器の純粋計算だけをSceneなしのEditModeテストで固定します。
+// ECS生成と同じ新18Biome分類器の純粋計算をSceneなしのEditModeテストで固定します。
 
 using NUnit.Framework;
 

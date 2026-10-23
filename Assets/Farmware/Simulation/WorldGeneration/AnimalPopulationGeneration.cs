@@ -938,18 +938,32 @@ namespace Farmware.WorldGeneration.Animals
             regionState.NextSpawnSequence++;
         }
 
-        /// <summary>BiomeIdを動物定義の同名bitへ明示的に変換します。</summary>
+        /// <summary>
+        /// 18種のBiomeIdを動物定義の独立bitへ明示的に変換します。
+        /// ID値のshiftに依存させないことで、予約値や将来の列挙値追加が既存動物の出現先を変えないようにします。
+        /// </summary>
         private static AnimalBiomeMask ToAnimalBiomeMask(BiomeId biome)
         {
             switch (biome)
             {
-                case BiomeId.Grassland: return AnimalBiomeMask.Grassland;
-                case BiomeId.Forest: return AnimalBiomeMask.Forest;
-                case BiomeId.Desert: return AnimalBiomeMask.Desert;
-                case BiomeId.Rockland: return AnimalBiomeMask.Rockland;
-                case BiomeId.Wetland: return AnimalBiomeMask.Wetland;
-                case BiomeId.Snowfield: return AnimalBiomeMask.Snowfield;
-                case BiomeId.Volcanic: return AnimalBiomeMask.Volcanic;
+                case BiomeId.TemperateGrassland: return AnimalBiomeMask.TemperateGrassland;
+                case BiomeId.TropicalSavannaWoodland: return AnimalBiomeMask.TropicalSavannaWoodland;
+                case BiomeId.TemperateDeciduousForest: return AnimalBiomeMask.TemperateDeciduousForest;
+                case BiomeId.WarmTemperateEvergreenForest: return AnimalBiomeMask.WarmTemperateEvergreenForest;
+                case BiomeId.TemperateMontaneBambooForest: return AnimalBiomeMask.TemperateMontaneBambooForest;
+                case BiomeId.TropicalRainforest: return AnimalBiomeMask.TropicalRainforest;
+                case BiomeId.TropicalSeasonalForest: return AnimalBiomeMask.TropicalSeasonalForest;
+                case BiomeId.SubtropicalOceanicForest: return AnimalBiomeMask.SubtropicalOceanicForest;
+                case BiomeId.BorealConiferForest: return AnimalBiomeMask.BorealConiferForest;
+                case BiomeId.Steppe: return AnimalBiomeMask.Steppe;
+                case BiomeId.DryShrublandWoodland: return AnimalBiomeMask.DryShrublandWoodland;
+                case BiomeId.CactusDesertDryPlateau: return AnimalBiomeMask.CactusDesertDryPlateau;
+                case BiomeId.HotDesert: return AnimalBiomeMask.HotDesert;
+                case BiomeId.FreshwaterMarshFloodplain: return AnimalBiomeMask.FreshwaterMarshFloodplain;
+                case BiomeId.SwampForest: return AnimalBiomeMask.SwampForest;
+                case BiomeId.TundraPolarBarrens: return AnimalBiomeMask.TundraPolarBarrens;
+                case BiomeId.AlpineRockland: return AnimalBiomeMask.AlpineRockland;
+                case BiomeId.VolcanicGeothermal: return AnimalBiomeMask.VolcanicGeothermal;
                 default: return AnimalBiomeMask.None;
             }
         }

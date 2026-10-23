@@ -32,7 +32,7 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="terrainSeedTexts">1件以上のワールドSeed文字列です。</param>
         /// <param name="populationSeeds">地形Seedと同数の、0ではない個体群Seedです。</param>
         /// <param name="regionRadius">0以上の地域半径です。</param>
-        /// <param name="generatorVersion">1以上の地形生成器版です。</param>
+        /// <param name="generatorVersion">C5-Cの現在GeneratorVersionです。旧版は監査でも混在させません。</param>
         public AnimalPopulationDistributionAuditSettings(
             string[] terrainSeedTexts,
             ulong[] populationSeeds,
@@ -54,9 +54,11 @@ namespace Farmware.WorldGeneration.Editor
                 throw new ArgumentOutOfRangeException(nameof(regionRadius), "地域半径は0以上である必要があります。");
             }
 
-            if (generatorVersion <= 0)
+            if (generatorVersion != WorldGenerationSettings.CurrentGeneratorVersion)
             {
-                throw new ArgumentOutOfRangeException(nameof(generatorVersion), "GeneratorVersionは1以上である必要があります。");
+                throw new ArgumentOutOfRangeException(
+                    nameof(generatorVersion),
+                    $"動物分布監査は現在GeneratorVersion {WorldGenerationSettings.CurrentGeneratorVersion} だけを受理します。");
             }
 
             string[] ownedTerrainSeeds = (string[])terrainSeedTexts.Clone();
@@ -98,7 +100,7 @@ namespace Farmware.WorldGeneration.Editor
                     0x5D02F1AC947EB638UL
                 },
                 4,
-                1);
+                WorldGenerationSettings.CurrentGeneratorVersion);
         }
     }
 
@@ -275,16 +277,28 @@ namespace Farmware.WorldGeneration.Editor
             int minimumTileX = regionX * WorldGridConstants.LogicalChunkSize;
             int minimumTileY = regionY * WorldGridConstants.LogicalChunkSize;
             ResourceGenerationSettings resourceSettings = ResourceGenerationSettings.CreateDefault();
+            BiomeClassificationSettings biomeSettings = BiomeDefinitionCatalog.CreateDefault();
+            if (!HydrologyDiagnosticChunk.TryGenerate(
+                    terrainSettings,
+                    biomeSettings,
+                    new ChunkCoordinate(WorldLayer.Surface, regionX, regionY),
+                    out HydrologyDiagnosticChunk generatedTerrainChunk,
+                    out HydrologyDiagnosticGenerationStage generationStage))
+            {
+                // 基礎生成のBiome=Noneを動物適性へ渡すと全候補が消えるため、部分結果へ退行せず監査を失敗させます。
+                throw new InvalidOperationException(
+                    $"動物分布監査のC5-C完成地形を生成できません。region=({regionX},{regionY}), stage={generationStage}");
+            }
+
+            // 1地域は1論理チャンクと同寸法です。監査終了時に4つのPersistent配列を必ず破棄します。
+            using HydrologyDiagnosticChunk terrainChunk = generatedTerrainChunk;
             int eligibleTerrainTileCount = 0;
             for (int localY = 0; localY < WorldGridConstants.LogicalChunkSize; localY++)
             {
                 for (int localX = 0; localX < WorldGridConstants.LogicalChunkSize; localX++)
                 {
                     int tileIndex = (localY * WorldGridConstants.LogicalChunkSize) + localX;
-                    GeneratedTile tile = DeterministicChunkGenerator.GenerateTile(
-                        terrainSettings,
-                        minimumTileX + localX,
-                        minimumTileY + localY);
+                    GeneratedTile tile = terrainChunk.TerrainTiles[tileIndex];
                     if (AnimalPopulationGenerator.IsTileEligible(tile, species))
                     {
                         eligibleTerrainTileCount++;
@@ -404,7 +418,7 @@ namespace Farmware.WorldGeneration.Editor
             return new AnimalSpeciesDefinitionBlob
             {
                 SpeciesRuntimeId = new DefinitionRuntimeId(1),
-                AllowedBiomes = AnimalBiomeMask.Grassland,
+                AllowedBiomes = AnimalBiomeMask.TemperateGrassland,
                 AllowedGrounds = AnimalGroundMask.Land,
                 MinimumHerdSize = 3,
                 MaximumHerdSize = 6,

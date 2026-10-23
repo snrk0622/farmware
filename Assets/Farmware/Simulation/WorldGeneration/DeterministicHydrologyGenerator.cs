@@ -1259,11 +1259,13 @@ namespace Farmware.WorldGeneration
         /// 指定チャンクの地下水反映済み64水文セル、4096固定表流水、4096自然水文タイルを地形ハッシュへ追加します。
         /// </summary>
         /// <param name="settings">固定ワールド生成設定です。</param>
+        /// <param name="biomeSettings">C5の新18Biome Definitionです。</param>
         /// <param name="chunkCoordinate">Surface上の論理チャンク座標です。</param>
-        /// <param name="currentHash">地形タイルまでを反映した現在の64bitハッシュです。</param>
+        /// <param name="currentHash">呼び出し元が用意した64bitハッシュ初期値です。</param>
         /// <returns>全固定水文結果、または明示的な生成失敗印を追加した64bitハッシュです。</returns>
         public static ulong AppendChunkHash(
             in WorldGenerationSettings settings,
+            in BiomeClassificationSettings biomeSettings,
             ChunkCoordinate chunkCoordinate,
             ulong currentHash)
         {
@@ -1512,6 +1514,33 @@ namespace Farmware.WorldGeneration
             {
                 // C4-D2の周辺淡水源再構築または湿原連結判定失敗を、通常の低冠水チャンクと区別します。
                 return WorldSeedUtility.Mix64(currentHash ^ 0xC4D0FA11ED000001UL);
+            }
+
+            // C4の湖・泉・自然冠水が完成してから全4096タイルを新18Biomeへ分類し、公開時と同じ最終地形を混合します。
+            for (int localY = 0; localY < WorldGridConstants.LogicalChunkSize; localY++)
+            {
+                for (int localX = 0; localX < WorldGridConstants.LogicalChunkSize; localX++)
+                {
+                    int tileIndex = WorldGrid.ToTileIndex(localX, localY);
+                    int worldTileX = WorldGrid.ToWorldTileX(chunkCoordinate.X, localX);
+                    int worldTileY = WorldGrid.ToWorldTileY(chunkCoordinate.Y, localY);
+                    if (!DeterministicBiomeChunkFinalizer.TryFinalizeTile(
+                            settings,
+                            biomeSettings,
+                            worldTileX,
+                            worldTileY,
+                            terrainTiles[tileIndex],
+                            hydrologyTiles[tileIndex],
+                            surfaceWater[tileIndex],
+                            out GeneratedTile finalizedTile))
+                    {
+                        return WorldSeedUtility.Mix64(currentHash ^ 0xC5C0FA11ED000001UL);
+                    }
+
+                    // using変数のNativeArrayはreadonly扱いになるため、既存の値コピー用ヘルパー経由で書き戻します。
+                    SetTerrainTile(terrainTiles, tileIndex, finalizedTile);
+                    currentHash = DeterministicChunkGenerator.HashTile(currentHash, finalizedTile);
+                }
             }
 
             // 湖水収支・泉JobがLake・Stream接続まで確定し、自然冠水も成功した後の64セルを固定順で混合します。

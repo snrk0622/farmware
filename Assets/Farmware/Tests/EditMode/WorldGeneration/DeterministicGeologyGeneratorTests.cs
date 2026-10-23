@@ -394,21 +394,22 @@ namespace Farmware.WorldGeneration.Tests
 
             secondSettings.Geology = modifiedGeology;
             ChunkCoordinate coordinate = new ChunkCoordinate(-2, 3);
-            ulong firstHash = DeterministicChunkGenerator.ComputeChunkHash(firstSettings, coordinate);
-            ulong secondHash = DeterministicChunkGenerator.ComputeChunkHash(secondSettings, coordinate);
+            BiomeClassificationSettings biomeSettings = BiomeDefinitionCatalog.CreateDefault();
+            ulong firstHash = DeterministicChunkGenerator.ComputeChunkHash(firstSettings, biomeSettings, coordinate);
+            ulong secondHash = DeterministicChunkGenerator.ComputeChunkHash(secondSettings, biomeSettings, coordinate);
 
             Assert.That(DeterministicGeologyGenerator.ValidateSettings(modifiedGeology), Is.True);
             Assert.That(secondHash, Is.Not.EqualTo(firstHash));
         }
 
-        /// <summary>テスト名から安定Seedを作り、製品既定値と同じGeneratorVersion 1の設定を返します。</summary>
+        /// <summary>テスト名から安定Seedを作り、製品既定値と同じ現在GeneratorVersionの設定を返します。</summary>
         /// <param name="seedText">テストケース同士の乱数列を分離する固定文字列です。</param>
         /// <returns>地質を含む製品既定のワールド生成設定です。</returns>
         private static WorldGenerationSettings CreateSettings(string seedText)
         {
             return WorldGenerationSettings.CreateDefault(
                 WorldSeedUtility.FromString(seedText),
-                1);
+                WorldGenerationSettings.CurrentGeneratorVersion);
         }
 
         /// <summary>指定した安定IDのDefinitionを取得し、確定表の全列と一致することを検証します。</summary>

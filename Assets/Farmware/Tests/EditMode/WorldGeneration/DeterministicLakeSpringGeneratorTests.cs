@@ -296,7 +296,7 @@ namespace Farmware.WorldGeneration.Tests
         {
             WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
                 WorldSeedUtility.FromString("lake-spring-halo-river-width"),
-                1);
+                WorldGenerationSettings.CurrentGeneratorVersion);
             NativeArray<SurfaceWaterPathSearchNode> pathWorkspace =
                 new NativeArray<SurfaceWaterPathSearchNode>(
                     DeterministicSurfaceWaterPathGenerator.MaximumSearchNodeCount,
@@ -494,7 +494,7 @@ namespace Farmware.WorldGeneration.Tests
         {
             WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
                 WorldSeedUtility.FromString("lake-spring-below-sea"),
-                1);
+                WorldGenerationSettings.CurrentGeneratorVersion);
             using NativeArray<SurfaceWaterPathTile> pathTiles = new NativeArray<SurfaceWaterPathTile>(
                 1,
                 Allocator.Temp,
@@ -719,7 +719,7 @@ namespace Farmware.WorldGeneration.Tests
         {
             WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
                 WorldSeedUtility.FromString("lake-spring-prepared-integration"),
-                1);
+                WorldGenerationSettings.CurrentGeneratorVersion);
             NativeArray<GeneratedHydrologyCell> hydrologyCells = new NativeArray<GeneratedHydrologyCell>(
                 DeterministicHydrologyGenerator.CellsPerChunk,
                 Allocator.Temp,
@@ -978,10 +978,12 @@ namespace Farmware.WorldGeneration.Tests
         {
             WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
                 WorldSeedUtility.FromString("lake-spring-performance"),
-                1);
+                WorldGenerationSettings.CurrentGeneratorVersion);
+            BiomeClassificationSettings biomeSettings = BiomeDefinitionCatalog.CreateDefault();
             ChunkCoordinate warmupCoordinate = new ChunkCoordinate(WorldLayer.Surface, 8, 8);
             ulong warmup = DeterministicHydrologyGenerator.AppendChunkHash(
                 settings,
+                biomeSettings,
                 warmupCoordinate,
                 0xC4C0000000000001UL);
             Assert.That(warmup, Is.Not.Zero);
@@ -995,6 +997,7 @@ namespace Farmware.WorldGeneration.Tests
                 int chunkY = (chunkIndex / 4) - 2;
                 aggregate = DeterministicHydrologyGenerator.AppendChunkHash(
                     settings,
+                    biomeSettings,
                     new ChunkCoordinate(WorldLayer.Surface, chunkX, chunkY),
                     aggregate);
             }

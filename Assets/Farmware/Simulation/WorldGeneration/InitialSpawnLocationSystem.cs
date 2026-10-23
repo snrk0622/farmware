@@ -1,54 +1,49 @@
-// このファイルは、通常生成された地形と資源から新規ワールドの初期スポーン地点を一度だけ探索してECSへ記録します。
-// 重い広域探索はBurst Jobへ渡し、完了後のSingleton作成だけをメインスレッドで行うことでUnity Editorの応答停止を避けます。
+// このファイルは、C5-Cで完成したECSチャンクから新規ワールドの初期スポーン候補を段階的に探します。
+// 分類前の単一タイルを別経路で再生成せず、ChunkGenerationSystemが公開した18Biome・水文・資源を正として読み取ります。
 
-using Unity.Burst;
+using Farmware.Simulation;
 using Unity.Collections;
 using Unity.Entities;
-using Unity.Jobs;
 using UnityEngine;
-using Farmware.Simulation;
 
 namespace Farmware.WorldGeneration
 {
     /// <summary>
-    /// JobからSystemへ、初期スポーン候補を発見できたかと建設可能矩形を返す一時データです。
-    /// セーブ対象ではなく、探索完了時にInitialSpawnLocationへ変換した後で破棄します。
-    /// </summary>
-    internal struct InitialSpawnSearchResult
-    {
-        /// <summary>探索範囲内に条件を満たす候補が見つかった場合は1、見つからなかった場合は0です。</summary>
-        public byte Found;
-
-        /// <summary>Foundが1の場合に、通常地形と必須資源の条件を満たした建設可能矩形です。</summary>
-        public EquipmentBuildableRegion Region;
-    }
-
-    /// <summary>
-    /// ワールド設定の準備後に、木・石・水が近い12×8建設可能領域を非同期で探します。
-    /// 探索結果をInitialSpawnSearchStatusへ記録し、成功時はInitialSpawnLocation Singletonも1つだけ作成します。
-    /// FarmwareInitializationSystemGroupへ所属し、通常のSimulation更新が始まる前に初期状態を確定します。
+    /// 原点チャンクから有限のリングを順に要求し、初期スポーン許可Biomeにある乾いた通行可能セルを一度だけ記録します。
+    /// FarmwareInitializationSystemGroupで要求を作り、FarmwareSimulationSystemGroupのChunkGenerationSystemが完成させた後に結果を読みます。
     /// </summary>
     [UpdateInGroup(typeof(FarmwareInitializationSystemGroup))]
     public partial struct InitialSpawnLocationSystem : ISystem
     {
-        // 0は未開始、1はJob実行中、2は完了です。毎フレーム同じ広域探索を再実行しないために保持します。
-        private byte searchState;
+        /// <summary>
+        /// 初期実装で探索する最大チャンク半径です。0、1、2の三段階で最大5×5チャンクを調べます。
+        /// 無制限探索で開始処理を終えられなくしないため固定上限を持たせ、将来の距離調整は専用設定へ分離します。
+        /// </summary>
+        private const int MaximumSearchRadiusInChunks = 2;
 
-        // Jobの完了確認とWorld破棄時の安全な同期に使います。探索結果以外のECSデータへは依存しません。
-        private JobHandle searchHandle;
+        /// <summary>Systemが作成した初期探索用チャンクを含め、完成状態とBufferを読むQueryです。</summary>
+        private EntityQuery chunkQuery;
 
-        // Jobが書き、Systemが完了後に読む1件分の結果です。SystemがPersistent確保と破棄の責任を持ちます。
-        private NativeReference<InitialSpawnSearchResult> searchResult;
-
-        // 探索中・成功・失敗をPresentationへ伝えるSingleton Entityです。Systemが作成し、Worldが破棄まで所有します。
+        /// <summary>探索中・成功・失敗をPresentationへ伝えるSingleton Entityです。</summary>
         private Entity searchStatusEntity;
 
+        /// <summary>現在完成待ちの正方形リング半径です。単位は64×64論理チャンクです。</summary>
+        private int currentSearchRadiusInChunks;
+
+        /// <summary>0は未要求、1は現在リングの生成待ち、2は探索終了です。</summary>
+        private byte searchState;
+
         /// <summary>
-        /// System作成時に呼ばれ、待機状態Singletonを作成してから地形設定と資源設定がそろうまで探索開始を待機します。
+        /// System作成時に完成チャンクQueryと待機状態Singletonを準備し、生成に必要な全設定がそろうまで更新を待ちます。
         /// </summary>
         /// <param name="state">Systemの更新条件、依存関係、EntityManagerへアクセスする状態です。</param>
         public void OnCreate(ref SystemState state)
         {
+            chunkQuery = new EntityQueryBuilder(Allocator.Temp)
+                .WithAll<ChunkCoordinateComponent, ChunkGenerationStatus>()
+                .WithAll<GeneratedTile, GeneratedResourceTile>()
+                .Build(ref state);
+
             searchStatusEntity = state.EntityManager.CreateEntity();
             state.EntityManager.AddComponentData(
                 searchStatusEntity,
@@ -57,25 +52,22 @@ namespace Farmware.WorldGeneration
                     Phase = InitialSpawnSearchPhase.WaitingForSettings
                 });
             state.RequireForUpdate<WorldGenerationSettings>();
+            state.RequireForUpdate<BiomeClassificationSettings>();
             state.RequireForUpdate<ResourceGenerationSettings>();
+            currentSearchRadiusInChunks = 0;
             searchState = 0;
-            searchHandle = default;
-            searchResult = default;
         }
 
         /// <summary>
-        /// 初回更新で探索Jobを開始し、後続フレームで成功時の初期スポーンまたは失敗状態を記録します。
-        /// 完了前にメインスレッドで待機しないため、広い探索範囲でもGameビューとEditor操作を止めません。
+        /// 未要求なら次のリングを作り、完成待ちなら待機し、完成後は最寄りの有効セルを選びます。
+        /// 旧12×8平地・資源距離探索や分類前タイルの同期再生成は行いません。
         /// </summary>
-        /// <param name="state">Job依存関係と、結果Entityを作成するEntityManagerを保持する状態です。</param>
+        /// <param name="state">完成チャンクBufferの読取りと要求Entity作成に使うSystem状態です。</param>
         public void OnUpdate(ref SystemState state)
         {
-            // SubSceneの再読み込みなどで既存Singletonがある場合は、二重作成せずこのSystemを停止します。
+            // ロード処理などが既に確定地点を復元した場合は、再探索や二重Singleton作成を行いません。
             if (SystemAPI.TryGetSingleton<InitialSpawnLocation>(out _))
             {
-                // 探索Jobが結果を書き込んでいる途中でも、書き込み完了前のNativeReferenceを破棄しないよう同期します。
-                CompleteSearchJobIfRunning();
-                DisposeSearchResultIfCreated();
                 searchState = 2;
                 SetSearchPhase(ref state, InitialSpawnSearchPhase.Succeeded);
                 state.Enabled = false;
@@ -84,83 +76,130 @@ namespace Farmware.WorldGeneration
 
             if (searchState == 0)
             {
-                searchResult = new NativeReference<InitialSpawnSearchResult>(Allocator.Persistent);
-                FindInitialSpawnJob searchJob = new FindInitialSpawnJob
-                {
-                    GenerationSettings = SystemAPI.GetSingleton<WorldGenerationSettings>(),
-                    ResourceSettings = SystemAPI.GetSingleton<ResourceGenerationSettings>(),
-                    Result = searchResult
-                };
-
-                // 広域ノイズ生成をWorker Threadで実行し、このフレームでは結果を待たずに制御を返します。
-                searchHandle = searchJob.Schedule(state.Dependency);
-                state.Dependency = searchHandle;
+                QueueSearchRing(state.EntityManager, currentSearchRadiusInChunks);
                 searchState = 1;
                 SetSearchPhase(ref state, InitialSpawnSearchPhase.Searching);
                 return;
             }
 
-            if (searchState != 1 || !searchHandle.IsCompleted)
+            if (searchState != 1
+                || !IsSearchRingComplete(state.EntityManager, currentSearchRadiusInChunks))
             {
+                // ChunkGenerationSystemは別System Groupで非同期生成するため、未完成フレームでは待たずに制御を返します。
                 return;
             }
 
-            // IsCompleted確認後なので通常は即時終了し、結果を読む前のJob安全性だけを確定します。
-            searchHandle.Complete();
-            InitialSpawnSearchResult completedResult = searchResult.Value;
-            DisposeSearchResultIfCreated();
-            searchState = 2;
-
-            if (completedResult.Found == 0)
+            BiomeClassificationSettings biomeSettings =
+                SystemAPI.GetSingleton<BiomeClassificationSettings>();
+            if (TryFindNearestCandidate(
+                    state.EntityManager,
+                    biomeSettings,
+                    currentSearchRadiusInChunks,
+                    out int tileX,
+                    out int tileY))
             {
-                SetSearchPhase(ref state, InitialSpawnSearchPhase.Failed);
-                Debug.LogError(
-                    "初期スポーン地点を探索範囲内で発見できませんでした。カメラはScene保存位置に留まり、その位置からチャンク読み込みを開始します。");
+                Entity locationEntity = state.EntityManager.CreateEntity();
+                state.EntityManager.AddComponentData(
+                    locationEntity,
+                    InitialSpawnLocation.FromTile(tileX, tileY));
+                searchState = 2;
+                SetSearchPhase(ref state, InitialSpawnSearchPhase.Succeeded);
                 state.Enabled = false;
                 return;
             }
 
-            Entity locationEntity = state.EntityManager.CreateEntity();
-            state.EntityManager.AddComponentData(
-                locationEntity,
-                InitialSpawnLocation.FromRegion(completedResult.Region));
-            SetSearchPhase(ref state, InitialSpawnSearchPhase.Succeeded);
+            if (currentSearchRadiusInChunks < MaximumSearchRadiusInChunks)
+            {
+                // 近いリングで候補がなかった場合だけ次の8、16チャンクへ広げ、遠方を先に選ばない決定論を維持します。
+                currentSearchRadiusInChunks++;
+                QueueSearchRing(state.EntityManager, currentSearchRadiusInChunks);
+                return;
+            }
+
+            searchState = 2;
+            SetSearchPhase(ref state, InitialSpawnSearchPhase.Failed);
+            Debug.LogError(
+                "初期スポーン地点を5×5チャンク内で発見できませんでした。分類前地形へ戻さず、探索失敗として記録します。");
             state.Enabled = false;
         }
 
         /// <summary>
-        /// World破棄時に呼ばれ、探索中ならJobを完了させてPersistentな結果領域を必ず解放します。
+        /// 指定半径の外周チャンクだけを座標順に要求します。内側リングは前段階で既に要求済みです。
         /// </summary>
-        /// <param name="state">破棄されるSystem状態です。Entityの追加は行いません。</param>
-        public void OnDestroy(ref SystemState state)
+        /// <param name="manager">要求Entityと空Bufferを作成する同じECS WorldのManagerです。</param>
+        /// <param name="radiusInChunks">0〜2の現在探索リング半径です。</param>
+        private void QueueSearchRing(EntityManager manager, int radiusInChunks)
         {
-            CompleteSearchJobIfRunning();
-            DisposeSearchResultIfCreated();
-        }
-
-        /// <summary>
-        /// 探索Jobが実行中の場合だけ完了を待ち、結果領域をメインスレッドから安全に読み取り・破棄できる状態へ戻します。
-        /// 既存地点の出現またはWorld破棄で探索を途中終了するときに呼び、完了まで一時的にメインスレッドを待機させます。
-        /// </summary>
-        private void CompleteSearchJobIfRunning()
-        {
-            if (searchState == 1)
+            for (int chunkY = -radiusInChunks; chunkY <= radiusInChunks; chunkY++)
             {
-                searchHandle.Complete();
+                for (int chunkX = -radiusInChunks; chunkX <= radiusInChunks; chunkX++)
+                {
+                    if (MaximumAbsolute(chunkX, chunkY) != radiusInChunks
+                        || TryFindChunkEntity(manager, chunkX, chunkY, out _))
+                    {
+                        continue;
+                    }
+
+                    Entity entity = manager.CreateEntity();
+                    manager.AddComponentData(
+                        entity,
+                        new ChunkCoordinateComponent
+                        {
+                            Layer = WorldLayer.Surface,
+                            X = chunkX,
+                            Y = chunkY
+                        });
+                    manager.AddComponentData(
+                        entity,
+                        new ChunkGenerationStatus
+                        {
+                            Phase = ChunkGenerationPhase.Queued,
+                            GeneratedWithVersion = 0
+                        });
+                    manager.AddComponent<ChunkGenerationRequest>(entity);
+                    manager.AddBuffer<GeneratedTile>(entity);
+                    manager.AddBuffer<GeneratedResourceTile>(entity);
+                    manager.AddBuffer<GeneratedHydrologyCell>(entity);
+                    manager.AddBuffer<GeneratedSurfaceWaterTile>(entity);
+                    manager.AddBuffer<GeneratedHydrologyTile>(entity);
+                }
             }
         }
 
         /// <summary>
-        /// NativeReferenceが確保済みの場合だけ破棄し、二重Disposeを防ぎます。
+        /// 現在リングの全チャンクが成功または失敗の終端状態へ到達したか確認します。
         /// </summary>
-        private void DisposeSearchResultIfCreated()
+        /// <param name="manager">チャンク座標と生成状態を読むManagerです。</param>
+        /// <param name="radiusInChunks">完成を待つリング半径です。</param>
+        /// <returns>外周すべてが生成中ではなくなった場合はtrueです。</returns>
+        private bool IsSearchRingComplete(EntityManager manager, int radiusInChunks)
         {
-            if (searchResult.IsCreated)
+            for (int chunkY = -radiusInChunks; chunkY <= radiusInChunks; chunkY++)
             {
-                searchResult.Dispose();
+                for (int chunkX = -radiusInChunks; chunkX <= radiusInChunks; chunkX++)
+                {
+                    if (MaximumAbsolute(chunkX, chunkY) != radiusInChunks)
+                    {
+                        continue;
+                    }
+
+                    if (!TryFindChunkEntity(manager, chunkX, chunkY, out Entity entity))
+                    {
+                        return false;
+                    }
+
+                    ChunkGenerationPhase phase =
+                        manager.GetComponentData<ChunkGenerationStatus>(entity).Phase;
+                    if (phase == ChunkGenerationPhase.Queued
+                        || phase == ChunkGenerationPhase.GeneratingData
+                        || phase == ChunkGenerationPhase.Unrequested)
+                    {
+                        return false;
+                    }
+                }
             }
 
-            searchResult = default;
+            return true;
         }
 
         /// <summary>
@@ -176,43 +215,172 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>
-        /// 通常生成器だけを使って初期建設領域と周辺必須資源を探索するBurst Jobです。
-        /// EntityやTilemapへ触れないため、メインスレッド外でも生成結果を変えずに実行できます。
+        /// 現在までに完成した正方形範囲を走査し、原点タイルへ最も近い許可セルを選びます。
         /// </summary>
-        [BurstCompile]
-        private struct FindInitialSpawnJob : IJob
+        /// <param name="manager">完成地形・資源Bufferを読むManagerです。</param>
+        /// <param name="biomeSettings">初期スポーン許可フラグを持つ新18Biome Definitionです。</param>
+        /// <param name="radiusInChunks">走査済み範囲のチャンク半径です。</param>
+        /// <param name="tileX">成功時に選んだ水平ワールドタイル座標です。</param>
+        /// <param name="tileY">成功時に選んだ垂直ワールドタイル座標です。</param>
+        /// <returns>乾いた通行可能・資源非占有・許可Biomeのセルが存在する場合はtrueです。</returns>
+        private bool TryFindNearestCandidate(
+            EntityManager manager,
+            in BiomeClassificationSettings biomeSettings,
+            int radiusInChunks,
+            out int tileX,
+            out int tileY)
         {
-            /// <summary>地形を座標から再生成するため、Singletonからコピーした読み取り専用設定です。</summary>
-            public WorldGenerationSettings GenerationSettings;
+            bool found = false;
+            long bestSquaredDistance = long.MaxValue;
+            tileX = 0;
+            tileY = 0;
 
-            /// <summary>木・石の通常配置を候補条件へ含めるため、Singletonからコピーした読み取り専用設定です。</summary>
-            public ResourceGenerationSettings ResourceSettings;
-
-            /// <summary>探索終了時に1回だけ書き込む結果です。所有と破棄は外側のSystemが担当します。</summary>
-            public NativeReference<InitialSpawnSearchResult> Result;
-
-            /// <summary>
-            /// Worker Threadで呼ばれ、原点に近く木・石・水がそろう通常生成領域を探索します。
-            /// </summary>
-            public void Execute()
+            for (int chunkY = -radiusInChunks; chunkY <= radiusInChunks; chunkY++)
             {
-                EquipmentBuildableRegionSearchSettings searchSettings =
-                    EquipmentBuildableRegionSearchSettings.CreateInitialLocationDefault();
-                EquipmentBuildableRegionResourceRequirements resourceRequirements =
-                    EquipmentBuildableRegionResourceRequirements.CreateDefault();
-                bool found = EquipmentBuildableRegionLocator.TryFindNearestWithResources(
-                    GenerationSettings,
-                    ResourceSettings,
-                    searchSettings,
-                    resourceRequirements,
-                    out EquipmentBuildableRegion region);
-
-                Result.Value = new InitialSpawnSearchResult
+                for (int chunkX = -radiusInChunks; chunkX <= radiusInChunks; chunkX++)
                 {
-                    Found = found ? (byte)1 : (byte)0,
-                    Region = region
-                };
+                    if (!TryFindChunkEntity(manager, chunkX, chunkY, out Entity entity))
+                    {
+                        continue;
+                    }
+
+                    ChunkGenerationStatus status =
+                        manager.GetComponentData<ChunkGenerationStatus>(entity);
+                    if (status.Phase == ChunkGenerationPhase.Failed)
+                    {
+                        continue;
+                    }
+
+                    DynamicBuffer<GeneratedTile> tiles = manager.GetBuffer<GeneratedTile>(entity);
+                    DynamicBuffer<GeneratedResourceTile> resources =
+                        manager.GetBuffer<GeneratedResourceTile>(entity);
+                    if (tiles.Length != WorldGridConstants.TilesPerChunk
+                        || resources.Length != WorldGridConstants.TilesPerChunk)
+                    {
+                        continue;
+                    }
+
+                    for (int index = 0; index < WorldGridConstants.TilesPerChunk; index++)
+                    {
+                        GeneratedTile terrain = tiles[index];
+                        if (!IsInitialSpawnCandidate(
+                                biomeSettings,
+                                terrain,
+                                resources[index]))
+                        {
+                            continue;
+                        }
+
+                        int candidateX = WorldGrid.ToWorldTileX(
+                            chunkX,
+                            index % WorldGridConstants.LogicalChunkSize);
+                        int candidateY = WorldGrid.ToWorldTileY(
+                            chunkY,
+                            index / WorldGridConstants.LogicalChunkSize);
+                        long squaredDistance = ((long)candidateX * candidateX)
+                            + ((long)candidateY * candidateY);
+                        if (!found
+                            || squaredDistance < bestSquaredDistance
+                            || (squaredDistance == bestSquaredDistance
+                                && IsCoordinateBefore(candidateX, candidateY, tileX, tileY)))
+                        {
+                            found = true;
+                            bestSquaredDistance = squaredDistance;
+                            tileX = candidateX;
+                            tileY = candidateY;
+                        }
+                    }
+                }
             }
+
+            return found;
+        }
+
+        /// <summary>
+        /// 1セルが現行仕様の初期スポーン候補かを、完成済み地形・資源とBiome Definitionだけから判定します。
+        /// </summary>
+        /// <param name="biomeSettings">安定IDに対応する許可フラグを検索する設定です。</param>
+        /// <param name="terrain">ChunkGenerationSystemがC5-Cまで完成させた地形です。</param>
+        /// <param name="resource">同じ座標の暫定自然資源です。</param>
+        /// <returns>乾いた陸上を歩け、資源に埋まらず、Biomeが開始を許可する場合はtrueです。</returns>
+        private static bool IsInitialSpawnCandidate(
+            in BiomeClassificationSettings biomeSettings,
+            in GeneratedTile terrain,
+            in GeneratedResourceTile resource)
+        {
+            if (terrain.Ground != GroundType.Land
+                || terrain.WaterSalinity != WaterSalinity.None
+                || terrain.MovementCost == 0
+                || resource.Type != GeneratedResourceType.None
+                || !BiomeDefinitionCatalog.TryGetDefinition(
+                    biomeSettings,
+                    (byte)terrain.Biome,
+                    out BiomeDefinition definition))
+            {
+                return false;
+            }
+
+            return (definition.Flags & BiomeDefinitionFlags.AllowsInitialSpawn) != 0;
+        }
+
+        /// <summary>
+        /// Query内から指定Surfaceチャンクを検索します。探索範囲は最大25件なので管理Dictionaryを常駐させません。
+        /// </summary>
+        /// <param name="manager">座標Componentを読むManagerです。</param>
+        /// <param name="chunkX">検索する水平論理チャンク座標です。</param>
+        /// <param name="chunkY">検索する垂直論理チャンク座標です。</param>
+        /// <param name="entity">成功時に一致したEntityを返します。</param>
+        /// <returns>同じSurface座標のチャンクが1件見つかった場合はtrueです。</returns>
+        private bool TryFindChunkEntity(
+            EntityManager manager,
+            int chunkX,
+            int chunkY,
+            out Entity entity)
+        {
+            using NativeArray<Entity> entities = chunkQuery.ToEntityArray(Allocator.Temp);
+            using NativeArray<ChunkCoordinateComponent> coordinates =
+                chunkQuery.ToComponentDataArray<ChunkCoordinateComponent>(Allocator.Temp);
+            for (int index = 0; index < entities.Length; index++)
+            {
+                ChunkCoordinateComponent coordinate = coordinates[index];
+                if (coordinate.Layer == WorldLayer.Surface
+                    && coordinate.X == chunkX
+                    && coordinate.Y == chunkY)
+                {
+                    entity = entities[index];
+                    return true;
+                }
+            }
+
+            entity = Entity.Null;
+            return false;
+        }
+
+        /// <summary>同じ距離の候補を垂直座標、水平座標の昇順で一意に並べます。</summary>
+        /// <param name="candidateX">比較する新候補の水平座標です。</param>
+        /// <param name="candidateY">比較する新候補の垂直座標です。</param>
+        /// <param name="currentX">現在の最良候補の水平座標です。</param>
+        /// <param name="currentY">現在の最良候補の垂直座標です。</param>
+        /// <returns>新候補を優先する場合はtrueです。</returns>
+        private static bool IsCoordinateBefore(
+            int candidateX,
+            int candidateY,
+            int currentX,
+            int currentY)
+        {
+            return candidateY < currentY
+                || (candidateY == currentY && candidateX < currentX);
+        }
+
+        /// <summary>2軸の絶対値の大きい方を返し、正方形リングの外周判定へ使います。</summary>
+        /// <param name="x">水平オフセットです。</param>
+        /// <param name="y">垂直オフセットです。</param>
+        /// <returns>符号を除いた大きい方の値です。</returns>
+        private static int MaximumAbsolute(int x, int y)
+        {
+            int absoluteX = x < 0 ? -x : x;
+            int absoluteY = y < 0 ? -y : y;
+            return absoluteX > absoluteY ? absoluteX : absoluteY;
         }
     }
 }

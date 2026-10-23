@@ -298,14 +298,14 @@ namespace Farmware.WorldGeneration.Tests
             AssertAdjustedGeologyEqual(result, default);
         }
 
-        /// <summary>テスト名から安定Seedを作り、製品既定値と同じGeneratorVersion 1の設定を返します。</summary>
+        /// <summary>テスト名から安定Seedを作り、製品既定値と同じ現在GeneratorVersionの設定を返します。</summary>
         /// <param name="seedText">テストケース同士の乱数列を分離する固定文字列です。</param>
         /// <returns>局所地質を含む製品既定のワールド生成設定です。</returns>
         private static WorldGenerationSettings CreateSettings(string seedText)
         {
             return WorldGenerationSettings.CreateDefault(
                 WorldSeedUtility.FromString(seedText),
-                1);
+                WorldGenerationSettings.CurrentGeneratorVersion);
         }
 
         /// <summary>製品コードと同じ整数ノイズへ明示した格子とSaltを渡し、期待ポテンシャルを返します。</summary>

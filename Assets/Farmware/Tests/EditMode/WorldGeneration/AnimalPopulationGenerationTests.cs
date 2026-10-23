@@ -58,7 +58,7 @@ namespace Farmware.WorldGeneration.Tests
             BlobAssetReference<DefinitionCatalogBlob> definitionCatalog = default;
             BlobAssetReference<AnimalSpeciesCatalogBlob> animalCatalog = default;
             using NativeArray<GeneratedTile> tiles = CreateUniformTiles(
-                BiomeId.Grassland,
+                BiomeId.TemperateGrassland,
                 GroundType.Land);
             using NativeArray<GeneratedResourceTile> resources =
                 new NativeArray<GeneratedResourceTile>(tiles.Length, Allocator.Temp);
@@ -361,7 +361,7 @@ namespace Farmware.WorldGeneration.Tests
             BlobAssetReference<DefinitionCatalogBlob> definitionCatalog = default;
             BlobAssetReference<AnimalSpeciesCatalogBlob> animalCatalog = default;
             using NativeArray<GeneratedTile> tiles = CreateUniformTiles(
-                BiomeId.Grassland,
+                BiomeId.TemperateGrassland,
                 GroundType.Land);
             using NativeArray<GeneratedResourceTile> resources =
                 new NativeArray<GeneratedResourceTile>(tiles.Length, Allocator.Temp);
@@ -430,17 +430,17 @@ namespace Farmware.WorldGeneration.Tests
 
             Assert.That(
                 AnimalPopulationGenerator.IsTileEligible(
-                    new GeneratedTile { Biome = BiomeId.Grassland, Ground = GroundType.Land },
+                    new GeneratedTile { Biome = BiomeId.TemperateGrassland, Ground = GroundType.Land },
                     chicken),
                 Is.True);
             Assert.That(
                 AnimalPopulationGenerator.IsTileEligible(
-                    new GeneratedTile { Biome = BiomeId.Forest, Ground = GroundType.Land },
+                    new GeneratedTile { Biome = BiomeId.TemperateDeciduousForest, Ground = GroundType.Land },
                     chicken),
                 Is.False);
             Assert.That(
                 AnimalPopulationGenerator.IsTileEligible(
-                    new GeneratedTile { Biome = BiomeId.Grassland, Ground = GroundType.Water },
+                    new GeneratedTile { Biome = BiomeId.TemperateGrassland, Ground = GroundType.Water },
                     chicken),
                 Is.False);
             Assert.That(
@@ -585,7 +585,8 @@ namespace Farmware.WorldGeneration.Tests
                 EntityManager manager = world.EntityManager;
                 PrepareWorldSingletons(world, animals);
                 Entity configuration = manager.CreateEntity();
-                manager.AddComponentData(configuration, WorldGenerationSettings.CreateDefault(123456789UL, 1));
+                manager.AddComponentData(configuration, WorldGenerationSettings.CreateDefault(123456789UL, WorldGenerationSettings.CurrentGeneratorVersion));
+                manager.AddComponentData(configuration, BiomeDefinitionCatalog.CreateDefault());
                 manager.AddComponentData(configuration, ResourceGenerationSettings.CreateDefault());
                 manager.AddComponentData(configuration, ChunkStreamingSettings.CreateDefault());
                 manager.AddComponentData(configuration, new SimulationPauseState());
@@ -650,7 +651,8 @@ namespace Farmware.WorldGeneration.Tests
             using (EntityQuery tick = manager.CreateEntityQuery(typeof(SimulationTickState)))
                 tick.SetSingleton(new SimulationTickState { CurrentTick = 0 });
             Entity configuration = manager.CreateEntity();
-            manager.AddComponentData(configuration, WorldGenerationSettings.CreateDefault(123456789UL, 1));
+            manager.AddComponentData(configuration, WorldGenerationSettings.CreateDefault(123456789UL, WorldGenerationSettings.CurrentGeneratorVersion));
+            manager.AddComponentData(configuration, BiomeDefinitionCatalog.CreateDefault());
             manager.AddComponentData(configuration, ResourceGenerationSettings.CreateDefault());
             manager.AddComponentData(configuration, ChunkStreamingSettings.CreateDefault());
             manager.AddComponentData(configuration, FixedTickConfiguration.CreateDefault());
@@ -741,7 +743,8 @@ namespace Farmware.WorldGeneration.Tests
             EntityManager manager = world.EntityManager;
             PrepareWorldSingletons(world, catalog);
             Entity configuration = manager.CreateEntity();
-            manager.AddComponentData(configuration, WorldGenerationSettings.CreateDefault(123456789UL, 1));
+            manager.AddComponentData(configuration, WorldGenerationSettings.CreateDefault(123456789UL, WorldGenerationSettings.CurrentGeneratorVersion));
+            manager.AddComponentData(configuration, BiomeDefinitionCatalog.CreateDefault());
             manager.AddComponentData(configuration, ResourceGenerationSettings.CreateDefault());
             manager.AddComponentData(configuration, ChunkStreamingSettings.CreateDefault());
             manager.AddComponentData(configuration, new SimulationPauseState { Value = isPaused ? (byte)1 : (byte)0 });
@@ -769,7 +772,8 @@ namespace Farmware.WorldGeneration.Tests
                 {
                     // 本番Tick境界と同じ投入APIを使い、待ち合わせ前の実物Job完了順だけを操作します。
                     ref ChunkGenerationSystem generator = ref world.Unmanaged.GetUnsafeSystemRef<ChunkGenerationSystem>(generation);
-                    generator.ScheduleBatch(manager, WorldGenerationSettings.CreateDefault(123456789UL, 1),
+                    generator.ScheduleBatch(manager, WorldGenerationSettings.CreateDefault(123456789UL, WorldGenerationSettings.CurrentGeneratorVersion),
+                        BiomeDefinitionCatalog.CreateDefault(),
                         ResourceGenerationSettings.CreateDefault(), 2);
                 }
                 ulong nextIdBeforePublication = GetAllocatorState(manager).NextId;
@@ -1113,7 +1117,7 @@ namespace Farmware.WorldGeneration.Tests
             return new AnimalSpeciesDefinitionBlob
             {
                 SpeciesRuntimeId = runtimeId,
-                AllowedBiomes = AnimalBiomeMask.Grassland,
+                AllowedBiomes = AnimalBiomeMask.TemperateGrassland,
                 AllowedGrounds = AnimalGroundMask.Land,
                 MinimumHerdSize = 3,
                 MaximumHerdSize = 6,
@@ -1265,7 +1269,7 @@ namespace Farmware.WorldGeneration.Tests
                 new ChunkGenerationStatus
                 {
                     Phase = ChunkGenerationPhase.ReadyToApply,
-                    GeneratedWithVersion = 1
+                    GeneratedWithVersion = WorldGenerationSettings.CurrentGeneratorVersion
                 });
             entityManager.AddBuffer<GeneratedTile>(chunkEntity);
             entityManager.AddBuffer<GeneratedResourceTile>(chunkEntity);
@@ -1282,7 +1286,7 @@ namespace Farmware.WorldGeneration.Tests
             {
                 tiles[index] = new GeneratedTile
                 {
-                    Biome = BiomeId.Grassland,
+                    Biome = BiomeId.TemperateGrassland,
                     Ground = GroundType.Land
                 };
                 resources[index] = default;
@@ -1322,7 +1326,9 @@ namespace Farmware.WorldGeneration.Tests
                     new AnimalSpeciesDefinitionBuildEntry
                     {
                         DefinitionGuid = ChickenGuid,
-                        AllowedBiomes = AnimalBiomeMask.Grassland,
+                        // 固定Tick・Job順のテストではBiome分布を対象にしないため、18種すべてを許可して必ず実個体を作ります。
+                        // 鶏の製品用TemperateGrassland制限はScene構築テストと適性判定テストで別に保証します。
+                        AllowedBiomes = AnimalBiomeMask.All,
                         AllowedGrounds = AnimalGroundMask.Land,
                         MinimumHerdSize = 3,
                         MaximumHerdSize = 6,

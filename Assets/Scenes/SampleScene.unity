@@ -1509,13 +1509,25 @@ MonoBehaviour:
   cameraPanController: {fileID: 519420035}
   useChunkLocalTilemaps: 1
   maximumPooledChunkPresentations: 8
-  grasslandTile: {fileID: 11400000, guid: 8742ae7a60f7f434f894678fe1add07b, type: 2}
-  forestTile: {fileID: 11400000, guid: 7ee287944b9ff4c5087fa64923bb4251, type: 2}
-  desertTile: {fileID: 11400000, guid: b642a3ae94175467a93817fae33bf345, type: 2}
-  rocklandTile: {fileID: 11400000, guid: eba7c174fb8d945d48649edc499e98d0, type: 2}
-  wetlandTile: {fileID: 11400000, guid: b5726550b27e04f128ee5901a191c465, type: 2}
-  snowfieldTile: {fileID: 11400000, guid: 6b140b9d48f8a4382ae682f665d183c7, type: 2}
-  volcanicTile: {fileID: 11400000, guid: 398db16b0f8724fd19c1fd41a4bf960a, type: 2}
+  biomeTiles:
+  - {fileID: 11400000, guid: e6ce56f9d5d41470791d9d3213269646, type: 2}
+  - {fileID: 11400000, guid: c194a438082ee4b59921fcdc75b4f7c2, type: 2}
+  - {fileID: 11400000, guid: 2a1f5134346f84db3bc6867871add4dd, type: 2}
+  - {fileID: 11400000, guid: 112de089b44174ccda2084a249b08cd8, type: 2}
+  - {fileID: 11400000, guid: 6c2514abed1db4e2c8adc18678ceff03, type: 2}
+  - {fileID: 11400000, guid: 0e59fa06334954d6fa30212741f81ac6, type: 2}
+  - {fileID: 11400000, guid: 6b6fed4f78d85456f837d4c24b578d5b, type: 2}
+  - {fileID: 11400000, guid: 1de8aa51176c3427d9f2a01e005da558, type: 2}
+  - {fileID: 11400000, guid: 43403acd19280403a976b80de685a755, type: 2}
+  - {fileID: 11400000, guid: e7776a557f66e409c8e1334d6788249c, type: 2}
+  - {fileID: 11400000, guid: ea95048ee88fb4200904927a0b4d3a86, type: 2}
+  - {fileID: 11400000, guid: 277e08e4d648142ef9b43eff5e00947c, type: 2}
+  - {fileID: 11400000, guid: c1692df47c9d64525b5b52f8c73b22d4, type: 2}
+  - {fileID: 11400000, guid: fa8ea60dadde444d59d796b4b1fbacfd, type: 2}
+  - {fileID: 11400000, guid: 5f2a80b90c1dc426fa075dc2db6aeb0a, type: 2}
+  - {fileID: 11400000, guid: fb165b34e2239482087259ee502aeb0f, type: 2}
+  - {fileID: 11400000, guid: 45d52e52c3df945bf9c4536025bcb0b7, type: 2}
+  - {fileID: 11400000, guid: 568d58706b01d4b688920be8021c184c, type: 2}
   magmaTile: {fileID: 11400000, guid: 6a015ba4629a2470990ef874ec171e33, type: 2}
   freshWaterTile: {fileID: 11400000, guid: 0c8767b14ec794733bf2093f1c6b8c2f, type: 2}
   saltWaterTile: {fileID: 11400000, guid: 06507ec0f78364046ab6c0ec235d8bcf, type: 2}

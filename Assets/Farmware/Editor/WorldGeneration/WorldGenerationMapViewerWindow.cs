@@ -416,18 +416,18 @@ namespace Farmware.WorldGeneration.Editor
 
         /// <summary>
         /// 表示モードと縮尺に応じて、Map Viewerが1辺へ生成してよい最大サンプル数を返します。
-        /// 基礎水文は64、完成チャンクを使う派生水文は対象チャンク数が各軸3件以内になる動的上限を共有します。
+        /// 基礎水文は64、完成チャンクを使うTerrain・Biome・派生水文は対象チャンク数が各軸3件以内になる動的上限を共有します。
         /// </summary>
         /// <param name="viewMode">生成負荷を判定する現在の表示モードです。</param>
         /// <param name="tilesPerPixel">現在の1サンプルあたりワールドタイル数です。</param>
-        /// <returns>通常768、基礎水文64、派生水文1〜64の最大サンプル数です。状態は変更しません。</returns>
+        /// <returns>通常768、基礎水文64、完成チャンク使用モード1〜64の最大サンプル数です。状態は変更しません。</returns>
         private static int GetMaximumSampleResolution(
             WorldGenerationMapViewMode viewMode,
             int tilesPerPixel)
         {
-            if (WorldGenerationMapSampler.IsDerivedHydrologyViewMode(viewMode))
+            if (WorldGenerationMapSampler.RequiresCompletedDiagnosticChunk(viewMode))
             {
-                return WorldGenerationMapSampler.CalculateMaximumDerivedHydrologyResolution(
+                return WorldGenerationMapSampler.CalculateMaximumCompletedChunkResolution(
                     tilesPerPixel);
             }
 
@@ -978,12 +978,22 @@ namespace Farmware.WorldGeneration.Editor
                 return;
             }
 
-            // 広域画像と同じ失敗境界を使い、生成できない座標を値0の地形として誤表示しません。
-            if (!DeterministicChunkGenerator.TryGenerateTile(
+            // 完成チャンクを使った画像では、その場で基礎地形を再生成するとBiome=Noneへ戻ってしまいます。
+            // 画像作成時のC5-C確定値を優先し、環境・地質など基礎生成だけのモードでのみ純粋Generatorを呼びます。
+            bool hasTile = displayedSample.TryGetFinalizedTerrainSample(
+                worldTileX,
+                worldTileY,
+                out GeneratedTile tile);
+            if (!hasTile)
+            {
+                hasTile = DeterministicChunkGenerator.TryGenerateTile(
                     displayedSettings,
                     worldTileX,
                     worldTileY,
-                    out GeneratedTile tile))
+                    out tile);
+            }
+
+            if (!hasTile)
             {
                 hoverLabel.text =
                     $"{displayedSample.Layer} / Tile ({worldTileX}, {worldTileY}) / "
@@ -1481,13 +1491,16 @@ namespace Farmware.WorldGeneration.Editor
                 return;
             }
 
-            AddLegendRow("Grassland", "legend-grassland");
-            AddLegendRow("Forest", "legend-forest");
-            AddLegendRow("Desert", "legend-desert");
-            AddLegendRow("Rockland", "legend-rockland");
-            AddLegendRow("Wetland", "legend-wetland");
-            AddLegendRow("Snowfield", "legend-snowfield");
-            AddLegendRow("Volcanic", "legend-volcanic");
+            for (byte stableId = BiomeStableIds.First;
+                stableId <= BiomeStableIds.Last;
+                stableId++)
+            {
+                // 凡例もMap本体の色関数を通し、18種追加時にUSSの旧7色だけが残らないようにします。
+                BiomeId biome = (BiomeId)stableId;
+                AddLegendRow(
+                    biome.ToString(),
+                    WorldGenerationMapSampler.GetBiomeColor(biome));
+            }
 
             if (selectedMode == WorldGenerationMapViewMode.Terrain)
             {

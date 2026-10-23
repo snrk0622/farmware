@@ -8,34 +8,67 @@ using Unity.Entities;
 namespace Farmware.WorldGeneration
 {
     /// <summary>
-    /// 初回のランダムマップ生成で使用する7種類の陸上バイオームの安定IDです。
-    /// セーブデータへ保存する値になるため、既存値の番号は将来も変更しません。
+    /// TERRAIN-01C5以降の地上18バイオームへ割り当てる安定IDです。
+    /// 旧7種とは数値の意味に互換性がないため、C5以前の生成結果をこの列挙値へ読み替えてはいけません。
     /// </summary>
     public enum BiomeId : byte
     {
         /// <summary>未設定または生成失敗を表します。</summary>
         None = 0,
 
-        /// <summary>温暖で中程度の湿度を持つ草原です。</summary>
-        Grassland = 1,
+        /// <summary>温帯草原です。</summary>
+        TemperateGrassland = 1,
 
-        /// <summary>湿度が高く植生の多い森林です。</summary>
-        Forest = 2,
+        /// <summary>熱帯サバンナ・疎林です。</summary>
+        TropicalSavannaWoodland = 2,
 
-        /// <summary>高温かつ乾燥した砂漠です。</summary>
-        Desert = 3,
+        /// <summary>温帯落葉広葉樹林です。</summary>
+        TemperateDeciduousForest = 3,
 
-        /// <summary>中〜高標高で植生が少なく、鉱物資源に適する岩地です。</summary>
-        Rockland = 4,
+        /// <summary>暖温帯照葉樹林です。</summary>
+        WarmTemperateEvergreenForest = 4,
 
-        /// <summary>低標高かつ非常に湿潤で、池と植生が多い湿地です。</summary>
-        Wetland = 5,
+        /// <summary>温帯山地竹林です。</summary>
+        TemperateMontaneBambooForest = 5,
 
-        /// <summary>低温域に広がり、将来は凍結した水域表現を重ねられる雪原です。</summary>
-        Snowfield = 6,
+        /// <summary>熱帯雨林です。</summary>
+        TropicalRainforest = 6,
 
-        /// <summary>高温・高標高・高Weirdnessが重なる希少な火山地帯です。</summary>
-        Volcanic = 7
+        /// <summary>熱帯季節林・モンスーン林です。</summary>
+        TropicalSeasonalForest = 7,
+
+        /// <summary>亜熱帯海洋性林です。</summary>
+        SubtropicalOceanicForest = 8,
+
+        /// <summary>亜寒帯針葉樹林・タイガです。</summary>
+        BorealConiferForest = 9,
+
+        /// <summary>ステップです。</summary>
+        Steppe = 10,
+
+        /// <summary>乾燥低木地・疎林です。</summary>
+        DryShrublandWoodland = 11,
+
+        /// <summary>サボテン砂漠・乾燥高原です。</summary>
+        CactusDesertDryPlateau = 12,
+
+        /// <summary>高温砂漠です。</summary>
+        HotDesert = 13,
+
+        /// <summary>淡水湿原・氾濫原です。</summary>
+        FreshwaterMarshFloodplain = 14,
+
+        /// <summary>湿地林・沼沢林です。</summary>
+        SwampForest = 15,
+
+        /// <summary>ツンドラ・極地荒原です。</summary>
+        TundraPolarBarrens = 16,
+
+        /// <summary>高山岩地です。</summary>
+        AlpineRockland = 17,
+
+        /// <summary>火山・地熱地帯です。</summary>
+        VolcanicGeothermal = 18
     }
 
     /// <summary>
@@ -264,6 +297,9 @@ namespace Farmware.WorldGeneration
         /// </summary>
         public const ushort MinimumSupportedSeaLevelThreshold = 20000;
 
+        /// <summary>C5の新18Biome形式として受理する最小かつ現在の生成器バージョンです。</summary>
+        public const int CurrentGeneratorVersion = 2;
+
         /// <summary>既定の海面を表す0〜65535の固定小数点閾値です。Authoringと分布監査が同じ値を共有します。</summary>
         public const ushort DefaultSeaLevelThreshold = MinimumSupportedSeaLevelThreshold;
 
@@ -290,9 +326,6 @@ namespace Farmware.WorldGeneration
 
         /// <summary>湿度の最も低周波な格子サイズです。単位はタイルです。</summary>
         public int MoistureCellSizeInTiles;
-
-        /// <summary>火山などの特殊地域候補を決めるWeirdnessの最も低周波な格子サイズです。単位はタイルです。</summary>
-        public int WeirdnessCellSizeInTiles;
 
         /// <summary>気候ノイズのサンプリング座標を曲げる低周波格子サイズです。単位はタイルです。</summary>
         public int BiomeWarpCellSizeInTiles;
@@ -339,56 +372,11 @@ namespace Farmware.WorldGeneration
         /// </summary>
         public NaturalFloodingGenerationSettings NaturalFlooding;
 
-        /// <summary>7バイオームの適性が閾値付近で滑らかに入れ替わる帯のおおよその幅です。単位はタイルです。</summary>
-        public int BiomeClassificationTransitionWidthInTiles;
-
-        /// <summary>バイオーム境界で隣接地面を混ぜる帯のおおよその幅です。単位はタイルです。</summary>
-        public int BiomeTransitionWidthInTiles;
-
         /// <summary>
         /// これ未満の標高を海水域にする固定小数点閾値です。
         /// 地上18Biomeの固定標高範囲と両立する20,000以上、保存済み低地上限以下を設定検証で要求します。
         /// </summary>
         public ushort SeaLevelThreshold;
-
-        /// <summary>川の大きな蛇行を決めるノイズ格子サイズです。単位はタイルです。</summary>
-        public int RiverCellSizeInTiles;
-
-        /// <summary>池のまとまりを決めるノイズ格子サイズです。単位はタイルです。</summary>
-        public int PondCellSizeInTiles;
-
-        /// <summary>川と池の輪郭へ重ねるノイズ解像度の数です。</summary>
-        public int FreshWaterOctaveCount;
-
-        /// <summary>川の中心値32768から許容する差です。大きいほど川幅と本数が増えます。</summary>
-        public ushort RiverCenterLineHalfWidth;
-
-        /// <summary>池を生成する0〜65535のノイズ下限です。大きいほど池が減ります。</summary>
-        public ushort PondThreshold;
-
-        /// <summary>森林に近い湿潤度で池の下限を最大いくつ下げるかを表す0〜65535の補正量です。</summary>
-        public ushort WetClimatePondThresholdReduction;
-
-        /// <summary>低地かつ高湿度の湿地条件で、森林分に追加して池の下限を最大いくつ下げるかを表します。</summary>
-        public ushort WetlandPondThresholdReduction;
-
-        /// <summary>高温かつ乾燥した砂漠条件で、池の下限を最大いくつ上げるかを表します。</summary>
-        public ushort DesertPondThresholdIncrease;
-
-        /// <summary>高地の岩地条件で、池の下限を最大いくつ上げるかを表します。</summary>
-        public ushort HighlandPondThresholdIncrease;
-
-        /// <summary>高温・高地・高Weirdnessの火山条件で、池の下限を最大いくつ上げるかを表します。</summary>
-        public ushort VolcanicPondThresholdIncrease;
-
-        /// <summary>低地かつ高湿度の湿地条件で、川の中心線半幅へ最大いくつ加えるかを表します。</summary>
-        public ushort WetlandRiverHalfWidthIncrease;
-
-        /// <summary>高温・高地・高Weirdnessの火山条件で、川の中心線半幅から最大いくつ引くかを表します。</summary>
-        public ushort VolcanicRiverHalfWidthReduction;
-
-        /// <summary>川と池を生成できる0〜65535の最大標高です。山頂まで淡水が伸びることを防ぎます。</summary>
-        public ushort FreshWaterMaximumElevation;
 
         /// <summary>火山バイオームの広いマグマ海を決める大域ノイズ格子サイズです。単位はタイルです。</summary>
         public int MagmaCellSizeInTiles;
@@ -405,29 +393,8 @@ namespace Farmware.WorldGeneration
         /// <summary>火山バイオームをマグマ本体へ変換する0〜65535の専用ノイズ下限です。大きいほど陸地が増えます。</summary>
         public ushort MagmaNoiseThreshold;
 
-        /// <summary>淡水を遠ざける火山影響域を生成する0〜65535の専用ノイズ下限です。マグマ本体より低く設定します。</summary>
-        public ushort MagmaInfluenceNoiseThreshold;
-
         /// <summary>火山内でマグマを追加制限する0〜65535の連続火山適性下限です。既定値0では離散火山全域を許可します。</summary>
         public ushort MagmaMinimumVolcanicInfluence;
-
-        /// <summary>火山内の淡水抑制域を追加制限する0〜65535の連続火山適性下限です。マグマ本体以下に設定します。</summary>
-        public ushort MagmaInfluenceMinimumVolcanicInfluence;
-
-        /// <summary>岩地バイオームの小さなマグマ溜まりを決めるノイズ格子サイズです。単位はタイルです。</summary>
-        public int RocklandMagmaCellSizeInTiles;
-
-        /// <summary>岩地バイオームへ稀にマグマを生成する0〜65535の専用ノイズ下限です。</summary>
-        public ushort RocklandMagmaNoiseThreshold;
-
-        /// <summary>岩地の小規模マグマ周囲で淡水を抑制する0〜65535の専用ノイズ下限です。</summary>
-        public ushort RocklandMagmaInfluenceNoiseThreshold;
-
-        /// <summary>岩地マグマを火山との移行域へ限定する0〜65535の連続火山適性下限です。</summary>
-        public ushort RocklandMagmaMinimumVolcanicInfluence;
-
-        /// <summary>岩地マグマの淡水抑制域を許可する0〜65535の連続火山適性下限です。</summary>
-        public ushort RocklandMagmaInfluenceMinimumVolcanicInfluence;
 
         /// <summary>岩壁の大きな塊を決めるノイズ格子の1辺です。単位はタイルです。</summary>
         public int RockWallMassCellSizeInTiles;
@@ -465,20 +432,14 @@ namespace Farmware.WorldGeneration
         /// <summary>これ以上を岩地・火山候補にできる高地とみなす0〜65535の標高閾値です。</summary>
         public ushort HighlandElevationThreshold;
 
-        /// <summary>これ以上を火山候補にできる異常度とみなす0〜65535のWeirdness閾値です。</summary>
-        public ushort VolcanicWeirdnessThreshold;
-
-        /// <summary>強く抑制する2バイオームの適性差がこの値以下なら緩衝バイオームへ置換します。</summary>
-        public ushort BiomeAdjacencyTransitionScoreMargin;
-
         /// <summary>
         /// Phase 1〜2の比較基準となる既定設定を作ります。
         /// 固定小数点の既定閾値はこの型へ集約し、Authoringの初期値も同じ値を0〜1へ戻して使用します。
-        /// 初期開発中は呼び出し側から1を渡し、正式なセーブ互換運用開始後だけ非互換変更に合わせて更新します。
+        /// C5より前の値は生成側の検証で拒否し、新旧Biomeの混在を防ぎます。
         /// </summary>
         /// <param name="worldSeed">文字列から変換済みのワールドシードです。</param>
         /// <param name="generatorVersion">保存対象の生成器バージョンです。</param>
-        /// <returns>7バイオームと水域・岩壁を生成できる設定です。</returns>
+        /// <returns>新18Biomeと固定水文・岩壁を生成できる設定です。</returns>
         public static WorldGenerationSettings CreateDefault(ulong worldSeed, int generatorVersion)
         {
             return new WorldGenerationSettings
@@ -488,7 +449,6 @@ namespace Farmware.WorldGeneration
                 ElevationCellSizeInTiles = 192,
                 TemperatureCellSizeInTiles = 96,
                 MoistureCellSizeInTiles = 80,
-                WeirdnessCellSizeInTiles = 112,
                 BiomeWarpCellSizeInTiles = 192,
                 BiomeWarpAmplitudeInTiles = 12,
                 OctaveCount = 4,
@@ -498,35 +458,13 @@ namespace Farmware.WorldGeneration
                 Groundwater = GroundwaterGenerationSettings.CreateDefault(),
                 LakeSpring = LakeSpringGenerationSettings.CreateDefault(),
                 NaturalFlooding = NaturalFloodingGenerationSettings.CreateDefault(),
-                BiomeClassificationTransitionWidthInTiles = 12,
-                BiomeTransitionWidthInTiles = 6,
                 SeaLevelThreshold = DefaultSeaLevelThreshold,
-                RiverCellSizeInTiles = 96,
-                PondCellSizeInTiles = 48,
-                FreshWaterOctaveCount = 2,
-                RiverCenterLineHalfWidth = 600,
-                PondThreshold = 57000,
-                WetClimatePondThresholdReduction = 8500,
-                WetlandPondThresholdReduction = 8500,
-                DesertPondThresholdIncrease = 5000,
-                HighlandPondThresholdIncrease = 3500,
-                VolcanicPondThresholdIncrease = 16000,
-                WetlandRiverHalfWidthIncrease = 500,
-                VolcanicRiverHalfWidthReduction = 450,
-                FreshWaterMaximumElevation = 47000,
                 MagmaCellSizeInTiles = 24,
                 MagmaDetailCellSizeInTiles = 8,
                 MagmaWarpAmplitudeInTiles = 6,
                 MagmaOctaveCount = 3,
                 MagmaNoiseThreshold = 34000,
-                MagmaInfluenceNoiseThreshold = 30000,
                 MagmaMinimumVolcanicInfluence = 0,
-                MagmaInfluenceMinimumVolcanicInfluence = 0,
-                RocklandMagmaCellSizeInTiles = 12,
-                RocklandMagmaNoiseThreshold = 47000,
-                RocklandMagmaInfluenceNoiseThreshold = 44000,
-                RocklandMagmaMinimumVolcanicInfluence = 100,
-                RocklandMagmaInfluenceMinimumVolcanicInfluence = 50,
                 RockWallMassCellSizeInTiles = 24,
                 RockWallDetailCellSizeInTiles = 8,
                 RockWallWarpAmplitudeInTiles = 6,
@@ -538,82 +476,9 @@ namespace Farmware.WorldGeneration
                 WetMoistureThreshold = DefaultWetMoistureThreshold,
                 WetlandMoistureThreshold = 50000,
                 WetlandMaximumElevation = 36000,
-                HighlandElevationThreshold = 43000,
-                VolcanicWeirdnessThreshold = 47000,
-                BiomeAdjacencyTransitionScoreMargin = 18000
+                HighlandElevationThreshold = 43000
             };
         }
-    }
-
-    /// <summary>
-    /// 1タイルの淡水判定で使った連続補正値とノイズ値です。
-    /// 開発者用HUDとEditModeテストがSimulationと同じ計算結果を読み、表示だけの再実装を防ぎます。
-    /// </summary>
-    public struct WaterGenerationDebugInfo
-    {
-        /// <summary>池の形状ノイズです。0〜65535で、大きいほど池候補になりやすい値です。</summary>
-        public ushort PondSample;
-
-        /// <summary>気候補正後の池判定下限です。65535のときは池生成を無効として扱います。</summary>
-        public ushort EffectivePondThreshold;
-
-        /// <summary>川の形状ノイズです。中心値32768へ近いほど川候補になりやすい値です。</summary>
-        public ushort RiverSample;
-
-        /// <summary>川ノイズの中心値32768からの絶対距離です。</summary>
-        public ushort RiverDistanceFromCenterLine;
-
-        /// <summary>気候補正後に許容する川中心線からの距離です。</summary>
-        public ushort EffectiveRiverHalfWidth;
-
-        /// <summary>森林に近い湿潤条件の0〜65535連続重みです。</summary>
-        public ushort WetClimateInfluence;
-
-        /// <summary>低地かつ高湿度の湿地条件の0〜65535連続重みです。</summary>
-        public ushort WetlandInfluence;
-
-        /// <summary>高温かつ乾燥した砂漠条件の0〜65535連続重みです。</summary>
-        public ushort DesertInfluence;
-
-        /// <summary>高地の岩地条件の0〜65535連続重みです。</summary>
-        public ushort HighlandInfluence;
-
-        /// <summary>高温・高地・高Weirdnessの火山条件の0〜65535連続重みです。</summary>
-        public ushort VolcanicInfluence;
-
-        /// <summary>海、池、川、陸地の優先判定を終えた最終水域種別です。</summary>
-        public WaterBodyType WaterBodyType;
-    }
-
-    /// <summary>
-    /// 1タイルのマグマ判定に使った火山適性と専用ノイズ値です。
-    /// Simulation、開発者HUD、EditModeテストが同じ判定結果を読み、淡水抑制域を含む生成規則のずれを防ぎます。
-    /// </summary>
-    public struct MagmaGenerationDebugInfo
-    {
-        /// <summary>高温・高地・高Weirdnessを掛け合わせた0〜65535の連続火山適性です。</summary>
-        public ushort VolcanicInfluence;
-
-        /// <summary>火山では大域形状・細部形状・座標ワープを合成した密度、岩地では小規模溜まり用ノイズを0〜65535で保持します。</summary>
-        public ushort MagmaSample;
-
-        /// <summary>火山適性を適用する前の生密度が淡水抑制域の閾値以上ならtrueです。</summary>
-        public bool RawInfluenceArea;
-
-        /// <summary>火山適性と境界平滑化を適用する前の生密度がマグマ本体の閾値以上ならtrueです。</summary>
-        public bool RawMagmaCandidate;
-
-        /// <summary>離散バイオームが火山または火山境界の岩地で、マグマ本体を置ける場合はtrueです。</summary>
-        public bool IsEligibleBiome;
-
-        /// <summary>岩地専用の小規模・低頻度プロファイルで判定した場合はtrueです。</summary>
-        public bool UsesRocklandProfile;
-
-        /// <summary>淡水を生成しない火山・マグマ影響域に含まれる場合はtrueです。</summary>
-        public bool IsInfluenceArea;
-
-        /// <summary>海の優先判定前に、このタイルがマグマ本体の候補になった場合はtrueです。</summary>
-        public bool IsMagma;
     }
 
     /// <summary>
@@ -680,7 +545,7 @@ namespace Farmware.WorldGeneration
     }
 
     /// <summary>
-    /// 新規ワールド開始時に決定した初期スポーン地点と、その根拠になった建設可能領域を保持します。
+    /// 新規ワールド開始時に完成地形から決定した初期スポーン地点を保持します。
     /// Simulationが一度だけ作成し、カメラ、将来のプレイヤー開始位置、セーブ処理、F3表示が同じ座標を参照します。
     /// </summary>
     public struct InitialSpawnLocation : IComponentData
@@ -688,47 +553,23 @@ namespace Farmware.WorldGeneration
         /// <summary>初期スポーンが属する固定ワールドレイヤーです。現在の開始地点探索はSurfaceだけを選びます。</summary>
         public WorldLayer Layer;
 
-        /// <summary>
-        /// 旧MAP-01初期探索が建築可能性を確認する正方形の一辺です。
-        /// 中央コアは現行仕様では採用せず、この互換条件自体をTERRAIN-01Dの新スポーン規則で置き換えます。
-        /// </summary>
-        public const int CentralCoreSizeInTiles = 3;
-
         /// <summary>初期スポーンに選んだ水平ワールドタイル座標です。ワールド存続中は変更しません。</summary>
         public int TileX;
 
         /// <summary>初期スポーンに選んだ垂直ワールドタイル座標です。ワールド存続中は変更しません。</summary>
         public int TileY;
 
-        /// <summary>選択元となった建設可能矩形の左下水平タイル座標です。</summary>
-        public int RegionMinimumTileX;
-
-        /// <summary>選択元となった建設可能矩形の左下垂直タイル座標です。</summary>
-        public int RegionMinimumTileY;
-
-        /// <summary>選択元となった建設可能矩形の横幅です。単位はタイルです。</summary>
-        public int RegionWidthInTiles;
-
-        /// <summary>選択元となった建設可能矩形の縦幅です。単位はタイルです。</summary>
-        public int RegionHeightInTiles;
-
-        /// <summary>
-        /// 発見済みの建設可能矩形から、旧3×3互換条件を満たす中央寄りの開始タイルを選びます。
-        /// 偶数幅では中央2タイルのうち右・上側を選び、常に整数タイル座標として記録します。
-        /// </summary>
-        /// <param name="region">全セルが建設可能と確認済みの矩形です。</param>
-        /// <returns>矩形情報と、その内部にある初期スポーンタイルです。</returns>
-        public static InitialSpawnLocation FromRegion(in EquipmentBuildableRegion region)
+        /// <summary>完成済みSurfaceタイル座標から保存対象の初期スポーン地点を作ります。</summary>
+        /// <param name="tileX">乾いた通行可能セルの水平ワールドタイル座標です。</param>
+        /// <param name="tileY">乾いた通行可能セルの垂直ワールドタイル座標です。</param>
+        /// <returns>Surfaceと選択座標だけを持つ初期スポーン地点です。</returns>
+        public static InitialSpawnLocation FromTile(int tileX, int tileY)
         {
             return new InitialSpawnLocation
             {
                 Layer = WorldLayer.Surface,
-                TileX = region.MinimumTileX + (region.WidthInTiles / 2),
-                TileY = region.MinimumTileY + (region.HeightInTiles / 2),
-                RegionMinimumTileX = region.MinimumTileX,
-                RegionMinimumTileY = region.MinimumTileY,
-                RegionWidthInTiles = region.WidthInTiles,
-                RegionHeightInTiles = region.HeightInTiles
+                TileX = tileX,
+                TileY = tileY
             };
         }
     }
@@ -742,13 +583,13 @@ namespace Farmware.WorldGeneration
         /// <summary>生成設定の準備を待っており、探索Jobをまだ開始していません。</summary>
         WaitingForSettings = 0,
 
-        /// <summary>Worker Threadで初期スポーン候補を探索しています。</summary>
+        /// <summary>有限リングの完成ECSチャンクを生成・走査しています。</summary>
         Searching = 1,
 
         /// <summary>候補を発見し、InitialSpawnLocation Singletonを記録済みです。</summary>
         Succeeded = 2,
 
-        /// <summary>探索上限内に候補がなく、Scene保存位置を代替の表示開始位置として使います。</summary>
+        /// <summary>探索上限内に候補がなく、開始位置を決定できなかった状態です。</summary>
         Failed = 3
     }
 
@@ -934,9 +775,6 @@ namespace Farmware.WorldGeneration
 
         /// <summary>0〜65535へ正規化した、現在土壌水分とは独立する基礎湿度値です。</summary>
         public ushort Moisture;
-
-        /// <summary>TERRAIN-01C5まで旧7Biome分類だけが参照する連続Weirdness値です。新しい火山活動度とは別Saltです。</summary>
-        public ushort Weirdness;
 
         /// <summary>基礎気温へ海面より上の標高寒冷補正を一度だけ適用した0〜65535の地形気温です。</summary>
         public ushort TerrainTemperature;

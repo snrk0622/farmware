@@ -105,7 +105,7 @@ namespace Farmware.WorldGeneration.Tests
         public void Resolve_RockWallRemoval_PreservesGroundAndBiome()
         {
             GeneratedTile generatedTile = CreateGeneratedTile(
-                BiomeId.Rockland,
+                BiomeId.AlpineRockland,
                 GroundType.RockWall);
             Assert.That(
                 EffectiveTerrainResolver.TryCreateBaseCell(
@@ -129,7 +129,7 @@ namespace Farmware.WorldGeneration.Tests
                     out EffectiveTerrainCell effectiveCell),
                 Is.EqualTo(EffectiveTerrainResolveResult.Success));
 
-            Assert.That(effectiveCell.Biome, Is.EqualTo(BiomeId.Rockland));
+            Assert.That(effectiveCell.Biome, Is.EqualTo(BiomeId.AlpineRockland));
             Assert.That(effectiveCell.GroundBlockRuntimeId, Is.EqualTo(runtimeIds.LandGround));
             Assert.That(effectiveCell.WallBlockRuntimeId.IsValid, Is.False);
         }
@@ -141,7 +141,7 @@ namespace Farmware.WorldGeneration.Tests
         public void CreateBaseCell_FreshWater_UsesLiquidWithoutGround()
         {
             GeneratedTile generatedTile = CreateGeneratedTile(
-                BiomeId.Wetland,
+                BiomeId.FreshwaterMarshFloodplain,
                 GroundType.Water,
                 WaterSalinity.FreshWater);
 
@@ -161,7 +161,7 @@ namespace Farmware.WorldGeneration.Tests
         [Test]
         public void Resolve_GroundAndLiquidOverlap_IsRejected()
         {
-            BaseTerrainCell baseCell = CreateLandBaseCell(BiomeId.Grassland);
+            BaseTerrainCell baseCell = CreateLandBaseCell(BiomeId.TemperateGrassland);
             TerrainCellDelta delta = new TerrainCellDelta
             {
                 LocalTileIndex = 0,
@@ -189,7 +189,7 @@ namespace Farmware.WorldGeneration.Tests
             Entity entity = world.EntityManager.CreateEntity();
             DynamicBuffer<TerrainCellDelta> deltas =
                 world.EntityManager.AddBuffer<TerrainCellDelta>(entity);
-            BaseTerrainCell baseCell = CreateLandBaseCell(BiomeId.Grassland);
+            BaseTerrainCell baseCell = CreateLandBaseCell(BiomeId.TemperateGrassland);
             EffectiveTerrainCell changed = CreateEffectiveCell(baseCell);
             changed.GroundBlockRuntimeId = default;
 
@@ -252,7 +252,7 @@ namespace Farmware.WorldGeneration.Tests
                     underwaterCoordinate,
                     surfaceOwner,
                     deltas,
-                    CreateLandBaseCell(BiomeId.Grassland),
+                    CreateLandBaseCell(BiomeId.TemperateGrassland),
                     terrainCatalog,
                     out _),
                 Is.EqualTo(EffectiveTerrainResolveResult.InvalidDelta));
@@ -266,7 +266,7 @@ namespace Farmware.WorldGeneration.Tests
         {
             EffectiveTerrainCell waterCell = new EffectiveTerrainCell
             {
-                Biome = BiomeId.Wetland,
+                Biome = BiomeId.FreshwaterMarshFloodplain,
                 LiquidRuntimeId = runtimeIds.FreshWater
             };
             TerrainTraversalCapabilities swimmer = new TerrainTraversalCapabilities
@@ -302,7 +302,7 @@ namespace Farmware.WorldGeneration.Tests
         {
             EffectiveTerrainCell magmaCell = new EffectiveTerrainCell
             {
-                Biome = BiomeId.Volcanic,
+                Biome = BiomeId.VolcanicGeothermal,
                 LiquidRuntimeId = runtimeIds.Magma
             };
             TerrainTraversalCapabilities swimmerWithoutHeatResistance =

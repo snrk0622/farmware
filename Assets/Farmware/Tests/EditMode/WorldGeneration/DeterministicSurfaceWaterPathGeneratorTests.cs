@@ -292,12 +292,12 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(pathLength, Is.Zero);
         }
 
-        /// <summary>テスト名から安定Seedを作り、製品既定のGeneratorVersion 1設定を返します。</summary>
+        /// <summary>テスト名から安定Seedを作り、製品の現在GeneratorVersion設定を返します。</summary>
         /// <param name="seedText">テストケースを分離するSeed文字列です。</param>
         /// <returns>C4-A1の純粋計算へ渡す既定ワールド生成設定です。</returns>
         private static WorldGenerationSettings CreateSettings(string seedText)
         {
-            return WorldGenerationSettings.CreateDefault(WorldSeedUtility.FromString(seedText), 1);
+            return WorldGenerationSettings.CreateDefault(WorldSeedUtility.FromString(seedText), WorldGenerationSettings.CurrentGeneratorVersion);
         }
 
         /// <summary>合成標高格子の指定位置へ標高を設定し、反例用の通路を読みやすく組み立てます。</summary>

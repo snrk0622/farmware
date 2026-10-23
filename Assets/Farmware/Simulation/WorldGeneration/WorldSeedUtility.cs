@@ -20,9 +20,6 @@ namespace Farmware.WorldGeneration
         /// <summary>湿度ノイズ専用のソルトです。</summary>
         public const ulong Moisture = 0x8EBC6AF09C88C6E3UL;
 
-        /// <summary>火山などの特殊地域候補を決めるWeirdnessノイズ専用のソルトです。</summary>
-        public const ulong Weirdness = 0x589965CC75374CC3UL;
-
         /// <summary>Biome分類前の固定した木本植生ポテンシャル専用のソルトです。</summary>
         public const ulong WoodyVegetationPotential = 0x3F84D5B5B5470917UL;
 
@@ -71,15 +68,6 @@ namespace Farmware.WorldGeneration
         /// <summary>バイオーム用気候ノイズの垂直サンプリング座標を歪ませるソルトです。</summary>
         public const ulong BiomeWarpY = 0xEB44ACCAB455D165UL;
 
-        /// <summary>バイオーム境界で地面種別を段階的に混ぜる座標抽選専用のソルトです。</summary>
-        public const ulong BiomeTransition = 0x1D8E4E27C47D124FUL;
-
-        /// <summary>陸上を連続して横断する川の中心線ノイズ専用のソルトです。</summary>
-        public const ulong River = 0x8CB92BA72F3D8DD7UL;
-
-        /// <summary>内陸へまとまって生成する池の形状ノイズ専用のソルトです。</summary>
-        public const ulong Pond = 0xDB4F0B9175AE2165UL;
-
         /// <summary>火山地帯のマグマ湾と流路を作る連続ノイズ専用のソルトです。</summary>
         public const ulong Magma = 0x9E3779B185EBCA87UL;
 
@@ -91,9 +79,6 @@ namespace Farmware.WorldGeneration
 
         /// <summary>火山マグマ密度の垂直サンプリング座標を歪ませるノイズ専用のソルトです。</summary>
         public const ulong MagmaWarpY = 0xABC98388FB8FAC03UL;
-
-        /// <summary>岩地へ稀に現れる小さなマグマ溜まり専用のソルトです。</summary>
-        public const ulong RocklandMagma = 0xC2B2AE3D27D4EB4FUL;
 
         /// <summary>岩壁の広域的な塊を作る連続ノイズ専用のソルトです。</summary>
         public const ulong RockWallMass = 0x6A09E667F3BCC909UL;

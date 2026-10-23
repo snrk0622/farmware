@@ -97,10 +97,11 @@ namespace Farmware.Authoring
             [Tooltip("DefinitionsでAnimal Speciesに分類した定義GUIDです。定義作成後は変更しないでください。")]
             [SerializeField] private string definitionGuid = string.Empty;
 
-            // 複数バイオームを許可できるMaskで、空または未定義bitはBakerが拒否します。
-            [Tooltip("この動物が自然出現できるバイオームです。少なくとも1種類を選択してください。")]
-            [SerializeField] private AnimalBiomeMask allowedBiomes =
-                AnimalBiomeMask.Grassland;
+            // Unityはulongを基底型に持つenumを直接Serializeできないため、Inspector入力だけ符号付き32bit整数で保持します。
+            // 使用するのは下位18bitだけで、Bakerが未定義bitと0を拒否してから実行時のAnimalBiomeMaskへ変換します。
+            [Tooltip("この動物が自然出現できる18バイオームのbit集合です。下位18bitを使用し、少なくとも1種類を設定してください。")]
+            [SerializeField] private int allowedBiomeBits =
+                (int)AnimalBiomeMask.TemperateGrassland;
 
             // 地形分類はバイオームとは別に確認し、水域や岩壁への誤配置を防ぎます。
             [Tooltip("この動物が出現・滞在できる基礎地形です。陸生動物は通常Landだけを選択します。")]
@@ -142,8 +143,9 @@ namespace Farmware.Authoring
             /// <summary>共通DefinitionCatalogへ接続するGUID文字列です。</summary>
             public string DefinitionGuid => definitionGuid;
 
-            /// <summary>自然出現を許可するバイオームMaskです。</summary>
-            public AnimalBiomeMask AllowedBiomes => allowedBiomes;
+            /// <summary>Inspectorの下位18bitを、自然出現を許可する実行時バイオームMaskとして返します。</summary>
+            public AnimalBiomeMask AllowedBiomes =>
+                (AnimalBiomeMask)(uint)allowedBiomeBits;
 
             /// <summary>出現・滞在を許可する基礎地形Maskです。</summary>
             public AnimalGroundMask AllowedGrounds => allowedGrounds;

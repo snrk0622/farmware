@@ -467,7 +467,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 CreateCompletedChunk(manager, 1, 0, ChunkGenerationPhase.Inactive);
                 CreateCompletedChunk(manager, -1, 0, ChunkGenerationPhase.GeneratingData);
                 Entity settingsEntity = manager.CreateEntity(typeof(WorldGenerationSettings));
-                manager.SetComponentData(settingsEntity, WorldGenerationSettings.CreateDefault(1UL, 1));
+                manager.SetComponentData(settingsEntity, WorldGenerationSettings.CreateDefault(1UL, WorldGenerationSettings.CurrentGeneratorVersion));
                 Assert.That(Invoke("TryEnsureQueries"), Is.True);
                 Invoke("SynchronizeDisplayOrigin");
                 ChunkStreamingObserver observer = new ChunkStreamingObserver

@@ -1,4 +1,4 @@
-// このファイルは、TERRAIN-01C2の地質分布監査が全代表点とクロス軸を漏れなく集計することを検証します。
+// このファイルは、TERRAIN-01C2の地質分布監査が全代表点とC5-C後も有効な環境クロス軸を漏れなく集計することを検証します。
 // 通常テストでは小さな固定格子を使い、既定3シードの広域レポートはEditorメニューから必要時に実行します。
 
 using Farmware.WorldGeneration.Editor;
@@ -22,7 +22,7 @@ namespace Farmware.WorldGeneration.Tests
                     new[] { "geology-audit-test-a", "geology-audit-test-b" },
                     6,
                     64,
-                    1);
+                    WorldGenerationSettings.CurrentGeneratorVersion);
 
             GeologyDistributionAuditResult first = GeologyDistributionAnalyzer.Analyze(settings);
             GeologyDistributionAuditResult second = GeologyDistributionAnalyzer.Analyze(settings);
@@ -50,7 +50,6 @@ namespace Farmware.WorldGeneration.Tests
             {
                 int geologyCount = first.GetGeologyCount(geologyClass);
                 Assert.That(SumElevationCrossCounts(first, geologyClass), Is.EqualTo(geologyCount));
-                Assert.That(SumBiomeCrossCounts(first, geologyClass), Is.EqualTo(geologyCount));
                 Assert.That(SumVolcanicCrossCounts(first, geologyClass), Is.EqualTo(geologyCount));
                 Assert.That(first.GetIsolatedRegionCount(geologyClass),
                     Is.LessThanOrEqualTo(first.GetRegionCount(geologyClass)));
@@ -105,23 +104,6 @@ namespace Farmware.WorldGeneration.Tests
                  elevation++)
             {
                 total += result.GetElevationCrossCount(geologyClass, elevation);
-            }
-
-            return total;
-        }
-
-        /// <summary>指定地質の7論理Biomeと予約値Noneを合計します。</summary>
-        /// <param name="result">読取対象の監査結果です。</param>
-        /// <param name="geologyClass">合計対象の地質分類です。</param>
-        /// <returns>全Biomeスロットの件数合計です。</returns>
-        private static int SumBiomeCrossCounts(
-            GeologyDistributionAuditResult result,
-            GeologyClass geologyClass)
-        {
-            int total = 0;
-            for (BiomeId biome = BiomeId.None; biome <= BiomeId.Volcanic; biome++)
-            {
-                total += result.GetBiomeCrossCount(geologyClass, biome);
             }
 
             return total;

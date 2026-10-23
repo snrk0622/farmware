@@ -30,7 +30,7 @@ namespace Farmware.WorldGeneration.Tests
         [TestCase("Farmware", -33554432, 33554431)]
         public void FillShadowMask_MatchesBufferAndDirectHalo(string seed, int chunkX, int chunkY)
         {
-            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(WorldSeedUtility.FromString(seed), 1);
+            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(WorldSeedUtility.FromString(seed), WorldGenerationSettings.CurrentGeneratorVersion);
             using var tileStorage = new NativeArray<GeneratedTile>(WorldGridConstants.TilesPerChunk, Allocator.TempJob);
             // using変数は値型として読み取り専用になるため、要素を書き込む借用コピーを分けます。破棄はtileStorageだけが担当します。
             NativeArray<GeneratedTile> tiles = tileStorage;
@@ -90,7 +90,7 @@ namespace Farmware.WorldGeneration.Tests
         {
             using var tiles = new NativeArray<GeneratedTile>(tileCount, Allocator.TempJob);
             using var mask = new NativeArray<bool>(maskCount, Allocator.TempJob);
-            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(1, 1);
+            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(1, WorldGenerationSettings.CurrentGeneratorVersion);
             Assert.Throws<ArgumentException>(() => RockWallAppearanceUtility.FillShadowMask(
                 settings, new ChunkCoordinate(0, 0), tiles, mask));
         }

@@ -12,18 +12,6 @@ namespace Farmware.WorldGeneration.Authoring
     /// </summary>
     public sealed class WorldGenerationAuthoring : MonoBehaviour
     {
-        /// <summary>旧Authoringの小数0.305が変換されていた海面閾値です。既存Sceneの既定値移行だけに使用します。</summary>
-        private const ushort LegacySeaLevelThreshold = 19988;
-
-        /// <summary>旧Authoringの小数0.61が変換されていた高温閾値です。既存Sceneの既定値移行だけに使用します。</summary>
-        private const ushort LegacyHotTemperatureThreshold = 39976;
-
-        /// <summary>旧Authoringの小数0.435が変換されていた乾燥閾値です。既存Sceneの既定値移行だけに使用します。</summary>
-        private const ushort LegacyDryMoistureThreshold = 28508;
-
-        /// <summary>旧Authoringの小数0.603が変換されていた湿潤閾値です。既存Sceneの既定値移行だけに使用します。</summary>
-        private const ushort LegacyWetMoistureThreshold = 39518;
-
         /// <summary>
         /// 地上18Biomeの固定標高下限と両立する、Inspector用の正規化海面下限です。
         /// OnValidateとRange表示で共有し、分類先のない20,000未満の陸地を作る入力を残しません。
@@ -35,10 +23,10 @@ namespace Farmware.WorldGeneration.Authoring
         [Tooltip("開発用ワールドのシード文字列です。数字以外や日本語も使用できます。同じ文字列とGeneratorVersionなら同じ地形になります。")]
         [SerializeField] private string seedText = "Farmware";
 
-        // 初期開発中は1へ固定し、正式なセーブ互換運用を始めた後だけ非互換変更に合わせて更新します。
-        [Tooltip("生成規則の互換バージョンです。初期開発中は1へ固定し、正式なセーブ互換運用を始めた後だけ非互換変更時に増やします。")]
-        [Min(1)]
-        [SerializeField] private int generatorVersion = 1;
+        // C5より前の旧7Biome結果を新IDへ読み替えないため、現在の生成器バージョンだけをBakeします。
+        [Tooltip("生成規則の互換バージョンです。C5の新18Biome形式では2固定で、旧バージョンのキャッシュは再利用しません。")]
+        [Min(WorldGenerationSettings.CurrentGeneratorVersion)]
+        [SerializeField] private int generatorVersion = WorldGenerationSettings.CurrentGeneratorVersion;
 
         // 標高の広がりを決める最も低周波な格子サイズで、Bake時からワールド寿命中は固定します。
         [Tooltip("標高ノイズの基準格子サイズです。単位はタイルです。大きくすると海・低地・高地が広く続き、変更すると生成結果が変わります。")]
@@ -55,11 +43,6 @@ namespace Farmware.WorldGeneration.Authoring
         [Min(16)]
         [SerializeField] private int moistureCellSizeInTiles = 80;
 
-        // 火山などの希少バイオーム候補を決める独立ノイズで、気温・湿度だけでは得られない分布差を作ります。
-        [Tooltip("火山など特殊地域の候補を決めるWeirdnessノイズの基準格子サイズです。単位はタイルです。大きくすると特殊地域が広く続きます。")]
-        [Min(16)]
-        [SerializeField] private int weirdnessCellSizeInTiles = 112;
-
         // 気候ノイズを読む座標そのものを緩やかに曲げ、縦横の帯に見えるバイオーム境界を減らします。
         [Tooltip("バイオーム境界を曲げる低周波ノイズの格子サイズです。単位はタイルです。大きくすると曲がり方が緩やかになります。")]
         [Min(16)]
@@ -75,86 +58,11 @@ namespace Farmware.WorldGeneration.Authoring
         [Range(1, 6)]
         [SerializeField] private int octaveCount = 4;
 
-        // 7種類の適性スコアを閾値の前後で滑らかに入れ替え、一本線の境界や小さな飛び地を減らします。
-        [Tooltip("バイオーム適性が気候閾値付近で滑らかに入れ替わる帯のおおよその幅です。単位はタイルです。大きくすると緩衝的な地域が広がります。")]
-        [Range(0, 32)]
-        [SerializeField] private int biomeClassificationTransitionWidthInTiles = 12;
-
-        // 論理Biome IDを変えず、境界付近の地面種別だけを座標ハッシュで段階的に混ぜる幅です。
-        [Tooltip("バイオーム境界で標準・肥沃・砂質の土壌を混ぜる帯のおおよその幅です。単位はタイルです。0で無効、2〜8を推奨します。変更すると生成結果が変わります。")]
-        [Range(0, 16)]
-        [SerializeField] private int biomeTransitionWidthInTiles = 6;
-
         // 0〜1の標高に対する海面境界です。既存Sceneとの互換のためフィールド名はwaterThresholdを維持します。
         [Tooltip("これ未満の標高を海水域にする海面閾値です。地上18Biomeの固定標高範囲と両立する20,000以上の範囲で指定し、大きくすると海が増えます。湿地上限と山地・高山境界の順序を保てる範囲へ自動補正されます。")]
         [Range(MinimumSupportedWaterThreshold, 1f)]
         [SerializeField] private float waterThreshold =
             WorldGenerationSettings.DefaultSeaLevelThreshold / (float)ushort.MaxValue;
-
-        // 川の大きな蛇行を決める低周波格子で、チャンク境界より大きくして短い断片を減らします。
-        [Tooltip("川の蛇行を作るノイズ格子サイズです。単位はタイルです。大きくすると川が緩やかに曲がり、変更すると生成結果が変わります。")]
-        [Min(16)]
-        [SerializeField] private int riverCellSizeInTiles = 96;
-
-        // 池のまとまりを決める格子で、川より小さくして内陸に局所的な水面を作ります。
-        [Tooltip("池の形を作るノイズ格子サイズです。単位はタイルです。大きくすると池が広くまとまり、変更すると生成結果が変わります。")]
-        [Min(8)]
-        [SerializeField] private int pondCellSizeInTiles = 48;
-
-        // 淡水形状へ重ねる解像度数で、細かすぎる水路を避けるため地形より少なくします。
-        [Tooltip("川と池の輪郭へ重ねるノイズ解像度数です。増やすと輪郭が細かくなりますが生成負荷も増えます。")]
-        [Range(1, 4)]
-        [SerializeField] private int freshWaterOctaveCount = 2;
-
-        // ノイズ中心値の周囲を川として扱う幅で、0〜1正規化値をBake時に固定小数点へ変換します。
-        [Tooltip("川の中心線から許容するノイズ差です。0〜1で指定し、大きくすると川幅と本数が増えます。")]
-        [Range(0.001f, 0.1f)]
-        [SerializeField] private float riverCenterLineHalfWidth = 600f / ushort.MaxValue;
-
-        // 池ノイズの下限で、高い場所だけを水面にして群れ状の池を作ります。
-        [Tooltip("池を生成するノイズ下限です。0〜1で指定し、小さくすると池が増えます。")]
-        [Range(0f, 1f)]
-        [SerializeField] private float pondThreshold = 57000f / ushort.MaxValue;
-
-        // 森林のような湿潤域では池を少し増やすため、湿度に応じて池ノイズ下限を連続的に下げます。
-        [Tooltip("森林に近い湿潤条件で池ノイズ下限を最大どれだけ下げるかを0〜1で指定します。大きくすると森林内の池が増えます。")]
-        [Range(0f, 0.5f)]
-        [SerializeField] private float wetClimatePondThresholdReduction = 8500f / ushort.MaxValue;
-
-        // 湿地では森林分に加えて池を増やし、陸地を残しながら水面が点在する分布を作ります。
-        [Tooltip("低地かつ高湿度の湿地条件で、森林分に追加して池ノイズ下限を最大どれだけ下げるかを0〜1で指定します。")]
-        [Range(0f, 0.5f)]
-        [SerializeField] private float wetlandPondThresholdReduction = 8500f / ushort.MaxValue;
-
-        // 砂漠では池を希少にするため、高温と乾燥の両方が強いほど池ノイズ下限を上げます。
-        [Tooltip("高温かつ乾燥した砂漠条件で池ノイズ下限を最大どれだけ上げるかを0〜1で指定します。大きくすると砂漠の池が減ります。")]
-        [Range(0f, 0.5f)]
-        [SerializeField] private float desertPondThresholdIncrease = 5000f / ushort.MaxValue;
-
-        // 岩地では池を希少にするため、標高が高地条件へ近づくほど池ノイズ下限を上げます。
-        [Tooltip("高地の岩地条件で池ノイズ下限を最大どれだけ上げるかを0〜1で指定します。大きくすると岩地の池が減ります。")]
-        [Range(0f, 0.5f)]
-        [SerializeField] private float highlandPondThresholdIncrease = 3500f / ushort.MaxValue;
-
-        // 火山中心部では池を禁止し、周縁では急に途切れないよう火山適性に比例して抑制します。
-        [Tooltip("高温・高地・高Weirdnessの火山条件で池ノイズ下限を最大どれだけ上げるかを0〜1で指定します。既定値では火山中心部の池を禁止します。")]
-        [Range(0f, 0.5f)]
-        [SerializeField] private float volcanicPondThresholdIncrease = 16000f / ushort.MaxValue;
-
-        // 湿地内の川を見つけやすくするため、低地かつ高湿度の連続重みに応じて川幅を広げます。
-        [Tooltip("低地かつ高湿度の湿地条件で川の中心線半幅へ最大どれだけ加えるかを0〜1で指定します。大きくすると湿地の川が太くなります。")]
-        [Range(0f, 0.1f)]
-        [SerializeField] private float wetlandRiverHalfWidthIncrease = 500f / ushort.MaxValue;
-
-        // 火山でも川を完全には切らず、自然に横断できるよう最小幅を残しながら細くします。
-        [Tooltip("高温・高地・高Weirdnessの火山条件で川の中心線半幅から最大どれだけ引くかを0〜1で指定します。川を完全には消しません。")]
-        [Range(0f, 0.1f)]
-        [SerializeField] private float volcanicRiverHalfWidthReduction = 450f / ushort.MaxValue;
-
-        // 淡水を生成できる標高上限で、山頂まで川や池が伸びることを防ぎます。
-        [Tooltip("川と池を生成できる最大標高です。0〜1で指定し、小さくすると淡水が低地へ限定されます。海面より高くしてください。")]
-        [Range(0f, 1f)]
-        [SerializeField] private float freshWaterMaximumElevation = 47000f / ushort.MaxValue;
 
         // 火山バイオームの約半分を占めるマグマ海と陸地を決めます。火山領域より格子が大きいと局所的に全域がマグマになるため、24タイルへ抑えます。
         [Tooltip("火山バイオームのマグマ海を作るノイズ格子サイズです。単位はタイルです。大きくすると塊は広がりますが、小さな火山全域がマグマになる場合があります。")]
@@ -181,45 +89,10 @@ namespace Farmware.WorldGeneration.Authoring
         [Range(0f, 1f)]
         [SerializeField] private float magmaNoiseThreshold = 34000f / ushort.MaxValue;
 
-        // 本体より低い閾値で周囲へ淡水抑制域を作り、川・池とマグマが直接接しにくくします。
-        [Tooltip("マグマ周囲で川と池を抑制する専用ノイズ下限です。0〜1で指定し、マグマ本体の下限以下にしてください。")]
-        [Range(0f, 1f)]
-        [SerializeField] private float magmaInfluenceNoiseThreshold = 30000f / ushort.MaxValue;
-
         // 離散火山内でさらに中心部へ絞りたい場合の追加下限です。既定値0では火山全域を面積比の母集団にします。
         [Tooltip("火山内でマグマ本体を追加制限する連続火山適性の下限です。0〜1で指定し、既定値0では火山全域を許可します。")]
         [Range(0f, 1f)]
         [SerializeField] private float magmaMinimumVolcanicInfluence;
-
-        // 本体より緩い追加下限で淡水抑制域を作ります。既定値0では専用ノイズだけで外周を決めます。
-        [Tooltip("火山内で川と池を抑制する影響域の連続適性下限です。0〜1で指定し、マグマ本体の追加下限以下にしてください。")]
-        [Range(0f, 1f)]
-        [SerializeField] private float magmaInfluenceMinimumVolcanicInfluence;
-
-        // 岩地では火山と別の細かなノイズを使い、広いマグマ海ではなく小さな溜まりに限定します。
-        [Tooltip("岩地バイオームの小さなマグマ溜まりを作るノイズ格子サイズです。単位はタイルです。小さくすると各溜まりも小さくなります。")]
-        [Min(8)]
-        [SerializeField] private int rocklandMagmaCellSizeInTiles = 12;
-
-        // 高い下限を超えたピークだけを採用し、岩地でのマグマを稀な障害物として扱います。
-        [Tooltip("岩地バイオームへマグマを生成する専用ノイズ下限です。0〜1で指定し、大きくすると発生がより稀になります。")]
-        [Range(0f, 1f)]
-        [SerializeField] private float rocklandMagmaNoiseThreshold = 47000f / ushort.MaxValue;
-
-        // 本体の少し外側だけ淡水を抑え、小規模なマグマへ川や池が直接重なることを防ぎます。
-        [Tooltip("岩地マグマ周囲で川と池を抑制する専用ノイズ下限です。0〜1で指定し、岩地マグマ本体の下限以下にしてください。")]
-        [Range(0f, 1f)]
-        [SerializeField] private float rocklandMagmaInfluenceNoiseThreshold = 44000f / ushort.MaxValue;
-
-        // 火山性が少し残る岩地移行域だけを許可し、通常の岩地全域へマグマが散ることを防ぎます。
-        [Tooltip("岩地マグマを火山との移行域へ限定する連続火山適性の下限です。0〜1で指定します。")]
-        [Range(0f, 1f)]
-        [SerializeField] private float rocklandMagmaMinimumVolcanicInfluence = 100f / ushort.MaxValue;
-
-        // 淡水抑制域は本体より緩い火山適性にし、マグマ周囲へ細い陸地の余白を作ります。
-        [Tooltip("岩地マグマ周囲の淡水抑制域を許可する連続火山適性下限です。0〜1で指定し、本体の下限以下にしてください。")]
-        [Range(0f, 1f)]
-        [SerializeField] private float rocklandMagmaInfluenceMinimumVolcanicInfluence = 50f / ushort.MaxValue;
 
         // 岩壁の大きなまとまりを作る低周波格子で、論理チャンク境界とは独立して連続します。
         [Tooltip("岩壁の大きな塊を作るノイズ格子サイズです。単位はタイルです。大きくすると1つの岩壁域が広がります。")]
@@ -283,16 +156,6 @@ namespace Farmware.WorldGeneration.Authoring
         [Tooltip("これ以上を岩地・火山候補および山地とみなす高地閾値です。0〜1で指定し、小さくすると岩地・山地が増えます。高山境界54,000未満へ自動補正されます。")]
         [Range(0f, 1f)]
         [SerializeField] private float highlandElevationThreshold = 43000f / ushort.MaxValue;
-
-        // 火山を希少な特殊地域へ限定する0〜1のWeirdness境界です。
-        [Tooltip("これ以上を火山候補とみなすWeirdness閾値です。0〜1で指定し、小さくすると火山が増えます。")]
-        [Range(0f, 1f)]
-        [SerializeField] private float volcanicWeirdnessThreshold = 47000f / ushort.MaxValue;
-
-        // 強く隣接抑制する候補が僅差のときに、草原または岩地へ置き換えるスコア差です。
-        [Tooltip("強く隣接抑制する2バイオームの適性差がこの値以下なら緩衝帯へ置き換えます。0〜65535の整数で、大きくすると緩衝帯が広がります。")]
-        [Range(0, ushort.MaxValue)]
-        [SerializeField] private int biomeAdjacencyTransitionScoreMargin = 18000;
 
         // 木・石・水・砂が1タイルずつ散らばらず、まとまった採取場所になるように使う低周波格子です。
         [Tooltip("基礎資源の群れを作るノイズ格子サイズです。単位はタイルです。大きくすると同じ資源が広くまとまり、変更すると資源配置が変わります。")]
@@ -388,8 +251,8 @@ namespace Farmware.WorldGeneration.Authoring
         {
             string effectiveSeedText = seedTextOverride ?? seedText;
 
-            // TERRAIN-01C1移行期間は、旧7Biomeの高地判定と新しい標高区分の山地境界が同じ意味を持ちます。
-            // 既存Inspector値だけを変えたときにも両方を同じ値へ揃え、設定検証で全チャンクが失敗することを防ぎます。
+            // 基礎岩壁と暫定資源が参照する山地境界を、連続環境軸の同じ境界へ揃えます。
+            // Inspector値だけを変えたときにも両者を同期し、設定検証で全チャンクが失敗することを防ぎます。
             ContinuousEnvironmentSettings environmentAxes =
                 ContinuousEnvironmentSettings.CreateDefault();
             environmentAxes.MountainElevationThreshold =
@@ -402,11 +265,10 @@ namespace Farmware.WorldGeneration.Authoring
                 ElevationCellSizeInTiles = elevationCellSizeInTiles,
                 TemperatureCellSizeInTiles = temperatureCellSizeInTiles,
                 MoistureCellSizeInTiles = moistureCellSizeInTiles,
-                WeirdnessCellSizeInTiles = weirdnessCellSizeInTiles,
                 BiomeWarpCellSizeInTiles = biomeWarpCellSizeInTiles,
                 BiomeWarpAmplitudeInTiles = biomeWarpAmplitudeInTiles,
                 OctaveCount = octaveCount,
-                // 新しい軸の確定値は共有既定値を使い、旧7Biomeと意味を共有する山地境界だけ上で同期します。
+                // 新しい軸の確定値は共有既定値を使い、基礎地形でも使う山地境界だけ上で同期します。
                 EnvironmentAxes = environmentAxes,
                 // TERRAIN-01C2の固定地質値はInspectorへ重複保持せず、純粋生成と同じ共有既定値をBakeします。
                 Geology = GeologyGenerationSettings.CreateDefault(),
@@ -418,77 +280,26 @@ namespace Farmware.WorldGeneration.Authoring
                 LakeSpring = LakeSpringGenerationSettings.CreateDefault(),
                 // TERRAIN-01C4-Dの自然冠水・湿原規模設定もGeneratorVersion対象の共有既定値をBakeします。
                 NaturalFlooding = NaturalFloodingGenerationSettings.CreateDefault(),
-                BiomeClassificationTransitionWidthInTiles =
-                    biomeClassificationTransitionWidthInTiles,
-                BiomeTransitionWidthInTiles = biomeTransitionWidthInTiles,
-                SeaLevelThreshold = ToCanonicalDefaultThreshold(
-                    waterThreshold,
-                    LegacySeaLevelThreshold,
-                    WorldGenerationSettings.DefaultSeaLevelThreshold),
-                RiverCellSizeInTiles = riverCellSizeInTiles,
-                PondCellSizeInTiles = pondCellSizeInTiles,
-                FreshWaterOctaveCount = freshWaterOctaveCount,
-                RiverCenterLineHalfWidth = ToNormalizedUShort(riverCenterLineHalfWidth),
-                PondThreshold = ToNormalizedUShort(pondThreshold),
-                WetClimatePondThresholdReduction =
-                    ToNormalizedUShort(wetClimatePondThresholdReduction),
-                WetlandPondThresholdReduction =
-                    ToNormalizedUShort(wetlandPondThresholdReduction),
-                DesertPondThresholdIncrease =
-                    ToNormalizedUShort(desertPondThresholdIncrease),
-                HighlandPondThresholdIncrease =
-                    ToNormalizedUShort(highlandPondThresholdIncrease),
-                VolcanicPondThresholdIncrease =
-                    ToNormalizedUShort(volcanicPondThresholdIncrease),
-                WetlandRiverHalfWidthIncrease =
-                    ToNormalizedUShort(wetlandRiverHalfWidthIncrease),
-                VolcanicRiverHalfWidthReduction =
-                    ToNormalizedUShort(volcanicRiverHalfWidthReduction),
-                FreshWaterMaximumElevation = ToNormalizedUShort(freshWaterMaximumElevation),
+                SeaLevelThreshold = ToNormalizedUShort(waterThreshold),
                 MagmaCellSizeInTiles = magmaCellSizeInTiles,
                 MagmaDetailCellSizeInTiles = magmaDetailCellSizeInTiles,
                 MagmaWarpAmplitudeInTiles = magmaWarpAmplitudeInTiles,
                 MagmaOctaveCount = magmaOctaveCount,
                 MagmaNoiseThreshold = ToNormalizedUShort(magmaNoiseThreshold),
-                MagmaInfluenceNoiseThreshold =
-                    ToNormalizedUShort(magmaInfluenceNoiseThreshold),
                 MagmaMinimumVolcanicInfluence =
                     ToNormalizedUShort(magmaMinimumVolcanicInfluence),
-                MagmaInfluenceMinimumVolcanicInfluence =
-                    ToNormalizedUShort(magmaInfluenceMinimumVolcanicInfluence),
-                RocklandMagmaCellSizeInTiles = rocklandMagmaCellSizeInTiles,
-                RocklandMagmaNoiseThreshold =
-                    ToNormalizedUShort(rocklandMagmaNoiseThreshold),
-                RocklandMagmaInfluenceNoiseThreshold =
-                    ToNormalizedUShort(rocklandMagmaInfluenceNoiseThreshold),
-                RocklandMagmaMinimumVolcanicInfluence =
-                    ToNormalizedUShort(rocklandMagmaMinimumVolcanicInfluence),
-                RocklandMagmaInfluenceMinimumVolcanicInfluence =
-                    ToNormalizedUShort(rocklandMagmaInfluenceMinimumVolcanicInfluence),
                 RockWallMassCellSizeInTiles = rockWallMassCellSizeInTiles,
                 RockWallDetailCellSizeInTiles = rockWallDetailCellSizeInTiles,
                 RockWallWarpAmplitudeInTiles = rockWallWarpAmplitudeInTiles,
                 RockWallNoiseThreshold = ToNormalizedUShort(rockWallNoiseThreshold),
                 RockWallCorridorHalfWidth = ToNormalizedUShort(rockWallCorridorHalfWidth),
-                HotTemperatureThreshold = ToCanonicalDefaultThreshold(
-                    hotTemperatureThreshold,
-                    LegacyHotTemperatureThreshold,
-                    WorldGenerationSettings.DefaultHotTemperatureThreshold),
+                HotTemperatureThreshold = ToNormalizedUShort(hotTemperatureThreshold),
                 ColdTemperatureThreshold = ToNormalizedUShort(coldTemperatureThreshold),
-                DryMoistureThreshold = ToCanonicalDefaultThreshold(
-                    dryMoistureThreshold,
-                    LegacyDryMoistureThreshold,
-                    WorldGenerationSettings.DefaultDryMoistureThreshold),
-                WetMoistureThreshold = ToCanonicalDefaultThreshold(
-                    wetMoistureThreshold,
-                    LegacyWetMoistureThreshold,
-                    WorldGenerationSettings.DefaultWetMoistureThreshold),
+                DryMoistureThreshold = ToNormalizedUShort(dryMoistureThreshold),
+                WetMoistureThreshold = ToNormalizedUShort(wetMoistureThreshold),
                 WetlandMoistureThreshold = ToNormalizedUShort(wetlandMoistureThreshold),
                 WetlandMaximumElevation = ToNormalizedUShort(wetlandMaximumElevation),
-                HighlandElevationThreshold = ToNormalizedUShort(highlandElevationThreshold),
-                VolcanicWeirdnessThreshold = ToNormalizedUShort(volcanicWeirdnessThreshold),
-                BiomeAdjacencyTransitionScoreMargin =
-                    (ushort)biomeAdjacencyTransitionScoreMargin
+                HighlandElevationThreshold = ToNormalizedUShort(highlandElevationThreshold)
             };
         }
 
@@ -499,6 +310,9 @@ namespace Farmware.WorldGeneration.Authoring
         private void OnValidate()
         {
             const float minimumGap = 0.001f;
+
+            // 初回リリース前の旧7Biomeデータは移行せず、新18Biomeの現行版だけをAuthoringから出力します。
+            generatorVersion = WorldGenerationSettings.CurrentGeneratorVersion;
 
             // 新しい標高区分の高山境界はTERRAIN-01C1の固定値なので、Inspectorの山地境界は必ずその直前へ収めます。
             // ushortへ丸めた後も山地と高山が1以上離れるよう、固定小数点の1段階を差し引いた上限を使います。
@@ -522,26 +336,6 @@ namespace Farmware.WorldGeneration.Authoring
                 MinimumSupportedWaterThreshold,
                 maximumWetlandElevation);
 
-            // 淡水の上限を海面以上へ収め、海水だけの標高帯と逆転しないようにします。
-            freshWaterMaximumElevation = Mathf.Max(
-                freshWaterMaximumElevation,
-                waterThreshold + minimumGap);
-            freshWaterMaximumElevation = Mathf.Clamp01(freshWaterMaximumElevation);
-
-            // 火山用・岩地用の両方で影響域を本体より広く保ち、マグマの直前まで淡水が入り込む逆転設定を防ぎます。
-            magmaInfluenceNoiseThreshold = Mathf.Min(
-                magmaInfluenceNoiseThreshold,
-                magmaNoiseThreshold);
-            magmaInfluenceMinimumVolcanicInfluence = Mathf.Min(
-                magmaInfluenceMinimumVolcanicInfluence,
-                magmaMinimumVolcanicInfluence);
-            rocklandMagmaInfluenceNoiseThreshold = Mathf.Min(
-                rocklandMagmaInfluenceNoiseThreshold,
-                rocklandMagmaNoiseThreshold);
-            rocklandMagmaInfluenceMinimumVolcanicInfluence = Mathf.Min(
-                rocklandMagmaInfluenceMinimumVolcanicInfluence,
-                rocklandMagmaMinimumVolcanicInfluence);
-
             // 乾燥・森林・湿地の3領域をすべて残すには上端側へ2つの間隔が必要なため、乾燥閾値を0.998以下へ収めます。
             // 乾燥閾値を0.999まで許すと、森林閾値も上限0.999へ補正されて同値になり、中湿度の森林候補帯が消えてしまいます。
             // 新しい極乾燥境界より下へ入る値も、5段階分類との順序を保てる下限へ戻します。
@@ -556,8 +350,8 @@ namespace Farmware.WorldGeneration.Authoring
                 wetMoistureThreshold + minimumGap);
             wetlandMoistureThreshold = Mathf.Clamp01(wetlandMoistureThreshold);
 
-            // 旧7Biomeの低温・高温境界を、新しい5段階分類の対応する境界の間へ収めます。
-            // 旧境界同士だけでなく連続環境軸との順序も守ることで、Inspector調整後の設定を生成可能に保ちます。
+            // C6/C7まで残る暫定土壌・資源用の低温／高温境界を、新しい5段階分類の対応範囲へ収めます。
+            // 暫定境界同士だけでなく連続環境軸との順序も守り、Inspector調整後の設定を生成可能に保ちます。
             hotTemperatureThreshold = Mathf.Clamp(
                 hotTemperatureThreshold,
                 temperateBandBoundary + minimumGap,
@@ -598,23 +392,6 @@ namespace Farmware.WorldGeneration.Authoring
         private static ushort ToNormalizedUShort(float normalizedValue)
         {
             return (ushort)Mathf.RoundToInt(Mathf.Clamp01(normalizedValue) * ushort.MaxValue);
-        }
-
-        /// <summary>
-        /// 既存Sceneへ保存済みの丸めた旧既定値だけを、純粋計算と共有する正確な固定小数点既定値へ移行します。
-        /// それ以外のInspector調整値は変更せず、開発者が意図したカスタム設定を保ちます。
-        /// </summary>
-        /// <param name="normalizedValue">InspectorまたはSceneへ保存された0〜1の値です。</param>
-        /// <param name="legacyDefault">旧小数値を0〜65535へ変換した値です。</param>
-        /// <param name="canonicalDefault">現在のCreateDefaultと共有する正確な既定値です。</param>
-        /// <returns>旧既定値なら現在の既定値、それ以外なら入力を通常変換した値です。</returns>
-        private static ushort ToCanonicalDefaultThreshold(
-            float normalizedValue,
-            ushort legacyDefault,
-            ushort canonicalDefault)
-        {
-            ushort convertedValue = ToNormalizedUShort(normalizedValue);
-            return convertedValue == legacyDefault ? canonicalDefault : convertedValue;
         }
 
         /// <summary>

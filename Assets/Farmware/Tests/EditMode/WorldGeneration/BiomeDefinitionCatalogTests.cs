@@ -1,5 +1,5 @@
 // このファイルは、TERRAIN-01C5-Aで追加した新18Biome Definitionの安定ID、固定表、検証失敗条件を確認します。
-// 旧7Biomeの生成結果は対象にせず、C5後半の分類器が読み始める前に設定契約だけをEditModeで固定します。
+// C5-Cの最終分類Jobが読む新18Biome設定契約をEditModeで固定します。
 
 using System.Collections.Generic;
 using System.Reflection;

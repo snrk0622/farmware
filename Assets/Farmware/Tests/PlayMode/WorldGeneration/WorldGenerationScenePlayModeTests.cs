@@ -28,7 +28,10 @@ namespace Farmware.WorldGeneration.PlayModeTests
     public sealed class WorldGenerationScenePlayModeTests
     {
         /// <summary>SubSceneの非同期Bake・ロードと初回チャンク生成を待つ最大描画フレーム数です。</summary>
-        private const int MaximumWaitFrames = 300;
+        // C5-C以降の初期スポーンは、分類前の単一タイルではなく、C4水文と18Biome分類まで完成した
+        // 最大5×5チャンクを段階的に調べます。BatchModeでは描画フレームだけが高速に進み、Worker Jobへ
+        // 十分な実時間を渡さない場合があるため、12秒相当まで待てる上限にします。
+        private const int MaximumWaitFrames = 1200;
 
         /// <summary>
         /// BatchModeの高速空フレーム間で、Burst Workerへ処理時間を渡す待機時間です。単位はミリ秒です。
@@ -759,12 +762,12 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     WorldSeed = 0x1234UL
                 },
                 true,
-                BiomeId.Snowfield);
+                BiomeId.TundraPolarBarrens);
 
             Assert.That(text, Does.Contain("Tile  : (5, -3)"));
             Assert.That(text, Does.Contain("Layer : Surface"));
             Assert.That(text, Does.Contain("SubChunk: (0, 3)"));
-            Assert.That(text, Does.Contain("Biome: Snowfield"));
+            Assert.That(text, Does.Contain("Biome: TundraPolarBarrens"));
             Assert.That(text, Does.Contain("GeneratorVersion: 7"));
             Assert.That(text, Does.Contain("WorldSeed: 0x0000000000001234"));
             Assert.That(text, Does.Contain("Spawn: Surface Tile (-65, 64) / Chunk (-2, 1)"));
@@ -846,7 +849,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 tiles.ResizeUninitialized(WorldGridConstants.TilesPerChunk);
                 ChunkLocalTileCoordinate local = WorldGrid.ToLocalTileCoordinate(5, -3);
                 int tileIndex = WorldGrid.ToTileIndex(local.X, local.Y);
-                tiles[tileIndex] = new GeneratedTile { Biome = BiomeId.Volcanic };
+                tiles[tileIndex] = new GeneratedTile { Biome = BiomeId.VolcanicGeothermal };
 
                 overlayObject = new GameObject("Coordinate HUD ECS Reader");
                 overlayObject.AddComponent<Camera>();
@@ -883,7 +886,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Assert.That(
                     ((InitialSpawnSearchStatus)searchStatusArguments[0]).Phase,
                     Is.EqualTo(InitialSpawnSearchPhase.Failed));
-                Assert.That((BiomeId)biomeArguments[2], Is.EqualTo(BiomeId.Volcanic));
+                Assert.That((BiomeId)biomeArguments[2], Is.EqualTo(BiomeId.VolcanicGeothermal));
             }
             finally
             {
@@ -1368,17 +1371,14 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     out _);
                 grasslandBase = ScriptableObject.CreateInstance<Tile>();
                 forestBase = ScriptableObject.CreateInstance<Tile>();
+                TileBase[] biomeTiles = new TileBase[BiomeStableIds.Count];
+                biomeTiles[(int)BiomeId.TemperateGrassland - BiomeStableIds.First] = grasslandBase;
+                biomeTiles[(int)BiomeId.TemperateDeciduousForest - BiomeStableIds.First] = forestBase;
 
                 presenter.Configure(
                     terrainTilemap,
                     null,
-                    grasslandBase,
-                    forestBase,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
+                    biomeTiles,
                     null,
                     null,
                     null,
@@ -1394,7 +1394,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 GeneratedTile forestNormal = new GeneratedTile
                 {
                     Ground = GroundType.Land,
-                    Biome = BiomeId.Forest,
+                    Biome = BiomeId.TemperateDeciduousForest,
                     Soil = SoilType.Normal
                 };
                 GeneratedTile forestFertile = forestNormal;
@@ -1480,7 +1480,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
         {
             GeneratedTile forestTransitionTile = new GeneratedTile
             {
-                Biome = BiomeId.Forest,
+                Biome = BiomeId.TemperateDeciduousForest,
                 Ground = GroundType.Land,
                 Soil = SoilType.Normal,
                 // Terrain Placement表示は補助物流のベルト可否に依存せず、通常設備可否だけで陸上色を選びます。
@@ -1488,7 +1488,6 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Elevation = ushort.MaxValue,
                 Temperature = 0,
                 Moisture = ushort.MaxValue,
-                Weirdness = ushort.MaxValue,
                 TerrainTemperature = ushort.MaxValue,
                 WoodyVegetationPotential = ushort.MaxValue,
                 TerrainRuggedness = ushort.MaxValue,
@@ -1593,14 +1592,14 @@ namespace Farmware.WorldGeneration.PlayModeTests
 
             Color wetlandColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
                 WorldGenerationDebugVisualizationMode.Biome,
-                new GeneratedTile { Biome = BiomeId.Wetland });
+                new GeneratedTile { Biome = BiomeId.FreshwaterMarshFloodplain });
             Color volcanicColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
                 WorldGenerationDebugVisualizationMode.Biome,
-                new GeneratedTile { Biome = BiomeId.Volcanic });
+                new GeneratedTile { Biome = BiomeId.VolcanicGeothermal });
             Assert.That(
                 wetlandColor,
                 Is.Not.EqualTo(volcanicColor),
-                "7バイオーム表示では湿地と火山を別色で判別できる必要があります。");
+                "新18Biome表示では淡水湿原と火山地熱地帯を別色で判別できる必要があります。");
 
             Color normalSoilColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
                 WorldGenerationDebugVisualizationMode.Soil,
@@ -1650,7 +1649,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(riverColor, Is.Not.EqualTo(seaColor), "川と海は別の色で判別できる必要があります。");
 
             GeneratedTile magmaTile = forestTransitionTile;
-            magmaTile.Biome = BiomeId.Volcanic;
+            magmaTile.Biome = BiomeId.VolcanicGeothermal;
             magmaTile.Ground = GroundType.Magma;
             Color magmaColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
                 WorldGenerationDebugVisualizationMode.Magma,
@@ -1804,14 +1803,10 @@ namespace Farmware.WorldGeneration.PlayModeTests
 
             WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
                 WorldSeedUtility.FromString("rock-wall-chunk-edge-test"),
-                1);
+                WorldGenerationSettings.CurrentGeneratorVersion);
             // 地上18Biomeの固定標高範囲と両立する最小海面を使い、無効設定へ依存せず岩壁境界だけを検証します。
             settings.SeaLevelThreshold =
                 WorldGenerationSettings.MinimumSupportedSeaLevelThreshold;
-            settings.FreshWaterMaximumElevation =
-                WorldGenerationSettings.MinimumSupportedSeaLevelThreshold;
-            settings.RiverCenterLineHalfWidth = 0;
-            settings.PondThreshold = ushort.MaxValue;
             bool foundShadowAcrossChunkBoundary = false;
 
             // X=63とX=64は別チャンクです。境界をまたぐ岩壁を探し、両側が座標再生成で影分類できることを確認します。
@@ -1941,6 +1936,9 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     break;
                 }
 
+                // 初期スポーン探索はC4水文を含む非同期Jobを待つため、BatchModeの空フレームで
+                // 上限だけを消費せず、Worker threadが進める短い実時間を毎フレーム確保します。
+                System.Threading.Thread.Sleep(BatchModeWorkerYieldMilliseconds);
                 yield return null;
             }
 
@@ -2211,51 +2209,30 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Is.Not.Null,
                 "SampleSceneに地形Tileを割り当てるChunkTilemapPresenterがありません。");
 
-            string[] biomeTileFieldNames =
-            {
-                "grasslandTile",
-                "forestTile",
-                "desertTile",
-                "rocklandTile",
-                "wetlandTile",
-                "snowfieldTile",
-                "volcanicTile"
-            };
-            string[] expectedBiomeSpriteNames =
-            {
-                "terrain_grassland",
-                "terrain_forest",
-                "terrain_desert",
-                "terrain_rockland",
-                "terrain_wetland",
-                "terrain_snowfield",
-                "terrain_volcanic"
-            };
+            FieldInfo biomeTilesField = typeof(ChunkTilemapPresenter).GetField(
+                "biomeTiles",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.That(biomeTilesField, Is.Not.Null, "新18BiomeのTile配列が見つかりません。");
+            TileBase[] biomeTiles = biomeTilesField.GetValue(terrainPresenter) as TileBase[];
+            Assert.That(biomeTiles, Is.Not.Null);
+            Assert.That(biomeTiles.Length, Is.EqualTo(BiomeStableIds.Count));
 
-            // Sceneの参照先まで検証し、Tileアセットだけ作成されて表示には旧Fallbackが残る回帰を防ぎます。
-            for (int biomeIndex = 0; biomeIndex < biomeTileFieldNames.Length; biomeIndex++)
+            // 18要素を個別確認し、未制作Biomeを旧7種の近似Tileへ黙って寄せる回帰を防ぎます。
+            for (int biomeIndex = 0; biomeIndex < biomeTiles.Length; biomeIndex++)
             {
-                FieldInfo tileField = typeof(ChunkTilemapPresenter).GetField(
-                    biomeTileFieldNames[biomeIndex],
-                    BindingFlags.NonPublic | BindingFlags.Instance);
-                Assert.That(
-                    tileField,
-                    Is.Not.Null,
-                    $"Biome Tileフィールドが見つかりません: {biomeTileFieldNames[biomeIndex]}");
-
-                Tile biomeTile = tileField.GetValue(terrainPresenter) as Tile;
+                Tile biomeTile = biomeTiles[biomeIndex] as Tile;
                 Assert.That(
                     biomeTile,
                     Is.Not.Null,
-                    $"SampleSceneのBiome Tile参照がありません: {biomeTileFieldNames[biomeIndex]}");
+                    $"SampleSceneのBiome Tile参照がありません: ID {biomeIndex + 1}");
                 Assert.That(
                     biomeTile.sprite,
                     Is.Not.Null,
-                    $"SampleSceneのBiome TileにSpriteがありません: {biomeTileFieldNames[biomeIndex]}");
+                    $"SampleSceneのBiome TileにSpriteがありません: ID {biomeIndex + 1}");
                 Assert.That(
                     biomeTile.sprite.name,
-                    Is.EqualTo(expectedBiomeSpriteNames[biomeIndex]),
-                    $"SampleSceneが本番用Biome Spriteを参照していません: {biomeTileFieldNames[biomeIndex]}");
+                    Is.EqualTo(((BiomeId)(biomeIndex + BiomeStableIds.First)).ToString()),
+                    $"SampleSceneの仮Tileが安定ID順に並んでいません: ID {biomeIndex + 1}");
             }
 
             // 専用TileアセットとSceneの参照を同時に確認し、構築ツールの再実行でFallback岩壁へ戻る回帰を検出します。
@@ -2647,9 +2624,14 @@ namespace Farmware.WorldGeneration.PlayModeTests
             EntityQuery animalRegionQuery = default;
             EntityQuery wildAnimalQuery = default;
             EntityQuery locationQuery = default;
+            EntityQuery spawnSearchStatusQuery = default;
             EntityQuery chunkQuery = default;
             bool queriesCreated = false;
             bool initialLoadCompleted = false;
+            bool hasCompleteSpawnChunk = false;
+            bool hasCompleteLeftNeighbor = false;
+            bool hasPresentedSpawnGround = false;
+            bool hasDisplayedSpawnResource = false;
             Entity originalChunkEntity = Entity.Null;
             Vector3Int originalResourceCell = default;
             InitialSpawnLocation initialSpawnLocation = default;
@@ -2682,6 +2664,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
                         ComponentType.ReadOnly<AnimalAppearanceVariant>());
                     locationQuery = world.EntityManager.CreateEntityQuery(
                         ComponentType.ReadOnly<InitialSpawnLocation>());
+                    spawnSearchStatusQuery = world.EntityManager.CreateEntityQuery(
+                        ComponentType.ReadOnly<InitialSpawnSearchStatus>());
                     chunkQuery = world.EntityManager.CreateEntityQuery(
                         ComponentType.ReadOnly<ChunkCoordinateComponent>(),
                         ComponentType.ReadOnly<ChunkGenerationStatus>(),
@@ -2691,12 +2675,13 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 }
 
                 // 設定、初期スポーン記録、カメラ移動、スポーン先チャンク、地形・資源Tileがそろうまで固定秒数に依存せず待ちます。
+                // C5-Cで鶏は新しい温帯草原だけへ移行したため、表示範囲に温帯草原がなければ野生個体0件も正しい結果です。
+                // そのため、個体数をScene初期化の完了条件には含めず、生成された個体だけを後段で検証します。
                 if (queriesCreated
                     && settingsQuery.CalculateEntityCount() == 1
                     && animalCatalogQuery.CalculateEntityCount() == 1
                     && animalPopulationSeedQuery.CalculateEntityCount() == 1
                     && animalRegionQuery.CalculateEntityCount() > 0
-                    && wildAnimalQuery.CalculateEntityCount() > 0
                     && locationQuery.CalculateEntityCount() == 1)
                 {
                     initialSpawnLocation = locationQuery.GetSingleton<InitialSpawnLocation>();
@@ -2711,14 +2696,20 @@ namespace Farmware.WorldGeneration.PlayModeTests
                         initialSpawnLocation.TileY,
                         cameraPanController.CurrentDisplayOrigin);
 
-                    if (initialPositionController.HasAppliedInitialPosition
-                        && TryGetActiveCompleteChunk(
+                    hasCompleteSpawnChunk = TryGetActiveCompleteChunk(
                             world.EntityManager,
                             chunkQuery,
                             initialSpawnChunk.X,
                             initialSpawnChunk.Y,
-                            out originalChunkEntity)
-                        && readPresentedTile(tilemap, spawnCell) != null
+                            out originalChunkEntity);
+                    hasPresentedSpawnGround = readPresentedTile(tilemap, spawnCell) != null;
+                    hasCompleteLeftNeighbor = TryGetCompleteChunk(
+                        world.EntityManager,
+                        chunkQuery,
+                        initialSpawnChunk.X - 1,
+                        initialSpawnChunk.Y,
+                        out _);
+                    hasDisplayedSpawnResource = hasCompleteSpawnChunk
                         && TryGetDisplayedResourceCell(
                             world.EntityManager,
                             originalChunkEntity,
@@ -2727,7 +2718,11 @@ namespace Farmware.WorldGeneration.PlayModeTests
                             resourceTilemap,
                             resourceBehindRockWallTilemap,
                             readPresentedTile,
-                            out originalResourceCell))
+                            out originalResourceCell);
+                    if (initialPositionController.HasAppliedInitialPosition
+                        && hasCompleteSpawnChunk
+                        && hasCompleteLeftNeighbor
+                        && hasPresentedSpawnGround)
                     {
                         initialLoadCompleted = true;
                         break;
@@ -2739,10 +2734,22 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 yield return null;
             }
 
+            // 失敗時は待機条件の件数と探索段階を表示し、単なる待機不足と設定・生成失敗を区別できるようにします。
+            string spawnSearchPhase = spawnSearchStatusQuery.CalculateEntityCount() == 1
+                ? spawnSearchStatusQuery.GetSingleton<InitialSpawnSearchStatus>().Phase.ToString()
+                : "MissingOrDuplicate";
             Assert.That(
                 initialLoadCompleted,
                 Is.True,
-                $"{MaximumWaitFrames}フレーム以内に初回生成と表示が完了しませんでした。");
+                $"{MaximumWaitFrames}フレーム以内に初回生成と表示が完了しませんでした。"
+                + $" settings={settingsQuery.CalculateEntityCount()}, catalogs={animalCatalogQuery.CalculateEntityCount()},"
+                + $" populationSeed={animalPopulationSeedQuery.CalculateEntityCount()}, regions={animalRegionQuery.CalculateEntityCount()},"
+                + $" animals={wildAnimalQuery.CalculateEntityCount()}, spawn={locationQuery.CalculateEntityCount()},"
+                + $" spawnSearch={spawnSearchPhase}, chunks={chunkQuery.CalculateEntityCount()},"
+                + $" cameraApplied={initialPositionController.HasAppliedInitialPosition},"
+                + $" completeSpawnChunk={hasCompleteSpawnChunk}, completeLeftNeighbor={hasCompleteLeftNeighbor},"
+                + $" groundVisible={hasPresentedSpawnGround},"
+                + $" resourceVisible={hasDisplayedSpawnResource}");
 
             // 通常の左移動で最初に画面へ入る隣接チャンクは、中心と同じ初回生成バッチで完成させます。
             // C4-D2の重い生成中に角チャンクを先に待ち、左境界越え時に空白が見える回帰を検出します。
@@ -2782,7 +2789,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     out AnimalSpeciesDefinitionBlob chickenDefinition),
                 Is.True,
                 "共通実行時IDに対応する鶏の固有設定がBakeされていません。");
-            Assert.That(chickenDefinition.AllowedBiomes, Is.EqualTo(AnimalBiomeMask.Grassland));
+            Assert.That(chickenDefinition.AllowedBiomes, Is.EqualTo(AnimalBiomeMask.TemperateGrassland));
             Assert.That(chickenDefinition.AllowedGrounds, Is.EqualTo(AnimalGroundMask.Land));
             Assert.That(chickenDefinition.MinimumHerdSize, Is.EqualTo(3));
             Assert.That(chickenDefinition.MaximumHerdSize, Is.EqualTo(6));
@@ -2808,12 +2815,13 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 runtimeRockWall.Flags & TerrainBlockDefinitionFlags.BlocksMovement,
                 Is.Not.EqualTo(TerrainBlockDefinitionFlags.None));
 
-            // SampleSceneの実際の固定Tickで独立Seed、地域状態、個体Entityまで作られ、静的定義だけで止まっていないことを確認します。
+            // SampleSceneの実際の固定Tickで独立Seedと地域状態まで作られ、静的定義だけで止まっていないことを確認します。
+            // 新18Biomeでは初期表示範囲に温帯草原が存在しない場合があるため、鶏0羽を失敗にはしません。
+            // 個体が生成された場合は、下の配列走査で種、群れ、位置、許可Biomeを全件検証します。
             AnimalPopulationSeed runtimePopulationSeed =
                 animalPopulationSeedQuery.GetSingleton<AnimalPopulationSeed>();
             Assert.That(runtimePopulationSeed.IsValid, Is.True);
             Assert.That(animalRegionQuery.CalculateEntityCount(), Is.GreaterThan(0));
-            Assert.That(wildAnimalQuery.CalculateEntityCount(), Is.GreaterThan(0));
             using (NativeArray<AnimalSpecies> runtimeSpecies =
                    wildAnimalQuery.ToComponentDataArray<AnimalSpecies>(Allocator.Temp))
             using (NativeArray<AnimalHerdMembership> runtimeHerds =
@@ -2846,7 +2854,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
             MethodInfo animalCandidateMethod = typeof(WorldGenerationDebugVisualizationOverlay).GetMethod(
                 "IsEligibleForAnyAnimalSpecies", BindingFlags.NonPublic | BindingFlags.Static);
             Assert.That(animalCandidateMethod, Is.Not.Null);
-            GeneratedTile candidateTerrain = new GeneratedTile { Biome = BiomeId.Grassland, Ground = GroundType.Land };
+            GeneratedTile candidateTerrain = new GeneratedTile { Biome = BiomeId.TemperateGrassland, Ground = GroundType.Land };
             Assert.That(animalCandidateMethod.Invoke(null, new object[]
                 { candidateTerrain, new GeneratedResourceTile { Type = GeneratedResourceType.Tree }, runtimeAnimalCatalog.Value }), Is.False);
             Assert.That(animalCandidateMethod.Invoke(null, new object[]
@@ -2912,13 +2920,13 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 initialCameraWorldPosition.x,
                 initialCameraWorldPosition.y);
 
-            // 正式なセーブ互換運用前は生成調整のたびに番号を増やさず、Sceneの初期バージョンを1へ固定します。
+            // C5-Cは旧7Biomeワールドを移行せず拒否する版境界なので、Sceneも現在版2へ更新されていることを確認します。
             WorldGenerationSettings runtimeGenerationSettings =
                 settingsQuery.GetSingleton<WorldGenerationSettings>();
             Assert.That(
                 runtimeGenerationSettings.GeneratorVersion,
-                Is.EqualTo(1),
-                "初期開発中のGeneratorVersionは1へ固定してください。");
+                Is.EqualTo(WorldGenerationSettings.CurrentGeneratorVersion),
+                "SampleSceneはC5-Cの現在GeneratorVersionだけを使用してください。");
             Assert.That(
                 runtimeGenerationSettings.SeaLevelThreshold,
                 Is.EqualTo(WorldGenerationSettings.DefaultSeaLevelThreshold));
@@ -2983,8 +2991,9 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     originalResourceAbsoluteTileY,
                     cameraPanController.CurrentDisplayOrigin);
                 bool originalResourceWasCleared =
-                    readPresentedTile(resourceTilemap, originalResourceDisplayCell) == null
-                    && readPresentedTile(resourceBehindRockWallTilemap, originalResourceDisplayCell) == null;
+                    !hasDisplayedSpawnResource
+                    || (readPresentedTile(resourceTilemap, originalResourceDisplayCell) == null
+                        && readPresentedTile(resourceBehindRockWallTilemap, originalResourceDisplayCell) == null);
                 bool displayOriginMoved = !cameraPanController.CurrentDisplayOrigin
                     .AbsoluteTileCoordinate.Equals(initialDisplayOrigin);
 
@@ -3152,11 +3161,16 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 originalLastResource,
                 regeneratedResources[WorldGridConstants.TilesPerChunk - 1],
                 WorldGridConstants.TilesPerChunk - 1);
-            Assert.That(
-                readPresentedTile(resourceTilemap, originalResourceCell) != null
-                    || readPresentedTile(resourceBehindRockWallTilemap, originalResourceCell) != null,
-                Is.True,
-                "原点へ戻った後、決定論的に再生成された資源アイコンが再表示される必要があります。");
+            // C5-Cの初期スポーンは資源量を条件にしないため、開始チャンクに資源がないSeedも正常です。
+            // 初回に資源アイコンを確認できた場合だけ、遠方往復後にも同じアイコンが戻ることを追加保証します。
+            if (hasDisplayedSpawnResource)
+            {
+                Assert.That(
+                    readPresentedTile(resourceTilemap, originalResourceCell) != null
+                        || readPresentedTile(resourceBehindRockWallTilemap, originalResourceCell) != null,
+                    Is.True,
+                    "原点へ戻った後、決定論的に再生成された資源アイコンが再表示される必要があります。");
+            }
 
             // 初期スポーン周辺は安全な陸地として選ばれるため、水が偶然あることへ依存せず、生成規則から液体セルを探して表示先へ移動します。
             bool foundLiquidCell = TryFindLiquidCell(
@@ -3210,6 +3224,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 animalRegionQuery.Dispose();
                 wildAnimalQuery.Dispose();
                 locationQuery.Dispose();
+                spawnSearchStatusQuery.Dispose();
                 chunkQuery.Dispose();
             }
         }
@@ -3767,7 +3782,6 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(actual.Elevation, Is.EqualTo(expected.Elevation), $"Elevationが一致しません。Index={tileIndex}");
             Assert.That(actual.Temperature, Is.EqualTo(expected.Temperature), $"Temperatureが一致しません。Index={tileIndex}");
             Assert.That(actual.Moisture, Is.EqualTo(expected.Moisture), $"Moistureが一致しません。Index={tileIndex}");
-            Assert.That(actual.Weirdness, Is.EqualTo(expected.Weirdness), $"Weirdnessが一致しません。Index={tileIndex}");
             Assert.That(actual.TerrainTemperature, Is.EqualTo(expected.TerrainTemperature), $"TerrainTemperatureが一致しません。Index={tileIndex}");
             Assert.That(actual.WoodyVegetationPotential, Is.EqualTo(expected.WoodyVegetationPotential), $"WoodyVegetationPotentialが一致しません。Index={tileIndex}");
             Assert.That(actual.TerrainRuggedness, Is.EqualTo(expected.TerrainRuggedness), $"TerrainRuggednessが一致しません。Index={tileIndex}");
@@ -3836,13 +3850,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
             presenter.Configure(
                 terrainTilemap,
                 null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
+                new TileBase[BiomeStableIds.Count],
                 null,
                 null,
                 null,

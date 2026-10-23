@@ -30,7 +30,7 @@ namespace Farmware.WorldGeneration.Tests
                 Allocator.TempJob);
             // using変数はreadonlyなので、書き込み用の借用コピーを作ります。破棄はstorageだけが担当します。
             NativeArray<GeneratedTile> halo = storage;
-            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(WorldSeedUtility.FromString("Farmware"), 1);
+            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(WorldSeedUtility.FromString("Farmware"), WorldGenerationSettings.CurrentGeneratorVersion);
             ChunkCoordinate coordinate = new ChunkCoordinate(chunkX, chunkY);
             GeneratedTile[] expected = BuildExpectedHalo(settings, coordinate);
 
@@ -72,7 +72,7 @@ namespace Farmware.WorldGeneration.Tests
             using var halo = new NativeArray<GeneratedTile>(Presentation.TerrainNeighborHaloUtility.TileCount, Allocator.TempJob);
             for (int trial = 0; trial < 2; trial++)
             {
-                WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault((ulong)(trial + 1), 1);
+                WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault((ulong)(trial + 1), WorldGenerationSettings.CurrentGeneratorVersion);
                 ChunkCoordinate coordinate = new ChunkCoordinate(trial * 4, -trial);
                 Presentation.TerrainNeighborHaloUtility.Fill(settings, coordinate, 0, 16, halo);
                 GeneratedTile[] expected = BuildExpectedHalo(settings, coordinate);
@@ -114,7 +114,7 @@ namespace Farmware.WorldGeneration.Tests
             // 書き込み用の借用コピーです。storageだけがDisposeします。
             NativeArray<GeneratedTile> halo = storage;
             for (int i = 0; i < halo.Length; i++) halo[i] = new GeneratedTile { Biome = (BiomeId)255 };
-            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(1, 1);
+            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(1, WorldGenerationSettings.CurrentGeneratorVersion);
             Presentation.TerrainNeighborHaloUtility.Fill(settings, new ChunkCoordinate(0, 0), first, count, halo);
             int changed = 0;
             for (int i = 0; i < halo.Length; i++)
@@ -130,7 +130,7 @@ namespace Farmware.WorldGeneration.Tests
         {
             using var halo = new NativeArray<GeneratedTile>(Presentation.TerrainNeighborHaloUtility.TileCount, Allocator.TempJob);
             using var shortHalo = new NativeArray<GeneratedTile>(1, Allocator.TempJob);
-            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(1, 1);
+            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(1, WorldGenerationSettings.CurrentGeneratorVersion);
             ChunkCoordinate coordinate = new ChunkCoordinate(0, 0);
             Assert.Throws<ArgumentException>(() => Presentation.TerrainNeighborHaloUtility.Fill(settings, coordinate, 0, 1, shortHalo));
             Assert.Throws<ArgumentOutOfRangeException>(() => Presentation.TerrainNeighborHaloUtility.Fill(settings, coordinate, -1, 1, halo));

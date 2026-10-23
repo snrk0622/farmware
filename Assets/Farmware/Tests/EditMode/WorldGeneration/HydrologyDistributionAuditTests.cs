@@ -20,7 +20,7 @@ namespace Farmware.WorldGeneration.Tests
                 new HydrologyDistributionAuditSettings(
                     new[] { "hydrology-audit-test" },
                     0,
-                    1);
+                    WorldGenerationSettings.CurrentGeneratorVersion);
 
             HydrologyDistributionAuditResult first =
                 HydrologyDistributionAnalyzer.Analyze(settings);

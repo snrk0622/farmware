@@ -8,38 +8,54 @@ using Unity.Entities;
 namespace Farmware.Simulation.Animals
 {
     /// <summary>
-    /// 動物が出現できるバイオームをbit単位で表す安定した分類です。
-    /// 各bitはWorldGenerationのBiomeId 1〜7と同じ順序に固定し、ANIMAL-01Bの生成判定で対応付けます。
+    /// 動物が出現できる18種のバイオームをbit単位で表す安定した分類です。
+    /// BiomeIdの数値を直接shiftせず、ANIMAL-01Bの生成判定で明示的に対応付けます。
     /// </summary>
     [Flags]
-    public enum AnimalBiomeMask : byte
+    public enum AnimalBiomeMask : ulong
     {
         /// <summary>出現可能なバイオームがない無効値です。</summary>
         None = 0,
 
-        /// <summary>草原への出現を許可します。BiomeId.Grasslandに対応します。</summary>
-        Grassland = 1 << 0,
+        /// <summary>温帯草原を許可します。</summary>
+        TemperateGrassland = 1UL << 0,
+        /// <summary>熱帯サバンナ・疎林を許可します。</summary>
+        TropicalSavannaWoodland = 1UL << 1,
+        /// <summary>温帯落葉広葉樹林を許可します。</summary>
+        TemperateDeciduousForest = 1UL << 2,
+        /// <summary>暖温帯常緑樹林を許可します。</summary>
+        WarmTemperateEvergreenForest = 1UL << 3,
+        /// <summary>温帯山地竹林を許可します。</summary>
+        TemperateMontaneBambooForest = 1UL << 4,
+        /// <summary>熱帯雨林を許可します。</summary>
+        TropicalRainforest = 1UL << 5,
+        /// <summary>熱帯季節林を許可します。</summary>
+        TropicalSeasonalForest = 1UL << 6,
+        /// <summary>亜熱帯海洋性樹林を許可します。</summary>
+        SubtropicalOceanicForest = 1UL << 7,
+        /// <summary>亜寒帯針葉樹林を許可します。</summary>
+        BorealConiferForest = 1UL << 8,
+        /// <summary>ステップを許可します。</summary>
+        Steppe = 1UL << 9,
+        /// <summary>乾燥灌木地・疎林を許可します。</summary>
+        DryShrublandWoodland = 1UL << 10,
+        /// <summary>サボテン砂漠・乾燥高原を許可します。</summary>
+        CactusDesertDryPlateau = 1UL << 11,
+        /// <summary>熱砂漠を許可します。</summary>
+        HotDesert = 1UL << 12,
+        /// <summary>淡水湿地・氾濫原を許可します。</summary>
+        FreshwaterMarshFloodplain = 1UL << 13,
+        /// <summary>湿地林を許可します。</summary>
+        SwampForest = 1UL << 14,
+        /// <summary>ツンドラ・極地荒原を許可します。</summary>
+        TundraPolarBarrens = 1UL << 15,
+        /// <summary>高山岩地を許可します。</summary>
+        AlpineRockland = 1UL << 16,
+        /// <summary>火山・地熱地帯を許可します。</summary>
+        VolcanicGeothermal = 1UL << 17,
 
-        /// <summary>森林への出現を許可します。BiomeId.Forestに対応します。</summary>
-        Forest = 1 << 1,
-
-        /// <summary>砂漠への出現を許可します。BiomeId.Desertに対応します。</summary>
-        Desert = 1 << 2,
-
-        /// <summary>岩地への出現を許可します。BiomeId.Rocklandに対応します。</summary>
-        Rockland = 1 << 3,
-
-        /// <summary>湿地への出現を許可します。BiomeId.Wetlandに対応します。</summary>
-        Wetland = 1 << 4,
-
-        /// <summary>雪原への出現を許可します。BiomeId.Snowfieldに対応します。</summary>
-        Snowfield = 1 << 5,
-
-        /// <summary>火山への出現を許可します。BiomeId.Volcanicに対応します。</summary>
-        Volcanic = 1 << 6,
-
-        /// <summary>現在定義済みの全陸上バイオームを表します。</summary>
-        All = Grassland | Forest | Desert | Rockland | Wetland | Snowfield | Volcanic
+        /// <summary>現在定義済みの18バイオームすべてを表します。</summary>
+        All = (1UL << 18) - 1UL
     }
 
     /// <summary>
@@ -192,7 +208,7 @@ namespace Farmware.Simulation.Animals
             AnimalBiomeMask allowedBiomes,
             AnimalBiomeMask candidateBiome)
         {
-            byte candidateValue = (byte)candidateBiome;
+            ulong candidateValue = (ulong)candidateBiome;
             bool isSingleBit = candidateValue != 0
                 && (candidateValue & (candidateValue - 1)) == 0;
             bool isKnownBit = (candidateBiome & ~AnimalBiomeMask.All) == 0;

@@ -22,7 +22,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// <summary>開発者用の色分けを表示しません。</summary>
         None = 0,
 
-        /// <summary>論理Biome IDを7種類の固定色で表示します。</summary>
+        /// <summary>新18種の論理Biome IDを固定色で表示します。</summary>
         Biome = 1,
 
         /// <summary>0〜65535の連続標高値を黒から白の濃淡で表示します。</summary>
@@ -432,7 +432,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="tile">ECS Dynamic Bufferから読み取った1タイルの生成結果です。</param>
         /// <param name="rockWallShadowOpacity">RockWallモードで使う0〜1の連続影不透明度です。他モードでは参照しません。</param>
         /// <param name="resourceType">Resourcesモードで色分けする競合解決後の資源IDです。</param>
-        /// <param name="isMagmaInfluenceArea">Magmaモードで淡水抑制域を暗赤色表示する場合はtrueです。</param>
+        /// <param name="isMagmaCandidate">Magmaモードで最終マグマ候補を明色表示する場合はtrueです。</param>
         /// <param name="isAnimalCandidate">Animal Populationモードで、いずれかの動物種が利用できる地形ならtrueです。</param>
         /// <param name="hasConfirmedAnimal">Animal Populationモードで、確定済み個体がこのタイルに存在するならtrueです。</param>
         /// <param name="geologySite">支配サイト表示へ使用する診断専用サイト情報です。他モードでは参照しません。</param>
@@ -443,7 +443,7 @@ namespace Farmware.WorldGeneration.Presentation
             GeneratedTile tile,
             float rockWallShadowOpacity = 0f,
             GeneratedResourceType resourceType = GeneratedResourceType.None,
-            bool isMagmaInfluenceArea = false,
+            bool isMagmaCandidate = false,
             bool isAnimalCandidate = false,
             bool hasConfirmedAnimal = false,
             GeologySiteData geologySite = default,
@@ -452,37 +452,7 @@ namespace Farmware.WorldGeneration.Presentation
             switch (mode)
             {
                 case WorldGenerationDebugVisualizationMode.Biome:
-                    if (tile.Biome == BiomeId.Forest)
-                    {
-                        return new Color32(42, 128, 65, 238);
-                    }
-
-                    if (tile.Biome == BiomeId.Desert)
-                    {
-                        return new Color32(224, 174, 70, 238);
-                    }
-
-                    if (tile.Biome == BiomeId.Rockland)
-                    {
-                        return new Color32(130, 126, 145, 238);
-                    }
-
-                    if (tile.Biome == BiomeId.Wetland)
-                    {
-                        return new Color32(45, 135, 112, 238);
-                    }
-
-                    if (tile.Biome == BiomeId.Snowfield)
-                    {
-                        return new Color32(198, 230, 238, 238);
-                    }
-
-                    if (tile.Biome == BiomeId.Volcanic)
-                    {
-                        return new Color32(154, 62, 48, 238);
-                    }
-
-                    return new Color32(104, 190, 85, 238);
+                    return GetBiomeVisualizationColor(tile.Biome);
 
                 case WorldGenerationDebugVisualizationMode.Soil:
                     // SoilTypeは通常の土地Spriteへ反映しないため、生成分布を検証するときだけ専用色で区別します。
@@ -693,7 +663,7 @@ namespace Farmware.WorldGeneration.Presentation
                         return new Color32(255, 92, 18, 245);
                     }
 
-                    return isMagmaInfluenceArea
+                    return isMagmaCandidate
                         ? new Color32(136, 38, 30, 226)
                         : new Color32(24, 24, 30, 165);
 
@@ -1185,21 +1155,14 @@ namespace Farmware.WorldGeneration.Presentation
                                     tileX,
                                     tileY)
                                 : 0f;
-                        bool isMagmaInfluenceArea = false;
+                        bool isMagmaCandidate = false;
                         if (currentMode == WorldGenerationDebugVisualizationMode.Magma
                             && hasGenerationSettings)
                         {
-                            // 専用モードのときだけ追加ノイズを読み、通常表示や他のデバッグ表示へ計算負荷を持ち込みません。
-                            MagmaGenerationDebugInfo magmaInfo =
-                                DeterministicChunkGenerator.GetMagmaGenerationDebugInfo(
-                                    tile.Elevation,
-                                    tile.Temperature,
-                                    tile.Weirdness,
-                                    tile.Biome,
-                                    settings,
-                                    tileX,
-                                    tileY);
-                            isMagmaInfluenceArea = magmaInfo.IsInfluenceArea;
+                            // C5-C以降は旧岩地Profileや淡水抑制域を使わず、新火山Biomeと連続火山活動度だけを背景候補として表示します。
+                            isMagmaCandidate = tile.Biome == BiomeId.VolcanicGeothermal
+                                && tile.VolcanicActivityPotential
+                                    >= settings.MagmaMinimumVolcanicInfluence;
                         }
                         bool isAnimalCandidate = hasAnimalCatalog
                             && IsEligibleForAnyAnimalSpecies(tile, resource, animalCatalog);
@@ -1245,7 +1208,7 @@ namespace Farmware.WorldGeneration.Presentation
                                 tile,
                                 rockWallShadowOpacity,
                                 resource.Type,
-                                isMagmaInfluenceArea,
+                                isMagmaCandidate,
                                 isAnimalCandidate,
                                 hasConfirmedAnimal,
                                 geologySite,
@@ -1785,11 +1748,13 @@ namespace Farmware.WorldGeneration.Presentation
             const int generatedTileInformationLineCount = 26;
             const int waitingInformationLineCount = 1;
             const float bottomPadding = 6f;
-            bool showsTwoLegendRows = currentMode == WorldGenerationDebugVisualizationMode.Biome
-                || currentMode == WorldGenerationDebugVisualizationMode.GeologyClass
+            bool showsTwoLegendRows = currentMode == WorldGenerationDebugVisualizationMode.GeologyClass
                 || currentMode == WorldGenerationDebugVisualizationMode.HydrologyFlowDirection
                 || currentMode == WorldGenerationDebugVisualizationMode.HydrologyLake;
-            float informationStartY = showsTwoLegendRows ? 66f : 48f;
+            // 新18Biomeは2列×9行で示すため、中央情報が凡例へ重ならない専用開始位置を使います。
+            float informationStartY = currentMode == WorldGenerationDebugVisualizationMode.Biome
+                ? 198f
+                : showsTwoLegendRows ? 66f : 48f;
 
             string centerInformation = "Center tile is waiting for generation.";
             if (hasCenterTile)
@@ -1816,24 +1781,15 @@ namespace Farmware.WorldGeneration.Presentation
                         centerTile,
                         centerCoordinate.x,
                         centerCoordinate.y);
-                WaterGenerationDebugInfo waterInfo =
-                    DeterministicChunkGenerator.GetWaterGenerationDebugInfo(
-                        centerTile.Elevation,
-                        centerTile.Temperature,
-                        centerTile.Moisture,
-                        centerTile.Weirdness,
-                        settings,
-                        centerCoordinate.x,
-                        centerCoordinate.y);
-                MagmaGenerationDebugInfo magmaInfo =
-                    DeterministicChunkGenerator.GetMagmaGenerationDebugInfo(
-                        centerTile.Elevation,
-                        centerTile.Temperature,
-                        centerTile.Weirdness,
-                        centerTile.Biome,
-                        settings,
-                        centerCoordinate.x,
-                        centerCoordinate.y);
+                ushort magmaDensity = DeterministicMagmaGenerator.SampleDensity(
+                    settings,
+                    centerCoordinate.x,
+                    centerCoordinate.y);
+                bool isMagmaEligible = centerTile.Biome == BiomeId.VolcanicGeothermal
+                    && centerTile.VolcanicActivityPotential
+                        >= settings.MagmaMinimumVolcanicInfluence;
+                bool isMagmaCandidate = isMagmaEligible
+                    && magmaDensity >= settings.MagmaNoiseThreshold;
                 string finalState = !rockWallInfo.FinalCandidate
                     ? "Outside"
                     : centerTile.Ground == GroundType.Water
@@ -1844,36 +1800,6 @@ namespace Farmware.WorldGeneration.Presentation
                 string resourceAnchor = resourceInfo.SelectedType == GeneratedResourceType.None
                     ? "None"
                     : $"({resourceInfo.AnchorTileX}, {resourceInfo.AnchorTileY})";
-                ushort displayedMagmaNoiseThreshold = magmaInfo.UsesRocklandProfile
-                    ? settings.RocklandMagmaNoiseThreshold
-                    : settings.MagmaNoiseThreshold;
-                int displayedMagmaCellSize = magmaInfo.UsesRocklandProfile
-                    ? settings.RocklandMagmaCellSizeInTiles
-                    : settings.MagmaCellSizeInTiles;
-                int displayedMagmaDetailCellSize = magmaInfo.UsesRocklandProfile
-                    ? 0
-                    : settings.MagmaDetailCellSizeInTiles;
-                int displayedMagmaWarpAmplitude = magmaInfo.UsesRocklandProfile
-                    ? 0
-                    : settings.MagmaWarpAmplitudeInTiles;
-                ushort displayedMagmaInfluenceThreshold = magmaInfo.UsesRocklandProfile
-                    ? settings.RocklandMagmaMinimumVolcanicInfluence
-                    : settings.MagmaMinimumVolcanicInfluence;
-                string magmaProfile;
-                if (!magmaInfo.IsEligibleBiome)
-                {
-                    // 対象外バイオームを火山用設定と誤認しないよう、診断HUDへ明示します。
-                    magmaProfile = "Outside";
-                }
-                else if (magmaInfo.UsesRocklandProfile)
-                {
-                    magmaProfile = "Rockland";
-                }
-                else
-                {
-                    magmaProfile = "Volcanic";
-                }
-
                 // 中央HUDも地図の色分けと同じ共通APIを使い、地形属性bitの直接表示と最終判定が食い違わないようにします。
                 TerrainPlacementResult equipmentPlacementResult = TerrainPlacementRules.Evaluate(
                     centerTile,
@@ -1911,8 +1837,7 @@ namespace Farmware.WorldGeneration.Presentation
                     + $"WoodyPotential={centerTile.WoodyVegetationPotential}\n"
                     + $"Ruggedness={centerTile.TerrainRuggedness}  "
                     + $"CoastalInfluence={centerTile.CoastalInfluence}\n"
-                    + $"VolcanicActivity={centerTile.VolcanicActivityPotential}  "
-                    + $"LegacyWeirdness={centerTile.Weirdness}\n"
+                    + $"VolcanicActivity={centerTile.VolcanicActivityPotential}\n"
                     + $"Geology={centerTile.GeologyClass}  Flags={centerTile.GeologyFlags}\n"
                     + $"GeologyTraits: Permeability={centerTile.GeologyPermeability}  "
                     + $"Groundwater={centerTile.GeologyGroundwaterStorage}  "
@@ -1923,22 +1848,18 @@ namespace Farmware.WorldGeneration.Presentation
                     + $"Corridor={(rockWallInfo.Corridor ? "Yes" : "No")}  "
                     + $"Final={finalState}  Surface={rockWallAppearance}  "
                     + $"Shadow={rockWallShadowOpacity:F2}\n"
-                    + $"WaterSettings: Sea={settings.SeaLevelThreshold}  "
-                    + $"FreshMax={settings.FreshWaterMaximumElevation}\n"
-                    + $"Pond: Noise={waterInfo.PondSample} / {waterInfo.EffectivePondThreshold}  "
-                    + $"Wet={waterInfo.WetClimateInfluence}  Wetland={waterInfo.WetlandInfluence}\n"
-                    + $"PondSuppress: Desert={waterInfo.DesertInfluence}  "
-                    + $"Highland={waterInfo.HighlandInfluence}  Volcanic={waterInfo.VolcanicInfluence}\n"
-                    + $"River: Distance={waterInfo.RiverDistanceFromCenterLine} / "
-                    + $"{waterInfo.EffectiveRiverHalfWidth}\n"
-                    + $"Magma[{magmaProfile}]: Cell={displayedMagmaCellSize}/{displayedMagmaDetailCellSize}  "
-                    + $"Warp={displayedMagmaWarpAmplitude}  "
-                    + $"Noise={magmaInfo.MagmaSample} / {displayedMagmaNoiseThreshold}  "
-                    + $"Volcanic={magmaInfo.VolcanicInfluence} / {displayedMagmaInfluenceThreshold}\n"
-                    + $"MagmaState: Raw={(magmaInfo.RawMagmaCandidate ? "Yes" : "No")}  "
-                    + $"Eligible={(magmaInfo.IsEligibleBiome ? "Yes" : "No")}  "
-                    + $"Influence={(magmaInfo.IsInfluenceArea ? "Yes" : "No")}  "
-                    + $"Magma={(magmaInfo.IsMagma ? "Yes" : "No")}\n"
+                    + $"SurfaceWater: Type={centerSurfaceWaterTile.Type}  "
+                    + $"Flags={centerSurfaceWaterTile.Flags}\n"
+                    + $"NaturalHydrology: Flags={centerHydrologyTile.Flags}  "
+                    + $"Flooding={centerHydrologyTile.NaturalFloodingPotential}  "
+                    + $"Saturation={centerHydrologyTile.NaturalSoilSaturationPotential}\n"
+                    + $"Magma: Cell={settings.MagmaCellSizeInTiles}/"
+                    + $"{settings.MagmaDetailCellSizeInTiles}  "
+                    + $"Warp={settings.MagmaWarpAmplitudeInTiles}  "
+                    + $"Density={magmaDensity} / {settings.MagmaNoiseThreshold}\n"
+                    + $"MagmaState: Eligible={(isMagmaEligible ? "Yes" : "No")}  "
+                    + $"Candidate={(isMagmaCandidate ? "Yes" : "No")}  "
+                    + $"Magma={(centerTile.Ground == GroundType.Magma ? "Yes" : "No")}\n"
                     + $"RockSettings: Mass={settings.RockWallMassCellSizeInTiles}  "
                     + $"Detail={settings.RockWallDetailCellSizeInTiles}  "
                     + $"Warp={settings.RockWallWarpAmplitudeInTiles}  "
@@ -1953,12 +1874,8 @@ namespace Farmware.WorldGeneration.Presentation
                     + $"{resourceSettings.StoneClusterRadiusInTiles}  "
                     + $"Sand={resourceSettings.SandMinimumSpacingInTiles}/"
                     + $"{resourceSettings.SandClusterRadiusInTiles}\n"
-                    + $"Cold={settings.ColdTemperatureThreshold}  Hot={settings.HotTemperatureThreshold}  "
-                    + $"Dry={settings.DryMoistureThreshold}  Wet={settings.WetMoistureThreshold}\n"
-                    + $"Wetland={settings.WetlandMoistureThreshold}/"
-                    + $"{settings.WetlandMaximumElevation}  "
-                    + $"Highland={settings.HighlandElevationThreshold}  "
-                    + $"Volcanic={settings.VolcanicWeirdnessThreshold}";
+                    + $"InterimSoil: Hot={settings.HotTemperatureThreshold}  "
+                    + $"Dry={settings.DryMoistureThreshold}  Wet={settings.WetMoistureThreshold}";
 
                 if (IsHydrologyVisualizationMode(currentMode))
                 {
@@ -2260,50 +2177,25 @@ namespace Farmware.WorldGeneration.Presentation
             switch (mode)
             {
                 case WorldGenerationDebugVisualizationMode.Biome:
-                    DrawLegendEntry(
-                        ref nextX,
-                        y,
-                        GetVisualizationColor(mode, new GeneratedTile { Biome = BiomeId.Grassland }),
-                        "Grassland",
-                        92f);
-                    DrawLegendEntry(
-                        ref nextX,
-                        y,
-                        GetVisualizationColor(mode, new GeneratedTile { Biome = BiomeId.Forest }),
-                        "Forest",
-                        74f);
-                    DrawLegendEntry(
-                        ref nextX,
-                        y,
-                        GetVisualizationColor(mode, new GeneratedTile { Biome = BiomeId.Desert }),
-                        "Desert",
-                        74f);
-                    DrawLegendEntry(
-                        ref nextX,
-                        y,
-                        GetVisualizationColor(mode, new GeneratedTile { Biome = BiomeId.Rockland }),
-                        "Rockland",
-                        84f);
-                    nextX = startX + 48f;
-                    float secondBiomeLegendY = y + 18f;
-                    DrawLegendEntry(
-                        ref nextX,
-                        secondBiomeLegendY,
-                        GetVisualizationColor(mode, new GeneratedTile { Biome = BiomeId.Wetland }),
-                        "Wetland",
-                        82f);
-                    DrawLegendEntry(
-                        ref nextX,
-                        secondBiomeLegendY,
-                        GetVisualizationColor(mode, new GeneratedTile { Biome = BiomeId.Snowfield }),
-                        "Snowfield",
-                        90f);
-                    DrawLegendEntry(
-                        ref nextX,
-                        secondBiomeLegendY,
-                        GetVisualizationColor(mode, new GeneratedTile { Biome = BiomeId.Volcanic }),
-                        "Volcanic",
-                        88f);
+                    for (byte stableId = BiomeStableIds.First;
+                        stableId <= BiomeStableIds.Last;
+                        stableId++)
+                    {
+                        // 横長名を430pxパネルへ収めるため2列とし、偶数番目で次の行へ移ります。
+                        int zeroBasedIndex = stableId - BiomeStableIds.First;
+                        if ((zeroBasedIndex & 1) == 0)
+                        {
+                            nextX = startX + 48f;
+                        }
+
+                        BiomeId biome = (BiomeId)stableId;
+                        DrawLegendEntry(
+                            ref nextX,
+                            y + ((zeroBasedIndex / 2) * 18f),
+                            GetBiomeVisualizationColor(biome),
+                            GetBiomeLegendName(biome),
+                            185f);
+                    }
                     break;
                 case WorldGenerationDebugVisualizationMode.Soil:
                     DrawLegendEntry(
@@ -2832,6 +2724,66 @@ namespace Farmware.WorldGeneration.Presentation
                 default:
                     GUI.Label(new Rect(nextX, y - 2f, 40f, 18f), "Off", informationStyle);
                     break;
+            }
+        }
+
+        /// <summary>新18Biomeの安定IDを、仮地形Tileと対応する開発者表示色へ変換します。</summary>
+        /// <param name="biome">色分けする新Biomeです。Noneや未定義値は分類漏れ色になります。</param>
+        /// <returns>GameビューOverlayへ重ねるAlpha 238の固定色です。</returns>
+        private static Color32 GetBiomeVisualizationColor(BiomeId biome)
+        {
+            switch (biome)
+            {
+                case BiomeId.TemperateGrassland: return new Color32(112, 169, 86, 238);
+                case BiomeId.TropicalSavannaWoodland: return new Color32(150, 166, 75, 238);
+                case BiomeId.TemperateDeciduousForest: return new Color32(79, 139, 70, 238);
+                case BiomeId.WarmTemperateEvergreenForest: return new Color32(50, 122, 77, 238);
+                case BiomeId.TemperateMontaneBambooForest: return new Color32(91, 151, 88, 238);
+                case BiomeId.TropicalRainforest: return new Color32(38, 112, 67, 238);
+                case BiomeId.TropicalSeasonalForest: return new Color32(68, 133, 61, 238);
+                case BiomeId.SubtropicalOceanicForest: return new Color32(58, 137, 105, 238);
+                case BiomeId.BorealConiferForest: return new Color32(66, 112, 82, 238);
+                case BiomeId.Steppe: return new Color32(174, 162, 82, 238);
+                case BiomeId.DryShrublandWoodland: return new Color32(154, 130, 74, 238);
+                case BiomeId.CactusDesertDryPlateau: return new Color32(188, 151, 83, 238);
+                case BiomeId.HotDesert: return new Color32(218, 181, 101, 238);
+                case BiomeId.FreshwaterMarshFloodplain: return new Color32(77, 142, 119, 238);
+                case BiomeId.SwampForest: return new Color32(54, 116, 90, 238);
+                case BiomeId.TundraPolarBarrens: return new Color32(190, 214, 218, 238);
+                case BiomeId.AlpineRockland: return new Color32(126, 122, 135, 238);
+                case BiomeId.VolcanicGeothermal: return new Color32(132, 68, 57, 238);
+                default:
+                    // Noneを温帯草原へ見せず、C5-C分類失敗を暗色として気付けるようにします。
+                    return new Color32(24, 24, 30, 238);
+            }
+        }
+
+        /// <summary>430pxの診断パネルへ収まる、新18Biomeの短い英語凡例名を返します。</summary>
+        /// <param name="biome">表示対象の新Biomeです。</param>
+        /// <returns>2列凡例用の省略名です。未定義値はInvalidです。</returns>
+        private static string GetBiomeLegendName(BiomeId biome)
+        {
+            switch (biome)
+            {
+                case BiomeId.TemperateGrassland: return "Temperate Grassland";
+                case BiomeId.TropicalSavannaWoodland: return "Tropical Savanna";
+                case BiomeId.TemperateDeciduousForest: return "Deciduous Forest";
+                case BiomeId.WarmTemperateEvergreenForest: return "Evergreen Forest";
+                case BiomeId.TemperateMontaneBambooForest: return "Montane Bamboo";
+                case BiomeId.TropicalRainforest: return "Tropical Rainforest";
+                case BiomeId.TropicalSeasonalForest: return "Seasonal Forest";
+                case BiomeId.SubtropicalOceanicForest: return "Oceanic Forest";
+                case BiomeId.BorealConiferForest: return "Boreal Forest";
+                case BiomeId.Steppe: return "Steppe";
+                case BiomeId.DryShrublandWoodland: return "Dry Shrubland";
+                case BiomeId.CactusDesertDryPlateau: return "Cactus Plateau";
+                case BiomeId.HotDesert: return "Hot Desert";
+                case BiomeId.FreshwaterMarshFloodplain: return "Freshwater Marsh";
+                case BiomeId.SwampForest: return "Swamp Forest";
+                case BiomeId.TundraPolarBarrens: return "Tundra";
+                case BiomeId.AlpineRockland: return "Alpine Rockland";
+                case BiomeId.VolcanicGeothermal: return "Volcanic";
+                default: return "Invalid";
             }
         }
 

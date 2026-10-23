@@ -353,7 +353,7 @@ namespace Farmware.Tests
             species[0] = new AnimalSpeciesDefinitionBlob
             {
                 SpeciesRuntimeId = new DefinitionRuntimeId(1),
-                AllowedBiomes = AnimalBiomeMask.Grassland,
+                AllowedBiomes = AnimalBiomeMask.TemperateGrassland,
                 AllowedGrounds = AnimalGroundMask.Land,
                 MinimumHerdSize = 3,
                 MaximumHerdSize = 6,

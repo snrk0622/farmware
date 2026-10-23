@@ -593,12 +593,12 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(dryHash, Is.Not.EqualTo(eligibleHash));
         }
 
-        /// <summary>テスト名から安定Seedを作り、製品既定のGeneratorVersion 1設定を返します。</summary>
+        /// <summary>テスト名から安定Seedを作り、製品の現在GeneratorVersion設定を返します。</summary>
         /// <param name="seedText">テストケース間の乱数列を分離する固定文字列です。</param>
         /// <returns>C4-B2までの既定値を持つ固定ワールド生成設定です。</returns>
         private static WorldGenerationSettings CreateSettings(string seedText)
         {
-            return WorldGenerationSettings.CreateDefault(WorldSeedUtility.FromString(seedText), 1);
+            return WorldGenerationSettings.CreateDefault(WorldSeedUtility.FromString(seedText), WorldGenerationSettings.CurrentGeneratorVersion);
         }
 
         /// <summary>製品の地質キャッシュ経路で1チャンク4096地形タイルを生成します。</summary>

@@ -147,60 +147,35 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: fbafab47a090442529ac375aace30d8b, type: 3}
-  m_Name: 
+  m_Name:
   m_EditorClassIdentifier: Farmware.WorldGeneration.Authoring::Farmware.WorldGeneration.Authoring.WorldGenerationAuthoring
   seedText: Farmware
-  generatorVersion: 1
+  generatorVersion: 2
   elevationCellSizeInTiles: 192
   temperatureCellSizeInTiles: 96
   moistureCellSizeInTiles: 80
-  weirdnessCellSizeInTiles: 112
   biomeWarpCellSizeInTiles: 192
   biomeWarpAmplitudeInTiles: 12
   octaveCount: 4
-  biomeClassificationTransitionWidthInTiles: 12
-  biomeTransitionWidthInTiles: 6
-  waterThreshold: 0.305
-  riverCellSizeInTiles: 96
-  pondCellSizeInTiles: 48
-  freshWaterOctaveCount: 2
-  riverCenterLineHalfWidth: 0.009155413
-  pondThreshold: 0.86976427
-  wetClimatePondThresholdReduction: 0.12970169
-  wetlandPondThresholdReduction: 0.12970169
-  desertPondThresholdIncrease: 0.07629511
-  highlandPondThresholdIncrease: 0.053406578
-  volcanicPondThresholdIncrease: 0.24414435
-  wetlandRiverHalfWidthIncrease: 0.007629511
-  volcanicRiverHalfWidthReduction: 0.00686656
-  freshWaterMaximumElevation: 0.71717405
+  waterThreshold: 0.30518043
   magmaCellSizeInTiles: 24
   magmaDetailCellSizeInTiles: 8
   magmaWarpAmplitudeInTiles: 6
   magmaOctaveCount: 3
   magmaNoiseThreshold: 0.51880676
-  magmaInfluenceNoiseThreshold: 0.45777065
   magmaMinimumVolcanicInfluence: 0
-  magmaInfluenceMinimumVolcanicInfluence: 0
-  rocklandMagmaCellSizeInTiles: 12
-  rocklandMagmaNoiseThreshold: 0.71717405
-  rocklandMagmaInfluenceNoiseThreshold: 0.671397
-  rocklandMagmaMinimumVolcanicInfluence: 0.0015259022
-  rocklandMagmaInfluenceMinimumVolcanicInfluence: 0.0007629511
   rockWallMassCellSizeInTiles: 24
   rockWallDetailCellSizeInTiles: 8
   rockWallWarpAmplitudeInTiles: 6
   rockWallNoiseThreshold: 0.6256199
   rockWallCorridorHalfWidth: 0.016784925
-  hotTemperatureThreshold: 0.61
+  hotTemperatureThreshold: 0.61036086
   coldTemperatureThreshold: 0.3509575
-  dryMoistureThreshold: 0.435
-  wetMoistureThreshold: 0.603
+  dryMoistureThreshold: 0.43488213
+  wetMoistureThreshold: 0.60273135
   wetlandMoistureThreshold: 0.7629511
   wetlandMaximumElevation: 0.5493248
   highlandElevationThreshold: 0.65613794
-  volcanicWeirdnessThreshold: 0.71717405
-  biomeAdjacencyTransitionScoreMargin: 18000
   resourceClusterCellSizeInTiles: 24
   resourceOctaveCount: 2
   treeResourceThreshold: 0.7629511
@@ -241,7 +216,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 4af02094a3894c718f00da1a1a00a426, type: 3}
-  m_Name: 
+  m_Name:
   m_EditorClassIdentifier: Farmware.Authoring::Farmware.Authoring.DefinitionCatalogAuthoring
   definitions:
   - displayName: Chicken
@@ -250,7 +225,7 @@ MonoBehaviour:
     references: []
   animalSpeciesDefinitions:
   - definitionGuid: 1728e39573b24efa996020e9493cc742
-    allowedBiomes: 1
+    allowedBiomeBits: 1
     allowedGrounds: 1
     minimumHerdSize: 3
     maximumHerdSize: 6

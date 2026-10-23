@@ -130,12 +130,12 @@ namespace Farmware.WorldGeneration.Tests
         [Test]
         public void SelectLand_DifferentBiomesAndRockWall_DoNotCreateBoundary()
         {
-            GeneratedTile current = CreateTile(GroundType.Land, BiomeId.Grassland);
+            GeneratedTile current = CreateTile(GroundType.Land, BiomeId.TemperateGrassland);
             TerrainNeighborTiles connectedNeighbors = CreateNeighbors(
-                CreateTile(GroundType.Land, BiomeId.Forest),
-                CreateTile(GroundType.RockWall, BiomeId.Rockland),
-                CreateTile(GroundType.Land, BiomeId.Desert),
-                CreateTile(GroundType.Land, BiomeId.Volcanic));
+                CreateTile(GroundType.Land, BiomeId.TemperateDeciduousForest),
+                CreateTile(GroundType.RockWall, BiomeId.AlpineRockland),
+                CreateTile(GroundType.Land, BiomeId.HotDesert),
+                CreateTile(GroundType.Land, BiomeId.VolcanicGeothermal));
 
             BoundaryHighlightSelection selection =
                 TerrainBoundaryHighlightUtility.SelectLand(current, connectedNeighbors);
@@ -149,7 +149,7 @@ namespace Farmware.WorldGeneration.Tests
         [Test]
         public void SelectLand_WaterOrMagmaNeighbor_SelectsLiquidBoundary()
         {
-            GeneratedTile current = CreateTile(GroundType.Land, BiomeId.Grassland);
+            GeneratedTile current = CreateTile(GroundType.Land, BiomeId.TemperateGrassland);
             TerrainNeighborTiles waterNeighbors = CreateNeighbors(
                 CreateTile(GroundType.Land),
                 CreateTile(GroundType.Water),
@@ -246,7 +246,7 @@ namespace Farmware.WorldGeneration.Tests
         /// <returns>テスト用のGeneratedTileです。</returns>
         private static GeneratedTile CreateTile(
             GroundType ground,
-            BiomeId biome = BiomeId.Grassland)
+            BiomeId biome = BiomeId.TemperateGrassland)
         {
             return new GeneratedTile
             {

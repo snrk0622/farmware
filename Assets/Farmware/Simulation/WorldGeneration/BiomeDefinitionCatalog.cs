@@ -1,5 +1,5 @@
 // このファイルは、TERRAIN-01C5-Aで確定した新18Biomeの安定ID、適性範囲、軸重み、地質適合度を定義します。
-// 旧7Biomeの実行経路とは接続せず、C5後半の分類器が同じ固定Definitionを読むための保存可能な基盤だけを提供します。
+// ChunkGenerationSystemのC5-C最終化Jobが同じ固定Definitionを読み、旧7Biomeへ戻らない分類基盤を提供します。
 
 using System;
 using Unity.Collections;
@@ -9,7 +9,7 @@ namespace Farmware.WorldGeneration
 {
     /// <summary>
     /// 新18Biomeへ割り当てる変更禁止の数値IDです。
-    /// C5完了時に置換するBiomeId列挙型とセーブ形式が同じ値を参照できるよう、数値契約を旧7Biomeから分離します。
+    /// BiomeId列挙型と生成結果が同じ値を参照できるよう、数値契約を旧7Biomeから分離します。
     /// </summary>
     public static class BiomeStableIds
     {
@@ -75,6 +75,9 @@ namespace Farmware.WorldGeneration
 
         /// <summary>新Biomeとして有効な最大安定IDです。</summary>
         public const byte Last = VolcanicGeothermal;
+
+        /// <summary>ID 1〜18へ連続して割り当てた新Biomeの総数です。</summary>
+        public const int Count = Last - First + 1;
     }
 
     /// <summary>
@@ -242,7 +245,7 @@ namespace Farmware.WorldGeneration
     /// <summary>
     /// 新18BiomeのDefinitionと、水文特殊Biomeごとの許可Host集合をまとめた固定設定です。
     /// 分類器だけが読むECSシングルトンとしてWorldGenerationSettingsから分離し、無関係な生成Jobへの約4KBの値コピーを避けます。
-    /// C5-AのDefinitionとC5-B1のVariation設定を保持し、旧7Biomeの生成結果へはまだ接続しません。
+    /// C5-AのDefinitionとC5-B1のVariation設定を保持し、C5-Cの最終分類Jobへ値コピーで渡します。
     /// </summary>
     public struct BiomeClassificationSettings : IComponentData
     {
