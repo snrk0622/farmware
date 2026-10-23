@@ -4,7 +4,7 @@
 - ブランチ: `feature/terrain-01a-effective-cells`
 - 状態: 実装・AI検証・人間確認完了
 - 依存: WORLD-01C、WORLD-01D
-- 後続: TERRAIN-01C1〜C7、TERRAIN-01D、SAVE-01、UI-01、PLAYER-01、GATHER-01、BUILD-01
+- 後続: TERRAIN-01C1〜C8、TERRAIN-01D、SAVE-01、UI-01、PLAYER-01、GATHER-01、BUILD-01
 
 ## 1. 目的
 
@@ -99,7 +99,7 @@ AI確認結果:
 
 ## 9. 未実装・残る境界
 
-- バイオーム構成と安定ID方針はTERRAIN-01Bで採用済み。生成への段階反映はTERRAIN-01C1〜C7。
+- バイオーム構成と安定ID方針はTERRAIN-01Bで採用済み。生成への段階反映と総合調整はTERRAIN-01C1〜C8。
 - Underwater／DeepSeaの自然Block生成と表示はTERRAIN-01C6。
 - Biome別の複数Ground／Wallパレットと表示参照はTERRAIN-01C6。
 - 新初期スポーン規則はTERRAIN-01D。
@@ -107,6 +107,6 @@ AI確認結果:
 - プレイヤー移動への接続はPLAYER-01。
 - 採掘、硬度、回収Item、道具耐久はGATHER-01。
 - 地面・壁で共通の材質ItemとGround／Wall両形態を結ぶ対応、配置先による形態決定はTERRAIN-01C6とGATHER-01B。
-- 地形Blockとは別の`GeologyDeposit`、Ground／Wall Host、採掘済み差分、大型鉱床はTERRAIN-01C7、GATHER-01C、AUTO-01D。
+- 地形Blockとは別の`GeologyDeposit`、Ground／Wall Host、採掘済み差分、大型鉱床はTERRAIN-01C8、GATHER-01C、AUTO-01D。
 - 配置物占有、材料精算、橋はBUILD-01。
 - 液体伝播と反応はTERRAIN-02。

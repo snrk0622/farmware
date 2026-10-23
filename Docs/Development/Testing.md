@@ -72,19 +72,19 @@ WORLD-01Bの製品用`WorldLayer`と`WorldLayerWaterContract`を、Sceneを使�
 | --- | --- |
 | 座標・シード・ハッシュ | 負座標の床除算、文字列シード、生成順に依存しないハッシュ、全用途のPurposeSaltが一意であることを保証する。 |
 | ノイズ・チャンク境界 | ノイズの連続性と、隣接チャンクが同じワールド座標規則を使うことを保証する。 |
-| バイオーム | 7バイオームの分類、既定スケール、移行帯、軽量サンプルでの出現を保証する。 |
-| 水域 | 気候による川・池の補正と、森林・湿地で池が確認できる分布を保証する。 |
-| マグマ | 火山のマグマ比率、陸地の残存、淡水抑制、岩地の希少マグマ、歪な輪郭を保証する。 |
+| 18Biome・最終地形 | 現行GeneratorVersionと環境軸・地形設定の既定値、基礎生成ではBiomeと派生地表を未確定に保つこと、C3／C4水文後の最終化で地上を18Biomeの有効IDへ分類し、海だけを`BiomeId.None`と海水にすることを保証する。不正なDefinitionとC5前のGeneratorVersionはフォールバックせず拒否する。 |
+| 水文統合 | 完成した湖分類の公開、地下水・泉・自然冠水の失敗時に部分Bufferを公開しないこと、湿原規模がチャンク境界をまたいでも一致することを保証する。 |
 | 岩壁 | 水域上の抑制、適度な被覆率、チャンク境界、凹凸、通路を保証する。 |
 | 固定水文 | 8×8セル、固定9地点の標高・基礎湿度、中心タイルの海洋流出口、専用Saltの同点順、D8流向、負座標、循環拒否、最大4,096辺の下流終端、最大4,096セルの集水・自然流出、Level 0〜6の空間集約Summary、外部入口、分解条件、キャッシュ同値性、閉鎖流域境界、越流辺、基礎湖面、64件のECS Bufferと状態ハッシュに加え、複数Seed監査と診断表示の色写像を保証する。 |
 | 地形配置属性 | 陸地は通常設備＋通常ベルト、水は橋、マグマは橋＋耐熱必須、岩壁と未知IDは配置不可になることを純粋計算で保証する。 |
 | 有効地形 | 組み込みBlock定義、TERRAIN-01C前のInspector追加地形定義の明示拒否、旧GroundTypeからの互換変換、明示除去を含む疎な差分、自然状態への復帰時削除、レイヤー分離、移動・建築の独立判定、地形定義・差分状態ハッシュの作成順非依存、Owner／Buffer片側欠落の拒否を保証する。 |
 | 資源 | 地形適性、最低間隔、群生半径、競合解決、決定性を保証する。 |
-| 建築可能領域・初期スポーン | 地形を上書きせず、必要面積と資源条件を満たす地点を決定論的に記録する。初期位置用設定が3×3未満の領域を拒否し、記録された中心周囲9セルがすべて通常設備建築可能であることも検証する。探索Job実行中に既存地点が現れた場合も、Job完了後に一時結果を解放してSingletonを二重作成しないことを保証する。 |
+| 初期スポーン | 完成ECSチャンクの初期スポーン許可Biome、乾いた通行可能地面、資源なしを満たす1セルを、原点から有限のチャンクリングで決定論的に選ぶ。原点チャンクの候補だけで打ち切らず、より近い負側候補と同距離時のY・X昇順を保証する。探索中に既存地点が現れた場合もSingletonを二重作成しない。旧12×8建築可能領域、3×3中央コア、近傍資源は要求しない。 |
 | ECS生成・ストリーミング | 生成要求、同時生成上限、範囲外キャンセル、保持、非表示化、再有効化を保証する。同じチャンクX/Yの別Layerを既存要求として再利用せず、Surface要求へ別層Entityを混ぜないことも確認する。先読み順は可視矩形の中心を最優先とし、同じリングの上下左右を角より先に要求する。旧Observerの未設定Layerと逆順矩形をSurfaceの正規化結果としてSingletonへ反映し、未生成レイヤーへの切替では実行中Jobの完了を待って旧Surfaceチャンクを解放し、新規要求を作らないことを検証する。Camera Bridgeは外部から選択されたObserver Layerをカメラ移動後も保持し、PresenterはLayer変更フレーム内に旧Tilemapと途中Queueを即時消去する。32bit絶対タイル座標域の正負端では、先読み・保持余白を安全に変換できる論理チャンク範囲へ収め、反対側へ整数周回したチャンクを要求しない。境界ハイライトの1セル近傍と岩壁影の8セル余白は範囲検査付き座標変換を使い、ワールド外を反対端の地形として参照せず非接続にする。初期スポーン、チャンク要求、チャンク生成がUnity標準Groupへ直接所属せず、用途に対応するFarmware共通Groupを使うことも確認する。 |
 
-`EquipmentBuildableRegionLocator_OneThousandSeedsFindDefaultRegion`は、狭い既定探索を1,000シードで調べる通常回帰テストである。
-`EquipmentBuildableRegionLocator_OneHundredSeedSoakTest`は、最大17×17チャンクの資源探索を100シードで行うため`Explicit`指定された負荷テストであり、通常の修正確認では自動実行しない。
+`InitialSpawnLocationSystem_RecordsCandidateFromCompletedChunk`は、完成Bufferの許可Biome・乾燥・通行可・資源なしセルを選び、Surfaceの初期地点を一意に記録することを確認する。
+`InitialSpawnLocationSystem_ContinuesToNegativeRingForCloserOrEarlierCandidate`は、原点チャンクで候補を見つけても探索を早期終了せず、負側を含む未探索リングから距離とY・X昇順で正しい候補を選ぶことを確認する。
+`InitialSpawnLocationSystem_ExistingLocationStopsWithoutDuplicate`は、探索要求後に既存地点が追加された場合も、その地点を成功結果として維持しSingletonを二重作成しないことを確認する。
 
 #### `DeterministicEnvironmentGeneratorTests`
 
@@ -200,7 +200,7 @@ C3-D1の局所性能診断`ClosedBasinResolution_ReportsScalingAndLakeDistributi
 
 #### `TerrainNeighborHaloUtilityTests`
 
-分類用外周1セルの一括生成を検証する。通常・負座標・遠方・int端の四隅の7地点について、連続サブチャンク範囲136通りで必要な外周セルを毎回準備し、旧セル単位生成と全フィールドが一致することを保証する。各回で出力を不正値にして未更新参照を検出する。別シード・別チャンクでの同一配列再利用、内部ECS確定値の優先、不正な配列長と範囲の拒否も確認する。4サブチャンクずつの反映では生成数100／36／36／100、内部1サブチャンクだけなら0となり、外周全260セルを毎回生成する退行も検出する。ワールド端の非接続値は`WorldGenerationTests.TerrainNeighborHalo_WorldEdge_TreatsOutsideNeighborAsDisconnected`で検証する。比較計測は前処理時間を除外せず、見た目と停止感は別途人間が確認する。
+分類用外周1セルを、中心と周囲8チャンクの完成済みECS地形から複写する契約を検証する。`Fill_EveryContiguousBatch_MatchesCompletedNeighborhood`は連続サブチャンク範囲136通りについて、GroundだけでなくBiomeと連続環境値も含む完成セルが対応する近傍チャンクから一致することを保証する。出力を不正値にした同一配列の再利用、中心完成値の優先、不正な配列長と範囲の拒否、4サブチャンク反映時100／36／36／100セル、内部1サブチャンクだけなら0セルとなる準備範囲も確認する。Factoryはワールド内の3×3から1件でも欠ければ表示へ渡さず、intワールド左下端では外側Entityを要求せず非接続として返す。`WorldGenerationTests.TerrainNeighborHalo_WorldEdge_TreatsOutsideNeighborAsDisconnected`も外周値を独立して保証する。見た目と停止感は別途人間が確認する。
 
 #### `WorldCoordinateConversionTests`
 
@@ -319,7 +319,7 @@ Sprite Packer ModeがV2であること、土地Atlasが7バイオームの本番
 | Presentation寿命 | Camera GameObjectを維持したDefault World再作成時に新しい初期スポーンを再適用する。Camera Bridgeは新Worldの初期スポーン探索中でも旧WorldのObserverを直ちに破棄し、初期位置の確定前は新Observerを作らず、確定後に1件だけ作り直す。同一Worldでカメラ制御を再有効化した場合はプレイヤーの移動後位置を保つ。正負座標のGrid 64タイル境界へViewport右上端が一致しても、上限側の面積を持たない隣接チャンクを要求しない。Tilemap PresenterがWorld切替または無効化時に表示済み・反映途中・消去途中の旧表示を残さないことも保証する。 |
 | 開発者用可視化 | バイオーム、Soil、水域、岩壁、マグマ、資源、TERRAIN-01C1の8連続環境表示、共通配置APIの判定結果を使う地形配置マトリクスの色写像がSimulationを変更しないことを保証する。正負の遠方表示原点でも、相対Viewportから得た絶対範囲と中央タイルを検索し、絶対タイルを正しい相対セルへ投影することを確認する。旧`Weirdness`と`Biome Transition`の色判定は削除済みであり、新しい回帰へ含めない。 |
 | 岩壁表示 | チャンク境界をまたぐ内部影が連続したグラデーションになり、一体型岩壁の上面・内部影・露出資源が同じ12px高へ揃うことを保証する。 |
-| SampleScene縦切り | SubSceneロード、Authoringと共通既定閾値、初期カメラ、通常12タイル/秒・Shift併用36タイル/秒のカメラ操作設定、512タイルの自動Floating Origin設定、チャンク生成、境界2層を含む9枚のTilemap、Ground・Rock WallのIndividual ModeおよびTop Left順、土地境界Order 1・岩壁境界Order 4と表示高、14 Sprite参照、境界の既定不透明度20%と実行時Tileへの反映、同じBiomeなら標準・肥沃・砂質のいずれも同じプレイヤー向けTileを選ぶこと、SampleSceneの7バイオーム参照が本番用`terrain_biomes_base.png`の同名Spriteへ対応すること、岩壁参照と全表示セルが本番用`terrain_rock_wall_01.png`の専用Tileへ対応すること、Editor専用Soil可視化が3種類を別色にすること、通常資源の岩壁背面用Order 2・前面用Order 10への振り分け、静止液面・アニメーションの-8pxオフセット、液体セルのGround Tilemapとの排他表示、岩壁セルの下層土地、岩壁上資源の12pxオフセット、土地・岩壁Spriteの上下はみ出しを含む可視チャンク範囲、液面4fps設定、アンロード、同一地形の再生成を保証する。EditModeでは、境界選択と資源背面分類の純粋計算を保証する。 |
+| SampleScene縦切り | SubSceneロード、Authoringと共通既定閾値、初期カメラ、通常12タイル/秒・Shift併用36タイル/秒のカメラ操作設定、512タイルの自動Floating Origin設定、チャンク生成、World Grid直下へScene保存した境界2層を含む9枚のテンプレートTilemap（実行時チャンク配下の複製は枚数から除外）、Ground・Rock WallのIndividual ModeおよびTop Left順、土地境界Order 1・岩壁境界Order 4と表示高、14 Sprite参照、境界の既定不透明度20%と実行時Tileへの反映、同じBiomeなら標準・肥沃・砂質のいずれも同じプレイヤー向けTileを選ぶこと、SampleSceneの7バイオーム参照が本番用`terrain_biomes_base.png`の同名Spriteへ対応すること、岩壁参照と全表示セルが本番用`terrain_rock_wall_01.png`の専用Tileへ対応すること、Editor専用Soil可視化が3種類を別色にすること、通常資源の岩壁背面用Order 2・前面用Order 10への振り分け、静止液面・アニメーションの-8pxオフセット、液体セルのGround Tilemapとの排他表示、岩壁セルの下層土地、岩壁上資源の12pxオフセット、土地・岩壁Spriteの上下はみ出しを含む可視チャンク範囲、液面4fps設定、アンロード、同一地形の再生成を保証する。EditModeでは、境界選択と資源背面分類の純粋計算を保証する。 |
 
 `AutomaticRebase_PreviousPixelPerfectCameraMatrixDoesNotShiftObserver`は、URP Pixel Perfect Cameraが前回描画時の`worldToCameraMatrix`を保持する条件を明示代入で再現する。Camera Transformと表示原点を更新した後、Bridgeが現在のTransformに基づく行列へ戻してからViewportを変換することを検証する。実際にちらついた絶対X=448・960（チャンク7・15への進入）と負方向の3条件で、可視要求が8チャンク先へ飛ばず正しい範囲を示すことを保証する。描画イベントの発火時刻やGameビューの解像度へ依存せず、前フレームの行列が残っていることも前提条件として検査する。
 
@@ -345,7 +345,9 @@ TERRAIN-01C1のAuthoring回帰では、既存の高地閾値を43,000以外へ�
 | TERRAIN-01C5-B1／通常候補の個別評価 | 海面直下の候補除外、海面閾値上の受理、通常・水文特殊Definition役割、7連続軸の許容範囲、台形型`AxisFit`の両端・傾斜・代表範囲・片側傾斜なし、地質適合、海洋影響段階5、活動的火山地質と火山活動段階4、火山中核段階5の通常候補除外、重み合計256の64bit最大16,776,960、全使用軸0点候補、256・128タイルを2：1で合成する候補別Variation、Warp後負座標、Definition固有Salt、Variation設定破損の拒否 | 製品生成・Scene・Prefab・表示は変更しない。Consoleの新規エラー・警告がなく、旧7Biome表示へ意図しない変化がないことを人間確認する。通常全候補の順位と候補なしはC5-B2、特殊優先はC5-B3で確認する |
 | TERRAIN-01C5-B2／通常候補の安定順位 | Score降順、完全同点だけVariation降順、最終同点の安定ID昇順、Score差1の順位不変、最高Score 3候補の完全同点、異なる挿入順、実Definition 3候補の登録逆順、首位・診断用次点・候補総数、海面下の候補なしと部分結果非公開、管理確保と全件ソートなし | 製品生成・Scene・Prefab・表示は変更しない。Consoleの新規エラー・警告がなく、旧7Biome表示へ意図しない変化がないことを人間確認する。活動的火山中核、水文特殊昇格、最終選択はC5-B3で確認する |
 | TERRAIN-01C5-B3／特殊優先と最終選択 | 火山Definitionの地質適合・`SupportsActiveVolcanism`・活動度段階5の3条件と水文特殊より高い優先度、淡水接続・湿原タイル資格・広域湿原規模の全成立、木本植生39,320／39,321境界、対象Definitionの地形気温・基礎湿度・標高・木本植生許容範囲、通常首位の専用Host許可・不許可、局所水場の通常Biome維持、特殊不成立時の通常首位、特殊選択後の通常順位保持、通常候補なしの明示失敗と既定結果、Definition登録逆順での最終ID・理由・通常順位不変 | 製品生成・Scene・Prefab・表示は変更しない。Consoleの新規エラー・警告がなく、旧7Biome表示へ意図しない変化がないことを人間確認する。ECS生成への接続と旧7Biome経路削除はC5-Cで確認する |
+| TERRAIN-01C5-C／ECS生成切替 | 基礎環境・地質・陸海の後にC3／C4水文を完成し、最終Jobで新18Biomeと地面を4096件へ一括公開すること。海だけが`BiomeId.None`となり、地上は1〜18の有効IDであること。火山中核・水文特殊・通常候補の優先、露出マグマが活動度段階5・追加活動度下限・形状密度をすべて要求すること、マグマ＞固定表流水＞岩壁＞陸地の暫定Ground優先、候補なしのチャンク全体失敗とBuffer部分非公開、状態ハッシュ、チャンク順・Job完了順の不変、GeneratorVersion 2の受理とC5前の明示拒否、旧7Biome分類・橋遷移・`Weirdness`・旧淡水・旧岩地マグマ・12×8開始平地探索が実行可能でないこと。初期スポーンが完成ECSチャンクの許可Biome・乾燥・通行可・資源なしセルだけを有限探索し、原点チャンクの遠い候補より負側隣接チャンクの近い候補を選ぶこと。同距離の未探索候補があり得る間も座標順確定のため探索を継続すること。SampleScene統合は初期スポーン付近の資源や`TemperateGrassland`を保証せず、存在する資源・動物だけを検証すること | SampleSceneで18色が欠落・代替Tileなしで表示され、淡水・海水・マグマ・岩壁の優先が保たれること。`Magma`診断の候補色、中央HUD、凡例が製品と同じ段階5・追加下限・形状密度条件で一致すること。初期カメラが有効スポーンへ移動し、通常移動・チャンク境界往復で空白や旧色が残らないこと。Map Viewerの`Terrain`／`Biome`がGameビューと一致すること。C5-E前の旧分布監査が無効で、基礎`None`を成功値として集計しないこと |
 | TERRAIN-01C6／旧地形表示の置換 | 最終Block・Liquid・固定水文を正とする表示と状態ハッシュ、旧`GeneratedTile.WaterBodyType`・旧River／Pond生成・旧Biome直結配色・互換変換・旧専用テストが残っていないこと、差分適用後も元生成を変更しないこと | GameビューとMap Viewerが新しい有効地形で一致し、旧表示の切替、凡例、中央情報を持たないこと |
+| TERRAIN-01C7／バイオーム・地形生成の総合調整 | 調整した気候・Biome・水文・Block設定の端点と不正値拒否、同Seed・GeneratorVersion・設定での決定論、負座標・チャンク境界・生成順不変、状態ハッシュ、河川の流出量別段階幅と地下水涵養Halo・泉候補除外の一致、候補なし・水文特殊Host・火山必須ゲートの維持、C7-Aで固定したSeed・範囲の変更前後集計 | C6の最終Tileを使ったGameビューとMap Viewerで、18Biomeの面積率・領域径・孤立片・境界、水系幅、湖・湿原規模、Block構成、初期スポーン候補、生成時間を比較する。合格範囲は実測後に合意し、仮色や描画だけで生成上の問題を隠していないことを確認する |
 | TERRAIN-01／BiomeVariation | 256・128タイル、2：1、既存Biome Warp後の座標、候補別64bit `VariationSalt`、Salt重複拒否、同じ`BiomeScore`内だけの変動値降順、変動値同点時の安定Definition ID昇順、スコア差1で順位不変、首位1候補＋同点次点2候補、最高スコア3候補以上の同点、最終選択前の一意化、先頭候補の最終選択・診断用上位2候補、表示名・登録順・候補列挙順・Job順・チャンク生成順による不変、GeneratorVersionと保存設定の分離 | 完全同点セル率、候補別勝率、連結領域サイズ、1セル孤立領域、同点候補・変動値・安定ID・上位2候補と最終選択理由の診断表示 |
 | TERRAIN-01／HydrologyState | `CatchmentAreaCells`、`CatchmentTruncated`、複数`ConnectionFlags`、終端分類`Marine`／`ClosedBasin`／`LongDrainage`の相互排他、自然冠水・自然土壌飽和ポテンシャル、自然水面、低地境界、淡水接続の各フラグ、海水のみ・閉鎖流域のみ・長距離排水のみの除外、湿原共通ゲート、木本植生境界39,320／39,321、流向・現在冠水・現在土壌水分との分離、同Seed・版・設定・絶対座標での再現、ロード順・探索範囲による不変 | 固定水文と現在水文の個別可視化、集水域・上流打切り・下流長距離判定・接続種別・自然冠水・自然飽和・自然水面・湿原ゲート理由、小池・泉・オアシス周囲が無条件に湿原化しないこと |
 | TERRAIN-01／水系基礎格子 | 8×8水文セル、負座標の床方向除算、担当範囲`-4〜+3`、固定9サンプル`-3／0／+3`、64bit合計と整数平均、D8全方向、海洋流出口の下流なし終端、隣接海洋流出口の代表標高に依存しない最優先選択、海洋候補複数時の`FlowKey`順、海洋候補なしでの低標高優先・同標高の専用Salt順位、ハッシュ衝突時の座標順、海洋以外の高標高セルを選ばないこと、流向循環なし、下流距離0／4,095／4,096／4,097辺、Level 0〜12・1〜4,096辺のDownstream Summary合成、終端を含むSummaryでの早期停止、キャッシュなしとの一致、`Marine`／`ClosedBasin`／`LongDrainage`相互排他、`LongDrainage`のロード後不変、論理チャンク最大262,144流向辺・2,097,152 D8候補判定、処理予算による中断再開・部分値非公開、チャンク境界・生成順・列挙順・Job順による不変、座標範囲外の明示失敗。中心標高19,999・9地点平均28,888の海洋セルと、代表標高21,000の隣接陸上セルを含む回帰ケースで海洋接続になり、閉鎖流域にならないこと | 代表標高・中心タイルの陸海判定・海洋優先の適用理由・流向・下流鎖・Downstream SummaryのLevel・適用数・展開数・終端までの辺数・長距離打切り・海洋接続・閉鎖流域の可視化、タイル細分化した河川が水文セル間の入口・出口と一致すること |
@@ -437,13 +439,15 @@ M3／24GBなど手元の環境での計測は比較データとして残し、8G
 
 2026-10-17の非同期公開比較では、`ChunkGenerationSystem_ProducesBufferAndDisablesRequest`を、開始更新では生成中・両Bufferが空・要求無効、後続更新で完成結果を公開するテストへ更新した。全4096セルの地形・資源を直接計算と比較する。追加の`ChunkGenerationSystem_RespectsConcurrentLimitAndReusesSlot`、`ChunkGenerationSystem_DestroyedTargetDoesNotPublishToReplacement`、`ChunkGenerationSystem_WorldDisposeCompletesOwnedJobs`、`ChunkStreamingSystem_RetainsRunningGenerationUntilCompletion`は、枠上限と再利用、破棄済みEntityへの誤公開防止、World終了時のJob／Native配列解放、保持外の生成枠予約と完成後アンロードを保証する。公開待ちのテスト補助はWorkerへCPUを譲りつつ後続System更新を進め、30秒で失敗する有限待機とし、未完成Jobをテストから強制公開しない。最終ソースの関連EditMode 167件、PlayMode 38件が成功した。Development Playerでも速度36の32秒移動を2試行し、収集・公開・投入・Streamingを同時取得した。両試行とも全フレーム前面のため背景だった旧原因特定記録と改善率を比較せず、読み込めたTimeline範囲で長い生成Job待ちが再現しないことと、残る影・分類・書込の停止を分けて記録した。条件・後片付け・未検証事項は[非同期公開の計測](./Map02DPerformanceReport.md#生成結果の非同期公開比較実装)を参照する。人間の表示受け入れは別途必要である。
 
-岩壁影マスクの同期Burst処理は`TerrainLayerPresentationUtilityTests.FillShadowMask_MatchesBufferAndDirectHalo`の10ケースで全6400セルを従来のBuffer参照／外周直接判定と比較する。別Seed、負座標、遠方、ワールドの四隅を含み、中心をあえて生成式と異なる地形にして確定済みBufferが優先されることも確認する。同じ出力配列を異なる中心地形で再利用し、全件上書きと入力不変を保証する。`FillShadowMask_InvalidArrayLengths_RejectsBeforeRunning`の3ケースでは不正な配列長をJob実行前に拒否する。関連EditModeは180件、PlayModeは38件が成功した。既存PlayMode回帰は影の原点変更時の再利用とPresenter停止・破棄も含む。性能比較と人間の表示受け入れは別途記録し、自動テストの成功だけで停止感の解消を保証しない。
+岩壁影マスクの同期Burst処理は`TerrainLayerPresentationUtilityTests.FillShadowMask_MatchesCompletedTerrainAcrossChunkBoundaries`で全6400セルを中心と周囲8チャンクの完成地形から判定する。東隣を最終Water、北隣を最終Magmaにした入力を含め、基礎岩壁候補を再利用して液体上へ影を延ばさないことを保証する。`FillShadowMask_InvalidArrayLength_RejectsBeforeRunning`の3ケースでは不正な配列長をJob実行前に拒否する。既存PlayMode回帰は影の原点変更時の再利用とPresenter停止・破棄に加え、表示収集が必要な完成近傍を待つことも確認する。性能比較と人間の表示受け入れは別途記録し、自動テストの成功だけで停止感の解消を保証しない。
+
+2026-10-23のC5-C追加レビュー対応後は、Unity 6000.3.8f1の接続済みEditorで厳格再コンパイルがエラー0件・警告0件、World Generation EditMode 556件が343.99秒、PlayMode 56件が141.53秒で全件成功した。完成近傍12件、岩壁影9件、正負intワールド端2件を対象実行でも確認した。PlayModeのScene階層テストは、生成速度によって実行時チャンク9枚が先に作られても、World Grid直下へScene保存された9テンプレートだけを検証し、正常な実行時複製を重複Scene設定と誤判定しない。
 
 同変更のPresentation asmdefにUnity.Burst参照を追加したため、`SystemGroupBoundaryTests` 4件も実行して全成功した。追加パッケージはなく、開発者可視化の式や凡例、Player向けのAssembly分離は維持する。
 
 2026-10-17、ユーザーが影改善後の比較ONで通常移動と`(7,-1)`／`(15,-1)`付近の影の継ぎ目・濃さ・停止感を確認し、問題なさそうと回答した。今回の局所改善の動作確認済みとして扱い、製品の性能合格や比較方式の既定ON採用とは区別する。詳細は[性能計測の受け入れ記録](./Map02DPerformanceReport.md#岩壁影マスク構築の同期burst化)を参照する。
 
-分類用外周の一括生成後はUnity 6000.3.8f1で関連EditMode 196件、PlayMode 39件が成功した。外周の追加16ケースと寿命の追加1ケースを含む。Development Playerでも新旧同一入力の前処理込み比較と前面移動2試行を実施し、開始地点の新旧PNG一致を確認した。これは移動中の全ピクセルや停止感を自動保証するものではない。2026-10-17にユーザーが比較ONの通常移動と`(7,-1)`／`(15,-1)`付近の影の継ぎ目・濃さ・停止感を確認し、問題なさそうと回答してcommitを許可した。今回の確認範囲は動作確認済みとし、最終Viewport・負方向・資源レイヤー等の網羅確認や既定ON採用とは区別する。条件と残る負荷は[外周生成の性能計測](./Map02DPerformanceReport.md#分類用外周地形のバッチ生成)を参照する。
+分類用外周の一括生成後はUnity 6000.3.8f1で関連EditMode 196件、PlayMode 39件が成功した。外周の追加16ケースと寿命の追加1ケースを含む。Development Playerでも新旧同一入力の前処理込み比較と前面移動2試行を実施し、開始地点の新旧PNG一致を確認した。これは移動中の全ピクセルや停止感を自動保証するものではない。2026-10-17にユーザーが比較ONの通常移動と`(7,-1)`／`(15,-1)`付近の影の継ぎ目・濃さ・停止感を確認し、問題なさそうと回答してcommitを許可した。今回の確認範囲は動作確認済みとし、最終Viewport・負方向・資源レイヤー等の網羅確認や既定ON採用とは区別する。条件と残る負荷は[外周生成の性能計測](./Map02DPerformanceReport.md#分類用外周地形のバッチ生成)を参照する。この段落はGeneratorVersion 1の外周生成方式に対する履歴であり、C5-C以降の完成3×3 Buffer方式の現行回帰は上記`TerrainNeighborHaloUtilityTests`と岩壁影マスク節を正とする。
 
 `58d10b16`後の残余停止調査では、同じ検証Playerを再ビルドせず詳細Profiler引数付きで再実行し、移動1907フレームすべて前面だった。読み込めた最後の2000フレームから、影なしの表示スパイクを分類・Tilemap書込へ帰属し、長いフレーム内のFPS待機とは分けて記録した。Editorの固定入力による8近傍取得の補助計測は反射・boxingを含むため、製品時間やGC量の比較には使わない。製品コード・テストは変更しておらず、180件＋依存境界4件／PlayMode 38件を今回再実行したわけではない。起動／出力／終了処理を移動値へ混ぜないこと、記録の退避・復元、未検証事項は[影なしのスパイク切り分け](./Map02DPerformanceReport.md#影構築なしの表示スパイクとフレーム待機の切り分け)を参照する。
 

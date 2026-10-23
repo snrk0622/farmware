@@ -65,15 +65,15 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 小さな表示範囲を生成し、全ピクセルが同じ座標へ直接GenerateTileした結果の色と一致することを検証します。
-        /// ビューア専用の簡易バイオーム計算を追加して実マップとずれる退行を防ぎます。
+        /// 小さな表示範囲を生成し、全ピクセルがC5-C完成チャンクからコピーした地形色と一致することを検証します。
+        /// ビューアが基礎生成のBiome=Noneや表示専用の簡易分類へ戻る退行を防ぎます。
         /// </summary>
         [Test]
-        public void Sample_EveryPixelMatchesDirectDeterministicGeneratorResult()
+        public void Sample_EveryPixelMatchesFinalizedTerrainSample()
         {
             WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
                 WorldSeedUtility.FromString("map-viewer-shared-generator-test"),
-                1);
+                WorldGenerationSettings.CurrentGeneratorVersion);
             WorldGenerationMapSampleResult result = WorldGenerationMapSampler.Sample(
                 settings,
                 -65,
@@ -84,7 +84,7 @@ namespace Farmware.WorldGeneration.Tests
                 WorldGenerationMapViewMode.Terrain,
                 CancellationToken.None);
 
-            // 全ピクセルを直接Generator結果と比較し、座標変換・配列順・色変換をまとめて保証します。
+            // 全ピクセルを同時保存した完成地形と比較し、座標変換・配列順・C5-C色変換をまとめて保証します。
             for (int pixelY = 0; pixelY < result.Height; pixelY++)
             {
                 for (int pixelX = 0; pixelX < result.Width; pixelX++)
@@ -94,14 +94,15 @@ namespace Farmware.WorldGeneration.Tests
                         pixelY,
                         out int worldTileX,
                         out int worldTileY);
-                    GeneratedTile directTile = DeterministicChunkGenerator.GenerateTile(
-                        settings,
+                    bool found = result.TryGetFinalizedTerrainSample(
                         worldTileX,
-                        worldTileY);
+                        worldTileY,
+                        out GeneratedTile finalizedTile);
                     Color32 expectedColor = WorldGenerationMapSampler.GetDisplayColor(
                         WorldGenerationMapViewMode.Terrain,
-                        directTile);
+                        finalizedTile);
 
+                    Assert.That(found, Is.True, $"tile=({worldTileX}, {worldTileY})");
                     Assert.That(
                         result.PixelColors[(pixelY * result.Width) + pixelX],
                         Is.EqualTo(expectedColor),
@@ -118,7 +119,7 @@ namespace Farmware.WorldGeneration.Tests
         {
             WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
                 WorldSeedUtility.FromString("map-viewer-underwater-placeholder-test"),
-                1);
+                WorldGenerationSettings.CurrentGeneratorVersion);
             WorldGenerationMapSampleResult result = WorldGenerationMapSampler.Sample(
                 settings,
                 WorldLayer.Underwater,
@@ -145,7 +146,7 @@ namespace Farmware.WorldGeneration.Tests
         {
             WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
                 WorldSeedUtility.FromString("map-viewer-invalid-layer-test"),
-                1);
+                WorldGenerationSettings.CurrentGeneratorVersion);
 
             Assert.That(
                 () => WorldGenerationMapSampler.Sample(
@@ -187,7 +188,7 @@ namespace Farmware.WorldGeneration.Tests
         {
             GeneratedTile forestNormal = new GeneratedTile
             {
-                Biome = BiomeId.Forest,
+                Biome = BiomeId.TemperateDeciduousForest,
                 Ground = GroundType.Land,
                 Soil = SoilType.Normal
             };
@@ -344,7 +345,7 @@ namespace Farmware.WorldGeneration.Tests
         {
             WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
                 WorldSeedUtility.FromString("map-viewer-geology-site-boundary-test"),
-                1);
+                WorldGenerationSettings.CurrentGeneratorVersion);
             bool foundBoundary = false;
 
             // 512タイル規模のサイトを複数またぐよう128タイル間隔で走査し、特定の境界座標への依存を避けます。
@@ -508,7 +509,7 @@ namespace Farmware.WorldGeneration.Tests
             const int centerTileY = -456;
             WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
                 WorldSeedUtility.FromString("map-viewer-initial-hover-test"),
-                1);
+                WorldGenerationSettings.CurrentGeneratorVersion);
             WorldGenerationMapSampleResult result = WorldGenerationMapSampler.Sample(
                 settings,
                 centerTileX,
@@ -684,8 +685,8 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// Map Viewerのモード別上限判定を直接呼び、基礎水文は64、派生水文は縮尺に応じた完成チャンク上限になることを保証します。
-        /// 描画・リサイズ・ホイールズームが共有する判定を対象にし、派生水文だけ無制限なチャンク生成へ戻る退行を防ぎます。
+        /// Map Viewerのモード別上限判定を直接呼び、基礎水文は64、完成チャンク使用モードは縮尺に応じた上限になることを保証します。
+        /// 描画・リサイズ・ホイールズームが共有する判定を対象にし、Terrain・Biomeだけ768サンプルへ戻る退行を防ぎます。
         /// </summary>
         [Test]
         public void GetMaximumSampleResolution_HydrologyUsesBoundedLimits()
@@ -698,6 +699,12 @@ namespace Farmware.WorldGeneration.Tests
             int terrainLimit = (int)getMaximumSampleResolution.Invoke(
                 null,
                 new object[] { WorldGenerationMapViewMode.Terrain, 4 });
+            int biomeLimit = (int)getMaximumSampleResolution.Invoke(
+                null,
+                new object[] { WorldGenerationMapViewMode.Biome, 4 });
+            int environmentLimit = (int)getMaximumSampleResolution.Invoke(
+                null,
+                new object[] { WorldGenerationMapViewMode.Elevation, 4 });
             int baseHydrologyLimit = (int)getMaximumSampleResolution.Invoke(
                 null,
                 new object[] { WorldGenerationMapViewMode.HydrologyLake, 4 });
@@ -708,14 +715,44 @@ namespace Farmware.WorldGeneration.Tests
                 null,
                 new object[] { WorldGenerationMapViewMode.HydrologyNaturalFlooding, 256 });
 
-            Assert.That(terrainLimit, Is.EqualTo(WorldGenerationMapSampler.MaximumResolution));
+            Assert.That(terrainLimit, Is.EqualTo(33));
+            Assert.That(biomeLimit, Is.EqualTo(33));
+            Assert.That(environmentLimit, Is.EqualTo(WorldGenerationMapSampler.MaximumResolution));
             Assert.That(
                 baseHydrologyLimit,
                 Is.EqualTo(WorldGenerationMapSampler.MaximumHydrologyResolution));
             Assert.That(derivedNearLimit, Is.EqualTo(33));
             Assert.That(
                 derivedFarLimit,
-                Is.EqualTo(WorldGenerationMapSampler.MaximumDerivedHydrologySampledChunksPerAxis));
+                Is.EqualTo(WorldGenerationMapSampler.MaximumCompletedChunkSampledChunksPerAxis));
+        }
+
+        /// <summary>
+        /// UI上限を越えるTerrain・Biome要求をサンプラーへ直接渡し、重い完成チャンクを生成する前に拒否することを保証します。
+        /// 将来の別EditorツールがWindowの解像度計算を通らず、数百チャンクの生成を開始する退行を防ぎます。
+        /// </summary>
+        /// <param name="viewMode">完成チャンクを必要とするTerrainまたはBiomeです。</param>
+        [TestCase(WorldGenerationMapViewMode.Terrain)]
+        [TestCase(WorldGenerationMapViewMode.Biome)]
+        public void Sample_CompletedChunkViewRejectsResolutionAboveBound(
+            WorldGenerationMapViewMode viewMode)
+        {
+            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.FromString("map-viewer-completed-chunk-bound-test"),
+                WorldGenerationSettings.CurrentGeneratorVersion);
+
+            Assert.That(
+                () => WorldGenerationMapSampler.Sample(
+                    settings,
+                    WorldLayer.Surface,
+                    0,
+                    0,
+                    34,
+                    1,
+                    4,
+                    viewMode,
+                    CancellationToken.None),
+                Throws.TypeOf<System.ArgumentOutOfRangeException>());
         }
 
         /// <summary>
@@ -758,14 +795,14 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 小さい地図を33行生成し、一定行数の進捗が100%へ到達し、通知の有無で地図の色が変わらないことを保証します。
-        /// UIへ表示する進み具合が本当の生成量を表し、診断追加が生成結果へ影響しないことを検証します。
+        /// 小さい地図を33行生成し、完成チャンク準備と画像行の進捗が単調増加して100%へ到達することを保証します。
+        /// C5-Cでは最終BiomeにC4水文が必要なため、通知の有無で完成地形の色が変わらないことも検証します。
         /// </summary>
         [Test]
-        public void Sample_ReportsCompletedRowsWithoutChangingPixels()
+        public void Sample_ReportsDiagnosticChunksAndCompletedRowsWithoutChangingPixels()
         {
             WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
-                WorldSeedUtility.FromString("map-viewer-progress-test"), 1);
+                WorldSeedUtility.FromString("map-viewer-progress-test"), WorldGenerationSettings.CurrentGeneratorVersion);
             RecordingProgress progress = new RecordingProgress();
             WorldGenerationMapSampleResult result = WorldGenerationMapSampler.Sample(
                 settings, WorldLayer.Surface, -64, 64, 3, 33, 4,
@@ -774,7 +811,17 @@ namespace Farmware.WorldGeneration.Tests
                 settings, WorldLayer.Surface, -64, 64, 3, 33, 4,
                 WorldGenerationMapViewMode.Terrain, CancellationToken.None);
 
-            Assert.That(progress.Values, Is.EqualTo(new[] { 16f / 33f, 32f / 33f, 1f }));
+            Assert.That(progress.Values, Is.Not.Empty);
+            Assert.That(progress.Values[0], Is.EqualTo(0.01f));
+            Assert.That(progress.Values[progress.Values.Count - 1], Is.EqualTo(1f));
+            for (int index = 1; index < progress.Values.Count; index++)
+            {
+                // Gate待機、完成チャンク、画像行という異なる段階を同じ0〜1表示へ合成しても、表示が逆戻りしてはいけません。
+                Assert.That(
+                    progress.Values[index],
+                    Is.GreaterThanOrEqualTo(progress.Values[index - 1]));
+            }
+
             Assert.That(result.PixelColors, Is.EqualTo(withoutProgress.PixelColors));
         }
 
@@ -961,7 +1008,9 @@ namespace Farmware.WorldGeneration.Tests
                 Assert.That(
                     snapshot.WorldSeed,
                     Is.EqualTo(WorldSeedUtility.FromString("viewer-seed-override")));
-                Assert.That(snapshot.GeneratorVersion, Is.EqualTo(1));
+                Assert.That(
+                    snapshot.GeneratorVersion,
+                    Is.EqualTo(WorldGenerationSettings.CurrentGeneratorVersion));
             }
             finally
             {
@@ -985,7 +1034,7 @@ namespace Farmware.WorldGeneration.Tests
                     authoring.CreateWorldGenerationSettingsSnapshot();
                 WorldGenerationSettings expected = WorldGenerationSettings.CreateDefault(
                     WorldSeedUtility.FromString(authoring.SeedText),
-                    1);
+                    WorldGenerationSettings.CurrentGeneratorVersion);
 
                 Assert.That(snapshot.SeaLevelThreshold, Is.EqualTo(expected.SeaLevelThreshold));
                 Assert.That(
@@ -1138,47 +1187,6 @@ namespace Farmware.WorldGeneration.Tests
                 Assert.That(
                     DeterministicEnvironmentGenerator.ValidateSettings(snapshot),
                     Is.True);
-            }
-            finally
-            {
-                Object.DestroyImmediate(authoringObject);
-            }
-        }
-
-        /// <summary>
-        /// 既存Sceneに保存されている旧丸め小数を準備し、Snapshot変換時だけ現在の共通既定値へ移行されることを保証します。
-        /// Sceneファイルを外部から書き換えず、開いているUnity Editorの未保存状態と競合しない移行経路を検証します。
-        /// </summary>
-        [Test]
-        public void AuthoringSnapshot_LegacyRoundedClimateDefaultsUseSharedDefaults()
-        {
-            GameObject authoringObject = new GameObject("WorldGenerationAuthoring Legacy Defaults Test");
-            try
-            {
-                WorldGenerationAuthoring authoring =
-                    authoringObject.AddComponent<WorldGenerationAuthoring>();
-                SerializedObject serializedAuthoring = new SerializedObject(authoring);
-                serializedAuthoring.FindProperty("waterThreshold").floatValue = 0.305f;
-                serializedAuthoring.FindProperty("hotTemperatureThreshold").floatValue = 0.61f;
-                serializedAuthoring.FindProperty("dryMoistureThreshold").floatValue = 0.435f;
-                serializedAuthoring.FindProperty("wetMoistureThreshold").floatValue = 0.603f;
-                serializedAuthoring.ApplyModifiedPropertiesWithoutUndo();
-
-                WorldGenerationSettings snapshot =
-                    authoring.CreateWorldGenerationSettingsSnapshot();
-
-                Assert.That(
-                    snapshot.SeaLevelThreshold,
-                    Is.EqualTo(WorldGenerationSettings.DefaultSeaLevelThreshold));
-                Assert.That(
-                    snapshot.HotTemperatureThreshold,
-                    Is.EqualTo(WorldGenerationSettings.DefaultHotTemperatureThreshold));
-                Assert.That(
-                    snapshot.DryMoistureThreshold,
-                    Is.EqualTo(WorldGenerationSettings.DefaultDryMoistureThreshold));
-                Assert.That(
-                    snapshot.WetMoistureThreshold,
-                    Is.EqualTo(WorldGenerationSettings.DefaultWetMoistureThreshold));
             }
             finally
             {

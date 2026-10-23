@@ -22,7 +22,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// <summary>開発者用の色分けを表示しません。</summary>
         None = 0,
 
-        /// <summary>論理Biome IDを7種類の固定色で表示します。</summary>
+        /// <summary>新18種の論理Biome IDを固定色で表示します。</summary>
         Biome = 1,
 
         /// <summary>0〜65535の連続標高値を黒から白の濃淡で表示します。</summary>
@@ -184,9 +184,9 @@ namespace Farmware.WorldGeneration.Presentation
         // モード名、凡例、中央タイル値を描くため、初回だけ作成して再利用するGUI Styleです。
         private GUIStyle informationStyle;
 
-        // Rock Wall表示の1回のRepaint内で座標ごとの岩壁判定を共有し、同じ重いノイズ生成を近隣タイルごとに繰り返さないキャッシュです。
-        private readonly Dictionary<long, bool> rockWallProbeCache =
-            new Dictionary<long, bool>();
+        // Rock Wall表示が水文・Biome確定前の生成へ戻らないよう、完成地形Bufferをチャンク座標で引くRepaint内索引です。
+        private readonly Dictionary<ChunkCoordinate, Entity> completedTerrainChunkEntities =
+            new Dictionary<ChunkCoordinate, Entity>();
 
         // 生成済み水文Bufferをセル座標で引くRepaint内キャッシュです。水文セルは中心が隣接チャンクに属する場合があるため、
         // 描画中の地形チャンクだけへ依存せず、ロード済み全チャンクの64件Bufferから一度だけ構築します。
@@ -381,6 +381,8 @@ namespace Farmware.WorldGeneration.Presentation
                         default,
                         default,
                         default,
+                        default,
+                        default,
                         default);
                     return;
                 }
@@ -432,7 +434,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="tile">ECS Dynamic Bufferから読み取った1タイルの生成結果です。</param>
         /// <param name="rockWallShadowOpacity">RockWallモードで使う0〜1の連続影不透明度です。他モードでは参照しません。</param>
         /// <param name="resourceType">Resourcesモードで色分けする競合解決後の資源IDです。</param>
-        /// <param name="isMagmaInfluenceArea">Magmaモードで淡水抑制域を暗赤色表示する場合はtrueです。</param>
+        /// <param name="isMagmaCandidate">Magmaモードで最終マグマ候補を明色表示する場合はtrueです。</param>
         /// <param name="isAnimalCandidate">Animal Populationモードで、いずれかの動物種が利用できる地形ならtrueです。</param>
         /// <param name="hasConfirmedAnimal">Animal Populationモードで、確定済み個体がこのタイルに存在するならtrueです。</param>
         /// <param name="geologySite">支配サイト表示へ使用する診断専用サイト情報です。他モードでは参照しません。</param>
@@ -443,7 +445,7 @@ namespace Farmware.WorldGeneration.Presentation
             GeneratedTile tile,
             float rockWallShadowOpacity = 0f,
             GeneratedResourceType resourceType = GeneratedResourceType.None,
-            bool isMagmaInfluenceArea = false,
+            bool isMagmaCandidate = false,
             bool isAnimalCandidate = false,
             bool hasConfirmedAnimal = false,
             GeologySiteData geologySite = default,
@@ -452,37 +454,7 @@ namespace Farmware.WorldGeneration.Presentation
             switch (mode)
             {
                 case WorldGenerationDebugVisualizationMode.Biome:
-                    if (tile.Biome == BiomeId.Forest)
-                    {
-                        return new Color32(42, 128, 65, 238);
-                    }
-
-                    if (tile.Biome == BiomeId.Desert)
-                    {
-                        return new Color32(224, 174, 70, 238);
-                    }
-
-                    if (tile.Biome == BiomeId.Rockland)
-                    {
-                        return new Color32(130, 126, 145, 238);
-                    }
-
-                    if (tile.Biome == BiomeId.Wetland)
-                    {
-                        return new Color32(45, 135, 112, 238);
-                    }
-
-                    if (tile.Biome == BiomeId.Snowfield)
-                    {
-                        return new Color32(198, 230, 238, 238);
-                    }
-
-                    if (tile.Biome == BiomeId.Volcanic)
-                    {
-                        return new Color32(154, 62, 48, 238);
-                    }
-
-                    return new Color32(104, 190, 85, 238);
+                    return GetBiomeVisualizationColor(tile.Biome);
 
                 case WorldGenerationDebugVisualizationMode.Soil:
                     // SoilTypeは通常の土地Spriteへ反映しないため、生成分布を検証するときだけ専用色で区別します。
@@ -693,7 +665,7 @@ namespace Farmware.WorldGeneration.Presentation
                         return new Color32(255, 92, 18, 245);
                     }
 
-                    return isMagmaInfluenceArea
+                    return isMagmaCandidate
                         ? new Color32(136, 38, 30, 226)
                         : new Color32(24, 24, 30, 165);
 
@@ -1080,6 +1052,8 @@ namespace Farmware.WorldGeneration.Presentation
             bool hasCenterHydrologyTile = false;
             GeneratedHydrologyTile centerHydrologyTile = default;
             GeneratedSurfaceWaterTile centerSurfaceWaterTile = default;
+            RockWallAppearance centerRockWallAppearance = RockWallAppearance.None;
+            float centerRockWallShadowOpacity = 0f;
             EntityManager entityManager = presentationWorld.EntityManager;
             bool hasGenerationSettings = settingsQuery.CalculateEntityCount() == 1;
             WorldGenerationSettings settings = hasGenerationSettings
@@ -1099,8 +1073,6 @@ namespace Farmware.WorldGeneration.Presentation
                 hasAnimalCatalog = animalCatalog.IsCreated;
             }
 
-            // 距離探索範囲は隣接タイル同士で重なるため、Rock Wallモードの1描画中だけ座標判定を共有します。
-            rockWallProbeCache.Clear();
             CacheAnimalPositionsForCurrentRepaint(bounds);
 
             using NativeArray<Entity> entities = chunkQuery.ToEntityArray(Allocator.Temp);
@@ -1108,6 +1080,12 @@ namespace Farmware.WorldGeneration.Presentation
                 chunkQuery.ToComponentDataArray<ChunkCoordinateComponent>(Allocator.Temp);
             using NativeArray<ChunkGenerationStatus> statuses =
                 chunkQuery.ToComponentDataArray<ChunkGenerationStatus>(Allocator.Temp);
+
+            CacheCompletedTerrainChunksForCurrentRepaint(
+                entities,
+                coordinates,
+                statuses,
+                entityManager);
 
             // 水文セルの担当範囲は中心から-4〜+3タイルなので、地形タイルと同じチャンクのBufferだけでは
             // 正端4タイルを引けません。水文モード中だけ全ロード済みBufferを座標索引へまとめます。
@@ -1160,6 +1138,13 @@ namespace Farmware.WorldGeneration.Presentation
                     continue;
                 }
 
+                bool hasTerrainNeighborhood =
+                    CompletedChunkTerrainNeighborhoodFactory.TryCreate(
+                        entityManager,
+                        completedTerrainChunkEntities,
+                        new ChunkCoordinate(coordinate.Layer, coordinate.X, coordinate.Y),
+                        out CompletedChunkTerrainNeighborhood terrainNeighborhood);
+
                 int minimumLocalX = minimumTileX - chunkMinimumX;
                 int maximumLocalX = maximumTileX - chunkMinimumX;
                 int minimumLocalY = minimumTileY - chunkMinimumY;
@@ -1179,27 +1164,23 @@ namespace Farmware.WorldGeneration.Presentation
                         GeneratedHydrologyTile hydrologyTile = hydrologyTiles[tileIndex];
                         float rockWallShadowOpacity =
                             currentMode == WorldGenerationDebugVisualizationMode.RockWall
-                            && hasGenerationSettings
-                                ? CalculateCachedRockWallShadowOpacity(
-                                    settings,
-                                    tileX,
-                                    tileY)
+                            && hasTerrainNeighborhood
+                                ? RockWallAppearanceUtility.CalculateShadowOpacityAt(
+                                    terrainNeighborhood,
+                                    localX,
+                                    localY)
                                 : 0f;
-                        bool isMagmaInfluenceArea = false;
+                        bool isMagmaCandidate = false;
                         if (currentMode == WorldGenerationDebugVisualizationMode.Magma
                             && hasGenerationSettings)
                         {
-                            // 専用モードのときだけ追加ノイズを読み、通常表示や他のデバッグ表示へ計算負荷を持ち込みません。
-                            MagmaGenerationDebugInfo magmaInfo =
-                                DeterministicChunkGenerator.GetMagmaGenerationDebugInfo(
-                                    tile.Elevation,
-                                    tile.Temperature,
-                                    tile.Weirdness,
-                                    tile.Biome,
-                                    settings,
-                                    tileX,
-                                    tileY);
-                            isMagmaInfluenceArea = magmaInfo.IsInfluenceArea;
+                            // 製品生成と同じ段階5・追加活動度下限・形状密度を使い、色面と中央HUDを一致させます。
+                            isMagmaCandidate = DeterministicBiomeChunkFinalizer.IsMagmaCandidate(
+                                settings,
+                                tile.Biome,
+                                tile.VolcanicActivityPotential,
+                                tileX,
+                                tileY);
                         }
                         bool isAnimalCandidate = hasAnimalCatalog
                             && IsEligibleForAnyAnimalSpecies(tile, resource, animalCatalog);
@@ -1245,7 +1226,7 @@ namespace Farmware.WorldGeneration.Presentation
                                 tile,
                                 rockWallShadowOpacity,
                                 resource.Type,
-                                isMagmaInfluenceArea,
+                                isMagmaCandidate,
                                 isAnimalCandidate,
                                 hasConfirmedAnimal,
                                 geologySite,
@@ -1264,6 +1245,21 @@ namespace Farmware.WorldGeneration.Presentation
                             hasCenterHydrologyTile = true;
                             centerHydrologyTile = hydrologyTile;
                             centerSurfaceWaterTile = surfaceWaterTile;
+                            centerRockWallAppearance = hasTerrainNeighborhood
+                                ? RockWallAppearanceUtility.ClassifyAt(
+                                    terrainNeighborhood,
+                                    localX,
+                                    localY)
+                                : RockWallAppearance.None;
+                            // Rock Wall以外のモードでも中央情報欄は表示されるため、中央1セルだけは完成近傍から影を求めます。
+                            centerRockWallShadowOpacity = hasTerrainNeighborhood
+                                ? currentMode == WorldGenerationDebugVisualizationMode.RockWall
+                                    ? rockWallShadowOpacity
+                                    : RockWallAppearanceUtility.CalculateShadowOpacityAt(
+                                        terrainNeighborhood,
+                                        localX,
+                                        localY)
+                                : 0f;
                         }
                     }
                 }
@@ -1280,8 +1276,50 @@ namespace Farmware.WorldGeneration.Presentation
                 hasCenterHydrologyTile,
                 centerHydrologyTile,
                 centerSurfaceWaterTile,
+                centerRockWallAppearance,
+                centerRockWallShadowOpacity,
                 settings,
                 resourceSettings);
+        }
+
+        /// <summary>
+        /// Rock Wall表示と中央情報欄が完成地形だけを参照できるよう、現在ロード済みの完成チャンクを座標索引へまとめます。
+        /// </summary>
+        /// <param name="entities">Chunk Queryから同じ順序で取得したEntity配列です。</param>
+        /// <param name="coordinates">各Entityと同じ添字のチャンク座標です。</param>
+        /// <param name="statuses">各Entityと同じ添字の生成状態です。</param>
+        /// <param name="entityManager">完成地形Bufferの長さを検証する現在WorldのEntityManagerです。</param>
+        private void CacheCompletedTerrainChunksForCurrentRepaint(
+            NativeArray<Entity> entities,
+            NativeArray<ChunkCoordinateComponent> coordinates,
+            NativeArray<ChunkGenerationStatus> statuses,
+            EntityManager entityManager)
+        {
+            completedTerrainChunkEntities.Clear();
+            for (int entityIndex = 0; entityIndex < entities.Length; entityIndex++)
+            {
+                ChunkGenerationStatus status = statuses[entityIndex];
+                bool hasCompleteData = status.Phase == ChunkGenerationPhase.ReadyToApply
+                    || status.Phase == ChunkGenerationPhase.Active
+                    || status.Phase == ChunkGenerationPhase.Inactive;
+                if (!hasCompleteData || coordinates[entityIndex].Layer != currentLayer)
+                {
+                    continue;
+                }
+
+                DynamicBuffer<GeneratedTile> tiles =
+                    entityManager.GetBuffer<GeneratedTile>(entities[entityIndex], true);
+                if (tiles.Length != WorldGridConstants.TilesPerChunk)
+                {
+                    continue;
+                }
+
+                var coordinate = new ChunkCoordinate(
+                    coordinates[entityIndex].Layer,
+                    coordinates[entityIndex].X,
+                    coordinates[entityIndex].Y);
+                completedTerrainChunkEntities[coordinate] = entities[entityIndex];
+            }
         }
 
         /// <summary>
@@ -1503,90 +1541,6 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// 開発者用Rock Wall表示について、Repaint内で共有した岩壁判定から最寄り空地距離と連続影値を求めます。
-        /// </summary>
-        /// <param name="settings">水域優先を含む最終岩壁判定に使う生成設定です。</param>
-        /// <param name="worldTileX">中心の符号付き水平ワールドタイル座標です。</param>
-        /// <param name="worldTileY">中心の符号付き垂直ワールドタイル座標です。</param>
-        /// <returns>0以上MaximumShadowOpacity以下の連続した影不透明度です。</returns>
-        private float CalculateCachedRockWallShadowOpacity(
-            in WorldGenerationSettings settings,
-            int worldTileX,
-            int worldTileY)
-        {
-            if (!GetCachedRockWall(settings, worldTileX, worldTileY))
-            {
-                return 0f;
-            }
-
-            int searchRadius = RockWallAppearanceUtility.ShadowSearchRadiusInTiles;
-            int maximumDistanceSquared = searchRadius * searchRadius;
-            int nearestOpenDistanceSquared = int.MaxValue;
-
-            // 通常表示と同じ円形距離を使い、デバッグ色と実際の影が別の形にならないようにします。
-            for (int offsetY = -searchRadius; offsetY <= searchRadius; offsetY++)
-            {
-                for (int offsetX = -searchRadius; offsetX <= searchRadius; offsetX++)
-                {
-                    int distanceSquared = (offsetX * offsetX) + (offsetY * offsetY);
-                    if (distanceSquared == 0
-                        || distanceSquared > maximumDistanceSquared
-                        || distanceSquared >= nearestOpenDistanceSquared)
-                    {
-                        continue;
-                    }
-
-                    long sampleTileX = (long)worldTileX + offsetX;
-                    long sampleTileY = (long)worldTileY + offsetY;
-                    bool sampleIsOutsideWorld = sampleTileX < int.MinValue
-                        || sampleTileX > int.MaxValue
-                        || sampleTileY < int.MinValue
-                        || sampleTileY > int.MaxValue;
-
-                    // int座標域の外側は地形が存在しない空地として扱い、反対側の端へ符号周回した岩壁を参照しません。
-                    if (sampleIsOutsideWorld
-                        || !GetCachedRockWall(
-                            settings,
-                            (int)sampleTileX,
-                            (int)sampleTileY))
-                    {
-                        nearestOpenDistanceSquared = distanceSquared;
-                    }
-                }
-            }
-
-            return RockWallAppearanceUtility
-                .CalculateShadowOpacityFromNearestOpenDistanceSquared(
-                    nearestOpenDistanceSquared);
-        }
-
-        /// <summary>
-        /// 符号付きXY座標を64bitキーへ可逆に詰め、同じRepaint中の決定論的岩壁判定を再利用します。
-        /// </summary>
-        /// <param name="settings">岩壁判定に使う現在の生成設定です。</param>
-        /// <param name="worldTileX">調べる水平ワールドタイル座標です。</param>
-        /// <param name="worldTileY">調べる垂直ワールドタイル座標です。</param>
-        /// <returns>水域優先適用後の最終地形が岩壁ならtrueです。</returns>
-        private bool GetCachedRockWall(
-            in WorldGenerationSettings settings,
-            int worldTileX,
-            int worldTileY)
-        {
-            long coordinateKey = ((long)worldTileX << 32) | (uint)worldTileY;
-            if (rockWallProbeCache.TryGetValue(coordinateKey, out bool isRockWall))
-            {
-                return isRockWall;
-            }
-
-            isRockWall = DeterministicChunkGenerator.IsRockWall(
-                settings,
-                worldTileX,
-                worldTileY);
-            rockWallProbeCache.Add(coordinateKey, isRockWall);
-            return isRockWall;
-        }
-
-        /// <summary>
         /// 指定タイルの4辺をCamera Viewportへ投影し、Windowbox左上原点のIMGUI矩形へ変換します。
         /// </summary>
         /// <param name="tileX">描画する水平ワールドタイル座標です。</param>
@@ -1767,6 +1721,8 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="hasCenterHydrologyTile">中央タイルの派生水文と固定表流水を取得できた場合はtrueです。</param>
         /// <param name="centerHydrologyTile">中央タイルの自然飽和、自然冠水、湿原フラグです。</param>
         /// <param name="centerSurfaceWaterTile">中央タイルへ最終確定した固定表流水です。</param>
+        /// <param name="centerRockWallAppearance">完成した周囲チャンクを含む中央岩壁の露出分類です。</param>
+        /// <param name="centerRockWallShadowOpacity">完成地形から求めた中央岩壁影の不透明度です。</param>
         /// <param name="settings">現在の生成閾値を保持するSingleton値です。</param>
         /// <param name="resourceSettings">現在の資源最低間隔と群半径を保持するSingleton値です。</param>
         private void DrawInformationPanel(
@@ -1779,17 +1735,21 @@ namespace Farmware.WorldGeneration.Presentation
             bool hasCenterHydrologyTile,
             GeneratedHydrologyTile centerHydrologyTile,
             GeneratedSurfaceWaterTile centerSurfaceWaterTile,
+            RockWallAppearance centerRockWallAppearance,
+            float centerRockWallShadowOpacity,
             WorldGenerationSettings settings,
             ResourceGenerationSettings resourceSettings)
         {
             const int generatedTileInformationLineCount = 26;
             const int waitingInformationLineCount = 1;
             const float bottomPadding = 6f;
-            bool showsTwoLegendRows = currentMode == WorldGenerationDebugVisualizationMode.Biome
-                || currentMode == WorldGenerationDebugVisualizationMode.GeologyClass
+            bool showsTwoLegendRows = currentMode == WorldGenerationDebugVisualizationMode.GeologyClass
                 || currentMode == WorldGenerationDebugVisualizationMode.HydrologyFlowDirection
                 || currentMode == WorldGenerationDebugVisualizationMode.HydrologyLake;
-            float informationStartY = showsTwoLegendRows ? 66f : 48f;
+            // 新18Biomeは2列×9行で示すため、中央情報が凡例へ重ならない専用開始位置を使います。
+            float informationStartY = currentMode == WorldGenerationDebugVisualizationMode.Biome
+                ? 198f
+                : showsTwoLegendRows ? 66f : 48f;
 
             string centerInformation = "Center tile is waiting for generation.";
             if (hasCenterTile)
@@ -1799,16 +1759,6 @@ namespace Farmware.WorldGeneration.Presentation
                     settings,
                     centerCoordinate.x,
                     centerCoordinate.y);
-                RockWallAppearance rockWallAppearance =
-                    RockWallAppearanceUtility.ClassifyAt(
-                        settings,
-                        centerCoordinate.x,
-                        centerCoordinate.y);
-                float rockWallShadowOpacity =
-                    RockWallAppearanceUtility.CalculateShadowOpacityAt(
-                        settings,
-                        centerCoordinate.x,
-                        centerCoordinate.y);
                 ResourceGenerationDebugInfo resourceInfo =
                     DeterministicResourceGenerator.GetDebugInfo(
                         settings,
@@ -1816,24 +1766,20 @@ namespace Farmware.WorldGeneration.Presentation
                         centerTile,
                         centerCoordinate.x,
                         centerCoordinate.y);
-                WaterGenerationDebugInfo waterInfo =
-                    DeterministicChunkGenerator.GetWaterGenerationDebugInfo(
-                        centerTile.Elevation,
-                        centerTile.Temperature,
-                        centerTile.Moisture,
-                        centerTile.Weirdness,
-                        settings,
-                        centerCoordinate.x,
-                        centerCoordinate.y);
-                MagmaGenerationDebugInfo magmaInfo =
-                    DeterministicChunkGenerator.GetMagmaGenerationDebugInfo(
-                        centerTile.Elevation,
-                        centerTile.Temperature,
-                        centerTile.Weirdness,
-                        centerTile.Biome,
-                        settings,
-                        centerCoordinate.x,
-                        centerCoordinate.y);
+                ushort magmaDensity = DeterministicMagmaGenerator.SampleDensity(
+                    settings,
+                    centerCoordinate.x,
+                    centerCoordinate.y);
+                bool isMagmaEligible = DeterministicBiomeChunkFinalizer.IsMagmaActivityEligible(
+                    settings,
+                    centerTile.Biome,
+                    centerTile.VolcanicActivityPotential);
+                bool isMagmaCandidate = DeterministicBiomeChunkFinalizer.IsMagmaCandidate(
+                    settings,
+                    centerTile.Biome,
+                    centerTile.VolcanicActivityPotential,
+                    centerCoordinate.x,
+                    centerCoordinate.y);
                 string finalState = !rockWallInfo.FinalCandidate
                     ? "Outside"
                     : centerTile.Ground == GroundType.Water
@@ -1844,36 +1790,6 @@ namespace Farmware.WorldGeneration.Presentation
                 string resourceAnchor = resourceInfo.SelectedType == GeneratedResourceType.None
                     ? "None"
                     : $"({resourceInfo.AnchorTileX}, {resourceInfo.AnchorTileY})";
-                ushort displayedMagmaNoiseThreshold = magmaInfo.UsesRocklandProfile
-                    ? settings.RocklandMagmaNoiseThreshold
-                    : settings.MagmaNoiseThreshold;
-                int displayedMagmaCellSize = magmaInfo.UsesRocklandProfile
-                    ? settings.RocklandMagmaCellSizeInTiles
-                    : settings.MagmaCellSizeInTiles;
-                int displayedMagmaDetailCellSize = magmaInfo.UsesRocklandProfile
-                    ? 0
-                    : settings.MagmaDetailCellSizeInTiles;
-                int displayedMagmaWarpAmplitude = magmaInfo.UsesRocklandProfile
-                    ? 0
-                    : settings.MagmaWarpAmplitudeInTiles;
-                ushort displayedMagmaInfluenceThreshold = magmaInfo.UsesRocklandProfile
-                    ? settings.RocklandMagmaMinimumVolcanicInfluence
-                    : settings.MagmaMinimumVolcanicInfluence;
-                string magmaProfile;
-                if (!magmaInfo.IsEligibleBiome)
-                {
-                    // 対象外バイオームを火山用設定と誤認しないよう、診断HUDへ明示します。
-                    magmaProfile = "Outside";
-                }
-                else if (magmaInfo.UsesRocklandProfile)
-                {
-                    magmaProfile = "Rockland";
-                }
-                else
-                {
-                    magmaProfile = "Volcanic";
-                }
-
                 // 中央HUDも地図の色分けと同じ共通APIを使い、地形属性bitの直接表示と最終判定が食い違わないようにします。
                 TerrainPlacementResult equipmentPlacementResult = TerrainPlacementRules.Evaluate(
                     centerTile,
@@ -1911,8 +1827,7 @@ namespace Farmware.WorldGeneration.Presentation
                     + $"WoodyPotential={centerTile.WoodyVegetationPotential}\n"
                     + $"Ruggedness={centerTile.TerrainRuggedness}  "
                     + $"CoastalInfluence={centerTile.CoastalInfluence}\n"
-                    + $"VolcanicActivity={centerTile.VolcanicActivityPotential}  "
-                    + $"LegacyWeirdness={centerTile.Weirdness}\n"
+                    + $"VolcanicActivity={centerTile.VolcanicActivityPotential}\n"
                     + $"Geology={centerTile.GeologyClass}  Flags={centerTile.GeologyFlags}\n"
                     + $"GeologyTraits: Permeability={centerTile.GeologyPermeability}  "
                     + $"Groundwater={centerTile.GeologyGroundwaterStorage}  "
@@ -1921,24 +1836,20 @@ namespace Farmware.WorldGeneration.Presentation
                     + $"RockDensity={rockWallInfo.Density} / {settings.RockWallNoiseThreshold}  "
                     + $"Raw={(rockWallInfo.RawCandidate ? "Yes" : "No")}\n"
                     + $"Corridor={(rockWallInfo.Corridor ? "Yes" : "No")}  "
-                    + $"Final={finalState}  Surface={rockWallAppearance}  "
-                    + $"Shadow={rockWallShadowOpacity:F2}\n"
-                    + $"WaterSettings: Sea={settings.SeaLevelThreshold}  "
-                    + $"FreshMax={settings.FreshWaterMaximumElevation}\n"
-                    + $"Pond: Noise={waterInfo.PondSample} / {waterInfo.EffectivePondThreshold}  "
-                    + $"Wet={waterInfo.WetClimateInfluence}  Wetland={waterInfo.WetlandInfluence}\n"
-                    + $"PondSuppress: Desert={waterInfo.DesertInfluence}  "
-                    + $"Highland={waterInfo.HighlandInfluence}  Volcanic={waterInfo.VolcanicInfluence}\n"
-                    + $"River: Distance={waterInfo.RiverDistanceFromCenterLine} / "
-                    + $"{waterInfo.EffectiveRiverHalfWidth}\n"
-                    + $"Magma[{magmaProfile}]: Cell={displayedMagmaCellSize}/{displayedMagmaDetailCellSize}  "
-                    + $"Warp={displayedMagmaWarpAmplitude}  "
-                    + $"Noise={magmaInfo.MagmaSample} / {displayedMagmaNoiseThreshold}  "
-                    + $"Volcanic={magmaInfo.VolcanicInfluence} / {displayedMagmaInfluenceThreshold}\n"
-                    + $"MagmaState: Raw={(magmaInfo.RawMagmaCandidate ? "Yes" : "No")}  "
-                    + $"Eligible={(magmaInfo.IsEligibleBiome ? "Yes" : "No")}  "
-                    + $"Influence={(magmaInfo.IsInfluenceArea ? "Yes" : "No")}  "
-                    + $"Magma={(magmaInfo.IsMagma ? "Yes" : "No")}\n"
+                    + $"Final={finalState}  Surface={centerRockWallAppearance}  "
+                    + $"Shadow={centerRockWallShadowOpacity:F2}\n"
+                    + $"SurfaceWater: Type={centerSurfaceWaterTile.Type}  "
+                    + $"Flags={centerSurfaceWaterTile.Flags}\n"
+                    + $"NaturalHydrology: Flags={centerHydrologyTile.Flags}  "
+                    + $"Flooding={centerHydrologyTile.NaturalFloodingPotential}  "
+                    + $"Saturation={centerHydrologyTile.NaturalSoilSaturationPotential}\n"
+                    + $"Magma: Cell={settings.MagmaCellSizeInTiles}/"
+                    + $"{settings.MagmaDetailCellSizeInTiles}  "
+                    + $"Warp={settings.MagmaWarpAmplitudeInTiles}  "
+                    + $"Density={magmaDensity} / {settings.MagmaNoiseThreshold}\n"
+                    + $"MagmaState: Eligible={(isMagmaEligible ? "Yes" : "No")}  "
+                    + $"Candidate={(isMagmaCandidate ? "Yes" : "No")}  "
+                    + $"Magma={(centerTile.Ground == GroundType.Magma ? "Yes" : "No")}\n"
                     + $"RockSettings: Mass={settings.RockWallMassCellSizeInTiles}  "
                     + $"Detail={settings.RockWallDetailCellSizeInTiles}  "
                     + $"Warp={settings.RockWallWarpAmplitudeInTiles}  "
@@ -1953,12 +1864,8 @@ namespace Farmware.WorldGeneration.Presentation
                     + $"{resourceSettings.StoneClusterRadiusInTiles}  "
                     + $"Sand={resourceSettings.SandMinimumSpacingInTiles}/"
                     + $"{resourceSettings.SandClusterRadiusInTiles}\n"
-                    + $"Cold={settings.ColdTemperatureThreshold}  Hot={settings.HotTemperatureThreshold}  "
-                    + $"Dry={settings.DryMoistureThreshold}  Wet={settings.WetMoistureThreshold}\n"
-                    + $"Wetland={settings.WetlandMoistureThreshold}/"
-                    + $"{settings.WetlandMaximumElevation}  "
-                    + $"Highland={settings.HighlandElevationThreshold}  "
-                    + $"Volcanic={settings.VolcanicWeirdnessThreshold}";
+                    + $"InterimSoil: Hot={settings.HotTemperatureThreshold}  "
+                    + $"Dry={settings.DryMoistureThreshold}  Wet={settings.WetMoistureThreshold}";
 
                 if (IsHydrologyVisualizationMode(currentMode))
                 {
@@ -2260,50 +2167,25 @@ namespace Farmware.WorldGeneration.Presentation
             switch (mode)
             {
                 case WorldGenerationDebugVisualizationMode.Biome:
-                    DrawLegendEntry(
-                        ref nextX,
-                        y,
-                        GetVisualizationColor(mode, new GeneratedTile { Biome = BiomeId.Grassland }),
-                        "Grassland",
-                        92f);
-                    DrawLegendEntry(
-                        ref nextX,
-                        y,
-                        GetVisualizationColor(mode, new GeneratedTile { Biome = BiomeId.Forest }),
-                        "Forest",
-                        74f);
-                    DrawLegendEntry(
-                        ref nextX,
-                        y,
-                        GetVisualizationColor(mode, new GeneratedTile { Biome = BiomeId.Desert }),
-                        "Desert",
-                        74f);
-                    DrawLegendEntry(
-                        ref nextX,
-                        y,
-                        GetVisualizationColor(mode, new GeneratedTile { Biome = BiomeId.Rockland }),
-                        "Rockland",
-                        84f);
-                    nextX = startX + 48f;
-                    float secondBiomeLegendY = y + 18f;
-                    DrawLegendEntry(
-                        ref nextX,
-                        secondBiomeLegendY,
-                        GetVisualizationColor(mode, new GeneratedTile { Biome = BiomeId.Wetland }),
-                        "Wetland",
-                        82f);
-                    DrawLegendEntry(
-                        ref nextX,
-                        secondBiomeLegendY,
-                        GetVisualizationColor(mode, new GeneratedTile { Biome = BiomeId.Snowfield }),
-                        "Snowfield",
-                        90f);
-                    DrawLegendEntry(
-                        ref nextX,
-                        secondBiomeLegendY,
-                        GetVisualizationColor(mode, new GeneratedTile { Biome = BiomeId.Volcanic }),
-                        "Volcanic",
-                        88f);
+                    for (byte stableId = BiomeStableIds.First;
+                        stableId <= BiomeStableIds.Last;
+                        stableId++)
+                    {
+                        // 横長名を430pxパネルへ収めるため2列とし、偶数番目で次の行へ移ります。
+                        int zeroBasedIndex = stableId - BiomeStableIds.First;
+                        if ((zeroBasedIndex & 1) == 0)
+                        {
+                            nextX = startX + 48f;
+                        }
+
+                        BiomeId biome = (BiomeId)stableId;
+                        DrawLegendEntry(
+                            ref nextX,
+                            y + ((zeroBasedIndex / 2) * 18f),
+                            GetBiomeVisualizationColor(biome),
+                            GetBiomeLegendName(biome),
+                            185f);
+                    }
                     break;
                 case WorldGenerationDebugVisualizationMode.Soil:
                     DrawLegendEntry(
@@ -2590,8 +2472,8 @@ namespace Farmware.WorldGeneration.Presentation
                         ref nextX,
                         y,
                         GetVisualizationColor(mode, new GeneratedTile(), 0f, GeneratedResourceType.None, true),
-                        "Freshwater suppressed",
-                        142f);
+                        "Candidate",
+                        82f);
                     DrawLegendEntry(
                         ref nextX,
                         y,
@@ -2832,6 +2714,66 @@ namespace Farmware.WorldGeneration.Presentation
                 default:
                     GUI.Label(new Rect(nextX, y - 2f, 40f, 18f), "Off", informationStyle);
                     break;
+            }
+        }
+
+        /// <summary>新18Biomeの安定IDを、仮地形Tileと対応する開発者表示色へ変換します。</summary>
+        /// <param name="biome">色分けする新Biomeです。Noneや未定義値は分類漏れ色になります。</param>
+        /// <returns>GameビューOverlayへ重ねるAlpha 238の固定色です。</returns>
+        private static Color32 GetBiomeVisualizationColor(BiomeId biome)
+        {
+            switch (biome)
+            {
+                case BiomeId.TemperateGrassland: return new Color32(112, 169, 86, 238);
+                case BiomeId.TropicalSavannaWoodland: return new Color32(150, 166, 75, 238);
+                case BiomeId.TemperateDeciduousForest: return new Color32(79, 139, 70, 238);
+                case BiomeId.WarmTemperateEvergreenForest: return new Color32(50, 122, 77, 238);
+                case BiomeId.TemperateMontaneBambooForest: return new Color32(91, 151, 88, 238);
+                case BiomeId.TropicalRainforest: return new Color32(38, 112, 67, 238);
+                case BiomeId.TropicalSeasonalForest: return new Color32(68, 133, 61, 238);
+                case BiomeId.SubtropicalOceanicForest: return new Color32(58, 137, 105, 238);
+                case BiomeId.BorealConiferForest: return new Color32(66, 112, 82, 238);
+                case BiomeId.Steppe: return new Color32(174, 162, 82, 238);
+                case BiomeId.DryShrublandWoodland: return new Color32(154, 130, 74, 238);
+                case BiomeId.CactusDesertDryPlateau: return new Color32(188, 151, 83, 238);
+                case BiomeId.HotDesert: return new Color32(218, 181, 101, 238);
+                case BiomeId.FreshwaterMarshFloodplain: return new Color32(77, 142, 119, 238);
+                case BiomeId.SwampForest: return new Color32(54, 116, 90, 238);
+                case BiomeId.TundraPolarBarrens: return new Color32(190, 214, 218, 238);
+                case BiomeId.AlpineRockland: return new Color32(126, 122, 135, 238);
+                case BiomeId.VolcanicGeothermal: return new Color32(132, 68, 57, 238);
+                default:
+                    // Noneを温帯草原へ見せず、C5-C分類失敗を暗色として気付けるようにします。
+                    return new Color32(24, 24, 30, 238);
+            }
+        }
+
+        /// <summary>430pxの診断パネルへ収まる、新18Biomeの短い英語凡例名を返します。</summary>
+        /// <param name="biome">表示対象の新Biomeです。</param>
+        /// <returns>2列凡例用の省略名です。未定義値はInvalidです。</returns>
+        private static string GetBiomeLegendName(BiomeId biome)
+        {
+            switch (biome)
+            {
+                case BiomeId.TemperateGrassland: return "Temperate Grassland";
+                case BiomeId.TropicalSavannaWoodland: return "Tropical Savanna";
+                case BiomeId.TemperateDeciduousForest: return "Deciduous Forest";
+                case BiomeId.WarmTemperateEvergreenForest: return "Evergreen Forest";
+                case BiomeId.TemperateMontaneBambooForest: return "Montane Bamboo";
+                case BiomeId.TropicalRainforest: return "Tropical Rainforest";
+                case BiomeId.TropicalSeasonalForest: return "Seasonal Forest";
+                case BiomeId.SubtropicalOceanicForest: return "Oceanic Forest";
+                case BiomeId.BorealConiferForest: return "Boreal Forest";
+                case BiomeId.Steppe: return "Steppe";
+                case BiomeId.DryShrublandWoodland: return "Dry Shrubland";
+                case BiomeId.CactusDesertDryPlateau: return "Cactus Plateau";
+                case BiomeId.HotDesert: return "Hot Desert";
+                case BiomeId.FreshwaterMarshFloodplain: return "Freshwater Marsh";
+                case BiomeId.SwampForest: return "Swamp Forest";
+                case BiomeId.TundraPolarBarrens: return "Tundra";
+                case BiomeId.AlpineRockland: return "Alpine Rockland";
+                case BiomeId.VolcanicGeothermal: return "Volcanic";
+                default: return "Invalid";
             }
         }
 
@@ -3138,6 +3080,8 @@ namespace Farmware.WorldGeneration.Presentation
             }
 
             animalPositionCache.Clear();
+            completedTerrainChunkEntities.Clear();
+            hydrologyCellCache.Clear();
             queriesAreCreated = false;
             presentationWorld = null;
         }

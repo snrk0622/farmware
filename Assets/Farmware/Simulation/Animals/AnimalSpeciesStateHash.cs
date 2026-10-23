@@ -195,7 +195,8 @@ namespace Farmware.Simulation.Animals
 
                 // フィールド順と型はハッシュ契約なので、構造体の生メモリやpaddingは使用しません。
                 builder.WriteInt32(runtimeId);
-                builder.WriteByte((byte)species.AllowedBiomes);
+                // C5で18bitへ拡張したため、上位Biomeを失わない固定8byteとして順序付きで書き込みます。
+                builder.WriteUInt64((ulong)species.AllowedBiomes);
                 builder.WriteByte((byte)species.AllowedGrounds);
                 builder.WriteByte(species.MinimumHerdSize);
                 builder.WriteByte(species.MaximumHerdSize);

@@ -1,4 +1,4 @@
-// このファイルは、C4-E1aの完成チャンク診断器が製品Generatorを順番どおり実行し、所有配列を安全に破棄することを検証します。
+// このファイルは、C4-E1aとC5-Cの完成チャンク診断器が製品Generatorを順番どおり実行し、所有配列を安全に破棄することを検証します。
 // 1チャンクの有限条件だけを使い、NativeArrayの件数、二重破棄耐性、未接続Layer拒否をEditModeで保証します。
 
 using Farmware.Simulation;
@@ -8,7 +8,7 @@ using NUnit.Framework;
 namespace Farmware.WorldGeneration.Tests
 {
     /// <summary>
-    /// C3とC4-A〜Dの完成結果を再構築するEditor診断境界と、Persistent配列の所有権を検証します。
+    /// C3、C4-A〜D、C5-Cの完成結果を再構築するEditor診断境界と、Persistent配列の所有権を検証します。
     /// 複数Seed集計とEditorメニューはC4-E1bで別に検証します。
     /// </summary>
     public sealed class HydrologyDiagnosticChunkTests
@@ -22,11 +22,12 @@ namespace Farmware.WorldGeneration.Tests
         {
             WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
                 WorldSeedUtility.FromString("derived-hydrology-diagnostic-buffer-test"),
-                1);
+                WorldGenerationSettings.CurrentGeneratorVersion);
             var coordinate = new ChunkCoordinate(WorldLayer.Surface, 0, 0);
 
             bool generated = HydrologyDiagnosticChunk.TryGenerate(
                 settings,
+                BiomeDefinitionCatalog.CreateDefault(),
                 coordinate,
                 out HydrologyDiagnosticChunk chunk,
                 out HydrologyDiagnosticGenerationStage stage);
@@ -66,10 +67,11 @@ namespace Farmware.WorldGeneration.Tests
         {
             WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
                 WorldSeedUtility.FromString("derived-hydrology-layer-rejection"),
-                1);
+                WorldGenerationSettings.CurrentGeneratorVersion);
 
             bool generated = HydrologyDiagnosticChunk.TryGenerate(
                 settings,
+                BiomeDefinitionCatalog.CreateDefault(),
                 new ChunkCoordinate(WorldLayer.Underwater, 0, 0),
                 out HydrologyDiagnosticChunk chunk,
                 out HydrologyDiagnosticGenerationStage stage);

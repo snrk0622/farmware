@@ -387,7 +387,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
         }
 
         /// <summary>
-        /// 完成した画面外データを先に作り、可視優先・外側1チャンクだけの予約・Inactive再利用・範囲外消去を保証します。
+        /// 完成した画面外データを先に作り、可視優先・完成近傍が揃う範囲だけの予約・Inactive再利用・範囲外消去を保証します。
         /// 共有方式とローカル方式で同じ有限範囲を使い、Observer自身は変更しません。
         /// </summary>
         /// <param name="local">チャンク別Tilemapを使う場合はtrueです。</param>
@@ -440,7 +440,10 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 var pendingClear = (HashSet<ChunkCoordinate>)Field("pendingClearCoordinates").GetValue(presenter);
                 Assert.That(pendingClear.Contains(entering), Is.False);
                 Assert.That(pendingClear.Contains(new ChunkCoordinate(center - 1, center)), Is.True);
-                Assert.That(progress.Contains(new ChunkCoordinate(center + 2, center)), Is.True);
+                Assert.That(
+                    progress.Contains(new ChunkCoordinate(center + 2, center)),
+                    Is.False,
+                    "右外周のさらに右隣が未ロードなら、確定前地形で補完せず先行表示を待つ必要があります。");
                 Assert.That(progress.Contains(new ChunkCoordinate(center + 3, center)), Is.False);
             }
             finally
@@ -463,11 +466,20 @@ namespace Farmware.WorldGeneration.PlayModeTests
             {
                 World.DefaultGameObjectInjectionWorld = world;
                 EntityManager manager = world.EntityManager;
-                CreateCompletedChunk(manager, 0, 0, ChunkGenerationPhase.ReadyToApply);
-                CreateCompletedChunk(manager, 1, 0, ChunkGenerationPhase.Inactive);
-                CreateCompletedChunk(manager, -1, 0, ChunkGenerationPhase.GeneratingData);
-                Entity settingsEntity = manager.CreateEntity(typeof(WorldGenerationSettings));
-                manager.SetComponentData(settingsEntity, WorldGenerationSettings.CreateDefault(1UL, 1));
+                // 可視中心と外側1チャンクの各表示が完成3×3近傍を借用できるよう、保持範囲相当の5×5を用意します。
+                for (int y = -2; y <= 2; y++)
+                {
+                    for (int x = -2; x <= 2; x++)
+                    {
+                        CreateCompletedChunk(
+                            manager,
+                            x,
+                            y,
+                            x == 0 && y == 0
+                                ? ChunkGenerationPhase.ReadyToApply
+                                : ChunkGenerationPhase.Inactive);
+                    }
+                }
                 Assert.That(Invoke("TryEnsureQueries"), Is.True);
                 Invoke("SynchronizeDisplayOrigin");
                 ChunkStreamingObserver observer = new ChunkStreamingObserver
@@ -478,7 +490,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 var progress = (IDictionary)Field("applyProgressByCoordinate").GetValue(presenter);
                 Assert.That(progress.Count, Is.EqualTo(1), "原点変更の同期経路へ余白を含めません。");
                 Invoke("CollectPresentationWork", observer, false);
-                Assert.That(progress.Count, Is.EqualTo(2), "生成中の未確定データは予約しません。");
+                Assert.That(progress.Count, Is.EqualTo(9), "通常経路は完成近傍を持つ外側1チャンクまで予約します。");
                 Assert.That(Invoke("ProcessApplyQueue", 4), Is.EqualTo(0));
                 object partial = progress[new ChunkCoordinate(0, 0)];
                 Assert.That(partial.GetType().GetField("NextSubChunkIndex").GetValue(partial), Is.EqualTo(4));

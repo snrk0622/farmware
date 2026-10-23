@@ -1,4 +1,4 @@
-// このファイルは、C3とC4-A〜Dの既存Generatorを製品と同じ順序で実行し、Editor監査用の完成水文チャンクを作ります。
+// このファイルは、C3、C4-A〜D、C5-Cの既存Generatorを製品と同じ順序で実行し、Editor監査用の完成地形チャンクを作ります。
 // 複数Seed監査と後続Map Viewerが同じ再構築経路を共有し、診断側へ生成規則を複製しないための境界です。
 
 using System;
@@ -35,7 +35,10 @@ namespace Farmware.WorldGeneration.Editor
         LakeAndSpring = 6,
 
         /// <summary>C4-Dの自然冠水・湿原規模生成で失敗した状態です。</summary>
-        NaturalFloodingAndWetland = 7
+        NaturalFloodingAndWetland = 7,
+
+        /// <summary>C5-Cの新18Biome分類と最終地面確定で失敗した状態です。</summary>
+        BiomeFinalization = 8
     }
 
     /// <summary>
@@ -47,7 +50,7 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>生成対象のレイヤー付き論理チャンク座標です。構築後は変更されません。</summary>
         public ChunkCoordinate Coordinate { get; }
 
-        /// <summary>行優先4096件の完成済み基礎地形です。診断器が所有し、Dispose時に破棄します。</summary>
+        /// <summary>行優先4096件のC5-C確定地形です。診断器が所有し、Dispose時に破棄します。</summary>
         public NativeArray<GeneratedTile> TerrainTiles { get; private set; }
 
         /// <summary>中心が対象チャンク内に属する行優先64件の完成固定水文セルです。診断器が所有します。</summary>
@@ -95,16 +98,18 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>
-        /// C3とC4-A〜Dの既存Generatorを製品と同じ順序で実行し、完成診断チャンクを生成します。
+        /// C3、C4-A〜D、C5-Cの既存Generatorを製品と同じ順序で実行し、完成診断チャンクを生成します。
         /// 呼出し元は成功時のchunkをusingで破棄し、失敗時はstageを監査エラーへ記録します。
         /// </summary>
         /// <param name="settings">Seed、GeneratorVersion、全固定生成設定です。</param>
+        /// <param name="biomeSettings">C5-Cで使用する新18Biome Definitionです。</param>
         /// <param name="coordinate">生成するSurface論理チャンク座標です。</param>
         /// <param name="chunk">成功時に完成配列を所有する診断チャンクです。失敗時はnullです。</param>
         /// <param name="stage">成功時はComplete、失敗時は停止した生成段階です。</param>
         /// <returns>全4出力を部分結果なしで完成できた場合はtrueです。</returns>
         public static bool TryGenerate(
             in WorldGenerationSettings settings,
+            in BiomeClassificationSettings biomeSettings,
             ChunkCoordinate coordinate,
             out HydrologyDiagnosticChunk chunk,
             out HydrologyDiagnosticGenerationStage stage)
@@ -119,7 +124,7 @@ namespace Farmware.WorldGeneration.Editor
             HydrologyDiagnosticChunk generated = new HydrologyDiagnosticChunk(coordinate);
             try
             {
-                if (!TryPopulate(settings, generated, out stage))
+                if (!TryPopulate(settings, biomeSettings, generated, out stage))
                 {
                     generated.Dispose();
                     return false;
@@ -141,11 +146,13 @@ namespace Farmware.WorldGeneration.Editor
         /// 呼出し中だけ必要な大容量作業配列を確実に破棄しながら、所有済み出力へ各段階を順番に書き込みます。
         /// </summary>
         /// <param name="settings">製品Worldと同じ固定生成設定です。</param>
+        /// <param name="biomeSettings">製品Worldと同じ新18Biome Definitionです。</param>
         /// <param name="chunk">成功時だけ公開する4出力配列の所有者です。</param>
         /// <param name="stage">最後に開始した生成段階です。</param>
-        /// <returns>C4-Dまでの全処理が成功した場合はtrueです。</returns>
+        /// <returns>C5-Cまでの全処理が成功した場合はtrueです。</returns>
         private static bool TryPopulate(
             in WorldGenerationSettings settings,
+            in BiomeClassificationSettings biomeSettings,
             HydrologyDiagnosticChunk chunk,
             out HydrologyDiagnosticGenerationStage stage)
         {
@@ -365,6 +372,35 @@ namespace Farmware.WorldGeneration.Editor
                     cellQueue))
             {
                 return false;
+            }
+
+            stage = HydrologyDiagnosticGenerationStage.BiomeFinalization;
+            // 基礎地形配列をその場で確定結果へ置き換えます。NativeArrayは値型なので、
+            // プロパティの添字へ直接代入せず、同じ領域を指すローカル値を通して書き戻します。
+            NativeArray<GeneratedTile> finalizedTerrainTiles = chunk.TerrainTiles;
+            for (int localY = 0; localY < WorldGridConstants.LogicalChunkSize; localY++)
+            {
+                for (int localX = 0; localX < WorldGridConstants.LogicalChunkSize; localX++)
+                {
+                    int tileIndex = WorldGrid.ToTileIndex(localX, localY);
+                    int worldTileX = WorldGrid.ToWorldTileX(chunk.Coordinate.X, localX);
+                    int worldTileY = WorldGrid.ToWorldTileY(chunk.Coordinate.Y, localY);
+                    if (!DeterministicBiomeChunkFinalizer.TryFinalizeTile(
+                            settings,
+                            biomeSettings,
+                            worldTileX,
+                            worldTileY,
+                            finalizedTerrainTiles[tileIndex],
+                            chunk.HydrologyTiles[tileIndex],
+                            chunk.SurfaceWaterTiles[tileIndex],
+                            out GeneratedTile finalizedTile))
+                    {
+                        // 未定義IDや候補なしを旧Biomeへ読み替えず、診断チャンク全体を失敗させます。
+                        return false;
+                    }
+
+                    finalizedTerrainTiles[tileIndex] = finalizedTile;
+                }
             }
 
             stage = HydrologyDiagnosticGenerationStage.Complete;

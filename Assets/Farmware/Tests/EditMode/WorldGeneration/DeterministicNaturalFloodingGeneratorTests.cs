@@ -41,7 +41,7 @@ namespace Farmware.WorldGeneration.Tests
         [Test]
         public void WorldGenerationDefaults_ContainNaturalFloodingSettings()
         {
-            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(123UL, 1);
+            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(123UL, WorldGenerationSettings.CurrentGeneratorVersion);
 
             Assert.That(
                 DeterministicNaturalFloodingGenerator.ValidateSettings(settings.NaturalFlooding),

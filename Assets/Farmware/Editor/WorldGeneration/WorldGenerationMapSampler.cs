@@ -20,7 +20,7 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>論理バイオーム色を基準に、水域、マグマ、岩壁を優先したプレイヤー向け地形を表示します。</summary>
         Terrain = 0,
 
-        /// <summary>水域や障害物に隠れている場所も含め、7種類の論理バイオームを表示します。</summary>
+        /// <summary>水域や障害物に隠れている場所も含め、新18種類の論理バイオームを表示します。</summary>
         Biome = 1,
 
         /// <summary>0〜65535の連続標高を表示します。</summary>
@@ -165,8 +165,14 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>Texture2D.SetPixels32へ直接渡せる、下端行から並んだ色配列です。</summary>
         public Color32[] PixelColors { get; }
 
-        /// <summary>C4派生水文サンプルの生成に使用した完成診断チャンク数です。ほかのモードでは0です。</summary>
+        /// <summary>C5-C完成地形またはC4派生水文の生成に使用した完成診断チャンク数です。ほかのモードでは0です。</summary>
         public int DiagnosticChunkCount { get; }
+
+        /// <summary>
+        /// 完成診断チャンクを使うモードのHover表示へ渡す、代表タイル別のC5-C確定地形です。
+        /// 元のPersistent NativeArrayはサンプリング終了時に破棄するため、値型のコピーだけを保持します。
+        /// </summary>
+        private readonly Dictionary<long, GeneratedTile> finalizedTerrainSamples;
 
         /// <summary>
         /// 派生水文モードのHover表示へ渡す代表タイル別の値コピーです。
@@ -186,7 +192,8 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="tilesPerPixel">画像1ピクセルあたりのタイル幅です。</param>
         /// <param name="viewMode">この結果を生成した地形・環境・地質・水文の表示モードです。</param>
         /// <param name="pixelColors">下端行から行優先で並べた色配列です。</param>
-        /// <param name="diagnosticChunkCount">派生水文生成に使用した完成診断チャンク数です。</param>
+        /// <param name="diagnosticChunkCount">完成地形または派生水文の生成に使用した完成診断チャンク数です。</param>
+        /// <param name="finalizedTerrainSamples">Hover用に値コピーした代表タイル別C5-C確定地形です。</param>
         /// <param name="derivedHydrologySamples">Hover用に値コピーした代表タイル別派生水文です。</param>
         internal WorldGenerationMapSampleResult(
             int width,
@@ -199,6 +206,7 @@ namespace Farmware.WorldGeneration.Editor
             WorldGenerationMapViewMode viewMode,
             Color32[] pixelColors,
             int diagnosticChunkCount,
+            Dictionary<long, GeneratedTile> finalizedTerrainSamples,
             Dictionary<long, DerivedHydrologyMapSample> derivedHydrologySamples)
         {
             Width = width;
@@ -211,7 +219,29 @@ namespace Farmware.WorldGeneration.Editor
             ViewMode = viewMode;
             PixelColors = pixelColors;
             DiagnosticChunkCount = diagnosticChunkCount;
+            this.finalizedTerrainSamples = finalizedTerrainSamples;
             this.derivedHydrologySamples = derivedHydrologySamples;
+        }
+
+        /// <summary>C5-C完成チャンクから画像と同時にコピーした代表タイルを取得します。</summary>
+        /// <param name="worldTileX">画像がサンプリングした絶対タイルX座標です。</param>
+        /// <param name="worldTileY">画像がサンプリングした絶対タイルY座標です。</param>
+        /// <param name="tile">成功時に新18Biomeと最終Groundを反映した値コピーを返します。</param>
+        /// <returns>現在結果が指定代表タイルの完成地形を保持する場合はtrueです。</returns>
+        public bool TryGetFinalizedTerrainSample(
+            int worldTileX,
+            int worldTileY,
+            out GeneratedTile tile)
+        {
+            if (finalizedTerrainSamples == null)
+            {
+                tile = default;
+                return false;
+            }
+
+            return finalizedTerrainSamples.TryGetValue(
+                CreateCoordinateKey(worldTileX, worldTileY),
+                out tile);
         }
 
         /// <summary>
@@ -300,40 +330,40 @@ namespace Farmware.WorldGeneration.Editor
         public const int MaximumHydrologyResolution = 64;
 
         /// <summary>
-        /// C4完成チャンクを再構築する派生水文モードで、1軸に生成してよい代表チャンク数です。
+        /// C5-Cまで完成した診断チャンクを再構築するモードで、1軸に生成してよい代表チャンク数です。
         /// 3×3を上限にして、1チャンク数秒の診断生成がパン・ズーム1回で無制限に増えないようにします。
         /// </summary>
-        public const int MaximumDerivedHydrologySampledChunksPerAxis = 3;
+        public const int MaximumCompletedChunkSampledChunksPerAxis = 3;
 
         /// <summary>進捗通知でEditorのイベントキューを埋めないための通知間隔です。単位は生成画像の行です。</summary>
         private const int ProgressReportRowInterval = 16;
 
         /// <summary>
-        /// 派生水文では完成チャンク生成が処理時間の大半を占めるため、進捗の95%をチャンク完成数へ割り当てます。
+        /// Terrain・Biome・派生水文では完成チャンク生成が処理時間の大半を占めるため、進捗の95%をチャンク完成数へ割り当てます。
         /// 残り5%は完成値から色とHoverコピーを作る画像行処理へ割り当て、最後の通知を必ず100%にします。
         /// </summary>
-        private const float DerivedHydrologyChunkProgressLimit = 0.95f;
+        private const float CompletedChunkProgressLimit = 0.95f;
 
         /// <summary>
-        /// Gate待機中も停止と誤認されないよう、派生水文要求を受け付けた直後に表示する準備割合です。
+        /// Gate待機中も停止と誤認されないよう、完成チャンク要求を受け付けた直後に表示する準備割合です。
         /// 完成チャンク1件目の通知より十分小さくし、実作業以上に進んだ表示へなりにくくします。
         /// </summary>
-        private const float DerivedHydrologyPreparationProgress = 0.01f;
+        private const float CompletedChunkPreparationProgress = 0.01f;
 
         /// <summary>
         /// 大容量Persistent作業領域を使う完成水文生成を、Editorプロセス内で同時に1要求へ制限します。
         /// パンやズームを連続したとき、取消済み要求と最新要求が並列にNative配列を確保してメモリとCPUを増幅しないためです。
         /// </summary>
-        private static readonly SemaphoreSlim DerivedHydrologyGenerationGate =
+        private static readonly SemaphoreSlim CompletedChunkGenerationGate =
             new SemaphoreSlim(1, 1);
 
         /// <summary>
-        /// 派生水文の代表座標が各軸最大3論理チャンクへ収まる、現在縮尺用の画像1辺上限を求めます。
+        /// Terrain・Biome・派生水文の代表座標が各軸最大3論理チャンクへ収まる、現在縮尺用の画像1辺上限を求めます。
         /// 64タイル未満の間隔では開始位置がチャンク末端でも3件以内になるSpanを使い、64以上では各サンプルを別チャンクとして数えます。
         /// </summary>
         /// <param name="tilesPerPixel">1画像ピクセルごとに進める1以上のワールドタイル数です。</param>
-        /// <returns>1以上64以下の派生水文サンプル上限です。</returns>
-        public static int CalculateMaximumDerivedHydrologyResolution(int tilesPerPixel)
+        /// <returns>1以上64以下の完成チャンク使用モードのサンプル上限です。</returns>
+        public static int CalculateMaximumCompletedChunkResolution(int tilesPerPixel)
         {
             if (tilesPerPixel <= 0)
             {
@@ -343,13 +373,13 @@ namespace Farmware.WorldGeneration.Editor
             if (tilesPerPixel >= WorldGridConstants.LogicalChunkSize)
             {
                 // 1サンプルの間隔が1チャンク以上なら、サンプル数そのものが軸上の最大チャンク数になります。
-                return MaximumDerivedHydrologySampledChunksPerAxis;
+                return MaximumCompletedChunkSampledChunksPerAxis;
             }
 
             // 開始座標がチャンク末端63でも3チャンク以内に収まる最大距離は128タイルです。
             // 「最初の1サンプル + 距離内へ置ける間隔数」とし、通常水文の64サンプル上限も越えません。
             int maximumSpan =
-                (MaximumDerivedHydrologySampledChunksPerAxis - 1)
+                (MaximumCompletedChunkSampledChunksPerAxis - 1)
                 * WorldGridConstants.LogicalChunkSize;
             return Math.Min(MaximumHydrologyResolution, (maximumSpan / tilesPerPixel) + 1);
         }
@@ -517,7 +547,7 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="progress">完了割合0〜1の任意通知先です。呼出元でメインスレッドへ戻すProgressを渡し、省略時は通知しません。</param>
         /// <returns>Texture2Dへ適用できる色配列、レイヤー、座標情報です。</returns>
         /// <exception cref="InvalidOperationException">
-        /// 座標端で固定サンプル範囲を安全に確保できない場合や、完成派生水文を生成できない場合に発生します。
+        /// 座標端で固定サンプル範囲を安全に確保できない場合や、完成診断チャンクを生成できない場合に発生します。
         /// </exception>
         public static WorldGenerationMapSampleResult Sample(
             in WorldGenerationSettings settings,
@@ -551,17 +581,41 @@ namespace Farmware.WorldGeneration.Editor
                 throw new ArgumentOutOfRangeException(nameof(tilesPerPixel));
             }
 
-            Color32[] pixelColors = new Color32[width * height];
-            bool hasGeneratedData = layer == WorldLayer.Surface;
             bool isBaseHydrologyViewMode = IsBaseHydrologyViewMode(viewMode);
             bool isDerivedHydrologyViewMode = IsDerivedHydrologyViewMode(viewMode);
+            bool isFinalTerrainViewMode = viewMode == WorldGenerationMapViewMode.Terrain
+                || viewMode == WorldGenerationMapViewMode.Biome;
+            bool requiresDiagnosticChunk = RequiresCompletedDiagnosticChunk(viewMode);
+            if (requiresDiagnosticChunk)
+            {
+                int maximumCompletedChunkResolution =
+                    CalculateMaximumCompletedChunkResolution(tilesPerPixel);
+                // 完成チャンクは1件に数秒かかるため、UI以外の呼出元からも無制限な範囲を投入できないよう入口で拒否します。
+                // 横長・縦長のどちらでも各軸の代表チャンク数を制限する必要があるため、幅と高さを別々に検証します。
+                if (width > maximumCompletedChunkResolution)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(width));
+                }
+
+                if (height > maximumCompletedChunkResolution)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(height));
+                }
+            }
+
+            Color32[] pixelColors = new Color32[width * height];
+            bool hasGeneratedData = layer == WorldLayer.Surface;
             Dictionary<long, GeneratedHydrologyCell> hydrologyCellCache =
                 isBaseHydrologyViewMode
                     ? new Dictionary<long, GeneratedHydrologyCell>()
                     : null;
             Dictionary<long, HydrologyDiagnosticChunk> diagnosticChunkCache =
-                isDerivedHydrologyViewMode
+                requiresDiagnosticChunk
                     ? new Dictionary<long, HydrologyDiagnosticChunk>()
+                    : null;
+            Dictionary<long, GeneratedTile> finalizedTerrainSamples =
+                requiresDiagnosticChunk
+                    ? new Dictionary<long, GeneratedTile>(pixelColors.Length)
                     : null;
             Dictionary<long, DerivedHydrologyMapSample> derivedHydrologySamples =
                 isDerivedHydrologyViewMode
@@ -592,11 +646,11 @@ namespace Farmware.WorldGeneration.Editor
                     : default;
             HydrologyLakeBasinCache hydrologyBasinCache = default;
             int diagnosticChunkCount = 0;
-            bool enteredDerivedHydrologyGenerationGate = false;
+            bool enteredCompletedChunkGenerationGate = false;
 
             try
             {
-                if (isDerivedHydrologyViewMode && hasGeneratedData)
+                if (requiresDiagnosticChunk && hasGeneratedData)
                 {
                     List<ChunkCoordinate> requiredDiagnosticChunks =
                         CollectRequiredDiagnosticChunkCoordinates(
@@ -606,15 +660,16 @@ namespace Farmware.WorldGeneration.Editor
                             centerTileY,
                             width,
                             height,
-                            tilesPerPixel);
+                            tilesPerPixel,
+                            isDerivedHydrologyViewMode);
 
                     // 直前要求の1チャンク完了待ちでも0%に見え続けないよう、Gate待機へ入る直前に準備開始を通知します。
-                    progress?.Report(DerivedHydrologyPreparationProgress);
+                    progress?.Report(CompletedChunkPreparationProgress);
                     // 取消待ちの要求はGate取得中にもTokenで終了し、古い要求を順番に実生成しません。
-                    DerivedHydrologyGenerationGate.Wait(cancellationToken);
-                    enteredDerivedHydrologyGenerationGate = true;
+                    CompletedChunkGenerationGate.Wait(cancellationToken);
+                    enteredCompletedChunkGenerationGate = true;
 
-                    // 派生水文の重い処理は最初の画像行へ偏るため、先に必要チャンクを列挙順で完成させ、
+                    // C5-C完成地形と派生水文の重い処理は最初の画像行へ偏るため、先に必要チャンクを列挙順で完成させ、
                     // 画像行ではなくチャンク完成数に対応した進捗をユーザーへ返します。
                     for (int chunkIndex = 0;
                         chunkIndex < requiredDiagnosticChunks.Count;
@@ -628,7 +683,7 @@ namespace Farmware.WorldGeneration.Editor
                         float completedChunkFraction =
                             (chunkIndex + 1f) / requiredDiagnosticChunks.Count;
                         progress?.Report(
-                            completedChunkFraction * DerivedHydrologyChunkProgressLimit);
+                            completedChunkFraction * CompletedChunkProgressLimit);
                     }
                 }
 
@@ -657,6 +712,27 @@ namespace Farmware.WorldGeneration.Editor
                             tilesPerPixel);
                         if (hasGeneratedData)
                         {
+                            if (requiresDiagnosticChunk)
+                            {
+                                GeneratedTile finalizedTile = GetFinalizedTerrainTile(
+                                    settings,
+                                    layer,
+                                    worldTileX,
+                                    worldTileY,
+                                    diagnosticChunkCache,
+                                    cancellationToken);
+                                finalizedTerrainSamples[
+                                    CreateCoordinateKey(worldTileX, worldTileY)] = finalizedTile;
+                                if (isFinalTerrainViewMode)
+                                {
+                                    // Terrain/BiomeはC4水文確定後のC5-C結果を表示し、Biome=Noneの基礎生成を見せません。
+                                    pixelColors[(pixelY * width) + pixelX] = GetDisplayColor(
+                                        viewMode,
+                                        finalizedTile);
+                                    continue;
+                                }
+                            }
+
                             if (isDerivedHydrologyViewMode)
                             {
                                 DerivedHydrologyMapSample derivedSample =
@@ -774,9 +850,9 @@ namespace Farmware.WorldGeneration.Editor
                     if ((pixelY + 1) % ProgressReportRowInterval == 0 || pixelY + 1 == height)
                     {
                         float completedRowFraction = (float)(pixelY + 1) / height;
-                        float reportedFraction = isDerivedHydrologyViewMode
-                            ? DerivedHydrologyChunkProgressLimit
-                                + ((1f - DerivedHydrologyChunkProgressLimit)
+                        float reportedFraction = requiresDiagnosticChunk
+                            ? CompletedChunkProgressLimit
+                                + ((1f - CompletedChunkProgressLimit)
                                     * completedRowFraction)
                             : completedRowFraction;
                         progress?.Report(reportedFraction);
@@ -800,10 +876,10 @@ namespace Farmware.WorldGeneration.Editor
                 }
                 finally
                 {
-                    if (enteredDerivedHydrologyGenerationGate)
+                    if (enteredCompletedChunkGenerationGate)
                     {
                         // 破棄例外時もGateを占有したままにせず、後続のMap Viewer要求が永久待機することを防ぎます。
-                        DerivedHydrologyGenerationGate.Release();
+                        CompletedChunkGenerationGate.Release();
                     }
                 }
             }
@@ -819,11 +895,12 @@ namespace Farmware.WorldGeneration.Editor
                 viewMode,
                 pixelColors,
                 diagnosticChunkCount,
+                finalizedTerrainSamples,
                 derivedHydrologySamples);
         }
 
         /// <summary>
-        /// 派生水文画像とHoverコピーに必要な完成診断チャンクを、最初に現れる順で重複なく列挙します。
+        /// C5-C地形・Biome画像または派生水文画像とHoverコピーに必要な完成診断チャンクを、最初に現れる順で重複なく列挙します。
         /// 先に総数を確定することで、画像行へ偏らない「完成チャンク数／必要チャンク数」の進捗を表示できます。
         /// </summary>
         /// <param name="settings">代表タイルから中心基準8×8水文セルを求める固定設定です。</param>
@@ -833,6 +910,7 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="width">画像の横サンプル数です。</param>
         /// <param name="height">画像の縦サンプル数です。</param>
         /// <param name="tilesPerPixel">代表サンプル間のワールドタイル数です。</param>
+        /// <param name="includeHydrologyCellOwner">担当水文セルを隣接チャンクから読む派生水文モードならtrueです。</param>
         /// <returns>タイル所有者と水文セル所有者を含む一意な完成診断チャンク座標です。</returns>
         private static List<ChunkCoordinate> CollectRequiredDiagnosticChunkCoordinates(
             in WorldGenerationSettings settings,
@@ -841,7 +919,8 @@ namespace Farmware.WorldGeneration.Editor
             int centerTileY,
             int width,
             int height,
-            int tilesPerPixel)
+            int tilesPerPixel,
+            bool includeHydrologyCellOwner)
         {
             List<ChunkCoordinate> requiredChunks = new List<ChunkCoordinate>();
             HashSet<long> requiredChunkKeys = new HashSet<long>();
@@ -864,6 +943,12 @@ namespace Farmware.WorldGeneration.Editor
                         WorldGrid.ToChunkCoordinate(layer, worldTileX, worldTileY),
                         requiredChunkKeys,
                         requiredChunks);
+
+                    if (!includeHydrologyCellOwner)
+                    {
+                        // Terrain/Biomeはタイル所有チャンクだけで完結するため、隣接セル所有チャンクを余分に生成しません。
+                        continue;
+                    }
 
                     if (!DeterministicHydrologyGenerator.TryGetCellCoordinate(
                             settings.Hydrology,
@@ -906,6 +991,40 @@ namespace Farmware.WorldGeneration.Editor
             {
                 requiredChunks.Add(coordinate);
             }
+        }
+
+        /// <summary>
+        /// 指定タイルを所有する完成診断チャンクから、C5-Cで確定した地形値をコピーします。
+        /// </summary>
+        /// <param name="settings">C3〜C5-Cを再構築する固定設定です。</param>
+        /// <param name="layer">対象タイルが属する固定ワールドレイヤーです。</param>
+        /// <param name="worldTileX">対象の絶対X座標です。</param>
+        /// <param name="worldTileY">対象の絶対Y座標です。</param>
+        /// <param name="diagnosticChunkCache">Sample終了時に破棄する完成チャンクキャッシュです。</param>
+        /// <param name="cancellationToken">未生成チャンクへ進む前に中止を検出するTokenです。</param>
+        /// <returns>新18Biomeと最終Groundを持つ値型のコピーです。</returns>
+        private static GeneratedTile GetFinalizedTerrainTile(
+            in WorldGenerationSettings settings,
+            WorldLayer layer,
+            int worldTileX,
+            int worldTileY,
+            Dictionary<long, HydrologyDiagnosticChunk> diagnosticChunkCache,
+            CancellationToken cancellationToken)
+        {
+            ChunkCoordinate coordinate = WorldGrid.ToChunkCoordinate(
+                layer,
+                worldTileX,
+                worldTileY);
+            HydrologyDiagnosticChunk chunk = GetOrCreateDiagnosticChunk(
+                settings,
+                coordinate,
+                diagnosticChunkCache,
+                cancellationToken);
+            ChunkLocalTileCoordinate localTile = WorldGrid.ToLocalTileCoordinate(
+                worldTileX,
+                worldTileY);
+            int tileIndex = WorldGrid.ToTileIndex(localTile.X, localTile.Y);
+            return chunk.TerrainTiles[tileIndex];
         }
 
         /// <summary>
@@ -991,7 +1110,7 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>
-        /// 指定論理チャンクをC4-Dまで完成生成し、同じSample呼出し中は再利用します。
+        /// 指定論理チャンクをC5-Cまで完成生成し、同じSample呼出し中は再利用します。
         /// 生成途中の失敗段階を例外へ含め、乾燥結果と生成失敗を同じ色として扱いません。
         /// </summary>
         /// <param name="settings">完成チャンク生成に使う固定設定です。</param>
@@ -1012,14 +1131,17 @@ namespace Farmware.WorldGeneration.Editor
             }
 
             cancellationToken.ThrowIfCancellationRequested();
+            // Map Viewerは製品Bakerと同じ固定Definitionカタログを使用し、旧7Biomeや表示専用の代替分類へ戻りません。
+            BiomeClassificationSettings biomeSettings = BiomeDefinitionCatalog.CreateDefault();
             if (!HydrologyDiagnosticChunk.TryGenerate(
                     settings,
+                    biomeSettings,
                     coordinate,
                     out HydrologyDiagnosticChunk generated,
                     out HydrologyDiagnosticGenerationStage stage))
             {
                 throw new InvalidOperationException(
-                    $"派生水文の完成診断チャンクを生成できません: Chunk=({coordinate.X}, {coordinate.Y}), Stage={stage}");
+                    $"完成診断チャンクを生成できません: Chunk=({coordinate.X}, {coordinate.Y}), Stage={stage}");
             }
 
             diagnosticChunkCache.Add(key, generated);
@@ -1044,13 +1166,23 @@ namespace Farmware.WorldGeneration.Editor
                 && viewMode <= WorldGenerationMapViewMode.HydrologyLake;
         }
 
-        /// <summary>C4-E1aの完成診断チャンクを必要とする派生水文5モードかを返します。</summary>
+        /// <summary>C5-Cまでの完成診断チャンクを必要とする派生水文5モードかを返します。</summary>
         /// <param name="viewMode">判定する広域表示モードです。</param>
         /// <returns>地下水から湿原候補までならtrueです。</returns>
         public static bool IsDerivedHydrologyViewMode(WorldGenerationMapViewMode viewMode)
         {
             return viewMode >= WorldGenerationMapViewMode.HydrologyGroundwater
                 && viewMode <= WorldGenerationMapViewMode.HydrologyWetlandCandidate;
+        }
+
+        /// <summary>C5-Cまでの完成診断チャンクを生成してから表示するモードかを返します。</summary>
+        /// <param name="viewMode">判定する広域表示モードです。</param>
+        /// <returns>最終Terrain、論理Biome、または派生水文5モードならtrueです。</returns>
+        public static bool RequiresCompletedDiagnosticChunk(WorldGenerationMapViewMode viewMode)
+        {
+            return viewMode == WorldGenerationMapViewMode.Terrain
+                || viewMode == WorldGenerationMapViewMode.Biome
+                || IsDerivedHydrologyViewMode(viewMode);
         }
 
         /// <summary>
@@ -1762,7 +1894,7 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>
-        /// 7種類の論理バイオームを、フォールバックTileに近い識別色へ変換します。
+        /// 新18種類の論理バイオームを、C5-Cの仮Tileと同じ識別色へ変換します。
         /// </summary>
         /// <param name="biome">色を取得する論理バイオームです。</param>
         /// <returns>凡例と画像で共有する不透明色です。</returns>
@@ -1770,21 +1902,44 @@ namespace Farmware.WorldGeneration.Editor
         {
             switch (biome)
             {
-                case BiomeId.Forest:
-                    return new Color32(61, 112, 66, 255);
-                case BiomeId.Desert:
-                    return new Color32(210, 177, 100, 255);
-                case BiomeId.Rockland:
-                    return new Color32(128, 123, 137, 255);
-                case BiomeId.Wetland:
-                    return new Color32(72, 128, 103, 255);
-                case BiomeId.Snowfield:
-                    return new Color32(198, 225, 232, 255);
-                case BiomeId.Volcanic:
-                    return new Color32(130, 67, 57, 255);
-                case BiomeId.Grassland:
+                case BiomeId.TemperateGrassland:
                     return new Color32(112, 169, 86, 255);
+                case BiomeId.TropicalSavannaWoodland:
+                    return new Color32(150, 166, 75, 255);
+                case BiomeId.TemperateDeciduousForest:
+                    return new Color32(79, 139, 70, 255);
+                case BiomeId.WarmTemperateEvergreenForest:
+                    return new Color32(50, 122, 77, 255);
+                case BiomeId.TemperateMontaneBambooForest:
+                    return new Color32(91, 151, 88, 255);
+                case BiomeId.TropicalRainforest:
+                    return new Color32(38, 112, 67, 255);
+                case BiomeId.TropicalSeasonalForest:
+                    return new Color32(68, 133, 61, 255);
+                case BiomeId.SubtropicalOceanicForest:
+                    return new Color32(58, 137, 105, 255);
+                case BiomeId.BorealConiferForest:
+                    return new Color32(66, 112, 82, 255);
+                case BiomeId.Steppe:
+                    return new Color32(174, 162, 82, 255);
+                case BiomeId.DryShrublandWoodland:
+                    return new Color32(154, 130, 74, 255);
+                case BiomeId.CactusDesertDryPlateau:
+                    return new Color32(188, 151, 83, 255);
+                case BiomeId.HotDesert:
+                    return new Color32(218, 181, 101, 255);
+                case BiomeId.FreshwaterMarshFloodplain:
+                    return new Color32(77, 142, 119, 255);
+                case BiomeId.SwampForest:
+                    return new Color32(54, 116, 90, 255);
+                case BiomeId.TundraPolarBarrens:
+                    return new Color32(190, 214, 218, 255);
+                case BiomeId.AlpineRockland:
+                    return new Color32(126, 122, 135, 255);
+                case BiomeId.VolcanicGeothermal:
+                    return new Color32(132, 68, 57, 255);
                 default:
+                    // Noneや未定義IDを温帯草原へ見せないことで、分類漏れを診断画像上でも発見できます。
                     return new Color32(24, 24, 30, 255);
             }
         }

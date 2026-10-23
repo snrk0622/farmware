@@ -211,7 +211,7 @@ namespace Farmware.WorldGeneration.Editor
                     "derived-hydrology-audit-c"
                 },
                 0,
-                1);
+                WorldGenerationSettings.CurrentGeneratorVersion);
         }
 
         /// <summary>指定した複数Seed・有限チャンク範囲を完成生成し、件数・極値・比較署名を返します。</summary>
@@ -227,6 +227,7 @@ namespace Farmware.WorldGeneration.Editor
 
             DerivedHydrologyDistributionCounts counts = default;
             ulong signature = SignatureOffsetBasis;
+            BiomeClassificationSettings biomeSettings = BiomeDefinitionCatalog.CreateDefault();
             for (int seedIndex = 0; seedIndex < auditSettings.SeedTexts.Count; seedIndex++)
             {
                 WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
@@ -248,6 +249,7 @@ namespace Farmware.WorldGeneration.Editor
                             chunkY);
                         if (!HydrologyDiagnosticChunk.TryGenerate(
                                 settings,
+                                biomeSettings,
                                 coordinate,
                                 out HydrologyDiagnosticChunk chunk,
                                 out HydrologyDiagnosticGenerationStage stage))

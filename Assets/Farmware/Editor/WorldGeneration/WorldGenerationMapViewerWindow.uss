@@ -222,13 +222,6 @@
     border-bottom-color: #727b88;
 }
 
-.legend-grassland { background-color: rgb(112, 169, 86); }
-.legend-forest { background-color: rgb(61, 112, 66); }
-.legend-desert { background-color: rgb(210, 177, 100); }
-.legend-rockland { background-color: rgb(128, 123, 137); }
-.legend-wetland { background-color: rgb(72, 128, 103); }
-.legend-snowfield { background-color: rgb(198, 225, 232); }
-.legend-volcanic { background-color: rgb(130, 67, 57); }
 .legend-fresh-water { background-color: rgb(76, 157, 211); }
 .legend-salt-water { background-color: rgb(42, 101, 176); }
 .legend-magma { background-color: rgb(238, 82, 24); }

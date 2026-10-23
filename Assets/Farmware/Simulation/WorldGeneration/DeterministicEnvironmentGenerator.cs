@@ -378,7 +378,8 @@ namespace Farmware.WorldGeneration
             ContinuousEnvironmentSettings axes = settings.EnvironmentAxes;
             // 地上18Biomeの最小許容標高は20,000です。海面をそれより低くすると、
             // 海面以上なのにどのBiome候補にも入れない標高帯ができるため、生成前に設定エラーとして拒否します。
-            return settings.SeaLevelThreshold
+            return settings.GeneratorVersion == WorldGenerationSettings.CurrentGeneratorVersion
+                && settings.SeaLevelThreshold
                     >= WorldGenerationSettings.MinimumSupportedSeaLevelThreshold
                 && settings.SeaLevelThreshold < ushort.MaxValue
                 && settings.ElevationCellSizeInTiles > 0

@@ -1152,10 +1152,10 @@ namespace Farmware.WorldGeneration.Tests
 
         /// <summary>文字列Seedと現行既定値から、各テスト専用の固定ワールド設定を作ります。</summary>
         /// <param name="seedText">別テストの乱数系列と共有しないSeed文字列です。</param>
-        /// <returns>GeneratorVersion 1の既定生成設定です。</returns>
+        /// <returns>現在GeneratorVersionの既定生成設定です。</returns>
         private static WorldGenerationSettings CreateSettings(string seedText)
         {
-            return WorldGenerationSettings.CreateDefault(WorldSeedUtility.FromString(seedText), 1);
+            return WorldGenerationSettings.CreateDefault(WorldSeedUtility.FromString(seedText), WorldGenerationSettings.CurrentGeneratorVersion);
         }
     }
 }

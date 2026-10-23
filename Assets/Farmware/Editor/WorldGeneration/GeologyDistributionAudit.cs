@@ -1,4 +1,4 @@
-// このファイルは、複数シードの地質面積比、連結領域、境界、孤立領域、環境クロス集計を作ります。
+// このファイルは、複数シードの地質面積比、連結領域、境界、孤立領域、標高・火山活動度クロス集計を作ります。
 // EditorメニューとEditModeテストから同じ純粋集計器を呼び、ゲームのECS状態や生成アセットは変更しません。
 
 using System;
@@ -33,7 +33,7 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>GeologyClass×ElevationClassの代表サンプル件数です。</summary>
         private readonly int[] elevationCrossCounts;
 
-        /// <summary>GeologyClass×BiomeIdの代表サンプル件数です。</summary>
+        /// <summary>C5-Eで完成Biomeクロス監査へ置換する予約領域です。C5-Cでは全要素0です。</summary>
         private readonly int[] biomeCrossCounts;
 
         /// <summary>GeologyClass×火山活動度5段階の代表サンプル件数です。</summary>
@@ -42,7 +42,7 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>標高区分を配列で表す固定スロット数です。</summary>
         private readonly int elevationSlotCount;
 
-        /// <summary>BiomeIdを配列で表す固定スロット数です。</summary>
+        /// <summary>C5-Eの完成Biomeクロス監査でBiomeIdを配列へ表すための予約スロット数です。</summary>
         private readonly int biomeSlotCount;
 
         /// <summary>火山活動度5段階を配列で表す固定スロット数です。</summary>
@@ -69,7 +69,7 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>代表格子境界数へサンプル間隔を掛けた概算境界長です。単位はタイルです。</summary>
         public long EstimatedBoundaryLengthInTiles => (long)BoundaryEdgeCount * sampleSpacingInTiles;
 
-        /// <summary>走査順の分類とクロス軸から作った調整前後比較用64bit署名です。</summary>
+        /// <summary>走査順の地質・標高・火山活動度から作った調整前後比較用64bit署名です。</summary>
         public ulong Signature { get; }
 
         /// <summary>Unity Consoleへそのまま表示できる日本語の監査レポートです。</summary>
@@ -83,7 +83,7 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="maximumRegionDiameterSquaredInTiles">地質分類別の最大領域外接矩形対角長平方です。</param>
         /// <param name="boundaryEdgeCounts">地質分類別の異種境界参加辺数です。</param>
         /// <param name="elevationCrossCounts">地質×標高区分件数です。</param>
-        /// <param name="biomeCrossCounts">地質×Biome件数です。</param>
+        /// <param name="biomeCrossCounts">C5-Cでは全要素0とする、C5-E向け予約配列です。</param>
         /// <param name="volcanicBandCrossCounts">地質×火山活動度段階件数です。</param>
         /// <param name="seedCount">監査シード数です。</param>
         /// <param name="gridWidth">1シード分の代表格子幅です。</param>
@@ -118,7 +118,7 @@ namespace Farmware.WorldGeneration.Editor
             this.biomeCrossCounts = biomeCrossCounts;
             this.volcanicBandCrossCounts = volcanicBandCrossCounts;
             elevationSlotCount = (int)ElevationClass.Alpine + 1;
-            biomeSlotCount = (int)BiomeId.Volcanic + 1;
+            biomeSlotCount = (int)BiomeId.VolcanicGeothermal + 1;
             volcanicBandSlotCount = (int)ContinuousEnvironmentBand.Level5 + 1;
             this.sampleSpacingInTiles = sampleSpacingInTiles;
             SeedCount = seedCount;
@@ -181,7 +181,7 @@ namespace Farmware.WorldGeneration.Editor
             return elevationCrossCounts[((int)geologyClass * elevationSlotCount) + (int)elevationClass];
         }
 
-        /// <summary>指定地質とBiomeのクロス件数を返します。</summary>
+        /// <summary>C5-E向け予約配列から指定地質とBiomeのクロス件数を返します。C5-Cでは常に0です。</summary>
         /// <param name="geologyClass">行に相当する地質分類です。</param>
         /// <param name="biome">列に相当する論理Biomeです。</param>
         /// <returns>両条件を満たした代表サンプル件数です。</returns>
@@ -233,8 +233,8 @@ namespace Farmware.WorldGeneration.Editor
                     .AppendLine(" tiles");
                 AppendCrossRow(builder, "  Elevation", geologyClass, elevationSlotCount,
                     value => GetElevationCrossCount(geologyClass, (ElevationClass)value));
-                AppendCrossRow(builder, "  Biome", geologyClass, biomeSlotCount,
-                    value => GetBiomeCrossCount(geologyClass, (BiomeId)value));
+                // C5-C以降のBiomeはC4完成チャンクを必要とするため、基礎地質監査へNoneの偽クロス集計を表示しません。
+                // 新18Biomeとのクロス監査は候補診断も扱うC5-Eへ集約します。
                 AppendCrossRow(builder, "  VolcanicBand", geologyClass, volcanicBandSlotCount,
                     value => GetVolcanicBandCrossCount(geologyClass, (ContinuousEnvironmentBand)value));
             }
@@ -293,7 +293,7 @@ namespace Farmware.WorldGeneration.Editor
         private const int ElevationSlotCount = (int)ElevationClass.Alpine + 1;
 
         /// <summary>NoneからVolcanicまでを格納できるBiome配列スロット数です。</summary>
-        private const int BiomeSlotCount = (int)BiomeId.Volcanic + 1;
+        private const int BiomeSlotCount = (int)BiomeId.VolcanicGeothermal + 1;
 
         /// <summary>予約値0とLevel1〜5を格納できる火山活動度段階スロット数です。</summary>
         private const int VolcanicBandSlotCount = (int)ContinuousEnvironmentBand.Level5 + 1;
@@ -363,14 +363,12 @@ namespace Farmware.WorldGeneration.Editor
                         geologyCounts[geologyIndex]++;
                         elevationCrossCounts[
                             (geologyIndex * ElevationSlotCount) + (int)tile.ElevationClass]++;
-                        biomeCrossCounts[(geologyIndex * BiomeSlotCount) + (int)tile.Biome]++;
                         volcanicCrossCounts[
                             (geologyIndex * VolcanicBandSlotCount) + (int)volcanicBand]++;
 
                         // 件数が同じでも空間配置や環境との対応が変われば検出できるよう、走査順に全軸を混ぜます。
                         MixSignature(ref signature, (byte)tile.GeologyClass);
                         MixSignature(ref signature, (byte)tile.ElevationClass);
-                        MixSignature(ref signature, (byte)tile.Biome);
                         MixSignature(ref signature, (byte)volcanicBand);
                     }
                 }

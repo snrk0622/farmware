@@ -1763,28 +1763,45 @@ namespace Farmware.WorldGeneration.Tests
                 Allocator.Persistent,
                 NativeArrayOptions.UninitializedMemory);
 
-            Assert.That(
-                DeterministicHydrologyGenerator.TryGenerateChunkCells(
-                    settings,
-                    -2,
-                    -2,
-                    expectedCells),
-                Is.True);
-            Assert.That(
-                TryGenerateChunkCellsWithoutLake(
-                    settings,
-                    -2,
-                    -2,
-                    actualCells,
-                    frontier),
-                Is.True);
-            Assert.That(
-                DeterministicHydrologyGenerator.TryBuildChunkLakeWorkItems(
-                    actualCells,
-                    workItems,
-                    out int workItemCount),
-                Is.True);
-            Assert.That(workItemCount, Is.GreaterThan(0));
+            int workItemCount = 0;
+            bool foundChunkWithClosedBasin = false;
+            for (int chunkY = -2; chunkY <= 2 && !foundChunkWithClosedBasin; chunkY++)
+            {
+                for (int chunkX = -2; chunkX <= 2; chunkX++)
+                {
+                    Assert.That(
+                        DeterministicHydrologyGenerator.TryGenerateChunkCells(
+                            settings,
+                            chunkX,
+                            chunkY,
+                            expectedCells),
+                        Is.True);
+                    Assert.That(
+                        TryGenerateChunkCellsWithoutLake(
+                            settings,
+                            chunkX,
+                            chunkY,
+                            actualCells,
+                            frontier),
+                        Is.True);
+                    Assert.That(
+                        DeterministicHydrologyGenerator.TryBuildChunkLakeWorkItems(
+                            actualCells,
+                            workItems,
+                            out workItemCount),
+                        Is.True);
+
+                    // GeneratorVersion変更で特定座標の閉鎖流域数は変わるため、固定Seedの有限範囲から最初の対象チャンクを選びます。
+                    // 選択後の逐次生成と並列担当の一致がこのテストの責務で、旧版の座標分布そのものは保証しません。
+                    if (workItemCount > 0)
+                    {
+                        foundChunkWithClosedBasin = true;
+                        break;
+                    }
+                }
+            }
+
+            Assert.That(foundChunkWithClosedBasin, Is.True);
 
             ulong combinedMask = 0UL;
             for (int workItemIndex = 0; workItemIndex < workItemCount; workItemIndex++)
@@ -1913,11 +1930,12 @@ namespace Farmware.WorldGeneration.Tests
             WorldGenerationSettings first = CreateSettings("hydrology-hash-first");
             WorldGenerationSettings second = CreateSettings("hydrology-hash-second");
             ChunkCoordinate coordinate = new ChunkCoordinate(-7, 11);
+            BiomeClassificationSettings biomeSettings = BiomeDefinitionCatalog.CreateDefault();
             const ulong initialHash = 0xCBF29CE484222325UL;
 
-            ulong firstHash = DeterministicHydrologyGenerator.AppendChunkHash(first, coordinate, initialHash);
-            ulong repeatedHash = DeterministicHydrologyGenerator.AppendChunkHash(first, coordinate, initialHash);
-            ulong secondHash = DeterministicHydrologyGenerator.AppendChunkHash(second, coordinate, initialHash);
+            ulong firstHash = DeterministicHydrologyGenerator.AppendChunkHash(first, biomeSettings, coordinate, initialHash);
+            ulong repeatedHash = DeterministicHydrologyGenerator.AppendChunkHash(first, biomeSettings, coordinate, initialHash);
+            ulong secondHash = DeterministicHydrologyGenerator.AppendChunkHash(second, biomeSettings, coordinate, initialHash);
 
             Assert.That(repeatedHash, Is.EqualTo(firstHash));
             Assert.That(secondHash, Is.Not.EqualTo(firstHash));
@@ -1982,10 +2000,10 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(cell, Is.EqualTo(default(GeneratedHydrologyCell)));
         }
 
-        /// <summary>テスト名から安定Seedを作り、製品既定値と同じGeneratorVersion 1の設定を返します。</summary>
+        /// <summary>テスト名から安定Seedを作り、製品既定値と同じ現行GeneratorVersionの設定を返します。</summary>
         private static WorldGenerationSettings CreateSettings(string seedText)
         {
-            return WorldGenerationSettings.CreateDefault(WorldSeedUtility.FromString(seedText), 1);
+            return WorldGenerationSettings.CreateDefault(WorldSeedUtility.FromString(seedText), WorldGenerationSettings.CurrentGeneratorVersion);
         }
 
         /// <summary>

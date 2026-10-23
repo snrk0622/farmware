@@ -1,4 +1,4 @@
-// このファイルは、本番用バイオーム土地・岩壁・境界ハイライトのSprite Atlas V2設定と、各Atlasが1ページへ収まることを検証します。
+// このファイルは、新18Biome仮土地・本番用岩壁・境界ハイライトのSprite Atlas V2設定と、各Atlasが1ページへ収まることを検証します。
 // Tilemapの見た目を画像比較する代わりに、誤描画の原因だったTexture分割をEditModeで直接保証します。
 
 using System;
@@ -34,7 +34,7 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 土地Atlasが7バイオームを収録した本番用TextureだけをPackableとして持ち、Fallback、液体、資源を誤って収録していないことを検証します。
+        /// 土地Atlasが新18Biomeの仮TextureだけをPackableとして持ち、旧7土地、液体、資源を誤って収録していないことを検証します。
         /// </summary>
         [Test]
         public void GroundTerrainAtlas_ContainsAllTerrainSourceTextures()
@@ -45,43 +45,39 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 本番用土地シートが左からBiome ID順の7枚へSliceされ、16×24土地向けのPixel Art設定を持つことを検証します。
+        /// 新18Biomeの仮土地がID順に各1枚のSpriteとして揃い、16×24土地向けのPixel Art設定を持つことを検証します。
         /// </summary>
         [Test]
-        public void ProductionBiomeSpriteSheet_UsesExpectedSlicesAndPixelArtSettings()
+        public void FallbackBiomeSprites_UseExpectedNamesAndPixelArtSettings()
         {
-            string texturePath = WorldGenerationSpriteAtlasBuilder.ProductionBiomeTerrainTexturePath;
-            TextureImporter importer = AssetImporter.GetAtPath(texturePath) as TextureImporter;
-            Assert.That(importer, Is.Not.Null, $"TextureImporterを取得できません: {texturePath}");
-            Assert.That(importer.textureType, Is.EqualTo(TextureImporterType.Sprite));
-            Assert.That(importer.spriteImportMode, Is.EqualTo(SpriteImportMode.Multiple));
-            Assert.That(importer.spritePixelsPerUnit, Is.EqualTo(16f));
-            Assert.That(importer.filterMode, Is.EqualTo(FilterMode.Point));
-            Assert.That(importer.mipmapEnabled, Is.False);
-            Assert.That(importer.textureCompression, Is.EqualTo(TextureImporterCompression.Uncompressed));
-            Assert.That(importer.wrapMode, Is.EqualTo(TextureWrapMode.Clamp));
-
-            // Unity 6.3ではMesh TypeとFallback Physics ShapeがTextureImporter本体から設定構造体へ移動しています。
-            // 実際のImporter設定を読み戻し、矩形Tileへ不要な輪郭処理やCollider形状が混ざらないことを保証します。
-            TextureImporterSettings importerSettings = new TextureImporterSettings();
-            importer.ReadTextureSettings(importerSettings);
-            Assert.That(importerSettings.spriteMeshType, Is.EqualTo(SpriteMeshType.FullRect));
-            Assert.That(importerSettings.spriteGenerateFallbackPhysicsShape, Is.False);
-
-            Sprite[] sprites = AssetDatabase.LoadAllAssetsAtPath(texturePath)
-                .OfType<Sprite>()
-                .OrderBy(sprite => sprite.rect.x)
-                .ToArray();
+            string[] texturePaths = WorldGenerationSpriteAtlasBuilder.GetGroundTerrainSourceTexturePaths();
             string[] expectedNames = WorldGenerationSpriteAtlasBuilder.GetExpectedBiomeSpriteNames();
-            Assert.That(sprites, Has.Length.EqualTo(expectedNames.Length));
+            Assert.That(texturePaths, Has.Length.EqualTo(BiomeStableIds.Count));
+            Assert.That(expectedNames, Has.Length.EqualTo(BiomeStableIds.Count));
 
-            for (int index = 0; index < sprites.Length; index++)
+            for (int index = 0; index < texturePaths.Length; index++)
             {
-                Sprite sprite = sprites[index];
+                string texturePath = texturePaths[index];
+                TextureImporter importer = AssetImporter.GetAtPath(texturePath) as TextureImporter;
+                Assert.That(importer, Is.Not.Null, $"TextureImporterを取得できません: {texturePath}");
+                Assert.That(importer.textureType, Is.EqualTo(TextureImporterType.Sprite));
+                Assert.That(importer.spriteImportMode, Is.EqualTo(SpriteImportMode.Single));
+                Assert.That(importer.spritePixelsPerUnit, Is.EqualTo(16f));
+                Assert.That(importer.filterMode, Is.EqualTo(FilterMode.Point));
+                Assert.That(importer.mipmapEnabled, Is.False);
+                Assert.That(importer.textureCompression, Is.EqualTo(TextureImporterCompression.Uncompressed));
+                Assert.That(importer.wrapMode, Is.EqualTo(TextureWrapMode.Clamp));
 
-                // 112×24画像を左から16pxずつ読むことで、Biome IDとSprite名の対応を固定します。
+                // Unity 6.3ではMesh TypeとFallback Physics Shapeを設定構造体から読み戻します。
+                TextureImporterSettings importerSettings = new TextureImporterSettings();
+                importer.ReadTextureSettings(importerSettings);
+                Assert.That(importerSettings.spriteMeshType, Is.EqualTo(SpriteMeshType.FullRect));
+                Assert.That(importerSettings.spriteGenerateFallbackPhysicsShape, Is.False);
+
+                Sprite sprite = AssetDatabase.LoadAllAssetsAtPath(texturePath).OfType<Sprite>().Single();
+
                 Assert.That(sprite.name, Is.EqualTo(expectedNames[index]));
-                Assert.That(sprite.rect.x, Is.EqualTo(index * 16f));
+                Assert.That(sprite.rect.x, Is.Zero);
                 Assert.That(sprite.rect.y, Is.Zero);
                 Assert.That(sprite.rect.width, Is.EqualTo(16f));
                 Assert.That(sprite.rect.height, Is.EqualTo(24f));
@@ -91,26 +87,27 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 7個の本番用Tileが同名のSlice Spriteを参照し、Colliderを持たない表示専用アセットであることを検証します。
+        /// 18個の仮土地Tileが同名Spriteを参照し、Colliderを持たない表示専用アセットであることを検証します。
         /// </summary>
         [Test]
-        public void ProductionBiomeTiles_ReferenceMatchingSprites()
+        public void FallbackBiomeTiles_ReferenceMatchingSprites()
         {
             string[] expectedNames = WorldGenerationSpriteAtlasBuilder.GetExpectedBiomeSpriteNames();
+            string[] texturePaths = WorldGenerationSpriteAtlasBuilder.GetGroundTerrainSourceTexturePaths();
 
             for (int index = 0; index < expectedNames.Length; index++)
             {
                 string expectedName = expectedNames[index];
                 string tilePath =
-                    $"Assets/Farmware/Art/WorldGeneration/Terrain/Base/{expectedName}.asset";
+                    $"Assets/Farmware/Art/WorldGeneration/Fallback/{expectedName}.asset";
                 Tile tile = AssetDatabase.LoadAssetAtPath<Tile>(tilePath);
 
-                Assert.That(tile, Is.Not.Null, $"本番用Biome Tileが見つかりません: {tilePath}");
+                Assert.That(tile, Is.Not.Null, $"新Biome仮Tileが見つかりません: {tilePath}");
                 Assert.That(tile.sprite, Is.Not.Null, $"TileのSprite参照がありません: {tilePath}");
                 Assert.That(tile.sprite.name, Is.EqualTo(expectedName));
                 Assert.That(
                     AssetDatabase.GetAssetPath(tile.sprite),
-                    Is.EqualTo(WorldGenerationSpriteAtlasBuilder.ProductionBiomeTerrainTexturePath));
+                    Is.EqualTo(texturePaths[index]));
                 Assert.That(tile.colliderType, Is.EqualTo(Tile.ColliderType.None));
             }
         }

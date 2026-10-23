@@ -75,7 +75,7 @@ namespace Farmware.WorldGeneration.Editor
                     "hydrology-audit-lake"
                 },
                 2,
-                1);
+                WorldGenerationSettings.CurrentGeneratorVersion);
         }
     }
 

@@ -57,12 +57,12 @@ namespace Farmware.WorldGeneration.Editor
             }
         }
 
-        /// <summary>監査中はメニュー項目を無効化し、同じ広域計算の二重起動を防ぎます。</summary>
-        /// <returns>新しい監査を開始できる場合はtrueです。</returns>
+        /// <summary>C5-Eの新18Biome監査へ置換するまで、旧基礎生成を使うメニューを無効化します。</summary>
+        /// <returns>C5-Cでは常にfalseです。</returns>
         [MenuItem(MenuPath, true)]
         private static bool ValidateAnalyzeDistribution()
         {
-            return !isRunning;
+            return false;
         }
     }
 }

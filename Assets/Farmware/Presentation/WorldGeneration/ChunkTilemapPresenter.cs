@@ -155,33 +155,9 @@ namespace Farmware.WorldGeneration.Presentation
         private readonly Stack<ChunkLocalTilemapPresentation> pooledChunkLocalPresentations =
             new Stack<ChunkLocalTilemapPresentation>();
 
-        // 草原Biomeの土地へ使用するTileです。プレイヤー表示にはSoilTypeを反映せず、バイオームの識別だけに使います。
-        [Tooltip("草原バイオームの土地に表示するTileです。SoilTypeによる見た目の差は付けません。")]
-        [SerializeField] private TileBase grasslandTile;
-
-        // 森林Biomeの土地へ使用するTileです。異なる土壌でも同じ森林表示を維持します。
-        [Tooltip("森林バイオームの土地に表示するTileです。SoilTypeによる見た目の差は付けません。")]
-        [SerializeField] private TileBase forestTile;
-
-        // 砂漠Biomeの土地へ使用するTileです。異なる土壌でも同じ砂漠表示を維持します。
-        [Tooltip("砂漠バイオームの土地に表示するTileです。SoilTypeによる見た目の差は付けません。")]
-        [SerializeField] private TileBase desertTile;
-
-        // 岩地Biomeの土地へ使用するTileです。障害物の岩壁Tileとは別で、SoilTypeは表示へ反映しません。
-        [Tooltip("岩地バイオームの土地に表示するTileです。岩壁とは別で、SoilTypeによる見た目の差は付けません。")]
-        [SerializeField] private TileBase rocklandTile;
-
-        // 湿地Biomeの土地へ使用するTileです。水域セルでは専用Tileを優先し、SoilTypeは表示へ反映しません。
-        [Tooltip("湿地バイオームの土地に表示するTileです。川・池・海の水域セルでは専用Tileを優先します。")]
-        [SerializeField] private TileBase wetlandTile;
-
-        // 雪原Biomeの土地へ使用するTileです。水域セルでは専用Tileを優先し、SoilTypeは表示へ反映しません。
-        [Tooltip("雪原バイオームの土地に表示するTileです。水域セルでは専用Tileを優先します。")]
-        [SerializeField] private TileBase snowfieldTile;
-
-        // 火山Biomeの土地へ使用するTileです。マグマセルでは専用Tileを優先し、SoilTypeは表示へ反映しません。
-        [Tooltip("火山バイオームの土地に表示するTileです。マグマセルでは専用Tileを優先します。")]
-        [SerializeField] private TileBase volcanicTile;
+        // 配列の0番をBiomeId 1へ対応させ、新18Biomeのどれを描いたかを旧7種の近似へ潰さず保持します。
+        [Tooltip("BiomeId 1〜18の順に対応する土地Tileです。18要素すべてを設定し、未設定Biomeを別Biomeへフォールバックさせないでください。")]
+        [SerializeField] private TileBase[] biomeTiles = new TileBase[BiomeStableIds.Count];
 
         // GroundType.Magmaへ使用する表示専用Tileで、水域や火山地面とは別のゲームルールを視覚化します。
         [Tooltip("マグマ地形に表示するTileです。通常設備・通常ベルト・通常移動の禁止と、橋の耐熱要件はECSデータで判定します。")]
@@ -246,9 +222,6 @@ namespace Farmware.WorldGeneration.Presentation
         // AuthoringからBakeされたTilemap適用予算を取得するSingleton Queryです。
         private EntityQuery streamingSettingsQuery;
 
-        // チャンク境界外の岩壁隣接判定を、Simulationと同じ生成規則で行うためのSingleton Queryです。
-        private EntityQuery generationSettingsQuery;
-
         // Queryを現在のWorld向けに作成済みかを示し、未初期化のEntityQueryを使用しないために保持します。
         private bool queriesAreCreated;
 
@@ -273,6 +246,10 @@ namespace Farmware.WorldGeneration.Presentation
 
         // 現フレームのQueryに存在した座標を再利用し、アンロード差分検出で毎フレームHashSetを確保しないようにします。
         private readonly HashSet<ChunkCoordinate> seenCoordinates = new HashSet<ChunkCoordinate>();
+
+        // 水文・Biomeまで確定した地形Bufferを持つEntityを座標で引き、表示外周が基礎生成へ戻らないようにします。
+        private readonly Dictionary<ChunkCoordinate, Entity> completedChunkEntities =
+            new Dictionary<ChunkCoordinate, Entity>();
 
         // 消去を要求した順番と途中位置を保持し、フレーム予算を超えないよう分割処理します。
         private readonly Queue<ChunkClearProgress> clearQueue = new Queue<ChunkClearProgress>();
@@ -382,13 +359,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// </summary>
         /// <param name="terrainTilemap">水・マグマを除く生成地形だけを描画する専用Tilemapです。</param>
         /// <param name="generatedResourceTilemap">生成資源だけを描画する専用Tilemapです。</param>
-        /// <param name="grassland">草原バイオームの通常地面に表示するTileです。</param>
-        /// <param name="forest">森林バイオームの地面に表示するTileです。</param>
-        /// <param name="desert">砂漠バイオームの地面に表示するTileです。</param>
-        /// <param name="rockland">岩地バイオームの地面に表示するTileです。</param>
-        /// <param name="wetland">湿地バイオームの地面に表示するTileです。</param>
-        /// <param name="snowfield">雪原バイオームの地面に表示するTileです。</param>
-        /// <param name="volcanic">火山バイオームの地面に表示するTileです。</param>
+        /// <param name="biomeBaseTiles">BiomeId 1〜18の順に対応する18枚の土地Tileです。</param>
         /// <param name="magma">GroundType.Magmaの全セルに表示するTileです。</param>
         /// <param name="freshWater">淡水の川と池に表示するTileです。</param>
         /// <param name="saltWater">海水の海に表示するTileです。</param>
@@ -399,13 +370,7 @@ namespace Farmware.WorldGeneration.Presentation
         public void Configure(
             Tilemap terrainTilemap,
             Tilemap generatedResourceTilemap,
-            TileBase grassland,
-            TileBase forest,
-            TileBase desert,
-            TileBase rockland,
-            TileBase wetland,
-            TileBase snowfield,
-            TileBase volcanic,
+            TileBase[] biomeBaseTiles,
             TileBase magma,
             TileBase freshWater,
             TileBase saltWater,
@@ -416,13 +381,8 @@ namespace Farmware.WorldGeneration.Presentation
         {
             targetTilemap = terrainTilemap;
             resourceTilemap = generatedResourceTilemap;
-            grasslandTile = grassland;
-            forestTile = forest;
-            desertTile = desert;
-            rocklandTile = rockland;
-            wetlandTile = wetland;
-            snowfieldTile = snowfield;
-            volcanicTile = volcanic;
+            // 呼び出し元の配列が後から差し替えられて表示契約が変わらないよう、参照配列だけを複製します。
+            biomeTiles = biomeBaseTiles == null ? null : (TileBase[])biomeBaseTiles.Clone();
             magmaTile = magma;
             freshWaterTile = freshWater;
             saltWaterTile = saltWater;
@@ -1004,8 +964,6 @@ namespace Farmware.WorldGeneration.Presentation
             observerQuery = entityManager.CreateEntityQuery(ComponentType.ReadOnly<ChunkStreamingObserver>());
             streamingSettingsQuery =
                 entityManager.CreateEntityQuery(ComponentType.ReadOnly<ChunkStreamingSettings>());
-            generationSettingsQuery =
-                entityManager.CreateEntityQuery(ComponentType.ReadOnly<WorldGenerationSettings>());
             queriesAreCreated = true;
             return true;
         }
@@ -1024,6 +982,36 @@ namespace Farmware.WorldGeneration.Presentation
             using NativeArray<ChunkGenerationStatus> statuses =
                 chunkQuery.ToComponentDataArray<ChunkGenerationStatus>(Allocator.Temp);
             seenCoordinates.Clear();
+            completedChunkEntities.Clear();
+
+            // 可視チャンクを予約する前に、外周参照へ使える完成Bufferを全ロード範囲から座標索引化します。
+            // 周囲8チャンクがまだ生成中なら中心の表示を待ち、確定前の単一タイル生成へ戻りません。
+            for (int index = 0; index < entities.Length; index++)
+            {
+                ChunkGenerationStatus status = statuses[index];
+                bool hasCompleteData = status.Phase == ChunkGenerationPhase.ReadyToApply
+                    || status.Phase == ChunkGenerationPhase.Active
+                    || status.Phase == ChunkGenerationPhase.Inactive;
+                if (!hasCompleteData
+                    || !entityManager.Exists(entities[index])
+                    || !entityManager.HasBuffer<GeneratedTile>(entities[index]))
+                {
+                    continue;
+                }
+
+                DynamicBuffer<GeneratedTile> completedTiles =
+                    entityManager.GetBuffer<GeneratedTile>(entities[index], true);
+                if (completedTiles.Length != WorldGridConstants.TilesPerChunk)
+                {
+                    continue;
+                }
+
+                var completedCoordinate = new ChunkCoordinate(
+                    coordinates[index].Layer,
+                    coordinates[index].X,
+                    coordinates[index].Y);
+                completedChunkEntities[completedCoordinate] = entities[index];
+            }
 
             // ECS Queryの列挙順で画面外が先頭になることがあるため、可視集合を先に予約します。
             // 2回とも既存の配列を読むだけで、別のソート配列や毎フレームのmanaged allocationは追加しません。
@@ -1051,7 +1039,14 @@ namespace Farmware.WorldGeneration.Presentation
                         || status.Phase == ChunkGenerationPhase.Active
                         || status.Phase == ChunkGenerationPhase.Inactive;
 
-                    if (isInsidePreparation && hasCompleteData)
+                    bool hasCompleteNeighborhood = isInsidePreparation
+                        && hasCompleteData
+                        && CompletedChunkTerrainNeighborhoodFactory.TryCreate(
+                            entityManager,
+                            completedChunkEntities,
+                            coordinate,
+                            out _);
+                    if (hasCompleteNeighborhood)
                     {
                         ScheduleApply(coordinate, entities[index]);
                     }
@@ -1160,17 +1155,10 @@ namespace Farmware.WorldGeneration.Presentation
         /// <returns>反映後に旧原点セルの消去へ渡せる残り予算です。</returns>
         private int ProcessApplyQueue(int remainingBudget)
         {
-            if (generationSettingsQuery.CalculateEntityCount() != 1)
-            {
-                // 境界の隣接地形をSimulationと同じ設定で判定できない間は、誤った影を確定せず次フレームへ待ちます。
-                return remainingBudget;
-            }
-
-            WorldGenerationSettings generationSettings =
-                generationSettingsQuery.GetSingleton<WorldGenerationSettings>();
             EntityManager entityManager = presentationWorld.EntityManager;
-            // 同一呼び出し内の連続サブチャンクだけで外周を共有します。次フレームは必ず現在の設定で再生成します。
+            // 同一呼び出し内の連続サブチャンクだけで外周を共有します。次フレームは完成Bufferを改めて借用します。
             ChunkApplyProgress preparedProgress = null;
+            CompletedChunkTerrainNeighborhood preparedNeighborhood = default;
             while (remainingBudget > 0 && applyQueue.Count > 0)
             {
                 ChunkCoordinate coordinate = applyQueue.Peek();
@@ -1202,11 +1190,21 @@ namespace Farmware.WorldGeneration.Presentation
 
                 if (preparedProgress != progress)
                 {
+                    if (!CompletedChunkTerrainNeighborhoodFactory.TryCreate(
+                            entityManager,
+                            completedChunkEntities,
+                            coordinate,
+                            out preparedNeighborhood))
+                    {
+                        // Streaming更新との間で隣接Entityが消えた場合は、古い外周を使わず次回の収集まで待ちます。
+                        return remainingBudget;
+                    }
+
                     int batchCount = math.min(remainingBudget,
                         WorldGridConstants.SubChunksPerChunk - progress.NextSubChunkIndex);
                     using (TerrainNeighborHaloProfilerMarker.Auto())
                     {
-                        TerrainNeighborHaloUtility.Fill(generationSettings, coordinate,
+                        TerrainNeighborHaloUtility.Fill(preparedNeighborhood,
                             progress.NextSubChunkIndex, batchCount, terrainNeighborHaloBuffer);
                     }
 
@@ -1227,7 +1225,7 @@ namespace Farmware.WorldGeneration.Presentation
                     // 全4096タイルがそろった時点で1チャンク1Meshを作り、サブチャンクごとのGameObject生成を避けます。
                     if (!TryReuseRockWallShadowAfterAutomaticRebase(coordinate))
                     {
-                        BuildRockWallShadowMesh(coordinate, tiles, generationSettings);
+                        BuildRockWallShadowMesh(coordinate, preparedNeighborhood);
                     }
 
                     applyProgressByCoordinate.Remove(coordinate);
@@ -1885,43 +1883,23 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// 論理Biomeを7枚の基準土地Tileへ変換します。
+        /// 論理Biomeを安定ID順の18枚の基準土地Tileへ変換します。
         /// </summary>
         /// <param name="biome">Simulationが決定した論理バイオームです。</param>
-        /// <returns>指定Biomeの基準Tileです。未設定値は草原へ安全にフォールバックします。</returns>
+        /// <returns>指定Biomeの基準Tileです。範囲外ID、要素不足、未設定参照ではnullを返します。</returns>
         private TileBase SelectBiomeBaseTile(BiomeId biome)
         {
-            if (biome == BiomeId.Forest)
+            int stableId = (int)biome;
+            if (stableId < BiomeStableIds.First
+                || stableId > BiomeStableIds.Last
+                || biomeTiles == null
+                || biomeTiles.Length != BiomeStableIds.Count)
             {
-                return forestTile;
+                // 旧草原Tileへ黙って読み替えると欠落した新Biomeを発見できないため、描画なしを明示します。
+                return null;
             }
 
-            if (biome == BiomeId.Desert)
-            {
-                return desertTile;
-            }
-
-            if (biome == BiomeId.Rockland)
-            {
-                return rocklandTile;
-            }
-
-            if (biome == BiomeId.Wetland)
-            {
-                return wetlandTile;
-            }
-
-            if (biome == BiomeId.Snowfield)
-            {
-                return snowfieldTile;
-            }
-
-            if (biome == BiomeId.Volcanic)
-            {
-                return volcanicTile;
-            }
-
-            return grasslandTile;
+            return biomeTiles[stableId - BiomeStableIds.First];
         }
 
         /// <summary>現在のBufferと準備済み外周の4方向を調べ、資源を残す露出面と内部を区別します。</summary>
@@ -1953,19 +1931,17 @@ namespace Farmware.WorldGeneration.Presentation
         /// 生成済みチャンクと探索余白の岩壁マスクから距離場を作り、頂点アルファが連続する黒い影Meshを更新します。
         /// </summary>
         /// <param name="coordinate">影を重ねる論理チャンク座標です。</param>
-        /// <param name="tiles">同じチャンクの4096件の生成済み地形Bufferです。</param>
-        /// <param name="generationSettings">チャンク外の探索余白を同じ規則で再生成する設定です。</param>
+        /// <param name="neighborhood">中心と周囲8チャンクの完成済み地形Bufferです。</param>
         private void BuildRockWallShadowMesh(
             ChunkCoordinate coordinate,
-            DynamicBuffer<GeneratedTile> tiles,
-            in WorldGenerationSettings generationSettings)
+            in CompletedChunkTerrainNeighborhood neighborhood)
         {
             // using宣言は早期returnを含むメソッド終了時に自動で閉じ、影構築全体を漏れなく計測します。
             using ProfilerMarker.AutoScope buildScope =
                 RockWallShadowBuildProfilerMarker.Auto();
             using (RockWallShadowMaskProfilerMarker.Auto())
             {
-                FillRockWallShadowMask(coordinate, tiles, generationSettings);
+                FillRockWallShadowMask(neighborhood);
             }
 
             using (RockWallShadowOpacityProfilerMarker.Auto())
@@ -2138,17 +2114,12 @@ namespace Farmware.WorldGeneration.Presentation
         /// <summary>
         /// 影の探索半径を含むチャンク周辺を同期Burst Jobで判定し、余白ノイズ計算のC#実行負荷を減らします。
         /// </summary>
-        /// <param name="coordinate">中心となる論理チャンク座標です。</param>
-        /// <param name="tiles">中心チャンクの生成済み地形Bufferです。</param>
-        /// <param name="generationSettings">余白部分を決定論的に再生成する設定です。</param>
+        /// <param name="neighborhood">中心と周囲8チャンクの完成済み地形Bufferです。</param>
         private void FillRockWallShadowMask(
-            ChunkCoordinate coordinate,
-            DynamicBuffer<GeneratedTile> tiles,
-            in WorldGenerationSettings generationSettings)
+            in CompletedChunkTerrainNeighborhood neighborhood)
         {
-            // AsNativeArrayはBufferを複製しない借用です。同期Run終了まで構造変更せず、メソッド外へ保持しません。
-            RockWallAppearanceUtility.FillShadowMask(generationSettings, coordinate,
-                tiles.AsNativeArray(), rockWallShadowMaskBuffer);
+            // 近傍内のAsNativeArrayはBufferを複製しない借用です。同期Run終了まで構造変更しません。
+            RockWallAppearanceUtility.FillShadowMask(neighborhood, rockWallShadowMaskBuffer);
         }
 
         /// <summary>
@@ -2438,7 +2409,6 @@ namespace Farmware.WorldGeneration.Presentation
                 chunkQuery.Dispose();
                 observerQuery.Dispose();
                 streamingSettingsQuery.Dispose();
-                generationSettingsQuery.Dispose();
             }
 
             queriesAreCreated = false;
@@ -2455,6 +2425,7 @@ namespace Farmware.WorldGeneration.Presentation
             displayedCoordinates.Clear();
             pendingClearCoordinates.Clear();
             seenCoordinates.Clear();
+            completedChunkEntities.Clear();
             clearQueue.Clear();
             staleOriginClearQueue.Clear();
             coordinateScratch.Clear();

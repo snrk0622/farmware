@@ -227,31 +227,7 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(
                 DeterministicEnvironmentGenerator.ValidateSettings(settings),
                 Is.False,
-                "旧7Biome移行期間は高地判定と新しい山地区分の境界を分離してはいけません。");
-        }
-
-        /// <summary>
-        /// 旧Weirdnessと新しい火山活動度を複数座標で生成し、別Saltの独立軸として同じ乱数列を共有しないことを保証します。
-        /// </summary>
-        [Test]
-        public void GeneratedTile_VolcanicActivityDoesNotAliasLegacyWeirdness()
-        {
-            WorldGenerationSettings settings = CreateSettings("volcanic-salt-separation");
-            int differentValueCount = 0;
-
-            for (int sampleIndex = 0; sampleIndex < 16; sampleIndex++)
-            {
-                GeneratedTile tile = DeterministicChunkGenerator.GenerateTile(
-                    settings,
-                    (sampleIndex * 73) - 500,
-                    (sampleIndex * -47) + 300);
-                if (tile.Weirdness != tile.VolcanicActivityPotential)
-                {
-                    differentValueCount++;
-                }
-            }
-
-            Assert.That(differentValueCount, Is.GreaterThanOrEqualTo(15));
+                "基礎岩壁・暫定資源用の山地判定と連続環境軸の山地区分を分離してはいけません。");
         }
 
         /// <summary>
@@ -264,9 +240,10 @@ namespace Farmware.WorldGeneration.Tests
             WorldGenerationSettings secondSettings = firstSettings;
             secondSettings.EnvironmentAxes.WoodyVegetationCellSizeInTiles = 96;
             ChunkCoordinate coordinate = new ChunkCoordinate(-2, 3);
+            BiomeClassificationSettings biomeSettings = BiomeDefinitionCatalog.CreateDefault();
 
-            ulong firstHash = DeterministicChunkGenerator.ComputeChunkHash(firstSettings, coordinate);
-            ulong secondHash = DeterministicChunkGenerator.ComputeChunkHash(secondSettings, coordinate);
+            ulong firstHash = DeterministicChunkGenerator.ComputeChunkHash(firstSettings, biomeSettings, coordinate);
+            ulong secondHash = DeterministicChunkGenerator.ComputeChunkHash(secondSettings, biomeSettings, coordinate);
 
             Assert.That(secondHash, Is.Not.EqualTo(firstHash));
         }

@@ -1,59 +1,84 @@
-// このファイルは、分類用外周の一括生成が従来のセル単位生成と一致し、再利用配列へ古い値を残さないことを検証します。
-// ECS内部の確定地形を優先することと、反映予算が変わっても必要な隣接セルがすべて準備されることを保証します。
+// このファイルは、分類用外周が中心と周囲8チャンクの完成ECS地形を正しく参照することを検証します。
+// 水文・Biome確定前の単一タイル生成へ戻らず、再利用配列へ古い値を残さない表示境界を保証します。
 
 using System;
+using Farmware.WorldGeneration.Presentation;
 using NUnit.Framework;
 using Unity.Collections;
 using Unity.Entities;
 
 namespace Farmware.WorldGeneration.Tests
 {
-    /// <summary>EditModeの最小Worldと一時Native配列で、Presenterの外周参照契約を検証します。</summary>
+    /// <summary>EditModeの最小Worldと一時Native配列で、Presenterの完成外周参照契約を検証します。</summary>
     public sealed class TerrainNeighborHaloUtilityTests
     {
-        /// <summary>全136通りの連続反映範囲を準備し、必要な外周の全フィールドが従来生成と一致することを保証します。</summary>
-        /// <param name="chunkX">負座標・通常・遠方・int端を含む水平チャンク座標です。</param>
-        /// <param name="chunkY">負座標・通常・遠方・int端を含む垂直チャンク座標です。</param>
-        [TestCase(8, -1)]
-        [TestCase(-3, -2)]
-        [TestCase(15625000, -15625000)]
-        [TestCase(WorldGridConstants.MinimumLogicalChunkCoordinate, WorldGridConstants.MinimumLogicalChunkCoordinate)]
-        [TestCase(WorldGridConstants.MaximumLogicalChunkCoordinate, WorldGridConstants.MaximumLogicalChunkCoordinate)]
-        [TestCase(WorldGridConstants.MinimumLogicalChunkCoordinate, WorldGridConstants.MaximumLogicalChunkCoordinate)]
-        [TestCase(WorldGridConstants.MaximumLogicalChunkCoordinate, WorldGridConstants.MinimumLogicalChunkCoordinate)]
-        public void Fill_EveryContiguousBatch_MatchesDirectGeneration(int chunkX, int chunkY)
+        /// <summary>全136通りの連続反映範囲を準備し、必要な外周が9つの完成Bufferと一致することを保証します。</summary>
+        [Test]
+        public void Fill_EveryContiguousBatch_MatchesCompletedNeighborhood()
         {
+            using var neighborhoodStorage = new NeighborhoodStorage();
             using World world = new World("TerrainHaloBatchTests");
             Entity entity = world.EntityManager.CreateEntity();
             DynamicBuffer<GeneratedTile> tiles = world.EntityManager.AddBuffer<GeneratedTile>(entity);
-            using var storage = new NativeArray<GeneratedTile>(Presentation.TerrainNeighborHaloUtility.TileCount,
+            CopyToBuffer(neighborhoodStorage.Center, tiles);
+            using var storage = new NativeArray<GeneratedTile>(
+                TerrainNeighborHaloUtility.TileCount,
                 Allocator.TempJob);
             // using変数はreadonlyなので、書き込み用の借用コピーを作ります。破棄はstorageだけが担当します。
             NativeArray<GeneratedTile> halo = storage;
-            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(WorldSeedUtility.FromString("Farmware"), 1);
-            ChunkCoordinate coordinate = new ChunkCoordinate(chunkX, chunkY);
-            GeneratedTile[] expected = BuildExpectedHalo(settings, coordinate);
 
             for (int first = 0; first < WorldGridConstants.SubChunksPerChunk; first++)
             {
                 for (int count = 1; count <= WorldGridConstants.SubChunksPerChunk - first; count++)
                 {
                     // 毎回あり得ないBiome値で汚し、必要なセルが未更新のまま前バッチの値を読む退行を検出します。
-                    for (int i = 0; i < halo.Length; i++) halo[i] = new GeneratedTile { Biome = (BiomeId)255 };
-                    Presentation.TerrainNeighborHaloUtility.Fill(settings, coordinate, first, count, halo);
-                    for (int index = first; index < first + count; index++)
+                    for (int index = 0; index < halo.Length; index++)
                     {
-                        int startX = index % WorldGridConstants.SubChunksPerAxis * WorldGridConstants.SubChunkSize;
-                        int startY = index / WorldGridConstants.SubChunksPerAxis * WorldGridConstants.SubChunkSize;
+                        halo[index] = new GeneratedTile { Biome = (BiomeId)255 };
+                    }
+
+                    TerrainNeighborHaloUtility.Fill(
+                        neighborhoodStorage.Neighborhood,
+                        first,
+                        count,
+                        halo);
+                    for (int subChunkIndex = first;
+                         subChunkIndex < first + count;
+                         subChunkIndex++)
+                    {
+                        int startX = subChunkIndex % WorldGridConstants.SubChunksPerAxis
+                            * WorldGridConstants.SubChunkSize;
+                        int startY = subChunkIndex / WorldGridConstants.SubChunksPerAxis
+                            * WorldGridConstants.SubChunkSize;
                         // 対象16×16を囲む18×18のうちチャンク外だけが必要です。斜め接続と資源の直下参照も含みます。
-                        for (int y = startY - 1; y <= startY + WorldGridConstants.SubChunkSize; y++)
+                        for (int y = startY - 1;
+                             y <= startY + WorldGridConstants.SubChunkSize;
+                             y++)
                         {
-                            for (int x = startX - 1; x <= startX + WorldGridConstants.SubChunkSize; x++)
+                            for (int x = startX - 1;
+                                 x <= startX + WorldGridConstants.SubChunkSize;
+                                 x++)
                             {
-                                if (x >= 0 && x < 64 && y >= 0 && y < 64) continue;
-                                GeneratedTile actual = Presentation.TerrainNeighborHaloUtility.GetTile(x, y, tiles, halo);
-                                Assert.That(actual, Is.EqualTo(expected[ExpectedIndex(x, y)]),
-                                    "境界・岩壁露出面・資源の前後判定は従来と同じ隣接地形を読む必要があります。");
+                                if (x >= 0 && x < 64 && y >= 0 && y < 64)
+                                {
+                                    continue;
+                                }
+
+                                Assert.That(
+                                    neighborhoodStorage.Neighborhood.TryGetTile(
+                                        x,
+                                        y,
+                                        out GeneratedTile expected),
+                                    Is.True);
+                                GeneratedTile actual = TerrainNeighborHaloUtility.GetTile(
+                                    x,
+                                    y,
+                                    tiles,
+                                    halo);
+                                Assert.That(
+                                    actual,
+                                    Is.EqualTo(expected),
+                                    "外周は水文・Biome確定後の隣接チャンクBufferをそのまま読む必要があります。");
                             }
                         }
                     }
@@ -61,43 +86,61 @@ namespace Farmware.WorldGeneration.Tests
             }
         }
 
-        /// <summary>同じ配列を別シード・別チャンクへ貸し直し、外周を更新しても内部のECS確定値を優先することを保証します。</summary>
+        /// <summary>同じ配列を別の完成近傍へ貸し直し、外周更新後も内部は現在のECS Bufferを優先することを保証します。</summary>
         [Test]
-        public void Fill_ReusedStorage_UsesCurrentSettingsAndAuthoritativeCenter()
+        public void Fill_ReusedStorage_UsesCurrentCompletedNeighborhoodAndAuthoritativeCenter()
         {
             using World world = new World("TerrainHaloReuseTests");
             Entity entity = world.EntityManager.CreateEntity();
             DynamicBuffer<GeneratedTile> tiles = world.EntityManager.AddBuffer<GeneratedTile>(entity);
             tiles.ResizeUninitialized(WorldGridConstants.TilesPerChunk);
-            using var halo = new NativeArray<GeneratedTile>(Presentation.TerrainNeighborHaloUtility.TileCount, Allocator.TempJob);
+            using var halo = new NativeArray<GeneratedTile>(
+                TerrainNeighborHaloUtility.TileCount,
+                Allocator.TempJob);
+
             for (int trial = 0; trial < 2; trial++)
             {
-                WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault((ulong)(trial + 1), 1);
-                ChunkCoordinate coordinate = new ChunkCoordinate(trial * 4, -trial);
-                Presentation.TerrainNeighborHaloUtility.Fill(settings, coordinate, 0, 16, halo);
-                GeneratedTile[] expected = BuildExpectedHalo(settings, coordinate);
+                using var neighborhoodStorage = new NeighborhoodStorage(trial * 32);
+                TerrainNeighborHaloUtility.Fill(
+                    neighborhoodStorage.Neighborhood,
+                    0,
+                    WorldGridConstants.SubChunksPerChunk,
+                    halo);
                 for (int y = -1; y <= 64; y++)
                 {
                     for (int x = -1; x <= 64; x++)
                     {
                         if (x >= 0 && x < 64 && y >= 0 && y < 64)
                         {
-                            // 通常生成とは異なる値を置き、中心を再生成・古い配列コピーへ置き換えないことを検証します。
-                            GeneratedTile authoritative = new GeneratedTile { Ground = GroundType.Magma, Biome = (BiomeId)trial };
+                            // 近傍の中心配列と異なる値を置き、GetTileが現在のECS Bufferを正として維持することを検証します。
+                            GeneratedTile authoritative = new GeneratedTile
+                            {
+                                Ground = GroundType.Magma,
+                                Biome = (BiomeId)(trial + 1)
+                            };
                             tiles[WorldGrid.ToTileIndex(x, y)] = authoritative;
-                            Assert.That(Presentation.TerrainNeighborHaloUtility.GetTile(x, y, tiles, halo), Is.EqualTo(authoritative));
+                            Assert.That(
+                                TerrainNeighborHaloUtility.GetTile(x, y, tiles, halo),
+                                Is.EqualTo(authoritative));
                         }
                         else
                         {
-                            Assert.That(Presentation.TerrainNeighborHaloUtility.GetTile(x, y, tiles, halo),
-                                Is.EqualTo(expected[ExpectedIndex(x, y)]));
+                            Assert.That(
+                                neighborhoodStorage.Neighborhood.TryGetTile(
+                                    x,
+                                    y,
+                                    out GeneratedTile expected),
+                                Is.True);
+                            Assert.That(
+                                TerrainNeighborHaloUtility.GetTile(x, y, tiles, halo),
+                                Is.EqualTo(expected));
                         }
                     }
                 }
             }
         }
 
-        /// <summary>外周配列を不正値で埋め、必要な矩形だけを更新して全260セルの無条件生成へ戻らないことを保証します。</summary>
+        /// <summary>外周配列を不正値で埋め、必要な矩形だけを更新して全260セルの無条件複写へ戻らないことを保証します。</summary>
         /// <param name="first">先頭サブチャンクです。</param>
         /// <param name="count">連続する反映対象数です。</param>
         /// <param name="expectedCount">重複なしで準備される外周セル数です。</param>
@@ -110,17 +153,31 @@ namespace Farmware.WorldGeneration.Tests
         [TestCase(0, 1, 35)]
         public void Fill_PreparesOnlyBatchRectangle(int first, int count, int expectedCount)
         {
-            using var storage = new NativeArray<GeneratedTile>(Presentation.TerrainNeighborHaloUtility.TileCount, Allocator.TempJob);
+            using var neighborhoodStorage = new NeighborhoodStorage();
+            using var storage = new NativeArray<GeneratedTile>(
+                TerrainNeighborHaloUtility.TileCount,
+                Allocator.TempJob);
             // 書き込み用の借用コピーです。storageだけがDisposeします。
             NativeArray<GeneratedTile> halo = storage;
-            for (int i = 0; i < halo.Length; i++) halo[i] = new GeneratedTile { Biome = (BiomeId)255 };
-            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(1, 1);
-            Presentation.TerrainNeighborHaloUtility.Fill(settings, new ChunkCoordinate(0, 0), first, count, halo);
-            int changed = 0;
-            for (int i = 0; i < halo.Length; i++)
+            for (int index = 0; index < halo.Length; index++)
             {
-                if (halo[i].Biome != (BiomeId)255) changed++;
+                halo[index] = new GeneratedTile { Biome = (BiomeId)255 };
             }
+
+            TerrainNeighborHaloUtility.Fill(
+                neighborhoodStorage.Neighborhood,
+                first,
+                count,
+                halo);
+            int changed = 0;
+            for (int index = 0; index < halo.Length; index++)
+            {
+                if (halo[index].Biome != (BiomeId)255)
+                {
+                    changed++;
+                }
+            }
+
             Assert.That(changed, Is.EqualTo(expectedCount));
         }
 
@@ -128,48 +185,212 @@ namespace Farmware.WorldGeneration.Tests
         [Test]
         public void Fill_InvalidArguments_RejectsBeforeJobExecution()
         {
-            using var halo = new NativeArray<GeneratedTile>(Presentation.TerrainNeighborHaloUtility.TileCount, Allocator.TempJob);
+            using var neighborhoodStorage = new NeighborhoodStorage();
+            using var halo = new NativeArray<GeneratedTile>(
+                TerrainNeighborHaloUtility.TileCount,
+                Allocator.TempJob);
             using var shortHalo = new NativeArray<GeneratedTile>(1, Allocator.TempJob);
-            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(1, 1);
-            ChunkCoordinate coordinate = new ChunkCoordinate(0, 0);
-            Assert.Throws<ArgumentException>(() => Presentation.TerrainNeighborHaloUtility.Fill(settings, coordinate, 0, 1, shortHalo));
-            Assert.Throws<ArgumentOutOfRangeException>(() => Presentation.TerrainNeighborHaloUtility.Fill(settings, coordinate, -1, 1, halo));
-            Assert.Throws<ArgumentOutOfRangeException>(() => Presentation.TerrainNeighborHaloUtility.Fill(settings, coordinate, 0, 0, halo));
-            Assert.Throws<ArgumentOutOfRangeException>(() => Presentation.TerrainNeighborHaloUtility.Fill(settings, coordinate, 15, 2, halo));
-            Assert.Throws<ArgumentOutOfRangeException>(() => Presentation.TerrainNeighborHaloUtility.Fill(settings, coordinate, 16, 1, halo));
+            Assert.Throws<ArgumentException>(() => TerrainNeighborHaloUtility.Fill(
+                neighborhoodStorage.Neighborhood, 0, 1, shortHalo));
+            Assert.Throws<ArgumentOutOfRangeException>(() => TerrainNeighborHaloUtility.Fill(
+                neighborhoodStorage.Neighborhood, -1, 1, halo));
+            Assert.Throws<ArgumentOutOfRangeException>(() => TerrainNeighborHaloUtility.Fill(
+                neighborhoodStorage.Neighborhood, 0, 0, halo));
+            Assert.Throws<ArgumentOutOfRangeException>(() => TerrainNeighborHaloUtility.Fill(
+                neighborhoodStorage.Neighborhood, 15, 2, halo));
+            Assert.Throws<ArgumentOutOfRangeException>(() => TerrainNeighborHaloUtility.Fill(
+                neighborhoodStorage.Neighborhood, 16, 1, halo));
         }
 
-        /// <summary>旧経路と同じ1セル生成を行い、int域外だけは表示専用の水域値へ変換して比較用配列を返します。</summary>
-        /// <param name="settings">比較する生成設定です。</param>
-        /// <param name="coordinate">外周の中心チャンクです。</param>
-        /// <returns>上下・左右の順で格納した260セルです。テストだけで確保します。</returns>
-        private static GeneratedTile[] BuildExpectedHalo(WorldGenerationSettings settings, ChunkCoordinate coordinate)
+        /// <summary>
+        /// 完成チャンク索引の周囲1件を欠かし、Factoryが未完成近傍を表示へ渡さないことを保証します。
+        /// </summary>
+        [Test]
+        public void NeighborhoodFactory_RequiresEveryInWorldCompletedChunk()
         {
-            GeneratedTile[] result = new GeneratedTile[Presentation.TerrainNeighborHaloUtility.TileCount];
-            for (int y = -1; y <= 64; y++)
+            using World world = new World("CompletedTerrainNeighborhoodFactoryTests");
+            EntityManager entityManager = world.EntityManager;
+            var completedEntities = new System.Collections.Generic.Dictionary<ChunkCoordinate, Entity>();
+            for (int offsetY = -1; offsetY <= 1; offsetY++)
             {
-                for (int x = -1; x <= 64; x++)
+                for (int offsetX = -1; offsetX <= 1; offsetX++)
                 {
-                    if (x >= 0 && x < 64 && y >= 0 && y < 64) continue;
-                    result[ExpectedIndex(x, y)] = WorldGrid.TryToWorldTileCoordinate(coordinate.X, coordinate.Y,
-                        x, y, out int worldX, out int worldY)
-                        ? DeterministicChunkGenerator.GenerateTile(settings, worldX, worldY)
-                        : new GeneratedTile { Ground = GroundType.Water };
+                    Entity entity = entityManager.CreateEntity();
+                    DynamicBuffer<GeneratedTile> buffer = entityManager.AddBuffer<GeneratedTile>(entity);
+                    buffer.ResizeUninitialized(WorldGridConstants.TilesPerChunk);
+                    completedEntities[new ChunkCoordinate(offsetX, offsetY)] = entity;
                 }
             }
 
-            return result;
+            Assert.That(
+                CompletedChunkTerrainNeighborhoodFactory.TryCreate(
+                    entityManager,
+                    completedEntities,
+                    new ChunkCoordinate(0, 0),
+                    out _),
+                Is.True);
+
+            completedEntities.Remove(new ChunkCoordinate(-1, 0));
+            Assert.That(
+                CompletedChunkTerrainNeighborhoodFactory.TryCreate(
+                    entityManager,
+                    completedEntities,
+                    new ChunkCoordinate(0, 0),
+                    out _),
+                Is.False,
+                "未完成の左隣を基礎生成で補完して表示を確定してはいけません。");
         }
 
-        /// <summary>テストの比較用配列で、上下の行と左右の列を重複なしの位置へ対応させます。</summary>
-        /// <param name="x">外周セルの水平ローカル座標です。</param>
-        /// <param name="y">外周セルの垂直ローカル座標です。</param>
-        /// <returns>260要素のうち対応する位置です。</returns>
-        private static int ExpectedIndex(int x, int y)
+        /// <summary>
+        /// intワールド左下端では、ワールド外3方向のEntityを要求せず、外側を非接続として返すことを保証します。
+        /// </summary>
+        [Test]
+        public void NeighborhoodFactory_WorldMinimumCorner_DoesNotRequireOutsideChunks()
         {
-            if (y == -1) return x + 1;
-            if (y == 64) return 66 + x + 1;
-            return 132 + (x == -1 ? 0 : 64) + y;
+            using World world = new World("CompletedTerrainNeighborhoodWorldEdgeTests");
+            EntityManager entityManager = world.EntityManager;
+            var completedEntities = new System.Collections.Generic.Dictionary<ChunkCoordinate, Entity>();
+            int minimum = WorldGridConstants.MinimumLogicalChunkCoordinate;
+            for (int offsetY = 0; offsetY <= 1; offsetY++)
+            {
+                for (int offsetX = 0; offsetX <= 1; offsetX++)
+                {
+                    Entity entity = entityManager.CreateEntity();
+                    DynamicBuffer<GeneratedTile> buffer = entityManager.AddBuffer<GeneratedTile>(entity);
+                    buffer.ResizeUninitialized(WorldGridConstants.TilesPerChunk);
+                    completedEntities[new ChunkCoordinate(minimum + offsetX, minimum + offsetY)] = entity;
+                }
+            }
+
+            Assert.That(
+                CompletedChunkTerrainNeighborhoodFactory.TryCreate(
+                    entityManager,
+                    completedEntities,
+                    new ChunkCoordinate(minimum, minimum),
+                    out CompletedChunkTerrainNeighborhood neighborhood),
+                Is.True);
+            Assert.That(neighborhood.TryGetTile(0, 0, out _), Is.True);
+            Assert.That(
+                neighborhood.TryGetTile(-1, 0, out _),
+                Is.False,
+                "intワールド外を隣接土地として返してはいけません。");
+        }
+
+        /// <summary>NativeArrayの完成中心地形をDynamicBufferへコピーし、GetTileの中心優先を検証できる状態にします。</summary>
+        /// <param name="source">コピー元の4096完成セルです。</param>
+        /// <param name="destination">テストWorldが所有するコピー先Bufferです。</param>
+        private static void CopyToBuffer(
+            NativeArray<GeneratedTile> source,
+            DynamicBuffer<GeneratedTile> destination)
+        {
+            destination.ResizeUninitialized(source.Length);
+            for (int index = 0; index < source.Length; index++)
+            {
+                destination[index] = source[index];
+            }
+        }
+
+        /// <summary>9つの独立NativeArrayを所有し、完成地形近傍をテスト終了時に一括破棄します。</summary>
+        private sealed class NeighborhoodStorage : IDisposable
+        {
+            // 左下チャンクの4096完成セルを保持し、このヘルパーが破棄します。
+            private NativeArray<GeneratedTile> southWest;
+
+            // 下チャンクの4096完成セルを保持し、このヘルパーが破棄します。
+            private NativeArray<GeneratedTile> south;
+
+            // 右下チャンクの4096完成セルを保持し、このヘルパーが破棄します。
+            private NativeArray<GeneratedTile> southEast;
+
+            // 左チャンクの4096完成セルを保持し、このヘルパーが破棄します。
+            private NativeArray<GeneratedTile> west;
+
+            // 中心チャンクの4096完成セルを保持し、このヘルパーが破棄します。
+            private NativeArray<GeneratedTile> center;
+
+            // 右チャンクの4096完成セルを保持し、このヘルパーが破棄します。
+            private NativeArray<GeneratedTile> east;
+
+            // 左上チャンクの4096完成セルを保持し、このヘルパーが破棄します。
+            private NativeArray<GeneratedTile> northWest;
+
+            // 上チャンクの4096完成セルを保持し、このヘルパーが破棄します。
+            private NativeArray<GeneratedTile> north;
+
+            // 右上チャンクの4096完成セルを保持し、このヘルパーが破棄します。
+            private NativeArray<GeneratedTile> northEast;
+
+            /// <summary>中心チャンクの完成配列です。DynamicBufferへの比較用コピーだけに使います。</summary>
+            public NativeArray<GeneratedTile> Center => center;
+
+            /// <summary>9配列を同期処理中だけ参照する完成地形近傍です。</summary>
+            public CompletedChunkTerrainNeighborhood Neighborhood { get; }
+
+            /// <summary>各チャンクを識別できる完成値で9配列を確保・初期化します。</summary>
+            /// <param name="valueOffset">再利用試験で前回値と区別するBiome値への加算です。</param>
+            public NeighborhoodStorage(int valueOffset = 0)
+            {
+                southWest = CreateChunk(0 + valueOffset);
+                south = CreateChunk(1 + valueOffset);
+                southEast = CreateChunk(2 + valueOffset);
+                west = CreateChunk(3 + valueOffset);
+                center = CreateChunk(4 + valueOffset);
+                east = CreateChunk(5 + valueOffset);
+                northWest = CreateChunk(6 + valueOffset);
+                north = CreateChunk(7 + valueOffset);
+                northEast = CreateChunk(8 + valueOffset);
+                Neighborhood = new CompletedChunkTerrainNeighborhood(
+                    southWest,
+                    south,
+                    southEast,
+                    west,
+                    center,
+                    east,
+                    northWest,
+                    north,
+                    northEast);
+            }
+
+            /// <summary>所有する9配列を、作成済みのものだけ確実に破棄します。</summary>
+            public void Dispose()
+            {
+                if (southWest.IsCreated) southWest.Dispose();
+                if (south.IsCreated) south.Dispose();
+                if (southEast.IsCreated) southEast.Dispose();
+                if (west.IsCreated) west.Dispose();
+                if (center.IsCreated) center.Dispose();
+                if (east.IsCreated) east.Dispose();
+                if (northWest.IsCreated) northWest.Dispose();
+                if (north.IsCreated) north.Dispose();
+                if (northEast.IsCreated) northEast.Dispose();
+            }
+
+            /// <summary>完成後の水域・マグマを含む、チャンクごとに識別可能な4096セルを作ります。</summary>
+            /// <param name="chunkValue">9チャンクと再利用試行を区別する固定値です。</param>
+            /// <returns>呼び出し側が所有・破棄する完成地形配列です。</returns>
+            private static NativeArray<GeneratedTile> CreateChunk(int chunkValue)
+            {
+                var tiles = new NativeArray<GeneratedTile>(
+                    WorldGridConstants.TilesPerChunk,
+                    Allocator.TempJob);
+                for (int index = 0; index < tiles.Length; index++)
+                {
+                    // Biomeと連続値も変え、Groundだけ一致する誤ったコピーではテストを通過できないようにします。
+                    tiles[index] = new GeneratedTile
+                    {
+                        Biome = (BiomeId)(chunkValue + 1),
+                        Ground = chunkValue % 3 == 0
+                            ? GroundType.Water
+                            : chunkValue % 3 == 1
+                                ? GroundType.Magma
+                                : GroundType.RockWall,
+                        Elevation = (ushort)(chunkValue * 100 + index % 97),
+                        Moisture = (ushort)(index % 65536)
+                    };
+                }
+
+                return tiles;
+            }
         }
     }
 }
