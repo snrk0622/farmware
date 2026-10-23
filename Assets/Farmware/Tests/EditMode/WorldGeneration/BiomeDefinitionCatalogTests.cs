@@ -23,6 +23,8 @@ namespace Farmware.WorldGeneration.Tests
 
             Assert.That(BiomeDefinitionCatalog.ValidateSettings(catalog), Is.True);
             Assert.That(catalog.Definitions.Length, Is.EqualTo(18));
+            Assert.That(catalog.VariationCellSizeInTiles, Is.EqualTo(256));
+            Assert.That(catalog.VariationOctaveCount, Is.EqualTo(2));
             Assert.That(catalog.FreshwaterMarshHostIds.Length, Is.EqualTo(7));
             Assert.That(catalog.SwampForestHostIds.Length, Is.EqualTo(4));
 
@@ -258,7 +260,7 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// ID重複、Salt重複、範囲逆転、重み不足、地質欠落、Host混入をそれぞれ設定エラーとして拒否します。
+        /// ID・Salt重複、範囲逆転、重み不足、地質欠落、Host混入、Variation設定破損をそれぞれ拒否します。
         /// </summary>
         [Test]
         public void Validation_RejectsIncompleteOrAmbiguousDefinitions()
@@ -303,6 +305,14 @@ namespace Farmware.WorldGeneration.Tests
             changed.Flags |= BiomeDefinitionFlags.AllowsInitialSpawn;
             invalidSpawn.Definitions[8] = changed;
             Assert.That(BiomeDefinitionCatalog.ValidateSettings(invalidSpawn), Is.False);
+
+            BiomeClassificationSettings invalidVariation = BiomeDefinitionCatalog.CreateDefault();
+            invalidVariation.VariationCellSizeInTiles = 128;
+            Assert.That(BiomeDefinitionCatalog.ValidateSettings(invalidVariation), Is.False);
+
+            invalidVariation = BiomeDefinitionCatalog.CreateDefault();
+            invalidVariation.VariationOctaveCount = 3;
+            Assert.That(BiomeDefinitionCatalog.ValidateSettings(invalidVariation), Is.False);
         }
 
         /// <summary>

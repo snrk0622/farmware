@@ -537,6 +537,8 @@ namespace Farmware.WorldGeneration.Tests
                             cellY * 8,
                             out GeneratedEnvironmentData centerEnvironment)
                         || candidateAnchorElevation >= centerEnvironment.Elevation
+                        || candidateAnchorElevation
+                            < WorldGenerationSettings.MinimumSupportedSeaLevelThreshold - 1
                         || candidateAnchorElevation >= settings.WetlandMaximumElevation
                         || centerEnvironment.Elevation == ushort.MaxValue)
                     {
@@ -553,7 +555,8 @@ namespace Farmware.WorldGeneration.Tests
             }
             Assert.That(foundCoastalShape, Is.True);
 
-            // 最低Anchorより1高い位置を海面にすると、Anchorだけが海面下で中心タイルは陸上になります。
+            // 最低Anchorより1高く、かつ地上Biomeの固定標高下限以上へ海面を置くと、
+            // 有効な生成設定を維持したままAnchorだけが海面下で中心タイルは陸上になります。
             settings.SeaLevelThreshold = (ushort)(anchorElevation + 1);
             Assert.That(DeterministicEnvironmentGenerator.ValidateSettings(settings), Is.True);
             Assert.That(anchorElevation, Is.LessThan(settings.SeaLevelThreshold));

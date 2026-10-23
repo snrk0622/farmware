@@ -1805,8 +1805,11 @@ namespace Farmware.WorldGeneration.PlayModeTests
             WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
                 WorldSeedUtility.FromString("rock-wall-chunk-edge-test"),
                 1);
-            settings.SeaLevelThreshold = 0;
-            settings.FreshWaterMaximumElevation = 0;
+            // 地上18Biomeの固定標高範囲と両立する最小海面を使い、無効設定へ依存せず岩壁境界だけを検証します。
+            settings.SeaLevelThreshold =
+                WorldGenerationSettings.MinimumSupportedSeaLevelThreshold;
+            settings.FreshWaterMaximumElevation =
+                WorldGenerationSettings.MinimumSupportedSeaLevelThreshold;
             settings.RiverCenterLineHalfWidth = 0;
             settings.PondThreshold = ushort.MaxValue;
             bool foundShadowAcrossChunkBoundary = false;

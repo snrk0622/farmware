@@ -205,6 +205,17 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(DeterministicEnvironmentGenerator.ValidateSettings(settings), Is.False);
             Assert.That(DeterministicEnvironmentGenerator.TryGenerate(settings, 0, 0, out _), Is.False);
 
+            settings = CreateSettings("environment-unsupported-low-sea-level");
+            settings.SeaLevelThreshold =
+                WorldGenerationSettings.MinimumSupportedSeaLevelThreshold - 1;
+            Assert.That(
+                DeterministicEnvironmentGenerator.ValidateSettings(settings),
+                Is.False,
+                "地上18Biomeの下限より低い海面は、分類先のない陸地を作るため拒否する必要があります。");
+            Assert.That(
+                DeterministicEnvironmentGenerator.TryGenerate(settings, 0, 0, out _),
+                Is.False);
+
             settings = CreateSettings("environment-invalid-relief");
             settings.EnvironmentAxes.RuggednessMaximumRelief = 0;
             Assert.That(DeterministicEnvironmentGenerator.ValidateSettings(settings), Is.False);

@@ -242,12 +242,22 @@ namespace Farmware.WorldGeneration
     /// <summary>
     /// 新18BiomeのDefinitionと、水文特殊Biomeごとの許可Host集合をまとめた固定設定です。
     /// 分類器だけが読むECSシングルトンとしてWorldGenerationSettingsから分離し、無関係な生成Jobへの約4KBの値コピーを避けます。
-    /// C5-Aでは設定と検証だけを追加し、旧7Biomeの生成結果へはまだ接続しません。
+    /// C5-AのDefinitionとC5-B1のVariation設定を保持し、旧7Biomeの生成結果へはまだ接続しません。
     /// </summary>
     public struct BiomeClassificationSettings : IComponentData
     {
         /// <summary>登録順に依存せず安定IDで検索する18件のBiome Definitionです。</summary>
         public FixedList4096Bytes<BiomeDefinition> Definitions;
+
+        /// <summary>
+        /// BiomeVariationで最も低周波なノイズ格子の一辺です。単位はタイルで、ワールド寿命中は変更しません。
+        /// </summary>
+        public int VariationCellSizeInTiles;
+
+        /// <summary>
+        /// BiomeVariationへ重ねるノイズ解像度数です。2なら256・128タイルを2：1で合成します。
+        /// </summary>
+        public int VariationOctaveCount;
 
         /// <summary>淡水湿原・氾濫原へ昇格できる通常Biomeの安定ID集合です。</summary>
         public FixedList32Bytes<byte> FreshwaterMarshHostIds;
@@ -262,6 +272,12 @@ namespace Farmware.WorldGeneration
     /// </summary>
     public static class BiomeDefinitionCatalog
     {
+        /// <summary>BiomeVariationの最も低周波な格子一辺です。仕様で固定された256タイルを表します。</summary>
+        public const int RequiredVariationCellSizeInTiles = 256;
+
+        /// <summary>BiomeVariationへ重ねる解像度数です。256・128タイルの2段を表します。</summary>
+        public const int RequiredVariationOctaveCount = 2;
+
         /// <summary>新Biome Definitionの必須件数です。</summary>
         public const int RequiredDefinitionCount = 18;
 
@@ -280,10 +296,14 @@ namespace Farmware.WorldGeneration
         /// <summary>
         /// C5-Aの確定表から新18Biomeの既定設定を作ります。
         /// </summary>
-        /// <returns>安定ID1〜18、全地質表、2種類の湿原Host集合を持つ固定設定です。</returns>
+        /// <returns>安定ID1〜18、全地質表、Variation格子、2種類の湿原Host集合を持つ固定設定です。</returns>
         public static BiomeClassificationSettings CreateDefault()
         {
-            BiomeClassificationSettings settings = default;
+            BiomeClassificationSettings settings = new BiomeClassificationSettings
+            {
+                VariationCellSizeInTiles = RequiredVariationCellSizeInTiles,
+                VariationOctaveCount = RequiredVariationOctaveCount
+            };
             AddNormalDefinitions(ref settings.Definitions);
             AddHydrologyAndExtremeDefinitions(ref settings.Definitions);
             AddWetlandHosts(ref settings);
@@ -294,10 +314,12 @@ namespace Farmware.WorldGeneration
         /// Definition設定が新18Biomeの保存・分類契約を満たすか検証します。
         /// </summary>
         /// <param name="settings">Authoringまたは既定値から作られた固定設定です。</param>
-        /// <returns>欠落、重複、範囲逆転、重み不正、Salt重複、地質表不正、Host不正がなければtrueです。</returns>
+        /// <returns>Definition、Variation格子、Salt、地質表、Hostに欠落や不整合がなければtrueです。</returns>
         public static bool ValidateSettings(in BiomeClassificationSettings settings)
         {
-            if (settings.Definitions.Length != RequiredDefinitionCount)
+            if (settings.Definitions.Length != RequiredDefinitionCount
+                || settings.VariationCellSizeInTiles != RequiredVariationCellSizeInTiles
+                || settings.VariationOctaveCount != RequiredVariationOctaveCount)
             {
                 return false;
             }
