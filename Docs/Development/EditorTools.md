@@ -5,7 +5,7 @@
 
 ## 1. 用途
 
-本書のメニュー・設定・表示は、TERRAIN-01C2-Bまでのdevelop、TERRAIN-01C3-D2、水文Lake表示へ先行反映したTERRAIN-01C4-C、派生水文分布監査、Gameビュー診断、Map Viewer診断を追加したTERRAIN-01C4-E3、最終18Biomeを接続したTERRAIN-01C5-Cの現行実装境界を説明する。C3-A〜D1がSimulationへ追加した固定水文の基礎格子、D8流向、固定下流終端、集水面積、自然流出、閉鎖流域境界、基礎湖面を、C3-D2で複数Seed分布監査、Debug Visualization、Map Viewerへ接続した。C4-E1bは地下水、土壌飽和、最終湖区分、泉、自然冠水、湿原候補を複数Seed分布監査へ接続し、C4-E2とE3は残る5分類をGameビューとMap Viewerへ接続した。C5-CはC4完成チャンクを18Biomeへ確定し、GameビューとMap ViewerのTerrain・Biome表示へ接続した。Level 0〜6集約Summaryの利用・分解・キャッシュ統計は性能テストだけで記録し、Editor表示へは渡さない。2026-10-19の[改訂マップ仕様](../GameSpecification/RandomMapGenerationSpecification.md)の可変Blockと水中文脈表示はまだツールに実装されていない。
+本書のメニュー・設定・表示は、TERRAIN-01C2-Bまでのdevelop、TERRAIN-01C3-D2、水文Lake表示へ先行反映したTERRAIN-01C4-C、派生水文分布監査、Gameビュー診断、Map Viewer診断を追加したTERRAIN-01C4-E3、最終18Biomeを接続したTERRAIN-01C5-C、Map Viewerモード契約とBiome選択診断を整理したTERRAIN-01C5-Dの現行実装境界を説明する。C3-A〜D1がSimulationへ追加した固定水文の基礎格子、D8流向、固定下流終端、集水面積、自然流出、閉鎖流域境界、基礎湖面を、C3-D2で複数Seed分布監査、Debug Visualization、Map Viewerへ接続した。C4-E1bは地下水、土壌飽和、最終湖区分、泉、自然冠水、湿原候補を複数Seed分布監査へ接続し、C4-E2とE3は残る5分類をGameビューとMap Viewerへ接続した。C5-CはC4完成チャンクを18Biomeへ確定し、GameビューとMap ViewerのTerrain・Biome表示へ接続した。C5-Dは製品分類器と同じ最終理由・通常上位候補・8軸適性を両画面の中央情報へ追加し、Map Viewer全27モードの生成契約を単一Catalogへ集約した。Level 0〜6集約Summaryの利用・分解・キャッシュ統計は性能テストだけで記録し、Editor表示へは渡さない。2026-10-19の[改訂マップ仕様](../GameSpecification/RandomMapGenerationSpecification.md)の可変Blockと水中文脈表示はまだツールに実装されていない。
 
 開発者専用のUnity Editorツールは、ワールド生成結果の調査、調整前後の比較、確認用Sceneとフォールバック素材の構築に使用する。
 これらは製品版のプレイヤー操作へ含めず、ランタイムのゲーム状態を変更するデバッグ操作にも使用しない。
@@ -118,7 +118,7 @@ Gameビューでは`CameraPanController`の表示原点を使い、CameraとGrid
 | モード | 確認できる内容 |
 | --- | --- |
 | `Off` | 開発者用着色を解除した通常表示 |
-| `Biome` | 草原、森林、砂漠、岩地、湿地、雪原、火山の論理バイオーム |
+| `Biome` | 現行18種の論理バイオーム。中央HUDには最終選択理由、通常首位・次点、候補数、Score、Variation、両候補の8軸適性を表示 |
 | `Soil` | 通常表示へ出さない標準、肥沃、砂質の`SoilType` |
 | `Elevation` | 標高の連続値 |
 | `Environment > Base Temperature` | 標高寒冷補正前の基礎気温 |
@@ -297,7 +297,7 @@ Consoleレポートには、次の比較材料を出力する。
 ### 2.9 Map Viewer
 
 - メニュー: `Farmware > World Generation > Map Viewer`
-- 実装: `WorldGenerationMapViewerWindow`、`WorldGenerationMapSampler`
+- 実装: `WorldGenerationMapViewerWindow`、`WorldGenerationMapSampler`、`WorldGenerationMapViewModeCatalog`
 - PlayMode: 不要。PlayMode中に開いた場合は、実行中ECSの`WorldGenerationSettings`を優先する。
 
 #### 用途
@@ -314,12 +314,13 @@ Farmwareのワールドは無限なので「全体」を有限画像へ収める
 - 設定SubSceneの全Root・全子孫を検査し、`WorldGenerationAuthoring`が0件または複数件なら生成を停止する。同じRoot配下の兄弟GameObjectにある重複も設定エラーとして扱う。
 - PlayModeでは、`ChunkGenerationSystem`が使用中のECS Singletonを直接読む。
 - `Terrain`と`Biome`は`HydrologyDiagnosticChunk`でC4水文まで完成したチャンクを生成し、製品ECSと同じC5-C最終化を適用する。連続環境軸と基礎地質の表示は用途に応じた純粋生成を使い、ビューア専用の簡易Biome分類は持たない。
+- 全27表示モードの表示名、実行経路、解像度上限、進捗方式、Hover用データ契約は`WorldGenerationMapViewModeCatalog`を正とする。完成チャンク、C3基礎水文セル、単一タイルの経路を用途別に維持し、WindowとSamplerがモード範囲や負荷上限を別々に推測しない。
 - 表示領域が生成Textureの上限を超える場合は、縦横共通の縮小率でTextureを生成し、正方形のタイルとグリッドを保つ。連続環境軸・地質の通常モードは最大768サンプル、C3基礎水文5モードは1サンプルごとに最大4,096セルの集水・流域探索を行うため最大64サンプルとする。`Terrain`、`Biome`、C4派生水文5モードは1チャンク数秒の完成診断生成を行うため、縮尺ごとに代表タイルの所有チャンクが各軸最大3件となる1〜64サンプルへさらに制限する。サンプラー入口でも同じ上限を検証し、Windowを経由しない呼出しから数百チャンクを生成しない。派生水文で担当8×8セルが正側隣接チャンクに属する場合はその完成チャンクも生成するため、完了表示には実際に使った完成水文チャンク数を示す。Windowリサイズで縦横比が変わった場合は、操作停止後に新しい比率のTextureを自動再生成する。生成TextureとCanvasの表示倍率はPointer座標、パン、ズーム、境界線、原点表示へ反映する。Pointer座標とカーソル中心ズームは、Point Filterで実際に表示されるTextureピクセルの代表タイルへ一致させる。カーソル中心ズームの次解像度も表示生成と同じモード別上限を使い、完成チャンク使用モードを未描画の768サンプルとして逆算しない。グリッドと原点表示は、Texture解像度が奇数の場合も地形生成と同じ整数中央のサンプル境界へ揃える。ツールバーの＋・－ButtonはCanvas中央をPointerへ変換せず、現在の中心タイル座標を直接維持する。再生成直後のHover情報もCanvas中央の境界をPointerとして解釈せず、Side Panelと同じ中心タイルを直接表示する。
 - 実設定を取得できない場合は生成を停止し、別の既定値へフォールバックしない。
-- 初回はCanvasの両辺が有限値かつ64ポイント以上になるまで生成を待ち、未確定の`NaN`寸法から1×1画像を作らない。画像完成までは地図領域の中央と画面下部へ生成進捗の割合を表示する。連続環境軸・地質の通常モードと基礎水文は完成行数、`Terrain`、`Biome`、派生水文は処理時間の大半を占める完成チャンク数へ95%、色・Hoverコピーを作る画像行へ残り5%を割り当てる。完成チャンク使用モードはGate待機開始時に1%を通知し、16行未満の低解像度でも完成まで0%のままにしない。再生成時は前の画像を維持し、下部の進捗を更新する。Hover情報は初回から派生水文を含む8行分の高さを確保し、完成後に情報欄が地図を縮めて重い完成チャンクを二度生成しないようにする。
+- 初回はCanvasの両辺が有限値かつ64ポイント以上になるまで生成を待ち、未確定の`NaN`寸法から1×1画像を作らない。画像完成までは地図領域の中央と画面下部へ生成進捗の割合を表示する。連続環境軸・地質の通常モードと基礎水文は完成行数、`Terrain`、`Biome`、派生水文は処理時間の大半を占める完成チャンク数へ95%、色・Hoverコピーを作る画像行へ残り5%を割り当てる。完成チャンク使用モードはGate待機開始時に1%を通知し、16行未満の低解像度でも完成まで0%のままにしない。再生成時は前の画像を維持し、下部の進捗を更新する。Hover情報は初回からBiome選択診断を含む最大10行分の高さを確保し、完成後に情報欄が地図を縮めて重い完成チャンクを二度生成しないようにする。
 
 `Terrain`はC5-Cの完成チャンクを使い、18Biomeの仮色、淡水、海水、マグマ、岩壁を優先した最終地形を表示する。C6前のためSoilType別の本番Block差分は反映せず、土壌分布はPlayMode中の`Debug Visualization > Soil`で確認する。
-`Biome`は水域や障害物の下も含む論理バイオームを表示する。`Elevation`、`Base Temperature`、`Terrain Temperature`、`Base Moisture`、`Woody Vegetation Potential`、`Terrain Ruggedness`、`Coastal Influence`、`Volcanic Activity Potential`はGameビューのDebug Visualizationと同じRGBで連続環境軸を表示する。`Geology Class`、3基礎特性、`Geology Flags`、`Geology Dominant Site`、`Geology Site Boundary`もGameビューと同じ色定義を使う。`Geology Dominant Site`の凡例色は固定の分類色ではなく、サイト座標から生成される実際の色の例であるため、地図には凡例と異なる色も表示される。同じサイトは同じ色を保ち、正確な境界確認には`Geology Site Boundary`を使う。サイト境界は広域縮小でも確認できるよう、上下左右の隣接代表サンプルとのサイト差を表示するため、Gameビューの隣接1タイル判定より太く見える場合がある。
+`Biome`は水域や障害物の下も含む論理バイオームを表示する。`Terrain`と`Biome`のHover／中央情報は、地上タイルについて製品最終化と同じ固定入力から得た最終選択理由、通常首位・次点、候補数、Score、Variation、両候補の8軸適性を表示する。海域は地上Biome選択の対象外と明示する。診断値は画像生成時にManaged値へコピーし、Pointer移動ごとに完成チャンクや分類を再実行しない。`Elevation`、`Base Temperature`、`Terrain Temperature`、`Base Moisture`、`Woody Vegetation Potential`、`Terrain Ruggedness`、`Coastal Influence`、`Volcanic Activity Potential`はGameビューのDebug Visualizationと同じRGBで連続環境軸を表示する。`Geology Class`、3基礎特性、`Geology Flags`、`Geology Dominant Site`、`Geology Site Boundary`もGameビューと同じ色定義を使う。`Geology Dominant Site`の凡例色は固定の分類色ではなく、サイト座標から生成される実際の色の例であるため、地図には凡例と異なる色も表示される。同じサイトは同じ色を保ち、正確な境界確認には`Geology Site Boundary`を使う。サイト境界は広域縮小でも確認できるよう、上下左右の隣接代表サンプルとのサイト差を表示するため、Gameビューの隣接1タイル判定より太く見える場合がある。
 
 C3基礎水文5モードはGameビューと同じRGBで、流向、終端、集水面積、渓流・河川、流域・湖を表示する。`Hydrology Lake`だけはC4-Cの水収支まで生成し、一時湖、恒久塩湖、閉鎖淡水湖、越流淡水湖をGameビューと同じ色で表示する。C4派生水文5モードはC4-E1aの完成チャンクをバックグラウンドで生成・再利用し、`Hydrology Groundwater`、`Hydrology Natural Soil Saturation`、`Hydrology Spring`、`Hydrology Natural Flooding`、`Hydrology Wetland Candidate`を表示する。RGBと分類条件はC4-E2のGameビュー色変換APIを共有する。完成チャンク生成はEditorプロセス内で同時に1要求へ制限し、連続操作で取消済み要求と最新要求の大容量Native配列が重複しないようにする。取消済み要求は実行中1チャンクの完成後に終了するため、最新要求の開始まで数秒待つ場合があるが、Editorメインスレッドは停止しない。生成中に前の画像を維持する場合、Hover診断もDropdownの新モードではなく画面へ適用済みの旧画像モードを参照し、未完成の派生水文を取得失敗として表示しない。完成チャンクのNative配列は画像生成後に破棄し、Hover／中央情報には生成時にManaged値へコピーした地下水、接続状態、自然飽和、泉、自然冠水、淡水接続、湿原資格、広域規模を表示するため、Pointer移動で重い再生成を行わない。現在降雨・灌水・排水・現在土壌水分・現在水位は表示しない。基礎水文のHoverと中央情報には固定水文セルの全診断値と最終湖区分を追加し、Lake凡例では打切り流域を`Truncated basin (not a fixed lake)`として固定湖候補と区別する。木、石、砂の資源分布は現時点では対象外である。
 
@@ -345,11 +346,11 @@ C3基礎水文5モードはGameビューと同じRGBで、流向、終端、集�
 - `DeterministicChunkGenerator`、`GeneratedTile`、Biome、Ground、水域、地質分類・特性・サイトの生成を変更した。
 - `HydrologyDiagnosticChunk`、地下水、自然飽和、泉、自然冠水、湿原候補の固定値または分類条件を変更した。
 - チャンク・サブチャンク寸法、負座標変換、シード変換、GeneratorVersionを変更した。
-- Map Viewerの色、凡例、座標変換、パン、ズーム、非同期処理を変更した。
+- Map Viewerの色、凡例、モードCatalog、Hoverデータ契約、座標変換、パン、ズーム、非同期処理を変更した。
 
 #### 確認内容
 
-1. 原点付近と既知の遠距離座標で、Map ViewerとGameビューのバイオーム・水域・マグマ・岩壁、8つの連続環境軸、地質7モード、C3基礎水文5モード、C4派生水文5モードが一致する。同じBiome内では標準・肥沃・砂質の土地表示が同じであり、`Debug Visualization > Soil`へ切り替えた場合だけ3種類を別色で確認できる。サイト境界は、Gameビューでは隣接1タイル、Map Viewerでは隣接代表サンプルという縮尺差を踏まえて同じ支配サイト変化を示す。水文Lakeでは打切り流域と固定湖候補が別色になり、一時湖、恒久塩湖、閉鎖淡水湖、越流淡水湖の色・凡例・最終区分表示が両画面で一致する。派生水文では5つの凡例、色面、Hover／中央固定値が選択モードと一致する。
+1. 原点付近と既知の遠距離座標で、Map ViewerとGameビューのバイオーム・水域・マグマ・岩壁、8つの連続環境軸、地質7モード、C3基礎水文5モード、C4派生水文5モードが一致する。Biomeモードでは同じ地上タイルの最終理由、通常首位・次点、候補数、8軸適性が両画面で一致し、海域は対象外と表示される。同じBiome内では標準・肥沃・砂質の土地表示が同じであり、`Debug Visualization > Soil`へ切り替えた場合だけ3種類を別色で確認できる。サイト境界は、Gameビューでは隣接1タイル、Map Viewerでは隣接代表サンプルという縮尺差を踏まえて同じ支配サイト変化を示す。水文Lakeでは打切り流域と固定湖候補が別色になり、一時湖、恒久塩湖、閉鎖淡水湖、越流淡水湖の色・凡例・最終区分表示が両画面で一致する。派生水文では5つの凡例、色面、Hover／中央固定値が選択モードと一致する。
 2. `実設定を再読込`後のSeed、WorldSeed、GeneratorVersion、設定取得元が想定どおり表示される。
 3. 負座標への移動、ドラッグ、ホイール、＋・－Buttonで中心と縮尺が正しく変化する。＋・－ButtonではTexture解像度が奇数・偶数のどちらでも中心タイル座標を動かさない。再生成直後のHover情報は、偶数解像度でもSide Panelと同じ中心座標を示す。Windowを768ポイントより大きくした場合と、生成Textureの幅または高さが奇数になる大きさにした場合のどちらでも、カーソル下の座標、グリッド、原点印が地形とずれず、正方形のグリッドが維持される。基礎水文を通常サイズで表示し、中央以外へPointerを置いてホイールズームした場合も、64サンプルのTexture上でPointer下の代表タイルを維持する。派生水文では縮尺に応じた低解像度へ切り替わっても同じ地点を維持し、連続操作時は前の要求をキャンセルして最新画像だけを反映する。
 4. 同じSeed・座標・縮尺へ戻ると同じ画像になる。

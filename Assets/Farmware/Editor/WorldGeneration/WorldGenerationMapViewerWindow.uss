@@ -163,8 +163,8 @@
 }
 
 .hover-label {
-    /* 初回から派生水文を含む8行分を確保し、完成後に地図が縮んで重い完成チャンクを二度生成することを防ぎます。 */
-    min-height: 134px;
+    /* 初回からBiome選択診断を含む最大10行分を確保し、完成後に地図が縮んで重い完成チャンクを二度生成することを防ぎます。 */
+    min-height: 166px;
     flex-shrink: 0;
     padding: 5px 8px;
     background-color: #1b1f26;

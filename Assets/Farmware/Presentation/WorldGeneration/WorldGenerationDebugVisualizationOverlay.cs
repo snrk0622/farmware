@@ -166,6 +166,9 @@ namespace Farmware.WorldGeneration.Presentation
         // 中央タイルHUDへ現在の閾値を表示するため、WorldGenerationSettings Singletonを読むQueryです。
         private EntityQuery settingsQuery;
 
+        // Biomeモードの中央タイルへ、製品分類器と同じDefinitionから候補・選択理由を表示するQueryです。
+        private EntityQuery biomeSettingsQuery;
+
         // 中央タイルHUDへ資源の最低間隔と群半径を表示するため、ResourceGenerationSettings Singletonを読むQueryです。
         private EntityQuery resourceSettingsQuery;
 
@@ -382,6 +385,8 @@ namespace Farmware.WorldGeneration.Presentation
                         default,
                         default,
                         default,
+                        default,
+                        false,
                         default,
                         default);
                     return;
@@ -1011,6 +1016,8 @@ namespace Farmware.WorldGeneration.Presentation
                 ComponentType.ReadOnly<GeneratedSurfaceWaterTile>(),
                 ComponentType.ReadOnly<GeneratedHydrologyTile>());
             settingsQuery = entityManager.CreateEntityQuery(ComponentType.ReadOnly<WorldGenerationSettings>());
+            biomeSettingsQuery = entityManager.CreateEntityQuery(
+                ComponentType.ReadOnly<BiomeClassificationSettings>());
             resourceSettingsQuery = entityManager.CreateEntityQuery(
                 ComponentType.ReadOnly<ResourceGenerationSettings>());
             animalCatalogQuery = entityManager.CreateEntityQuery(
@@ -1058,6 +1065,13 @@ namespace Farmware.WorldGeneration.Presentation
             bool hasGenerationSettings = settingsQuery.CalculateEntityCount() == 1;
             WorldGenerationSettings settings = hasGenerationSettings
                 ? settingsQuery.GetSingleton<WorldGenerationSettings>()
+                : default;
+            // 約4KBの固定DefinitionはBiome中央診断だけで必要です。
+            // 他の可視化モードではSingleton件数確認と値コピーを省き、Repaintごとの不要な処理を増やしません。
+            bool hasBiomeSettings = currentMode == WorldGenerationDebugVisualizationMode.Biome
+                && biomeSettingsQuery.CalculateEntityCount() == 1;
+            BiomeClassificationSettings biomeSettings = hasBiomeSettings
+                ? biomeSettingsQuery.GetSingleton<BiomeClassificationSettings>()
                 : default;
             bool hasResourceSettings = resourceSettingsQuery.CalculateEntityCount() == 1;
             ResourceGenerationSettings resourceSettings = hasResourceSettings
@@ -1279,6 +1293,8 @@ namespace Farmware.WorldGeneration.Presentation
                 centerRockWallAppearance,
                 centerRockWallShadowOpacity,
                 settings,
+                hasBiomeSettings,
+                biomeSettings,
                 resourceSettings);
         }
 
@@ -1724,6 +1740,8 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="centerRockWallAppearance">完成した周囲チャンクを含む中央岩壁の露出分類です。</param>
         /// <param name="centerRockWallShadowOpacity">完成地形から求めた中央岩壁影の不透明度です。</param>
         /// <param name="settings">現在の生成閾値を保持するSingleton値です。</param>
+        /// <param name="hasBiomeSettings">製品分類Jobと同じBiome設定Singletonを取得できた場合はtrueです。</param>
+        /// <param name="biomeSettings">Biomeモードの中央候補診断へ使う固定Definitionです。</param>
         /// <param name="resourceSettings">現在の資源最低間隔と群半径を保持するSingleton値です。</param>
         private void DrawInformationPanel(
             bool hasCenterTile,
@@ -1738,6 +1756,8 @@ namespace Farmware.WorldGeneration.Presentation
             RockWallAppearance centerRockWallAppearance,
             float centerRockWallShadowOpacity,
             WorldGenerationSettings settings,
+            bool hasBiomeSettings,
+            BiomeClassificationSettings biomeSettings,
             ResourceGenerationSettings resourceSettings)
         {
             const int generatedTileInformationLineCount = 26;
@@ -1752,6 +1772,7 @@ namespace Farmware.WorldGeneration.Presentation
                 : showsTwoLegendRows ? 66f : 48f;
 
             string centerInformation = "Center tile is waiting for generation.";
+            int biomeSelectionInformationLineCount = 0;
             if (hasCenterTile)
             {
                 RockWallGenerationDebugInfo rockWallInfo =
@@ -1812,10 +1833,43 @@ namespace Farmware.WorldGeneration.Presentation
                         + $"Site=({geologyDebugInfo.Site.SiteX}, {geologyDebugInfo.Site.SiteY})  "
                         + $"DistanceSquared={geologyDebugInfo.Site.DistanceSquared}"
                     : "Unavailable";
+                string biomeSelectionInformation = string.Empty;
+                if (currentMode == WorldGenerationDebugVisualizationMode.Biome)
+                {
+                    if (centerTile.Biome == BiomeId.None)
+                    {
+                        // 地上18Biomeを持たない海域へ、候補なし失敗や既定Biomeを表示しません。
+                        biomeSelectionInformation = "\nBiomeSelection=Not applicable (ocean)";
+                        biomeSelectionInformationLineCount = 1;
+                    }
+                    else if (hasBiomeSettings
+                        && hasCenterHydrologyTile
+                        && DeterministicBiomeChunkFinalizer.TryGetBiomeSelectionDiagnostics(
+                            settings,
+                            biomeSettings,
+                            centerCoordinate.x,
+                            centerCoordinate.y,
+                            centerTile,
+                            centerHydrologyTile,
+                            out FinalBiomeSelection biomeSelection))
+                    {
+                        biomeSelectionInformation = "\n"
+                            + FormatBiomeSelectionDiagnostics(biomeSelection);
+                        biomeSelectionInformationLineCount = 5;
+                    }
+                    else
+                    {
+                        biomeSelectionInformation =
+                            "\nBiomeSelection=Unavailable (settings, hydrology, or finalized tile mismatch)";
+                        biomeSelectionInformationLineCount = 1;
+                    }
+                }
 
                 // 生密度・平滑化後・通路削り・連続影値を同時に表示し、生成規則変更時の食い違いをGameビューだけで診断できます。
                 centerInformation = $"Layer={currentLayer}  Tile ({centerCoordinate.x}, {centerCoordinate.y})  "
                     + $"Biome={centerTile.Biome}  Ground={centerTile.Ground}  Soil={centerTile.Soil}\n"
+                    + biomeSelectionInformation
+                    + (biomeSelectionInformationLineCount > 0 ? "\n" : string.Empty)
                     + $"Water={centerTile.WaterSalinity} / {centerTile.WaterBodyType}\n"
                     + $"Placement: Equipment={GetPlacementResultState(equipmentPlacementResult)}\n"
                     + $"Bridge={GetPlacementResultState(bridgePlacementResult)}  "
@@ -1939,6 +1993,7 @@ namespace Farmware.WorldGeneration.Presentation
                 : 0;
             int informationLineCount = hasCenterTile
                 ? generatedTileInformationLineCount
+                    + biomeSelectionInformationLineCount
                     + hydrologyInformationLineCount
                 : waitingInformationLineCount;
 
@@ -1962,6 +2017,62 @@ namespace Farmware.WorldGeneration.Presentation
                 centerInformation,
                 informationStyle);
         }
+
+#if UNITY_EDITOR
+        /// <summary>
+        /// 製品Biome分類器が返した最終理由と通常上位2候補を、Map ViewerとGameビューで共有する5行へ整形します。
+        /// 表示側でScoreや軸適性を再計算せず、同じ値型診断をそのまま読めるようにします。
+        /// </summary>
+        /// <param name="selection">最終ID、選択理由、通常候補順位を含む分類結果です。</param>
+        /// <returns>最終理由、首位、首位8軸、次点、次点8軸の順に並ぶ5行の開発者向け文字列です。</returns>
+        public static string FormatBiomeSelectionDiagnostics(
+            in FinalBiomeSelection selection)
+        {
+            BiomeCandidateEvaluation first = selection.NormalCandidates.First;
+            string secondSummary = selection.NormalCandidates.HasSecond
+                ? FormatBiomeCandidateSummary("Second", selection.NormalCandidates.Second)
+                : "Second=None";
+            string secondFits = selection.NormalCandidates.HasSecond
+                ? FormatBiomeCandidateFits("SecondFit", selection.NormalCandidates.Second)
+                : "SecondFit=N/A";
+            return $"BiomeSelection Final={(BiomeId)selection.StableId}  "
+                + $"Reason={selection.Reason}  Candidates={selection.NormalCandidates.CandidateCount}\n"
+                + FormatBiomeCandidateSummary("First", first)
+                + "\n"
+                + FormatBiomeCandidateFits("FirstFit", first)
+                + "\n"
+                + secondSummary
+                + "\n"
+                + secondFits;
+        }
+
+        /// <summary>1候補の安定ID、総合Score、同点Variationを1行へ整形します。</summary>
+        /// <param name="label">首位または次点を区別する行頭名です。</param>
+        /// <param name="candidate">製品分類器が計算した候補評価です。</param>
+        /// <returns>候補名と順位値を含む開発者向け文字列です。</returns>
+        private static string FormatBiomeCandidateSummary(
+            string label,
+            in BiomeCandidateEvaluation candidate)
+        {
+            return $"{label}={(BiomeId)candidate.StableId}  "
+                + $"Score={candidate.Score}  Variation={candidate.CandidateVariation}";
+        }
+
+        /// <summary>1候補の8軸適性を、0〜65,535の整数値として1行へ整形します。</summary>
+        /// <param name="label">首位または次点を区別する行頭名です。</param>
+        /// <param name="candidate">製品分類器が計算した8軸適性です。</param>
+        /// <returns>温度、湿度、標高、植生、起伏、地質、火山、海洋の順で並ぶ文字列です。</returns>
+        private static string FormatBiomeCandidateFits(
+            string label,
+            in BiomeCandidateEvaluation candidate)
+        {
+            return $"{label}: Temp={candidate.TerrainTemperatureFit}  "
+                + $"Moist={candidate.BaseMoistureFit}  Elev={candidate.ElevationFit}  "
+                + $"Woody={candidate.WoodyVegetationFit}  Rugged={candidate.TerrainRuggednessFit}  "
+                + $"Geology={candidate.GeologyFit}  Volcanic={candidate.VolcanicActivityFit}  "
+                + $"Coastal={candidate.CoastalInfluenceFit}";
+        }
+#endif
 
         /// <summary>
         /// 共通地形判定の結果を、中央タイルHUDで読みやすい短い文言へ変換します。
@@ -3074,6 +3185,7 @@ namespace Farmware.WorldGeneration.Presentation
             {
                 chunkQuery.Dispose();
                 settingsQuery.Dispose();
+                biomeSettingsQuery.Dispose();
                 resourceSettingsQuery.Dispose();
                 animalCatalogQuery.Dispose();
                 animalPositionQuery.Dispose();

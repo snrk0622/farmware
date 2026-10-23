@@ -83,6 +83,7 @@ namespace Farmware.WorldGeneration.Tests
                 8,
                 WorldGenerationMapViewMode.Terrain,
                 CancellationToken.None);
+            bool foundLandBiome = false;
 
             // 全ピクセルを同時保存した完成地形と比較し、座標変換・配列順・C5-C色変換をまとめて保証します。
             for (int pixelY = 0; pixelY < result.Height; pixelY++)
@@ -107,8 +108,69 @@ namespace Farmware.WorldGeneration.Tests
                         result.PixelColors[(pixelY * result.Width) + pixelX],
                         Is.EqualTo(expectedColor),
                         $"pixel=({pixelX}, {pixelY}), tile=({worldTileX}, {worldTileY})");
+
+                    if (finalizedTile.Biome != BiomeId.None)
+                    {
+                        foundLandBiome = true;
+                        bool foundBiomeDiagnostics = result.TryGetBiomeClassificationSample(
+                            worldTileX,
+                            worldTileY,
+                            out BiomeClassificationMapSample biomeSample);
+                        Assert.That(foundBiomeDiagnostics, Is.True,
+                            $"地上Biomeの選択診断がありません: tile=({worldTileX}, {worldTileY})");
+                        Assert.That(
+                            biomeSample.Selection.StableId,
+                            Is.EqualTo((byte)finalizedTile.Biome),
+                            $"完成地形と選択診断が不一致です: tile=({worldTileX}, {worldTileY})");
+                    }
                 }
             }
+
+            Assert.That(foundLandBiome, Is.True, "固定テスト範囲に地上Biomeがなく、選択診断を検証できませんでした。");
+        }
+
+        /// <summary>
+        /// 製品分類器の値型結果を診断文字列へ変換し、最終理由、首位・次点、8軸適性が省略されないことを保証します。
+        /// Map ViewerとGameビューが別々の用語や計算結果を表示する退行を防ぎます。
+        /// </summary>
+        [Test]
+        public void BiomeSelectionDiagnostics_FormatsReasonCandidatesAndAllAxisFits()
+        {
+            FinalBiomeSelection selection = new FinalBiomeSelection
+            {
+                StableId = BiomeStableIds.SwampForest,
+                Reason = BiomeSelectionReason.SwampForestPromotion,
+                NormalCandidates = new NormalBiomeCandidateRanking
+                {
+                    CandidateCount = 3,
+                    HasSecond = true,
+                    First = CreateBiomeCandidateEvaluation(
+                        BiomeStableIds.WarmTemperateEvergreenForest,
+                        1000,
+                        2000),
+                    Second = CreateBiomeCandidateEvaluation(
+                        BiomeStableIds.TemperateDeciduousForest,
+                        900,
+                        1500)
+                }
+            };
+
+            string text = WorldGenerationDebugVisualizationOverlay
+                .FormatBiomeSelectionDiagnostics(selection);
+
+            Assert.That(text, Does.Contain("Final=SwampForest"));
+            Assert.That(text, Does.Contain("Reason=SwampForestPromotion"));
+            Assert.That(text, Does.Contain("Candidates=3"));
+            Assert.That(text, Does.Contain("First=WarmTemperateEvergreenForest"));
+            Assert.That(text, Does.Contain("Second=TemperateDeciduousForest"));
+            Assert.That(text, Does.Contain("FirstFit: Temp=1"));
+            Assert.That(text, Does.Contain("Moist=2"));
+            Assert.That(text, Does.Contain("Elev=3"));
+            Assert.That(text, Does.Contain("Woody=4"));
+            Assert.That(text, Does.Contain("Rugged=5"));
+            Assert.That(text, Does.Contain("Geology=6"));
+            Assert.That(text, Does.Contain("Volcanic=7"));
+            Assert.That(text, Does.Contain("Coastal=8"));
         }
 
         /// <summary>
@@ -424,6 +486,87 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// 全27モードをCatalogから順に取得し、Dropdown名、実行経路、解像度、進捗、Hover契約が欠落なく一対一であることを保証します。
+        /// 新モード追加時にWindowの選択肢だけ増え、サンプラーが古い経路や768上限へ戻る退行を防ぎます。
+        /// </summary>
+        [Test]
+        public void ViewModeCatalog_AllModesHaveOneConsistentExecutionContract()
+        {
+            System.Array modes = System.Enum.GetValues(typeof(WorldGenerationMapViewMode));
+            Assert.That(modes.Length, Is.EqualTo(WorldGenerationMapViewModeCatalog.ModeCount));
+            Assert.That(
+                WorldGenerationMapViewModeCatalog.OrderedDisplayNames.Count,
+                Is.EqualTo(WorldGenerationMapViewModeCatalog.ModeCount));
+            HashSet<string> uniqueDisplayNames = new HashSet<string>();
+
+            for (int index = 0; index < modes.Length; index++)
+            {
+                WorldGenerationMapViewMode mode = (WorldGenerationMapViewMode)modes.GetValue(index);
+                WorldGenerationMapViewModeDefinition definition =
+                    WorldGenerationMapViewModeCatalog.Get(mode);
+
+                Assert.That((int)mode, Is.EqualTo(index), $"{mode}のenum値がCatalog順と一致しません。");
+                Assert.That(definition.Mode, Is.EqualTo(mode));
+                Assert.That(definition.DisplayName, Is.Not.Empty);
+                Assert.That(uniqueDisplayNames.Add(definition.DisplayName), Is.True,
+                    $"表示名が重複しています: {definition.DisplayName}");
+                Assert.That(
+                    WorldGenerationMapViewModeCatalog.OrderedDisplayNames[index],
+                    Is.EqualTo(definition.DisplayName));
+                Assert.That(
+                    WorldGenerationMapViewModeCatalog.ResolveChoiceIndex(index),
+                    Is.EqualTo(mode));
+
+                // 完成チャンクを使う2経路だけが、動的上限、二段階進捗、生成時コピーのHover契約を持つ必要があります。
+                bool usesCompletedChunks = definition.SamplingPath
+                        == WorldGenerationMapSamplingPath.CompletedTerrainChunk
+                    || definition.SamplingPath
+                        == WorldGenerationMapSamplingPath.CompletedHydrologyChunk;
+                Assert.That(
+                    definition.ResolutionPolicy
+                        == WorldGenerationMapResolutionPolicy.CompletedChunks,
+                    Is.EqualTo(usesCompletedChunks),
+                    $"{mode}の解像度契約が生成経路と一致しません。");
+                Assert.That(
+                    definition.ProgressPolicy
+                        == WorldGenerationMapProgressPolicy.CompletedChunksThenPixelRows,
+                    Is.EqualTo(usesCompletedChunks),
+                    $"{mode}の進捗契約が生成経路と一致しません。");
+
+                if (definition.SamplingPath == WorldGenerationMapSamplingPath.DirectTile)
+                {
+                    Assert.That(
+                        definition.HoverDataContract,
+                        Is.EqualTo(WorldGenerationMapHoverDataContract.GeneratedTile));
+                }
+                else if (definition.SamplingPath
+                    == WorldGenerationMapSamplingPath.BaseHydrologyCell)
+                {
+                    Assert.That(
+                        definition.ResolutionPolicy,
+                        Is.EqualTo(WorldGenerationMapResolutionPolicy.BaseHydrology));
+                    Assert.That(
+                        definition.HoverDataContract,
+                        Is.EqualTo(WorldGenerationMapHoverDataContract.BaseHydrologyCell));
+                }
+                else if (definition.SamplingPath
+                    == WorldGenerationMapSamplingPath.CompletedTerrainChunk)
+                {
+                    Assert.That(
+                        definition.HoverDataContract,
+                        Is.EqualTo(
+                            WorldGenerationMapHoverDataContract.FinalizedTerrainAndBiomeSelection));
+                }
+                else
+                {
+                    Assert.That(
+                        definition.HoverDataContract,
+                        Is.EqualTo(WorldGenerationMapHoverDataContract.DerivedHydrologyTile));
+                }
+            }
+        }
+
+        /// <summary>
         /// 左上原点のPointer座標を実際のTextureピクセルへ変換し、負座標とY反転を含む代表タイルへ一致することを検証します。
         /// </summary>
         [Test]
@@ -689,31 +832,26 @@ namespace Farmware.WorldGeneration.Tests
         /// 描画・リサイズ・ホイールズームが共有する判定を対象にし、Terrain・Biomeだけ768サンプルへ戻る退行を防ぎます。
         /// </summary>
         [Test]
-        public void GetMaximumSampleResolution_HydrologyUsesBoundedLimits()
+        public void ViewModeCatalog_GetMaximumSampleResolutionUsesBoundedLimits()
         {
-            MethodInfo getMaximumSampleResolution = typeof(WorldGenerationMapViewerWindow).GetMethod(
-                "GetMaximumSampleResolution",
-                BindingFlags.Static | BindingFlags.NonPublic);
-            Assert.That(getMaximumSampleResolution, Is.Not.Null);
-
-            int terrainLimit = (int)getMaximumSampleResolution.Invoke(
-                null,
-                new object[] { WorldGenerationMapViewMode.Terrain, 4 });
-            int biomeLimit = (int)getMaximumSampleResolution.Invoke(
-                null,
-                new object[] { WorldGenerationMapViewMode.Biome, 4 });
-            int environmentLimit = (int)getMaximumSampleResolution.Invoke(
-                null,
-                new object[] { WorldGenerationMapViewMode.Elevation, 4 });
-            int baseHydrologyLimit = (int)getMaximumSampleResolution.Invoke(
-                null,
-                new object[] { WorldGenerationMapViewMode.HydrologyLake, 4 });
-            int derivedNearLimit = (int)getMaximumSampleResolution.Invoke(
-                null,
-                new object[] { WorldGenerationMapViewMode.HydrologyGroundwater, 4 });
-            int derivedFarLimit = (int)getMaximumSampleResolution.Invoke(
-                null,
-                new object[] { WorldGenerationMapViewMode.HydrologyNaturalFlooding, 256 });
+            int terrainLimit = WorldGenerationMapViewModeCatalog.GetMaximumSampleResolution(
+                WorldGenerationMapViewMode.Terrain,
+                4);
+            int biomeLimit = WorldGenerationMapViewModeCatalog.GetMaximumSampleResolution(
+                WorldGenerationMapViewMode.Biome,
+                4);
+            int environmentLimit = WorldGenerationMapViewModeCatalog.GetMaximumSampleResolution(
+                WorldGenerationMapViewMode.Elevation,
+                4);
+            int baseHydrologyLimit = WorldGenerationMapViewModeCatalog.GetMaximumSampleResolution(
+                WorldGenerationMapViewMode.HydrologyLake,
+                4);
+            int derivedNearLimit = WorldGenerationMapViewModeCatalog.GetMaximumSampleResolution(
+                WorldGenerationMapViewMode.HydrologyGroundwater,
+                4);
+            int derivedFarLimit = WorldGenerationMapViewModeCatalog.GetMaximumSampleResolution(
+                WorldGenerationMapViewMode.HydrologyNaturalFlooding,
+                256);
 
             Assert.That(terrainLimit, Is.EqualTo(33));
             Assert.That(biomeLimit, Is.EqualTo(33));
@@ -725,6 +863,11 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(
                 derivedFarLimit,
                 Is.EqualTo(WorldGenerationMapSampler.MaximumCompletedChunkSampledChunksPerAxis));
+            Assert.That(
+                () => WorldGenerationMapViewModeCatalog.GetMaximumSampleResolution(
+                    WorldGenerationMapViewMode.Elevation,
+                    0),
+                Throws.TypeOf<System.ArgumentOutOfRangeException>());
         }
 
         /// <summary>
@@ -1233,6 +1376,34 @@ namespace Farmware.WorldGeneration.Tests
             {
                 Object.DestroyImmediate(authoringObject);
             }
+        }
+
+        /// <summary>
+        /// 診断文字列テストへ、8軸を識別できる固定値と順位値を持つ候補を用意します。
+        /// </summary>
+        /// <param name="stableId">候補の新18Biome安定IDです。</param>
+        /// <param name="score">通常候補の整数総合Scoreです。</param>
+        /// <param name="variation">Score同点時だけ使う地域Variationです。</param>
+        /// <returns>各軸1〜8を保持する候補評価です。</returns>
+        private static BiomeCandidateEvaluation CreateBiomeCandidateEvaluation(
+            byte stableId,
+            long score,
+            ushort variation)
+        {
+            return new BiomeCandidateEvaluation
+            {
+                StableId = stableId,
+                TerrainTemperatureFit = 1,
+                BaseMoistureFit = 2,
+                ElevationFit = 3,
+                WoodyVegetationFit = 4,
+                TerrainRuggednessFit = 5,
+                GeologyFit = 6,
+                VolcanicActivityFit = 7,
+                CoastalInfluenceFit = 8,
+                Score = score,
+                CandidateVariation = variation
+            };
         }
 
         /// <summary>
