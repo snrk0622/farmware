@@ -11,7 +11,7 @@ TERRAIN-01C1の連続環境軸へ、Biome、Block、資源から独立した固�
 - C2-A: 8分類の安定ID、固定Definition、基礎特性、標高別出現重み、512タイル地域の純粋生成、用途別Salt、ECS Buffer、状態ハッシュ、Definition・負座標・境界テスト。
 - C2-B: 複数Seedの面積比・連結領域・境界・孤立領域・環境クロス集計、GameビューのDebug Visualization、Map Viewer、凡例、中央・Hover情報、表示テスト。
 
-C2-A／Bでは現行7Biome、Ground、Wall、水域、資源配置を置き換えない。水文、地下水、最終18Biome、地質別Blockパレット、資源適合はTERRAIN-01C3〜C7へ残す。C2-Bの人間確認まで完了したため、本変更のcommitをもってロードマップのTERRAIN-01C2を完了扱いにする。
+C2-A／Bでは現行7Biome、Ground、Wall、水域、資源配置を置き換えない。水文、地下水、最終18Biome、地質別Blockパレット、総合調整、資源適合はTERRAIN-01C3〜C8へ残す。C2-Bの人間確認まで完了したため、本変更のcommitをもってロードマップのTERRAIN-01C2を完了扱いにする。
 
 ## 2. 固定Definition
 
