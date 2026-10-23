@@ -2280,7 +2280,8 @@ namespace Farmware.WorldGeneration.Presentation
             hasCachedInformationScrollLayout = false;
         }
 
-#if UNITY_EDITOR
+        // DrawInformationPanel自体はPlayer Assemblyでもコンパイルされるため、そこから参照する純粋な文字列整形も同じ範囲へ含めます。
+        // 実際の描画開始はOnGUI内のUNITY_EDITOR条件で除外されるので、製品版で開発者HUDが動作することはありません。
         /// <summary>
         /// 製品Biome分類器が返した最終理由と通常上位2候補を、Map ViewerとGameビューで共有する12行へ整形します。
         /// 表示側でScoreや軸適性を再計算せず、同じ値型診断をそのまま読めるようにします。
@@ -2353,7 +2354,6 @@ namespace Farmware.WorldGeneration.Presentation
                 + $"{label}[2/3]: N/A\n"
                 + $"{label}[3/3]: N/A";
         }
-#endif
 
         /// <summary>
         /// 共通地形判定の結果を、中央タイルHUDで読みやすい短い文言へ変換します。

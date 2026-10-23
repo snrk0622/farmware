@@ -277,6 +277,8 @@ TERRAIN-01C5-Dでは、全27モードの表示名、実行経路、解像度方�
 
 続くレビューでは、Map Viewerの最小Window寸法が720×700ポイントであることを固定し、地図最小240pxと17行Hover診断280pxに加えてヘッダー、操作欄、状態欄を同時表示できる高さを保証する。旧480pxへ戻り、`overflow: hidden`の親Panelで地図または診断が欠ける退行を防ぐ。追加した寸法契約テスト1件は0.04秒、更新後の`WorldGenerationMapViewerTests` 61件は118.3秒で全件成功した。
 
+続くP1レビューでは、Editor再コンパイルだけでは検出できない`UNITY_EDITOR`条件の不一致をStandaloneOSX Player Buildで確認する。Playerにも含まれる呼び出し元とBiome診断Formatterが同じコンパイル範囲にあり、`CS0103`を発生させないことをBuild Reportで保証する。修正後のPlayer Buildは71.094秒で成功し、エラー0件、Pipeline Runtime設定未作成を示す既知の警告1件だった。既存の文字列契約を検証する`WorldGenerationMapViewerTests` 61件も121.08秒で全件成功した。
+
 #### `TerrainLayerPresentationUtilityTests`
 
 16×24土地の上面16px・断面8px・Pivot Y 2/3、16×28岩壁の上面16px・側面12px・Pivot Y 2/7、液面を8px下へ移す`-0.5セル`をSceneなしの純粋計算として検証する。淡水・海水・マグマを別の液面アニメーションへ分類する規則も保証する。
