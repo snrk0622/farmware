@@ -133,6 +133,24 @@ namespace Farmware.WorldGeneration.Presentation
     [RequireComponent(typeof(Camera))]
     public sealed class WorldGenerationDebugVisualizationOverlay : MonoBehaviour
     {
+        /// <summary>情報パネル内の文字・凡例領域の最大幅です。既存の長い中央情報を欠けさせない幅として使用します。</summary>
+        private const float MaximumInformationContentWidth = 430f;
+
+        /// <summary>Gameビュー端と情報パネルの間へ空ける余白です。</summary>
+        private const float InformationPanelMargin = 8f;
+
+        /// <summary>情報パネルの最終行と下枠の間へ空ける余白です。</summary>
+        private const float InformationPanelBottomPadding = 6f;
+
+        /// <summary>スクロール中の文字が情報パネルの上下枠へ重ならないよう、クリップ範囲を内側へ寄せる幅です。</summary>
+        private const float InformationPanelVerticalClipInset = 2f;
+
+        /// <summary>内容が画面高を超えた場合だけ表示する、情報パネル右端の縦スクロールバー幅です。</summary>
+        private const float InformationScrollbarWidth = 16f;
+
+        /// <summary>18Biome凡例の下から選択診断を描き始める、右パネル内のY座標です。</summary>
+        private const float BiomeSelectionInformationStartY = 198f;
+
         /// <summary>極端なズームアウト時にIMGUI描画が増え過ぎないよう制限する最大可視タイル数です。</summary>
         private const int MaximumDrawableTileCount = 8192;
 
@@ -186,6 +204,21 @@ namespace Farmware.WorldGeneration.Presentation
 
         // モード名、凡例、中央タイル値を描くため、初回だけ作成して再利用するGUI Styleです。
         private GUIStyle informationStyle;
+
+        // 情報パネルの現在の縦スクロール位置（px）です。EditorのPlayMode中だけ保持し、モード変更時に先頭へ戻します。
+        private float informationScrollOffset;
+
+        // 直前のRepaintで確定した情報パネル外枠です。MouseDown／Drag／UpではECSを再走査せず、同じバーだけを操作するために保持します。
+        private Rect cachedInformationPanelRect;
+
+        // 直前のRepaintで確定した縦スクロールバー矩形です。Gameビューの黒帯を除いた座標系で保持します。
+        private Rect cachedInformationScrollbarRect;
+
+        // 直前のRepaintで計算した情報全体の高さ（px）です。表示高との差からスクロール可能量を決めます。
+        private float cachedInformationContentHeight;
+
+        // Repaint済みのスクロール配置を入力イベントで再利用できる場合にtrueです。モード変更時は古い矩形を使わないようfalseへ戻します。
+        private bool hasCachedInformationScrollLayout;
 
         // Rock Wall表示が水文・Biome確定前の生成へ戻らないよう、完成地形Bufferをチャンク座標で引くRepaint内索引です。
         private readonly Dictionary<ChunkCoordinate, Entity> completedTerrainChunkEntities =
@@ -336,6 +369,7 @@ namespace Farmware.WorldGeneration.Presentation
         private void OnEnable()
         {
             currentMode = WorldGenerationDebugVisualizationMode.None;
+            ResetInformationScroll();
         }
 
         /// <summary>
@@ -354,13 +388,11 @@ namespace Farmware.WorldGeneration.Presentation
         {
 #if UNITY_EDITOR
             if (currentMode == WorldGenerationDebugVisualizationMode.None
-                || Event.current.type != EventType.Repaint
                 || targetCamera == null)
             {
                 return;
             }
 
-            EnsureGuiStyle();
             activeGuiViewportRect = CalculateGuiViewportRect();
             if (activeGuiViewportRect.width <= 0f || activeGuiViewportRect.height <= 0f)
             {
@@ -371,6 +403,19 @@ namespace Farmware.WorldGeneration.Presentation
             GUI.BeginGroup(activeGuiViewportRect);
             try
             {
+                if (Event.current.type != EventType.Repaint)
+                {
+                    // ホイール入力はHUDで一切処理しません。直前のRepaintで確定したバーだけを
+                    // MouseDown／Drag／Upへ再提示し、ゲーム操作と競合する入力分岐を増やしません。
+                    if (Event.current.type != EventType.ScrollWheel)
+                    {
+                        DrawCachedInformationScrollbar();
+                    }
+
+                    return;
+                }
+
+                EnsureGuiStyle();
                 if (!TryEnsureQueries())
                 {
                     DrawInformationPanel(
@@ -408,6 +453,12 @@ namespace Farmware.WorldGeneration.Presentation
         public void SetMode(WorldGenerationDebugVisualizationMode mode)
         {
 #if UNITY_EDITOR
+            if (currentMode != mode)
+            {
+                // 別モードの途中位置を引き継ぐと先頭の凡例を見失うため、表示切替ごとに先頭へ戻します。
+                ResetInformationScroll();
+            }
+
             currentMode = mode;
 #else
             // 製品版には操作UIを含めないため、誤って呼ばれても可視化を有効にしません。
@@ -1760,19 +1811,18 @@ namespace Farmware.WorldGeneration.Presentation
             BiomeClassificationSettings biomeSettings,
             ResourceGenerationSettings resourceSettings)
         {
-            const int generatedTileInformationLineCount = 26;
-            const int waitingInformationLineCount = 1;
-            const float bottomPadding = 6f;
             bool showsTwoLegendRows = currentMode == WorldGenerationDebugVisualizationMode.GeologyClass
                 || currentMode == WorldGenerationDebugVisualizationMode.HydrologyFlowDirection
                 || currentMode == WorldGenerationDebugVisualizationMode.HydrologyLake;
             // 新18Biomeは2列×9行で示すため、中央情報が凡例へ重ならない専用開始位置を使います。
             float informationStartY = currentMode == WorldGenerationDebugVisualizationMode.Biome
-                ? 198f
+                ? BiomeSelectionInformationStartY
                 : showsTwoLegendRows ? 66f : 48f;
 
             string centerInformation = "Center tile is waiting for generation.";
-            int biomeSelectionInformationLineCount = 0;
+            string biomeSelectionInformation = currentMode == WorldGenerationDebugVisualizationMode.Biome
+                ? "BiomeSelection=Waiting for center tile."
+                : string.Empty;
             if (hasCenterTile)
             {
                 RockWallGenerationDebugInfo rockWallInfo =
@@ -1833,14 +1883,12 @@ namespace Farmware.WorldGeneration.Presentation
                         + $"Site=({geologyDebugInfo.Site.SiteX}, {geologyDebugInfo.Site.SiteY})  "
                         + $"DistanceSquared={geologyDebugInfo.Site.DistanceSquared}"
                     : "Unavailable";
-                string biomeSelectionInformation = string.Empty;
                 if (currentMode == WorldGenerationDebugVisualizationMode.Biome)
                 {
                     if (centerTile.Biome == BiomeId.None)
                     {
                         // 地上18Biomeを持たない海域へ、候補なし失敗や既定Biomeを表示しません。
-                        biomeSelectionInformation = "\nBiomeSelection=Not applicable (ocean)";
-                        biomeSelectionInformationLineCount = 1;
+                        biomeSelectionInformation = "BiomeSelection=Not applicable (ocean)";
                     }
                     else if (hasBiomeSettings
                         && hasCenterHydrologyTile
@@ -1853,23 +1901,18 @@ namespace Farmware.WorldGeneration.Presentation
                             centerHydrologyTile,
                             out FinalBiomeSelection biomeSelection))
                     {
-                        biomeSelectionInformation = "\n"
-                            + FormatBiomeSelectionDiagnostics(biomeSelection);
-                        biomeSelectionInformationLineCount = 5;
+                        biomeSelectionInformation = FormatBiomeSelectionDiagnostics(biomeSelection);
                     }
                     else
                     {
                         biomeSelectionInformation =
-                            "\nBiomeSelection=Unavailable (settings, hydrology, or finalized tile mismatch)";
-                        biomeSelectionInformationLineCount = 1;
+                            "BiomeSelection=Unavailable (settings, hydrology, or finalized tile mismatch)";
                     }
                 }
 
                 // 生密度・平滑化後・通路削り・連続影値を同時に表示し、生成規則変更時の食い違いをGameビューだけで診断できます。
                 centerInformation = $"Layer={currentLayer}  Tile ({centerCoordinate.x}, {centerCoordinate.y})  "
                     + $"Biome={centerTile.Biome}  Ground={centerTile.Ground}  Soil={centerTile.Soil}\n"
-                    + biomeSelectionInformation
-                    + (biomeSelectionInformationLineCount > 0 ? "\n" : string.Empty)
                     + $"Water={centerTile.WaterSalinity} / {centerTile.WaterBodyType}\n"
                     + $"Placement: Equipment={GetPlacementResultState(equipmentPlacementResult)}\n"
                     + $"Bridge={GetPlacementResultState(bridgePlacementResult)}  "
@@ -1988,54 +2031,273 @@ namespace Farmware.WorldGeneration.Presentation
                     }
                 }
             }
-            int hydrologyInformationLineCount = IsHydrologyVisualizationMode(currentMode)
-                ? (hasCenterHydrologyCell ? 6 : 1) + (hasCenterHydrologyTile ? 2 : 1)
-                : 0;
-            int informationLineCount = hasCenterTile
-                ? generatedTileInformationLineCount
-                    + biomeSelectionInformationLineCount
-                    + hydrologyInformationLineCount
-                : waitingInformationLineCount;
+            // 固定行数を別管理すると、表示文を変更したときにパネル高だけが古いまま残ります。
+            // 実際に描く文字列から行数を求め、末尾へ存在しない空行分の余白を作らないようにします。
+            int biomeSelectionInformationLineCount =
+                CountInformationLines(biomeSelectionInformation);
+            int centerInformationLineCount = CountInformationLines(centerInformation);
 
-            // 長い閾値情報を2行へ分け、実際の行高からパネル下端を求めることで、見切れと余分な下余白を同時に防ぎます。
-            float informationHeight = Mathf.Ceil(
-                Mathf.Max(1f, informationStyle.lineHeight) * informationLineCount);
-            float panelWidth = Mathf.Min(430f, activeGuiViewportRect.width - 16f);
-            float panelHeight = informationStartY + informationHeight + bottomPadding;
-            float panelX = Mathf.Max(8f, activeGuiViewportRect.width - panelWidth - 8f);
-            Rect panelRect = new Rect(panelX, 8f, panelWidth, panelHeight);
-            GUI.Box(panelRect, GUIContent.none);
+            // Biomeだけは18色凡例の後へ12行の選択診断を置き、その後へ全モード共通の中央タイル詳細を続けます。
+            // 画面高を超えた分は削らず、右端の明示的な縦バーで確認できるよう内容全体の高さを求めます。
+            float lineHeight = Mathf.Max(1f, informationStyle.lineHeight);
+            float biomeSelectionInformationHeight = Mathf.Ceil(
+                lineHeight * biomeSelectionInformationLineCount);
+            float centerInformationHeight = Mathf.Ceil(lineHeight * centerInformationLineCount);
+            float centerInformationY = informationStartY + biomeSelectionInformationHeight;
+            float contentHeight = centerInformationY
+                + centerInformationHeight
+                + InformationPanelBottomPadding;
+            CalculateInformationPanelScrollLayout(
+                activeGuiViewportRect.width,
+                activeGuiViewportRect.height,
+                contentHeight,
+                out Rect panelRect,
+                out Rect contentViewportRect,
+                out Rect scrollbarRect,
+                out float maximumScrollOffset);
 
-            // タイトル・色見本・詳細情報を別々に描くことで、凡例の色を文字名ではなく実際のRGBA値で示します。
-            GUI.Label(
-                new Rect(panelRect.x + 8f, panelRect.y + 6f, panelRect.width - 16f, 18f),
-                $"Developer Visualization: {GetModeDisplayName(currentMode)} / {currentLayer}",
-                informationStyle);
-            DrawLegend(currentMode, panelRect.x + 8f, panelRect.y + 27f);
-            GUI.Label(
-                new Rect(panelRect.x + 8f, panelRect.y + informationStartY, panelRect.width - 16f, informationHeight),
-                centerInformation,
-                informationStyle);
+            cachedInformationPanelRect = panelRect;
+            cachedInformationScrollbarRect = scrollbarRect;
+            cachedInformationContentHeight = contentHeight;
+            hasCachedInformationScrollLayout = panelRect.width > 0f && panelRect.height > 0f;
+            informationScrollOffset = Mathf.Clamp(
+                informationScrollOffset,
+                0f,
+                maximumScrollOffset);
+
+            DrawCachedInformationScrollbar();
+
+            // BeginClipでパネルの上下枠より2px内側を明示的な描画境界にします。
+            // GUIStyleの文字クリップと併用し、スクロール途中の行もHUD外や枠上へ描かないようにします。
+            // BeginScrollViewはホイールを取得するため使わず、縦バーの値だけを内容座標へ反映します。
+            Rect contentClipRect = CalculateInformationContentClipRect(contentViewportRect);
+            GUI.BeginClip(contentClipRect);
+            try
+            {
+                float clipOriginOffsetY = contentClipRect.y - contentViewportRect.y;
+                float scrolledContentY = CalculateScrolledInformationY(
+                    -clipOriginOffsetY,
+                    informationScrollOffset);
+
+                // タイトル・色見本・詳細情報を別々に描き、凡例色を文字名ではなく実際のRGBA値で示します。
+                GUI.Label(
+                    new Rect(
+                        8f,
+                        scrolledContentY + 6f,
+                        Mathf.Max(0f, contentViewportRect.width - 16f),
+                        18f),
+                    $"Developer Visualization: {GetModeDisplayName(currentMode)} / {currentLayer}",
+                    informationStyle);
+                DrawLegend(currentMode, 8f, scrolledContentY + 27f);
+
+                if (biomeSelectionInformationLineCount > 0)
+                {
+                    GUI.Label(
+                        new Rect(
+                            8f,
+                            scrolledContentY + informationStartY,
+                            Mathf.Max(0f, contentViewportRect.width - 16f),
+                            biomeSelectionInformationHeight),
+                        biomeSelectionInformation,
+                        informationStyle);
+                }
+
+                GUI.Label(
+                    new Rect(
+                        8f,
+                        scrolledContentY + centerInformationY,
+                        Mathf.Max(0f, contentViewportRect.width - 16f),
+                        centerInformationHeight),
+                    centerInformation,
+                    informationStyle);
+            }
+            finally
+            {
+                GUI.EndClip();
+            }
+        }
+
+        /// <summary>
+        /// 情報パネルの文字・凡例に使う固定クリップ矩形を、上下枠より内側へ作ります。
+        /// 横幅は縮めず、既存の430px内容幅とスクロールバーとの境界を維持します。
+        /// </summary>
+        /// <param name="contentViewportRect">スクロールバーを除いた情報パネル内容領域です。</param>
+        /// <returns>上下枠から一定量を除いた明示クリップ矩形です。</returns>
+        public static Rect CalculateInformationContentClipRect(Rect contentViewportRect)
+        {
+            float clipHeight = Mathf.Max(
+                0f,
+                contentViewportRect.height - (InformationPanelVerticalClipInset * 2f));
+            return new Rect(
+                contentViewportRect.x,
+                contentViewportRect.y + InformationPanelVerticalClipInset,
+                contentViewportRect.width,
+                clipHeight);
+        }
+
+        /// <summary>
+        /// HUD内の要素Y座標だけを縦スクロール量に応じて移動します。
+        /// クリップ矩形はこの計算へ含めず、スクロール中もパネル内側へ固定します。
+        /// </summary>
+        /// <param name="contentY">スクロール前のHUD内容内Y座標（px）です。</param>
+        /// <param name="scrollOffset">縦スクロールバーが示す先頭からの移動量（px）です。</param>
+        /// <returns>固定クリップ領域の座標系で描画するY座標（px）です。</returns>
+        public static float CalculateScrolledInformationY(float contentY, float scrollOffset)
+        {
+            return contentY - Mathf.Max(0f, scrollOffset);
+        }
+
+        /// <summary>
+        /// Gameビュー右上の情報を1パネルへ配置し、画面高を超える内容のスクロール範囲を計算します。
+        /// 全可視化モードが同じ計算を使い、長い水文診断なども画面外へ描き捨てないようにします。
+        /// </summary>
+        /// <param name="viewportWidth">黒帯を除いたGameビューの横幅（px）です。</param>
+        /// <param name="viewportHeight">黒帯を除いたGameビューの高さ（px）です。</param>
+        /// <param name="contentHeight">タイトル、凡例、中央情報を含む内容全体の高さ（px）です。</param>
+        /// <param name="panelRect">Gameビュー右上へ収めた情報パネル外枠を返します。</param>
+        /// <param name="contentViewportRect">スクロールバーを除いた、内容のクリップ矩形を返します。</param>
+        /// <param name="scrollbarRect">内容が画面高を超えた場合の縦スクロールバー矩形を返します。不要時は幅0です。</param>
+        /// <param name="maximumScrollOffset">内容末尾まで移動するための最大Yオフセット（px）を返します。</param>
+        public static void CalculateInformationPanelScrollLayout(
+            float viewportWidth,
+            float viewportHeight,
+            float contentHeight,
+            out Rect panelRect,
+            out Rect contentViewportRect,
+            out Rect scrollbarRect,
+            out float maximumScrollOffset)
+        {
+            float safeViewportWidth = Mathf.Max(0f, viewportWidth);
+            float safeViewportHeight = Mathf.Max(0f, viewportHeight);
+            float safeContentHeight = Mathf.Max(0f, contentHeight);
+            float maximumPanelHeight = Mathf.Max(
+                0f,
+                safeViewportHeight - (InformationPanelMargin * 2f));
+            bool requiresScrollbar = safeContentHeight > maximumPanelHeight;
+            float requestedScrollbarWidth = requiresScrollbar
+                ? InformationScrollbarWidth
+                : 0f;
+            float panelWidth = Mathf.Max(
+                0f,
+                Mathf.Min(
+                    MaximumInformationContentWidth + requestedScrollbarWidth,
+                    safeViewportWidth - (InformationPanelMargin * 2f)));
+            float panelHeight = Mathf.Min(
+                safeContentHeight,
+                maximumPanelHeight);
+            float panelX = Mathf.Max(
+                InformationPanelMargin,
+                safeViewportWidth - panelWidth - InformationPanelMargin);
+            panelRect = new Rect(
+                panelX,
+                InformationPanelMargin,
+                panelWidth,
+                panelHeight);
+
+            // 高さが収まる場合はバー領域そのものを作らず、430pxの全幅を内容へ返します。
+            // 超過時も狭いGameビューではバーを負の幅にせず、残りだけを内容のクリップ幅として扱います。
+            float scrollbarWidth = Mathf.Min(requestedScrollbarWidth, panelWidth);
+            contentViewportRect = new Rect(
+                panelRect.x,
+                panelRect.y,
+                Mathf.Max(0f, panelWidth - scrollbarWidth),
+                panelHeight);
+            scrollbarRect = new Rect(
+                panelRect.xMax - scrollbarWidth,
+                panelRect.y,
+                scrollbarWidth,
+                panelHeight);
+            maximumScrollOffset = Mathf.Max(0f, safeContentHeight - panelHeight);
+        }
+
+        /// <summary>
+        /// 情報パネルへ描く文字列の実際の行数を、追加の文字列配列を作らずに数えます。
+        /// </summary>
+        /// <param name="information">GUI.Labelへ渡す改行区切りの表示文字列です。</param>
+        /// <returns>空文字列なら0、それ以外は改行数に1を加えた表示行数です。</returns>
+        private static int CountInformationLines(string information)
+        {
+            if (string.IsNullOrEmpty(information))
+            {
+                return 0;
+            }
+
+            int lineCount = 1;
+            // RepaintごとにSplitすると配列と各要素の文字列が作られるため、文字を順に見て改行だけを数えます。
+            for (int characterIndex = 0; characterIndex < information.Length; characterIndex++)
+            {
+                if (information[characterIndex] == '\n')
+                {
+                    lineCount++;
+                }
+            }
+
+            return lineCount;
+        }
+
+        /// <summary>
+        /// 直前のRepaintで確定した情報パネル外枠と、必要な場合だけ縦スクロールバーを描きます。
+        /// MouseDown／Drag／UpではECSを再走査せず、表示中のバーに対する明示操作だけを同じ位置で反映します。
+        /// </summary>
+        private void DrawCachedInformationScrollbar()
+        {
+            if (!hasCachedInformationScrollLayout)
+            {
+                return;
+            }
+
+            GUI.Box(cachedInformationPanelRect, GUIContent.none);
+            if (cachedInformationScrollbarRect.width <= 0f
+                || cachedInformationScrollbarRect.height <= 0f)
+            {
+                return;
+            }
+
+            float visibleHeight = cachedInformationPanelRect.height;
+            float scrollbarRange = Mathf.Max(visibleHeight, cachedInformationContentHeight);
+            informationScrollOffset = GUI.VerticalScrollbar(
+                cachedInformationScrollbarRect,
+                informationScrollOffset,
+                visibleHeight,
+                0f,
+                scrollbarRange);
+            informationScrollOffset = Mathf.Clamp(
+                informationScrollOffset,
+                0f,
+                Mathf.Max(0f, cachedInformationContentHeight - visibleHeight));
+        }
+
+        /// <summary>
+        /// 情報パネルを先頭へ戻し、次のRepaint前に旧モードのスクロール矩形を操作できない状態へ戻します。
+        /// Play開始時と表示モード変更時に呼び出し、異なる内容間で位置を引き継がないようにします。
+        /// </summary>
+        private void ResetInformationScroll()
+        {
+            informationScrollOffset = 0f;
+            cachedInformationPanelRect = default;
+            cachedInformationScrollbarRect = default;
+            cachedInformationContentHeight = 0f;
+            hasCachedInformationScrollLayout = false;
         }
 
 #if UNITY_EDITOR
         /// <summary>
-        /// 製品Biome分類器が返した最終理由と通常上位2候補を、Map ViewerとGameビューで共有する5行へ整形します。
+        /// 製品Biome分類器が返した最終理由と通常上位2候補を、Map ViewerとGameビューで共有する12行へ整形します。
         /// 表示側でScoreや軸適性を再計算せず、同じ値型診断をそのまま読めるようにします。
         /// </summary>
         /// <param name="selection">最終ID、選択理由、通常候補順位を含む分類結果です。</param>
-        /// <returns>最終理由、首位、首位8軸、次点、次点8軸の順に並ぶ5行の開発者向け文字列です。</returns>
+        /// <returns>最終IDと理由2行、首位要約2行、首位8軸3行、次点要約2行、次点8軸3行の順に並ぶ12行の文字列です。</returns>
         public static string FormatBiomeSelectionDiagnostics(
             in FinalBiomeSelection selection)
         {
             BiomeCandidateEvaluation first = selection.NormalCandidates.First;
             string secondSummary = selection.NormalCandidates.HasSecond
                 ? FormatBiomeCandidateSummary("Second", selection.NormalCandidates.Second)
-                : "Second=None";
+                : "Second=None\nSecondRank: Score=N/A  Variation=N/A";
             string secondFits = selection.NormalCandidates.HasSecond
                 ? FormatBiomeCandidateFits("SecondFit", selection.NormalCandidates.Second)
-                : "SecondFit=N/A";
-            return $"BiomeSelection Final={(BiomeId)selection.StableId}  "
+                : FormatUnavailableBiomeCandidateFits("SecondFit");
+            return $"BiomeSelection Final={(BiomeId)selection.StableId}\n"
                 + $"Reason={selection.Reason}  Candidates={selection.NormalCandidates.CandidateCount}\n"
                 + FormatBiomeCandidateSummary("First", first)
                 + "\n"
@@ -2046,31 +2308,50 @@ namespace Farmware.WorldGeneration.Presentation
                 + secondFits;
         }
 
-        /// <summary>1候補の安定ID、総合Score、同点Variationを1行へ整形します。</summary>
+        /// <summary>
+        /// 1候補の安定IDと順位値を2行へ整形し、長いBiome名でも430px幅のGameビュー内へ収めます。
+        /// </summary>
         /// <param name="label">首位または次点を区別する行頭名です。</param>
         /// <param name="candidate">製品分類器が計算した候補評価です。</param>
-        /// <returns>候補名と順位値を含む開発者向け文字列です。</returns>
+        /// <returns>候補名の行と、Score・Variationの順位値行を並べた文字列です。</returns>
         private static string FormatBiomeCandidateSummary(
             string label,
             in BiomeCandidateEvaluation candidate)
         {
-            return $"{label}={(BiomeId)candidate.StableId}  "
-                + $"Score={candidate.Score}  Variation={candidate.CandidateVariation}";
+            return $"{label}={(BiomeId)candidate.StableId}\n"
+                + $"{label}Rank: Score={candidate.Score}  "
+                + $"Variation={candidate.CandidateVariation}";
         }
 
-        /// <summary>1候補の8軸適性を、0〜65,535の整数値として1行へ整形します。</summary>
+        /// <summary>
+        /// 1候補の8軸適性を、0〜65,535の整数値として3行へ整形します。
+        /// 430px幅のGameビューでも右端を切らず、Map Viewerでも自動折り返しで予約行数を超えない長さに分けます。
+        /// </summary>
         /// <param name="label">首位または次点を区別する行頭名です。</param>
         /// <param name="candidate">製品分類器が計算した8軸適性です。</param>
-        /// <returns>温度、湿度、標高、植生、起伏、地質、火山、海洋の順で並ぶ文字列です。</returns>
+        /// <returns>温度から海洋までを3軸、3軸、2軸の順で分けた3行の文字列です。</returns>
         private static string FormatBiomeCandidateFits(
             string label,
             in BiomeCandidateEvaluation candidate)
         {
-            return $"{label}: Temp={candidate.TerrainTemperatureFit}  "
-                + $"Moist={candidate.BaseMoistureFit}  Elev={candidate.ElevationFit}  "
-                + $"Woody={candidate.WoodyVegetationFit}  Rugged={candidate.TerrainRuggednessFit}  "
-                + $"Geology={candidate.GeologyFit}  Volcanic={candidate.VolcanicActivityFit}  "
+            return $"{label}[1/3]: Temp={candidate.TerrainTemperatureFit}  "
+                + $"Moist={candidate.BaseMoistureFit}  Elev={candidate.ElevationFit}\n"
+                + $"{label}[2/3]: Woody={candidate.WoodyVegetationFit}  "
+                + $"Rugged={candidate.TerrainRuggednessFit}  Geology={candidate.GeologyFit}\n"
+                + $"{label}[3/3]: Volcanic={candidate.VolcanicActivityFit}  "
                 + $"Coastal={candidate.CoastalInfluenceFit}";
+        }
+
+        /// <summary>
+        /// 次点候補が存在しない場合も3行を維持し、診断内容によってパネル高が変化しない代替表示を作ります。
+        /// </summary>
+        /// <param name="label">次点適性を示す行頭名です。</param>
+        /// <returns>各分割行が対象外であることを示す3行の文字列です。</returns>
+        private static string FormatUnavailableBiomeCandidateFits(string label)
+        {
+            return $"{label}[1/3]: N/A\n"
+                + $"{label}[2/3]: N/A\n"
+                + $"{label}[3/3]: N/A";
         }
 #endif
 
@@ -3165,7 +3446,9 @@ namespace Farmware.WorldGeneration.Presentation
             {
                 fontSize = 12,
                 alignment = TextAnchor.UpperLeft,
-                wordWrap = false
+                wordWrap = false,
+                // 既定のOverflowではラベル矩形を越えて字形が描かれるため、HUD用文字は必ず矩形内へ切ります。
+                clipping = TextClipping.Clip
             };
             informationStyle.normal.textColor = Color.white;
         }

@@ -130,8 +130,8 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 製品分類器の値型結果を診断文字列へ変換し、最終理由、首位・次点、8軸適性が省略されないことを保証します。
-        /// Map ViewerとGameビューが別々の用語や計算結果を表示する退行を防ぎます。
+        /// 製品分類器の値型結果を診断文字列へ変換し、最終理由、首位・次点、8軸適性が12行へ収まることを保証します。
+        /// 5桁の適性値でもGameビューの右端を切らず、Map Viewerの予約高を自動折り返しで超えない構造を固定します。
         /// </summary>
         [Test]
         public void BiomeSelectionDiagnostics_FormatsReasonCandidatesAndAllAxisFits()
@@ -157,20 +157,177 @@ namespace Farmware.WorldGeneration.Tests
 
             string text = WorldGenerationDebugVisualizationOverlay
                 .FormatBiomeSelectionDiagnostics(selection);
+            string[] lines = text.Split('\n');
 
             Assert.That(text, Does.Contain("Final=SwampForest"));
             Assert.That(text, Does.Contain("Reason=SwampForestPromotion"));
             Assert.That(text, Does.Contain("Candidates=3"));
             Assert.That(text, Does.Contain("First=WarmTemperateEvergreenForest"));
             Assert.That(text, Does.Contain("Second=TemperateDeciduousForest"));
-            Assert.That(text, Does.Contain("FirstFit: Temp=1"));
-            Assert.That(text, Does.Contain("Moist=2"));
-            Assert.That(text, Does.Contain("Elev=3"));
-            Assert.That(text, Does.Contain("Woody=4"));
-            Assert.That(text, Does.Contain("Rugged=5"));
-            Assert.That(text, Does.Contain("Geology=6"));
-            Assert.That(text, Does.Contain("Volcanic=7"));
-            Assert.That(text, Does.Contain("Coastal=8"));
+            Assert.That(
+                lines,
+                Has.Length.EqualTo(12),
+                "診断はGameビューの行数計算とMap Viewerの最大17行予約に合わせて12行を維持する必要があります。");
+            Assert.That(lines[0], Is.EqualTo("BiomeSelection Final=SwampForest"));
+            Assert.That(lines[1], Is.EqualTo("Reason=SwampForestPromotion  Candidates=3"));
+            Assert.That(lines[2], Is.EqualTo("First=WarmTemperateEvergreenForest"));
+            Assert.That(lines[3], Is.EqualTo("FirstRank: Score=1000  Variation=2000"));
+            Assert.That(lines[4], Is.EqualTo("FirstFit[1/3]: Temp=60001  Moist=60002  Elev=60003"));
+            Assert.That(lines[5], Is.EqualTo("FirstFit[2/3]: Woody=60004  Rugged=60005  Geology=60006"));
+            Assert.That(lines[6], Is.EqualTo("FirstFit[3/3]: Volcanic=60007  Coastal=60008"));
+            Assert.That(lines[7], Is.EqualTo("Second=TemperateDeciduousForest"));
+            Assert.That(lines[8], Is.EqualTo("SecondRank: Score=900  Variation=1500"));
+            Assert.That(lines[9], Is.EqualTo("SecondFit[1/3]: Temp=60001  Moist=60002  Elev=60003"));
+            Assert.That(lines[10], Is.EqualTo("SecondFit[2/3]: Woody=60004  Rugged=60005  Geology=60006"));
+            Assert.That(lines[11], Is.EqualTo("SecondFit[3/3]: Volcanic=60007  Coastal=60008"));
+        }
+
+        /// <summary>
+        /// 次点がない分類結果でも診断を同じ12行で表示し、Hover対象によってCanvasの高さが変わらないことを保証します。
+        /// </summary>
+        [Test]
+        public void BiomeSelectionDiagnostics_WithoutSecondCandidate_PreservesReservedLineCount()
+        {
+            FinalBiomeSelection selection = new FinalBiomeSelection
+            {
+                StableId = BiomeStableIds.TropicalRainforest,
+                Reason = BiomeSelectionReason.NormalCandidate,
+                NormalCandidates = new NormalBiomeCandidateRanking
+                {
+                    CandidateCount = 1,
+                    HasSecond = false,
+                    First = CreateBiomeCandidateEvaluation(
+                        BiomeStableIds.TropicalRainforest,
+                        1234,
+                        5678)
+                }
+            };
+
+            string text = WorldGenerationDebugVisualizationOverlay
+                .FormatBiomeSelectionDiagnostics(selection);
+            string[] lines = text.Split('\n');
+
+            Assert.That(
+                lines,
+                Has.Length.EqualTo(12),
+                "次点がなくてもHover対象の変更で表示高を変えないため、診断は12行を維持する必要があります。");
+            Assert.That(lines[7], Is.EqualTo("Second=None"));
+            Assert.That(lines[8], Is.EqualTo("SecondRank: Score=N/A  Variation=N/A"));
+            Assert.That(lines[9], Is.EqualTo("SecondFit[1/3]: N/A"));
+            Assert.That(lines[10], Is.EqualTo("SecondFit[2/3]: N/A"));
+            Assert.That(lines[11], Is.EqualTo("SecondFit[3/3]: N/A"));
+        }
+
+        /// <summary>
+        /// 実際に確認する960×540のGameビューと、Biomeの全診断を縦積みした内容高を準備します。
+        /// 情報パネルが画面内へ収まり、見切れる内容量がスクロール可能量として残ることを保証します。
+        /// </summary>
+        [Test]
+        public void InformationPanelScrollLayout_At960By540_ClipsBiomeContentAndPreservesRemainder()
+        {
+            const float viewportWidth = 960f;
+            const float viewportHeight = 540f;
+            const float contentHeight = 729f;
+
+            WorldGenerationDebugVisualizationOverlay.CalculateInformationPanelScrollLayout(
+                viewportWidth,
+                viewportHeight,
+                contentHeight,
+                out Rect panelRect,
+                out Rect contentViewportRect,
+                out Rect scrollbarRect,
+                out float maximumScrollOffset);
+
+            Assert.That(
+                panelRect.yMax,
+                Is.LessThanOrEqualTo(viewportHeight),
+                "長いBiome診断でも情報パネル外枠はGameビュー下端を越えてはいけません。");
+            Assert.That(
+                maximumScrollOffset,
+                Is.EqualTo(contentHeight - panelRect.height),
+                "クリップした末尾を縦バーで確認できるよう、隠れた高さを最大移動量へ保持する必要があります。");
+            Assert.That(
+                contentViewportRect.xMax,
+                Is.EqualTo(scrollbarRect.xMin),
+                "診断文字と縦スクロールバーが重ならないよう、それぞれ隣接する矩形へ分ける必要があります。");
+            Assert.That(
+                contentViewportRect.width,
+                Is.EqualTo(430f),
+                "縦バーを追加しても、5桁の8軸診断と18Biome凡例に必要な430pxの内容幅を維持する必要があります。");
+            Assert.That(
+                scrollbarRect.yMin,
+                Is.EqualTo(panelRect.yMin),
+                "内容が超過したときの縦スクロールバーは、パネル上端から操作できる必要があります。");
+            Assert.That(
+                scrollbarRect.yMax,
+                Is.EqualTo(panelRect.yMax),
+                "内容が超過したときの縦スクロールバーは、パネル下端まで操作できる必要があります。");
+            Assert.That(
+                scrollbarRect.width,
+                Is.GreaterThan(0f),
+                "内容がGameビューの高さを超えた場合だけ、明示操作用の縦スクロールバーを表示する必要があります。");
+        }
+
+        /// <summary>
+        /// 画面高より短い一般モードの情報を準備し、共通スクロール配置を計算します。
+        /// スクロール不要なら縦バーを隠し、430pxのパネル全幅を内容へ使うことを保証します。
+        /// </summary>
+        [Test]
+        public void InformationPanelScrollLayout_WhenContentFits_HidesScrollbarAndUsesFullWidth()
+        {
+            const float viewportWidth = 960f;
+            const float viewportHeight = 540f;
+            const float contentHeight = 300f;
+
+            WorldGenerationDebugVisualizationOverlay.CalculateInformationPanelScrollLayout(
+                viewportWidth,
+                viewportHeight,
+                contentHeight,
+                out Rect panelRect,
+                out Rect contentViewportRect,
+                out Rect scrollbarRect,
+                out float maximumScrollOffset);
+
+            Assert.That(panelRect.height, Is.EqualTo(contentHeight));
+            Assert.That(maximumScrollOffset, Is.Zero);
+            Assert.That(scrollbarRect.width, Is.Zero);
+            Assert.That(contentViewportRect.width, Is.EqualTo(panelRect.width));
+            Assert.That(panelRect.width, Is.EqualTo(430f));
+        }
+
+        /// <summary>
+        /// HUD内の要素座標とスクロール量を準備し、内容座標だけが上へ移動することを保証します。
+        /// 明示クリップ範囲を上下枠より内側へ固定し、途中行がHUD外や枠上へ出る退行を防ぐ契約です。
+        /// </summary>
+        [Test]
+        public void InformationPanelScrollOffset_MovesContentAndKeepsInsetClip()
+        {
+            const float contentY = 198f;
+            const float scrollOffset = 120f;
+            Rect contentViewportRect = new Rect(514f, 8f, 430f, 524f);
+
+            float scrolledY =
+                WorldGenerationDebugVisualizationOverlay.CalculateScrolledInformationY(
+                    contentY,
+                    scrollOffset);
+            Rect contentClipRect =
+                WorldGenerationDebugVisualizationOverlay.CalculateInformationContentClipRect(
+                    contentViewportRect);
+
+            Assert.That(
+                scrolledY,
+                Is.EqualTo(78f),
+                "HUDの固定クリップ境界は動かさず、表示要素のY座標からだけスクロール量を差し引く必要があります。");
+            Assert.That(contentClipRect.x, Is.EqualTo(contentViewportRect.x));
+            Assert.That(contentClipRect.width, Is.EqualTo(contentViewportRect.width));
+            Assert.That(
+                contentClipRect.y,
+                Is.EqualTo(contentViewportRect.y + 2f),
+                "途中行が上枠へ重ならないよう、文字のクリップ境界をパネル上端より内側へ置く必要があります。");
+            Assert.That(
+                contentClipRect.yMax,
+                Is.EqualTo(contentViewportRect.yMax - 2f),
+                "途中行が下枠へ重ならないよう、文字のクリップ境界をパネル下端より内側へ置く必要があります。");
         }
 
         /// <summary>
@@ -1384,7 +1541,7 @@ namespace Farmware.WorldGeneration.Tests
         /// <param name="stableId">候補の新18Biome安定IDです。</param>
         /// <param name="score">通常候補の整数総合Scoreです。</param>
         /// <param name="variation">Score同点時だけ使う地域Variationです。</param>
-        /// <returns>各軸1〜8を保持する候補評価です。</returns>
+        /// <returns>各軸へ5桁の60001〜60008を保持する候補評価です。</returns>
         private static BiomeCandidateEvaluation CreateBiomeCandidateEvaluation(
             byte stableId,
             long score,
@@ -1393,14 +1550,14 @@ namespace Farmware.WorldGeneration.Tests
             return new BiomeCandidateEvaluation
             {
                 StableId = stableId,
-                TerrainTemperatureFit = 1,
-                BaseMoistureFit = 2,
-                ElevationFit = 3,
-                WoodyVegetationFit = 4,
-                TerrainRuggednessFit = 5,
-                GeologyFit = 6,
-                VolcanicActivityFit = 7,
-                CoastalInfluenceFit = 8,
+                TerrainTemperatureFit = 60001,
+                BaseMoistureFit = 60002,
+                ElevationFit = 60003,
+                WoodyVegetationFit = 60004,
+                TerrainRuggednessFit = 60005,
+                GeologyFit = 60006,
+                VolcanicActivityFit = 60007,
+                CoastalInfluenceFit = 60008,
                 Score = score,
                 CandidateVariation = variation
             };
