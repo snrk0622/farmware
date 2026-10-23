@@ -135,3 +135,17 @@ C5-B3はECS Buffer、旧7Biome分類、状態ハッシュ、Scene、Prefab、Pre
 差分レビューではP0・P1のブロッカー、空白エラー、旧7Biome生成への接続、Scene・Prefab・Presentation変更がないことを確認した。ゲーム仕様は既存の特殊優先、Host、環境境界を実装しただけで変更せず、`EditorTools.md`はEditor機能変更なし、`Docs/README.md`は文書追加・移動なしのため更新不要と判断した。人間確認ではConsoleに新規エラー・警告がなく、旧7Biome表示へ意図しない変化がないことを確認する。
 
 C5-B3は2026-10-23に人間確認とcommit許可を受け、C5-B全体を完了した。
+
+## 12. PR #45レビュー修正: 海面下限とBiome標高範囲の整合
+
+PR #45のレビューで、`SeaLevelThreshold`を20,000未満へ設定すると、海面以上20,000未満に地上18Biomeの候補が存在しないことを確認した。地上Biomeの確定標高範囲を保存済み海面に合わせて暗黙拡張せず、仕様表の固定下限20,000を正とする。
+
+- `WorldGenerationSettings.MinimumSupportedSeaLevelThreshold = 20,000`を設定、分類器、Authoringで共有する。
+- 連続環境設定検証は20,000未満の海面を拒否し、分類器を直接呼ぶ経路でも同じ入力を明示失敗にする。
+- Inspectorは海面入力範囲と`OnValidate`補正を20,000以上へ揃え、見かけ上選べる値が後続生成だけを失敗させる状態を残さない。
+- 海面を20,000より高くする既存の調整範囲は、固定Biome標高範囲内の陸地だけが残るため維持する。上限は従来どおり保存済み低地上限（既定36,000）とする。
+- 海岸の湖Anchorと岩壁境界の既存テストは、無効な低海面へ依存せず同じ責務を検証する入力へ更新する。
+
+回帰確認は、海面19,999の設定・個別候補・全候補順位の拒否、Inspector値0から20,000への補正、海面20,000以上を使う海岸Anchorと岩壁境界を対象とする。新18BiomeはまだECS生成へ未接続のため、旧7Biomeの製品表示結果を変更しない。
+
+2026-10-23の接続済みUnity 6000.3.8f1 Editorでは、厳格再コンパイルがエラー0件・警告0件、`DeterministicBiomeClassifierTests` 19件、`DeterministicEnvironmentGeneratorTests` 13件、`DeterministicSurfaceWaterGeneratorTests` 10件、Authoring海面補正1件、岩壁境界PlayMode 1件がすべて成功した。World Generation全EditModeも実行したが、既存`AnimalPopulationGenerationTests.GenerationBoundary_MatchesAcrossFramePartitionsAndRequestCreationOrder`の実行中にPipeline既定300秒を超えて中断され、全体件数の合否は得られなかった。これは個別テスト失敗ではなく実行基盤のタイムアウトであり、同テスト中の既知のSystem Group順序属性警告以外に新しいコンパイル警告は確認していない。

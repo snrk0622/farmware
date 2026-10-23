@@ -20,7 +20,10 @@ namespace Farmware.WorldGeneration
         /// <summary>固定地質Definitionが持つ活動的火山適性などの必須条件です。</summary>
         public GeologyDefinitionFlags GeologyFlags;
 
-        /// <summary>これ未満の標高を地上Biome候補から除外する、ワールドへ保存済みの海面閾値です。</summary>
+        /// <summary>
+        /// これ未満の標高を地上Biome候補から除外する、ワールドへ保存済みの海面閾値です。
+        /// 地上18Biomeの固定標高範囲と両立するよう、20,000以上であることを分類入口でも検証します。
+        /// </summary>
         public ushort SeaLevelThreshold;
 
         /// <summary>
@@ -242,8 +245,11 @@ namespace Farmware.WorldGeneration
                 || settings.VariationCellSizeInTiles
                     != BiomeDefinitionCatalog.RequiredVariationCellSizeInTiles
                 || settings.VariationOctaveCount
-                    != BiomeDefinitionCatalog.RequiredVariationOctaveCount)
+                    != BiomeDefinitionCatalog.RequiredVariationOctaveCount
+                || input.SeaLevelThreshold
+                    < WorldGenerationSettings.MinimumSupportedSeaLevelThreshold)
             {
+                // WorldGenerationSettingsの検証を迂回した入力でも、分類不能な低海面を候補なしへ曖昧化しません。
                 return false;
             }
 
@@ -511,6 +517,8 @@ namespace Farmware.WorldGeneration
                     != BiomeDefinitionCatalog.RequiredVariationOctaveCount
                 || input.GeologyClass < GeologyClass.UnconsolidatedSediment
                 || input.GeologyClass > GeologyClass.UltramaficRock
+                || input.SeaLevelThreshold
+                    < WorldGenerationSettings.MinimumSupportedSeaLevelThreshold
                 || input.Environment.Elevation < input.SeaLevelThreshold)
             {
                 return false;

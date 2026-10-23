@@ -249,6 +249,40 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// 地上18Biomeの最小標高より低い海面を分類器へ直接渡し、
+        /// 20,000以上のタイルを偶然分類できても不正設定全体を成功扱いにしないことを保証します。
+        /// </summary>
+        [Test]
+        public void CandidateEvaluation_RejectsSeaLevelBelowSupportedLandRange()
+        {
+            BiomeClassificationSettings settings = BiomeDefinitionCatalog.CreateDefault();
+            Assert.That(BiomeDefinitionCatalog.TryGetDefinition(
+                settings,
+                BiomeStableIds.TemperateGrassland,
+                out BiomeDefinition definition), Is.True);
+            BiomeClassificationInput input = CreateInput(
+                30000,
+                38000,
+                30000,
+                20000,
+                10000,
+                0,
+                0,
+                GeologyClass.UnconsolidatedSediment,
+                seaLevelThreshold:
+                    WorldGenerationSettings.MinimumSupportedSeaLevelThreshold - 1);
+
+            Assert.That(TryEvaluate(settings, definition, input), Is.False);
+            Assert.That(DeterministicBiomeClassifier.TryRankNormalCandidates(
+                settings,
+                789UL,
+                3,
+                input,
+                out NormalBiomeCandidateRanking ranking), Is.False);
+            Assert.That(ranking.CandidateCount, Is.Zero);
+        }
+
+        /// <summary>
         /// 水文特殊Definition、不正なVariation設定、不明な地質IDを拒否し、失敗時に部分評価を公開しないことを保証します。
         /// </summary>
         [Test]

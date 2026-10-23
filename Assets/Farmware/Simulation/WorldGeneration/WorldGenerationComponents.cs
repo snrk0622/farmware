@@ -258,8 +258,14 @@ namespace Farmware.WorldGeneration
     /// </summary>
     public struct WorldGenerationSettings : IComponentData
     {
+        /// <summary>
+        /// 地上18Biomeの固定標高範囲と両立できる海面閾値の下限です。
+        /// これ未満を許可すると海面以上20,000未満に分類先のない陸地が生じるため、設定検証とAuthoring補正で共有します。
+        /// </summary>
+        public const ushort MinimumSupportedSeaLevelThreshold = 20000;
+
         /// <summary>既定の海面を表す0〜65535の固定小数点閾値です。Authoringと分布監査が同じ値を共有します。</summary>
-        public const ushort DefaultSeaLevelThreshold = 20000;
+        public const ushort DefaultSeaLevelThreshold = MinimumSupportedSeaLevelThreshold;
 
         /// <summary>既定の高温域を表す0〜65535の固定小数点閾値です。Authoringと分布監査が同じ値を共有します。</summary>
         public const ushort DefaultHotTemperatureThreshold = 40000;
@@ -339,7 +345,10 @@ namespace Farmware.WorldGeneration
         /// <summary>バイオーム境界で隣接地面を混ぜる帯のおおよその幅です。単位はタイルです。</summary>
         public int BiomeTransitionWidthInTiles;
 
-        /// <summary>これ未満の標高を海水域にする0〜65535の閾値です。</summary>
+        /// <summary>
+        /// これ未満の標高を海水域にする固定小数点閾値です。
+        /// 地上18Biomeの固定標高範囲と両立する20,000以上、保存済み低地上限以下を設定検証で要求します。
+        /// </summary>
         public ushort SeaLevelThreshold;
 
         /// <summary>川の大きな蛇行を決めるノイズ格子サイズです。単位はタイルです。</summary>

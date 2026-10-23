@@ -24,6 +24,13 @@ namespace Farmware.WorldGeneration.Authoring
         /// <summary>旧Authoringの小数0.603が変換されていた湿潤閾値です。既存Sceneの既定値移行だけに使用します。</summary>
         private const ushort LegacyWetMoistureThreshold = 39518;
 
+        /// <summary>
+        /// 地上18Biomeの固定標高下限と両立する、Inspector用の正規化海面下限です。
+        /// OnValidateとRange表示で共有し、分類先のない20,000未満の陸地を作る入力を残しません。
+        /// </summary>
+        private const float MinimumSupportedWaterThreshold =
+            WorldGenerationSettings.MinimumSupportedSeaLevelThreshold / (float)ushort.MaxValue;
+
         // 開発者がInspectorで入力し、Bake時に安定64bit値へ変換されるシード文字列です。
         [Tooltip("開発用ワールドのシード文字列です。数字以外や日本語も使用できます。同じ文字列とGeneratorVersionなら同じ地形になります。")]
         [SerializeField] private string seedText = "Farmware";
@@ -79,8 +86,8 @@ namespace Farmware.WorldGeneration.Authoring
         [SerializeField] private int biomeTransitionWidthInTiles = 6;
 
         // 0〜1の標高に対する海面境界です。既存Sceneとの互換のためフィールド名はwaterThresholdを維持します。
-        [Tooltip("これ未満の標高を海水域にする海面閾値です。0〜1で指定し、大きくすると海が増えます。湿地上限と山地・高山境界の順序を保てる範囲へ自動補正されます。")]
-        [Range(0f, 1f)]
+        [Tooltip("これ未満の標高を海水域にする海面閾値です。地上18Biomeの固定標高範囲と両立する20,000以上の範囲で指定し、大きくすると海が増えます。湿地上限と山地・高山境界の順序を保てる範囲へ自動補正されます。")]
+        [Range(MinimumSupportedWaterThreshold, 1f)]
         [SerializeField] private float waterThreshold =
             WorldGenerationSettings.DefaultSeaLevelThreshold / (float)ushort.MaxValue;
 
@@ -512,7 +519,7 @@ namespace Farmware.WorldGeneration.Authoring
             // この制約により、Inspectorの値だけが連続環境軸と逆転して全チャンク生成が失敗することを防ぎます。
             waterThreshold = Mathf.Clamp(
                 waterThreshold,
-                0f,
+                MinimumSupportedWaterThreshold,
                 maximumWetlandElevation);
 
             // 淡水の上限を海面以上へ収め、海水だけの標高帯と逆転しないようにします。

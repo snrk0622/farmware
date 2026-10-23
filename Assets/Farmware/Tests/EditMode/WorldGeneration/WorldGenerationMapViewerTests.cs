@@ -1107,6 +1107,45 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// Inspectorへ地上18Biomeの固定標高下限より低い海面を入力し、OnValidateを実行します。
+        /// 保存Snapshotが海面20,000へ補正され、分類先のない陸地を生成できないことを保証します。
+        /// </summary>
+        [Test]
+        public void AuthoringOnValidate_SeaLevelBelowSupportedRangeClampsToMinimum()
+        {
+            GameObject authoringObject = new GameObject(
+                "WorldGenerationAuthoring Minimum Sea Level Test");
+            try
+            {
+                WorldGenerationAuthoring authoring =
+                    authoringObject.AddComponent<WorldGenerationAuthoring>();
+                SerializedObject serializedAuthoring = new SerializedObject(authoring);
+                serializedAuthoring.FindProperty("waterThreshold").floatValue = 0f;
+                serializedAuthoring.ApplyModifiedPropertiesWithoutUndo();
+
+                // Unity EditorがInspector変更後に行う補正を明示的に呼び、Bake前の値を直接確認します。
+                MethodInfo onValidate = typeof(WorldGenerationAuthoring).GetMethod(
+                    "OnValidate",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.That(onValidate, Is.Not.Null);
+                onValidate.Invoke(authoring, null);
+
+                WorldGenerationSettings snapshot =
+                    authoring.CreateWorldGenerationSettingsSnapshot();
+                Assert.That(
+                    snapshot.SeaLevelThreshold,
+                    Is.EqualTo(WorldGenerationSettings.MinimumSupportedSeaLevelThreshold));
+                Assert.That(
+                    DeterministicEnvironmentGenerator.ValidateSettings(snapshot),
+                    Is.True);
+            }
+            finally
+            {
+                Object.DestroyImmediate(authoringObject);
+            }
+        }
+
+        /// <summary>
         /// 既存Sceneに保存されている旧丸め小数を準備し、Snapshot変換時だけ現在の共通既定値へ移行されることを保証します。
         /// Sceneファイルを外部から書き換えず、開いているUnity Editorの未保存状態と競合しない移行経路を検証します。
         /// </summary>
