@@ -96,7 +96,11 @@ namespace Farmware.WorldGeneration
                     biomeSettings,
                     currentSearchRadiusInChunks,
                     out int tileX,
-                    out int tileY))
+                    out int tileY)
+                && IsNearestCandidateProven(
+                    currentSearchRadiusInChunks,
+                    tileX,
+                    tileY))
             {
                 Entity locationEntity = state.EntityManager.CreateEntity();
                 state.EntityManager.AddComponentData(
@@ -294,6 +298,40 @@ namespace Farmware.WorldGeneration
             }
 
             return found;
+        }
+
+        /// <summary>
+        /// 現在候補より近い、または同距離で座標順が先の候補を、次の未探索リングが持ち得ないことを確認します。
+        /// </summary>
+        /// <param name="radiusInChunks">現在まで完成・走査した正方形のチャンク半径です。</param>
+        /// <param name="candidateX">現在最良候補の水平ワールドタイル座標です。</param>
+        /// <param name="candidateY">現在最良候補の垂直ワールドタイル座標です。</param>
+        /// <returns>現在候補を原点最近傍として安全に確定できる場合はtrueです。</returns>
+        private static bool IsNearestCandidateProven(
+            int radiusInChunks,
+            int candidateX,
+            int candidateY)
+        {
+            if (radiusInChunks >= MaximumSearchRadiusInChunks)
+            {
+                // 有限探索上限まで走査済みなら、範囲内の最良候補を確定します。
+                return true;
+            }
+
+            long candidateSquaredDistance = ((long)candidateX * candidateX)
+                + ((long)candidateY * candidateY);
+
+            // チャンク0はタイル0〜63を担当するため、原点に対して正負対称ではありません。
+            // 次リングの負側チャンクは正側より原点へ近く、最も近いタイルの絶対座標は
+            // 現在半径×64+1です。他方の軸を0にできるので、この二乗が未探索範囲の距離下限です。
+            long nextRingMinimumAbsoluteTile =
+                ((long)radiusInChunks * WorldGridConstants.LogicalChunkSize) + 1L;
+            long nextRingMinimumSquaredDistance =
+                nextRingMinimumAbsoluteTile * nextRingMinimumAbsoluteTile;
+
+            // 同距離ではY、Xの昇順で負側候補が先になる可能性があるため、
+            // 未探索距離が現在値と等しい場合も次リングを生成して比較します。
+            return candidateSquaredDistance < nextRingMinimumSquaredDistance;
         }
 
         /// <summary>

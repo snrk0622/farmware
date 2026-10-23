@@ -819,23 +819,8 @@ namespace Farmware.WorldGeneration.Tests
                 0,
                 ChunkGenerationPhase.ReadyToApply,
                 false);
-            DynamicBuffer<GeneratedTile> tiles = entityManager.GetBuffer<GeneratedTile>(chunkEntity);
-            DynamicBuffer<GeneratedResourceTile> resources =
-                entityManager.GetBuffer<GeneratedResourceTile>(chunkEntity);
-            tiles.ResizeUninitialized(WorldGridConstants.TilesPerChunk);
-            resources.ResizeUninitialized(WorldGridConstants.TilesPerChunk);
-            for (int index = 0; index < WorldGridConstants.TilesPerChunk; index++)
-            {
-                tiles[index] = default;
-                resources[index] = default;
-            }
-            tiles[0] = new GeneratedTile
-            {
-                Biome = BiomeId.TemperateGrassland,
-                Ground = GroundType.Land,
-                WaterSalinity = WaterSalinity.None,
-                MovementCost = 1
-            };
+            InitializeCompletedChunkBuffers(entityManager, chunkEntity);
+            SetInitialSpawnCandidate(entityManager, chunkEntity, 0, 0);
 
             SystemHandle system = world.GetOrCreateSystem<InitialSpawnLocationSystem>();
 
@@ -861,6 +846,80 @@ namespace Farmware.WorldGeneration.Tests
             // 完了後に再更新してもSingletonを増やさず、ワールド内の開始地点が一意であることを保証します。
             system.Update(world.Unmanaged);
             Assert.That(locationQuery.CalculateEntityCount(), Is.EqualTo(1));
+        }
+
+        /// <summary>
+        /// 原点チャンクの候補と負側隣接チャンクの候補を準備し、最初の候補で探索を打ち切らず、
+        /// タイル原点から近い候補、または同距離で座標順が先の負側候補を選ぶことを保証します。
+        /// </summary>
+        /// <param name="originLocalX">原点チャンク候補の水平ローカル座標です。</param>
+        /// <param name="originLocalY">原点チャンク候補の垂直ローカル座標です。</param>
+        [TestCase(63, 63)]
+        [TestCase(1, 0)]
+        public void InitialSpawnLocationSystem_ContinuesToNegativeRingForCloserOrEarlierCandidate(
+            int originLocalX,
+            int originLocalY)
+        {
+            using World world = new World("InitialSpawnLocationSystem Negative Ring Test");
+            EntityManager entityManager = world.EntityManager;
+            Entity settingsEntity = entityManager.CreateEntity();
+            entityManager.AddComponentData(
+                settingsEntity,
+                WorldGenerationSettings.CreateDefault(
+                    WorldSeedUtility.Mix64(3UL),
+                    WorldGenerationSettings.CurrentGeneratorVersion));
+            entityManager.AddComponentData(
+                settingsEntity,
+                ResourceGenerationSettings.CreateDefault());
+            entityManager.AddComponentData(
+                settingsEntity,
+                BiomeDefinitionCatalog.CreateDefault());
+
+            Entity originChunk = Entity.Null;
+            Entity negativeXChunk = Entity.Null;
+            for (int chunkY = -1; chunkY <= 1; chunkY++)
+            {
+                for (int chunkX = -1; chunkX <= 1; chunkX++)
+                {
+                    Entity chunkEntity = CreateChunkEntity(
+                        entityManager,
+                        chunkX,
+                        chunkY,
+                        ChunkGenerationPhase.ReadyToApply,
+                        false);
+                    InitializeCompletedChunkBuffers(entityManager, chunkEntity);
+
+                    if (chunkX == 0 && chunkY == 0)
+                    {
+                        originChunk = chunkEntity;
+                    }
+                    else if (chunkX == -1 && chunkY == 0)
+                    {
+                        negativeXChunk = chunkEntity;
+                    }
+                }
+            }
+
+            // 負側チャンクの候補は常に(-1, 0)です。原点チャンクを(63, 63)にしたケースでは距離で、
+            // (1, 0)にしたケースでは同距離時のY・X昇順で、どちらも負側候補が先になります。
+            SetInitialSpawnCandidate(entityManager, originChunk, originLocalX, originLocalY);
+            SetInitialSpawnCandidate(entityManager, negativeXChunk, 63, 0);
+
+            SystemHandle system = world.GetOrCreateSystem<InitialSpawnLocationSystem>();
+
+            // 1回目は半径0を要求し、2回目は遠い候補を保留して半径1へ拡張し、
+            // 3回目に9チャンク全体から真の最近傍を確定します。
+            system.Update(world.Unmanaged);
+            system.Update(world.Unmanaged);
+            system.Update(world.Unmanaged);
+
+            using EntityQuery locationQuery = entityManager.CreateEntityQuery(
+                ComponentType.ReadOnly<InitialSpawnLocation>());
+            Assert.That(locationQuery.CalculateEntityCount(), Is.EqualTo(1));
+            InitialSpawnLocation location = locationQuery.GetSingleton<InitialSpawnLocation>();
+            Assert.That(location.Layer, Is.EqualTo(WorldLayer.Surface));
+            Assert.That(location.TileX, Is.EqualTo(-1));
+            Assert.That(location.TileY, Is.Zero);
         }
 
         /// <summary>
@@ -2102,6 +2161,52 @@ namespace Farmware.WorldGeneration.Tests
             entityManager.AddBuffer<GeneratedSurfaceWaterTile>(entity);
             entityManager.AddBuffer<GeneratedHydrologyTile>(entity);
             return entity;
+        }
+
+        /// <summary>
+        /// 初期スポーンSystemが完成済みチャンクとして走査できるよう、地形・資源Bufferを4096件の空値で初期化します。
+        /// </summary>
+        /// <param name="entityManager">対象チャンクのBufferを書き込むテストWorldのManagerです。</param>
+        /// <param name="chunkEntity">完成状態として作成済みのテスト用チャンクEntityです。</param>
+        private static void InitializeCompletedChunkBuffers(
+            EntityManager entityManager,
+            Entity chunkEntity)
+        {
+            DynamicBuffer<GeneratedTile> tiles = entityManager.GetBuffer<GeneratedTile>(chunkEntity);
+            DynamicBuffer<GeneratedResourceTile> resources =
+                entityManager.GetBuffer<GeneratedResourceTile>(chunkEntity);
+            tiles.ResizeUninitialized(WorldGridConstants.TilesPerChunk);
+            resources.ResizeUninitialized(WorldGridConstants.TilesPerChunk);
+            for (int index = 0; index < WorldGridConstants.TilesPerChunk; index++)
+            {
+                // 既定値は移動不能かつ資源なしなので、明示した候補以外が選ばれるのを防ぎます。
+                tiles[index] = default;
+                resources[index] = default;
+            }
+        }
+
+        /// <summary>
+        /// 完成済みテストチャンクの1セルを、資源なし・乾いた許可Biomeの初期スポーン候補へ変更します。
+        /// </summary>
+        /// <param name="entityManager">対象地形Bufferを書き込むテストWorldのManagerです。</param>
+        /// <param name="chunkEntity">候補を持たせる完成済みチャンクEntityです。</param>
+        /// <param name="localX">チャンク内の水平座標です。範囲は0〜63です。</param>
+        /// <param name="localY">チャンク内の垂直座標です。範囲は0〜63です。</param>
+        private static void SetInitialSpawnCandidate(
+            EntityManager entityManager,
+            Entity chunkEntity,
+            int localX,
+            int localY)
+        {
+            int index = (localY * WorldGridConstants.LogicalChunkSize) + localX;
+            DynamicBuffer<GeneratedTile> tiles = entityManager.GetBuffer<GeneratedTile>(chunkEntity);
+            tiles[index] = new GeneratedTile
+            {
+                Biome = BiomeId.TemperateGrassland,
+                Ground = GroundType.Land,
+                WaterSalinity = WaterSalinity.None,
+                MovementCost = 1
+            };
         }
 
         /// <summary>
