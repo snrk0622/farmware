@@ -125,13 +125,45 @@ namespace Farmware.WorldGeneration.Tests
             int chunkCoordinate, int outsideLocalCoordinate)
         {
             using World world = new World("WorldEdgePresentationNeighborTests");
-            Entity entity = world.EntityManager.CreateEntity();
-            DynamicBuffer<GeneratedTile> tiles = world.EntityManager.AddBuffer<GeneratedTile>(entity);
+            EntityManager entityManager = world.EntityManager;
+            var completedEntities = new System.Collections.Generic.Dictionary<ChunkCoordinate, Entity>();
+            int minimumOffset = chunkCoordinate == WorldGridConstants.MinimumLogicalChunkCoordinate ? 0 : -1;
+            int maximumOffset = chunkCoordinate == WorldGridConstants.MinimumLogicalChunkCoordinate ? 1 : 0;
+            for (int offsetY = minimumOffset; offsetY <= maximumOffset; offsetY++)
+            {
+                for (int offsetX = minimumOffset; offsetX <= maximumOffset; offsetX++)
+                {
+                    Entity entity = entityManager.CreateEntity();
+                    DynamicBuffer<GeneratedTile> completedTiles =
+                        entityManager.AddBuffer<GeneratedTile>(entity);
+                    completedTiles.ResizeUninitialized(WorldGridConstants.TilesPerChunk);
+                    for (int tileIndex = 0; tileIndex < completedTiles.Length; tileIndex++)
+                    {
+                        // ワールド内側は岩壁で埋め、外側だけが明示的な非接続水域へ変わることを比較しやすくします。
+                        completedTiles[tileIndex] = new GeneratedTile { Ground = GroundType.RockWall };
+                    }
+
+                    completedEntities[new ChunkCoordinate(
+                        chunkCoordinate + offsetX,
+                        chunkCoordinate + offsetY)] = entity;
+                }
+            }
+
+            var centerCoordinate = new ChunkCoordinate(chunkCoordinate, chunkCoordinate);
+            DynamicBuffer<GeneratedTile> tiles = entityManager.GetBuffer<GeneratedTile>(
+                completedEntities[centerCoordinate],
+                true);
             using var halo = new Unity.Collections.NativeArray<GeneratedTile>(TerrainNeighborHaloUtility.TileCount,
                 Unity.Collections.Allocator.TempJob);
-            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
-                WorldSeedUtility.FromString("world-edge-presentation-neighbor-test"), WorldGenerationSettings.CurrentGeneratorVersion);
-            TerrainNeighborHaloUtility.Fill(settings, new ChunkCoordinate(chunkCoordinate, chunkCoordinate),
+            Assert.That(
+                CompletedChunkTerrainNeighborhoodFactory.TryCreate(
+                    entityManager,
+                    completedEntities,
+                    centerCoordinate,
+                    out CompletedChunkTerrainNeighborhood neighborhood),
+                Is.True);
+            // Factoryはワールド外のdefault配列を中心借用で安全に代用しつつ、外側を非接続として区別します。
+            TerrainNeighborHaloUtility.Fill(neighborhood,
                 0, WorldGridConstants.SubChunksPerChunk, halo);
             GeneratedTile neighbor = TerrainNeighborHaloUtility.GetTile(outsideLocalCoordinate, 0, tiles, halo);
             Assert.That(neighbor.Ground, Is.EqualTo(GroundType.Water),
@@ -288,39 +320,6 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 正負座標と64×64チャンク境界を準備し、軽量な岩壁判定が完全な地形生成結果と一致することを保証します。
-        /// Presentationが境界外セルだけを再判定しても、SimulationのGroundTypeと食い違わないための回帰テストです。
-        /// </summary>
-        [Test]
-        public void RockWallProbe_MatchesGeneratedGroundAcrossChunkEdges()
-        {
-            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
-                WorldSeedUtility.FromString("rock-wall-probe-test"),
-                WorldGenerationSettings.CurrentGeneratorVersion);
-            int[] tileCoordinates = { -65, -64, -63, -1, 0, 1, 63, 64, 65 };
-
-            // XとYへ同じ境界候補を組み合わせ、正負4象限とチャンク端の判定を少数の81セルで確認します。
-            for (int yIndex = 0; yIndex < tileCoordinates.Length; yIndex++)
-            {
-                for (int xIndex = 0; xIndex < tileCoordinates.Length; xIndex++)
-                {
-                    int tileX = tileCoordinates[xIndex];
-                    int tileY = tileCoordinates[yIndex];
-                    bool expected = DeterministicChunkGenerator.GenerateTile(
-                        settings,
-                        tileX,
-                        tileY).Ground == GroundType.RockWall;
-                    bool actual = DeterministicChunkGenerator.IsRockWall(settings, tileX, tileY);
-
-                    Assert.That(
-                        actual,
-                        Is.EqualTo(expected),
-                        $"岩壁の軽量判定が完全生成と不一致です: ({tileX}, {tileY})");
-                }
-            }
-        }
-
-        /// <summary>
         /// 128×128タイル分の最終岩壁候補を直接数え、既定値がリンク経路へ適度な迂回を作る占有率に収まることを保証します。
         /// 地形全体を生成せず岩壁純粋計算だけを使い、日常実行するEditModeテストを現実的な時間へ抑えます。
         /// </summary>
@@ -385,7 +384,6 @@ namespace Farmware.WorldGeneration.Tests
 
                     overlappingWaterCandidateCount++;
                     Assert.That(tile.Ground, Is.EqualTo(GroundType.Water));
-                    Assert.That(DeterministicChunkGenerator.IsRockWall(settings, tileX, tileY), Is.False);
                 }
             }
 

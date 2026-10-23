@@ -10,42 +10,6 @@ namespace Farmware.WorldGeneration
     public static class DeterministicChunkGenerator
     {
         /// <summary>
-        /// 指定ワールド座標が、通常の地形生成規則で岩壁になるかだけを判定します。
-        /// Presentationがチャンク外周の隣接岩壁を調べる際に、気温・湿度など不要な値の生成を省くために使用します。
-        /// </summary>
-        /// <param name="settings">ワールド作成時に固定した生成設定です。</param>
-        /// <param name="worldTileX">符号付きワールド水平タイル座標です。</param>
-        /// <param name="worldTileY">符号付きワールド垂直タイル座標です。</param>
-        /// <returns>海面上で岩壁候補になる場合はtrueです。最終水面とマグマの上書きは完成チャンク側で行います。</returns>
-        public static bool IsRockWall(
-            in WorldGenerationSettings settings,
-            int worldTileX,
-            int worldTileY)
-        {
-            // 約9割の非候補タイルでは標高・淡水ノイズを計算せず、チャンク外周の影・露出面判定を軽量に保ちます。
-            if (!DeterministicRockWallGenerator.IsRockWallCandidate(
-                settings,
-                worldTileX,
-                worldTileY))
-            {
-                return false;
-            }
-
-            if (!DeterministicEnvironmentGenerator.TryGenerateBaseClimate(
-                settings,
-                worldTileX,
-                worldTileY,
-                out GeneratedEnvironmentData environment))
-            {
-                // ワールド端で固定半径サンプルがint範囲を越える場合は、反対端へ周回した偽の岩壁を作りません。
-                return false;
-            }
-
-            // 海は岩壁より優先されます。C4の固定表流水と新火山Biomeはこの軽量な外周候補判定で再生成しません。
-            return environment.Elevation >= settings.SeaLevelThreshold;
-        }
-
-        /// <summary>
         /// 1つのワールドタイル座標に対応する基礎地形データを生成します。
         /// </summary>
         /// <param name="settings">ワールド作成時に固定した生成設定です。</param>

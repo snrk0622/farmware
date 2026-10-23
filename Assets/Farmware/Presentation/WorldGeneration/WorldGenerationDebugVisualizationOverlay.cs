@@ -184,9 +184,9 @@ namespace Farmware.WorldGeneration.Presentation
         // モード名、凡例、中央タイル値を描くため、初回だけ作成して再利用するGUI Styleです。
         private GUIStyle informationStyle;
 
-        // Rock Wall表示の1回のRepaint内で座標ごとの岩壁判定を共有し、同じ重いノイズ生成を近隣タイルごとに繰り返さないキャッシュです。
-        private readonly Dictionary<long, bool> rockWallProbeCache =
-            new Dictionary<long, bool>();
+        // Rock Wall表示が水文・Biome確定前の生成へ戻らないよう、完成地形Bufferをチャンク座標で引くRepaint内索引です。
+        private readonly Dictionary<ChunkCoordinate, Entity> completedTerrainChunkEntities =
+            new Dictionary<ChunkCoordinate, Entity>();
 
         // 生成済み水文Bufferをセル座標で引くRepaint内キャッシュです。水文セルは中心が隣接チャンクに属する場合があるため、
         // 描画中の地形チャンクだけへ依存せず、ロード済み全チャンクの64件Bufferから一度だけ構築します。
@@ -378,6 +378,8 @@ namespace Farmware.WorldGeneration.Presentation
                         false,
                         default,
                         false,
+                        default,
+                        default,
                         default,
                         default,
                         default,
@@ -1050,6 +1052,8 @@ namespace Farmware.WorldGeneration.Presentation
             bool hasCenterHydrologyTile = false;
             GeneratedHydrologyTile centerHydrologyTile = default;
             GeneratedSurfaceWaterTile centerSurfaceWaterTile = default;
+            RockWallAppearance centerRockWallAppearance = RockWallAppearance.None;
+            float centerRockWallShadowOpacity = 0f;
             EntityManager entityManager = presentationWorld.EntityManager;
             bool hasGenerationSettings = settingsQuery.CalculateEntityCount() == 1;
             WorldGenerationSettings settings = hasGenerationSettings
@@ -1069,8 +1073,6 @@ namespace Farmware.WorldGeneration.Presentation
                 hasAnimalCatalog = animalCatalog.IsCreated;
             }
 
-            // 距離探索範囲は隣接タイル同士で重なるため、Rock Wallモードの1描画中だけ座標判定を共有します。
-            rockWallProbeCache.Clear();
             CacheAnimalPositionsForCurrentRepaint(bounds);
 
             using NativeArray<Entity> entities = chunkQuery.ToEntityArray(Allocator.Temp);
@@ -1078,6 +1080,12 @@ namespace Farmware.WorldGeneration.Presentation
                 chunkQuery.ToComponentDataArray<ChunkCoordinateComponent>(Allocator.Temp);
             using NativeArray<ChunkGenerationStatus> statuses =
                 chunkQuery.ToComponentDataArray<ChunkGenerationStatus>(Allocator.Temp);
+
+            CacheCompletedTerrainChunksForCurrentRepaint(
+                entities,
+                coordinates,
+                statuses,
+                entityManager);
 
             // 水文セルの担当範囲は中心から-4〜+3タイルなので、地形タイルと同じチャンクのBufferだけでは
             // 正端4タイルを引けません。水文モード中だけ全ロード済みBufferを座標索引へまとめます。
@@ -1130,6 +1138,13 @@ namespace Farmware.WorldGeneration.Presentation
                     continue;
                 }
 
+                bool hasTerrainNeighborhood =
+                    CompletedChunkTerrainNeighborhoodFactory.TryCreate(
+                        entityManager,
+                        completedTerrainChunkEntities,
+                        new ChunkCoordinate(coordinate.Layer, coordinate.X, coordinate.Y),
+                        out CompletedChunkTerrainNeighborhood terrainNeighborhood);
+
                 int minimumLocalX = minimumTileX - chunkMinimumX;
                 int maximumLocalX = maximumTileX - chunkMinimumX;
                 int minimumLocalY = minimumTileY - chunkMinimumY;
@@ -1149,11 +1164,11 @@ namespace Farmware.WorldGeneration.Presentation
                         GeneratedHydrologyTile hydrologyTile = hydrologyTiles[tileIndex];
                         float rockWallShadowOpacity =
                             currentMode == WorldGenerationDebugVisualizationMode.RockWall
-                            && hasGenerationSettings
-                                ? CalculateCachedRockWallShadowOpacity(
-                                    settings,
-                                    tileX,
-                                    tileY)
+                            && hasTerrainNeighborhood
+                                ? RockWallAppearanceUtility.CalculateShadowOpacityAt(
+                                    terrainNeighborhood,
+                                    localX,
+                                    localY)
                                 : 0f;
                         bool isMagmaCandidate = false;
                         if (currentMode == WorldGenerationDebugVisualizationMode.Magma
@@ -1227,6 +1242,21 @@ namespace Farmware.WorldGeneration.Presentation
                             hasCenterHydrologyTile = true;
                             centerHydrologyTile = hydrologyTile;
                             centerSurfaceWaterTile = surfaceWaterTile;
+                            centerRockWallAppearance = hasTerrainNeighborhood
+                                ? RockWallAppearanceUtility.ClassifyAt(
+                                    terrainNeighborhood,
+                                    localX,
+                                    localY)
+                                : RockWallAppearance.None;
+                            // Rock Wall以外のモードでも中央情報欄は表示されるため、中央1セルだけは完成近傍から影を求めます。
+                            centerRockWallShadowOpacity = hasTerrainNeighborhood
+                                ? currentMode == WorldGenerationDebugVisualizationMode.RockWall
+                                    ? rockWallShadowOpacity
+                                    : RockWallAppearanceUtility.CalculateShadowOpacityAt(
+                                        terrainNeighborhood,
+                                        localX,
+                                        localY)
+                                : 0f;
                         }
                     }
                 }
@@ -1243,8 +1273,50 @@ namespace Farmware.WorldGeneration.Presentation
                 hasCenterHydrologyTile,
                 centerHydrologyTile,
                 centerSurfaceWaterTile,
+                centerRockWallAppearance,
+                centerRockWallShadowOpacity,
                 settings,
                 resourceSettings);
+        }
+
+        /// <summary>
+        /// Rock Wall表示と中央情報欄が完成地形だけを参照できるよう、現在ロード済みの完成チャンクを座標索引へまとめます。
+        /// </summary>
+        /// <param name="entities">Chunk Queryから同じ順序で取得したEntity配列です。</param>
+        /// <param name="coordinates">各Entityと同じ添字のチャンク座標です。</param>
+        /// <param name="statuses">各Entityと同じ添字の生成状態です。</param>
+        /// <param name="entityManager">完成地形Bufferの長さを検証する現在WorldのEntityManagerです。</param>
+        private void CacheCompletedTerrainChunksForCurrentRepaint(
+            NativeArray<Entity> entities,
+            NativeArray<ChunkCoordinateComponent> coordinates,
+            NativeArray<ChunkGenerationStatus> statuses,
+            EntityManager entityManager)
+        {
+            completedTerrainChunkEntities.Clear();
+            for (int entityIndex = 0; entityIndex < entities.Length; entityIndex++)
+            {
+                ChunkGenerationStatus status = statuses[entityIndex];
+                bool hasCompleteData = status.Phase == ChunkGenerationPhase.ReadyToApply
+                    || status.Phase == ChunkGenerationPhase.Active
+                    || status.Phase == ChunkGenerationPhase.Inactive;
+                if (!hasCompleteData || coordinates[entityIndex].Layer != currentLayer)
+                {
+                    continue;
+                }
+
+                DynamicBuffer<GeneratedTile> tiles =
+                    entityManager.GetBuffer<GeneratedTile>(entities[entityIndex], true);
+                if (tiles.Length != WorldGridConstants.TilesPerChunk)
+                {
+                    continue;
+                }
+
+                var coordinate = new ChunkCoordinate(
+                    coordinates[entityIndex].Layer,
+                    coordinates[entityIndex].X,
+                    coordinates[entityIndex].Y);
+                completedTerrainChunkEntities[coordinate] = entities[entityIndex];
+            }
         }
 
         /// <summary>
@@ -1466,90 +1538,6 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// 開発者用Rock Wall表示について、Repaint内で共有した岩壁判定から最寄り空地距離と連続影値を求めます。
-        /// </summary>
-        /// <param name="settings">水域優先を含む最終岩壁判定に使う生成設定です。</param>
-        /// <param name="worldTileX">中心の符号付き水平ワールドタイル座標です。</param>
-        /// <param name="worldTileY">中心の符号付き垂直ワールドタイル座標です。</param>
-        /// <returns>0以上MaximumShadowOpacity以下の連続した影不透明度です。</returns>
-        private float CalculateCachedRockWallShadowOpacity(
-            in WorldGenerationSettings settings,
-            int worldTileX,
-            int worldTileY)
-        {
-            if (!GetCachedRockWall(settings, worldTileX, worldTileY))
-            {
-                return 0f;
-            }
-
-            int searchRadius = RockWallAppearanceUtility.ShadowSearchRadiusInTiles;
-            int maximumDistanceSquared = searchRadius * searchRadius;
-            int nearestOpenDistanceSquared = int.MaxValue;
-
-            // 通常表示と同じ円形距離を使い、デバッグ色と実際の影が別の形にならないようにします。
-            for (int offsetY = -searchRadius; offsetY <= searchRadius; offsetY++)
-            {
-                for (int offsetX = -searchRadius; offsetX <= searchRadius; offsetX++)
-                {
-                    int distanceSquared = (offsetX * offsetX) + (offsetY * offsetY);
-                    if (distanceSquared == 0
-                        || distanceSquared > maximumDistanceSquared
-                        || distanceSquared >= nearestOpenDistanceSquared)
-                    {
-                        continue;
-                    }
-
-                    long sampleTileX = (long)worldTileX + offsetX;
-                    long sampleTileY = (long)worldTileY + offsetY;
-                    bool sampleIsOutsideWorld = sampleTileX < int.MinValue
-                        || sampleTileX > int.MaxValue
-                        || sampleTileY < int.MinValue
-                        || sampleTileY > int.MaxValue;
-
-                    // int座標域の外側は地形が存在しない空地として扱い、反対側の端へ符号周回した岩壁を参照しません。
-                    if (sampleIsOutsideWorld
-                        || !GetCachedRockWall(
-                            settings,
-                            (int)sampleTileX,
-                            (int)sampleTileY))
-                    {
-                        nearestOpenDistanceSquared = distanceSquared;
-                    }
-                }
-            }
-
-            return RockWallAppearanceUtility
-                .CalculateShadowOpacityFromNearestOpenDistanceSquared(
-                    nearestOpenDistanceSquared);
-        }
-
-        /// <summary>
-        /// 符号付きXY座標を64bitキーへ可逆に詰め、同じRepaint中の決定論的岩壁判定を再利用します。
-        /// </summary>
-        /// <param name="settings">岩壁判定に使う現在の生成設定です。</param>
-        /// <param name="worldTileX">調べる水平ワールドタイル座標です。</param>
-        /// <param name="worldTileY">調べる垂直ワールドタイル座標です。</param>
-        /// <returns>水域優先適用後の最終地形が岩壁ならtrueです。</returns>
-        private bool GetCachedRockWall(
-            in WorldGenerationSettings settings,
-            int worldTileX,
-            int worldTileY)
-        {
-            long coordinateKey = ((long)worldTileX << 32) | (uint)worldTileY;
-            if (rockWallProbeCache.TryGetValue(coordinateKey, out bool isRockWall))
-            {
-                return isRockWall;
-            }
-
-            isRockWall = DeterministicChunkGenerator.IsRockWall(
-                settings,
-                worldTileX,
-                worldTileY);
-            rockWallProbeCache.Add(coordinateKey, isRockWall);
-            return isRockWall;
-        }
-
-        /// <summary>
         /// 指定タイルの4辺をCamera Viewportへ投影し、Windowbox左上原点のIMGUI矩形へ変換します。
         /// </summary>
         /// <param name="tileX">描画する水平ワールドタイル座標です。</param>
@@ -1730,6 +1718,8 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="hasCenterHydrologyTile">中央タイルの派生水文と固定表流水を取得できた場合はtrueです。</param>
         /// <param name="centerHydrologyTile">中央タイルの自然飽和、自然冠水、湿原フラグです。</param>
         /// <param name="centerSurfaceWaterTile">中央タイルへ最終確定した固定表流水です。</param>
+        /// <param name="centerRockWallAppearance">完成した周囲チャンクを含む中央岩壁の露出分類です。</param>
+        /// <param name="centerRockWallShadowOpacity">完成地形から求めた中央岩壁影の不透明度です。</param>
         /// <param name="settings">現在の生成閾値を保持するSingleton値です。</param>
         /// <param name="resourceSettings">現在の資源最低間隔と群半径を保持するSingleton値です。</param>
         private void DrawInformationPanel(
@@ -1742,6 +1732,8 @@ namespace Farmware.WorldGeneration.Presentation
             bool hasCenterHydrologyTile,
             GeneratedHydrologyTile centerHydrologyTile,
             GeneratedSurfaceWaterTile centerSurfaceWaterTile,
+            RockWallAppearance centerRockWallAppearance,
+            float centerRockWallShadowOpacity,
             WorldGenerationSettings settings,
             ResourceGenerationSettings resourceSettings)
         {
@@ -1764,16 +1756,6 @@ namespace Farmware.WorldGeneration.Presentation
                     settings,
                     centerCoordinate.x,
                     centerCoordinate.y);
-                RockWallAppearance rockWallAppearance =
-                    RockWallAppearanceUtility.ClassifyAt(
-                        settings,
-                        centerCoordinate.x,
-                        centerCoordinate.y);
-                float rockWallShadowOpacity =
-                    RockWallAppearanceUtility.CalculateShadowOpacityAt(
-                        settings,
-                        centerCoordinate.x,
-                        centerCoordinate.y);
                 ResourceGenerationDebugInfo resourceInfo =
                     DeterministicResourceGenerator.GetDebugInfo(
                         settings,
@@ -1846,8 +1828,8 @@ namespace Farmware.WorldGeneration.Presentation
                     + $"RockDensity={rockWallInfo.Density} / {settings.RockWallNoiseThreshold}  "
                     + $"Raw={(rockWallInfo.RawCandidate ? "Yes" : "No")}\n"
                     + $"Corridor={(rockWallInfo.Corridor ? "Yes" : "No")}  "
-                    + $"Final={finalState}  Surface={rockWallAppearance}  "
-                    + $"Shadow={rockWallShadowOpacity:F2}\n"
+                    + $"Final={finalState}  Surface={centerRockWallAppearance}  "
+                    + $"Shadow={centerRockWallShadowOpacity:F2}\n"
                     + $"SurfaceWater: Type={centerSurfaceWaterTile.Type}  "
                     + $"Flags={centerSurfaceWaterTile.Flags}\n"
                     + $"NaturalHydrology: Flags={centerHydrologyTile.Flags}  "
@@ -3090,6 +3072,8 @@ namespace Farmware.WorldGeneration.Presentation
             }
 
             animalPositionCache.Clear();
+            completedTerrainChunkEntities.Clear();
+            hydrologyCellCache.Clear();
             queriesAreCreated = false;
             presentationWorld = null;
         }

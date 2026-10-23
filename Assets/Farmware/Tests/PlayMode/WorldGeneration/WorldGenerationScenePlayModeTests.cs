@@ -1801,36 +1801,31 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Is.True,
                 "通常地面の資源アイコンは岩壁用の非表示規則へ巻き込んではいけません。");
 
-            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
-                WorldSeedUtility.FromString("rock-wall-chunk-edge-test"),
-                WorldGenerationSettings.CurrentGeneratorVersion);
-            // 地上18Biomeの固定標高範囲と両立する最小海面を使い、無効設定へ依存せず岩壁境界だけを検証します。
-            settings.SeaLevelThreshold =
-                WorldGenerationSettings.MinimumSupportedSeaLevelThreshold;
-            bool foundShadowAcrossChunkBoundary = false;
+            using var southWest = CreateFilledTerrainChunk(GroundType.RockWall);
+            using var south = CreateFilledTerrainChunk(GroundType.RockWall);
+            using var southEast = CreateFilledTerrainChunk(GroundType.RockWall);
+            using var west = CreateFilledTerrainChunk(GroundType.RockWall);
+            using var center = CreateFilledTerrainChunk(GroundType.RockWall);
+            using var east = CreateFilledTerrainChunk(GroundType.RockWall);
+            using var northWest = CreateFilledTerrainChunk(GroundType.RockWall);
+            using var north = CreateFilledTerrainChunk(GroundType.RockWall);
+            using var northEast = CreateFilledTerrainChunk(GroundType.RockWall);
+            var neighborhood = new CompletedChunkTerrainNeighborhood(
+                southWest, south, southEast,
+                west, center, east,
+                northWest, north, northEast);
 
-            // X=63とX=64は別チャンクです。境界をまたぐ岩壁を探し、両側が座標再生成で影分類できることを確認します。
-            for (int tileY = -256; tileY <= 256; tileY++)
-            {
-                RockWallAppearance left =
-                    RockWallAppearanceUtility.ClassifyAt(settings, 63, tileY);
-                RockWallAppearance right =
-                    RockWallAppearanceUtility.ClassifyAt(settings, 64, tileY);
-                if (left != RockWallAppearance.None && right != RockWallAppearance.None)
-                {
-                    foundShadowAcrossChunkBoundary = true;
-                    break;
-                }
-            }
-
+            // local X=63と64は別チャンクです。どちらも同じ完成Buffer近傍から岩壁として分類されることを確認します。
             Assert.That(
-                foundShadowAcrossChunkBoundary,
-                Is.True,
-                "64×64チャンク境界をまたぐ岩壁を試験範囲で確認できませんでした。");
+                RockWallAppearanceUtility.ClassifyAt(neighborhood, 63, 32),
+                Is.Not.EqualTo(RockWallAppearance.None));
+            Assert.That(
+                RockWallAppearanceUtility.ClassifyAt(neighborhood, 64, 32),
+                Is.Not.EqualTo(RockWallAppearance.None));
 
-            // 境界上の座標版も0〜最大値へ収まり、未ロード隣接チャンクを含む距離探索で例外や範囲外値を出さないことを確認します。
+            // チャンク境界上も0〜最大値へ収まり、完成した隣接チャンクを含む距離探索で範囲外値を出さないことを確認します。
             float boundaryOpacity =
-                RockWallAppearanceUtility.CalculateShadowOpacityAt(settings, 63, 0);
+                RockWallAppearanceUtility.CalculateShadowOpacityAt(neighborhood, 63, 32);
             Assert.That(
                 boundaryOpacity,
                 Is.InRange(0f, RockWallAppearanceUtility.MaximumShadowOpacity));
@@ -2409,9 +2404,9 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 "実行時Tileへ20%の不透明度が反映されていません。");
 
             Assert.That(
-                tilemap.transform.parent.GetComponentsInChildren<Tilemap>(includeInactive: true),
-                Has.Length.EqualTo(9),
-                "World Gridには既存7層と境界ハイライト2層の合計9 Tilemapが必要です。");
+                CountDirectChildTilemaps(tilemap.transform.parent),
+                Is.EqualTo(9),
+                "World Grid直下には既存7層と境界ハイライト2層の合計9テンプレートTilemapが必要です。");
 
             // 液面の下半分を手前土地で隠す前後関係はTransform位置だけでは決まらないため、Rendererの描画順もScene実体から確認します。
             TilemapRenderer groundRenderer = tilemap.GetComponent<TilemapRenderer>();
@@ -3864,6 +3859,42 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 null);
             rootObject.SetActive(true);
             return presenter;
+        }
+
+        /// <summary>岩壁表示の完成チャンク境界テスト用に、全セルが同じ地面の4096要素配列を作ります。</summary>
+        /// <param name="ground">水文・Biome確定後として全セルへ設定する地面です。</param>
+        /// <returns>呼び出し側がusingで破棄する一時NativeArrayです。</returns>
+        private static NativeArray<GeneratedTile> CreateFilledTerrainChunk(GroundType ground)
+        {
+            var tiles = new NativeArray<GeneratedTile>(
+                WorldGridConstants.TilesPerChunk,
+                Allocator.TempJob);
+            for (int index = 0; index < tiles.Length; index++)
+            {
+                tiles[index] = new GeneratedTile { Ground = ground };
+            }
+
+            return tiles;
+        }
+
+        /// <summary>
+        /// World Grid直下へScene保存されたTilemapだけを数え、実行時チャンク配下の複製をテンプレート数へ混ぜません。
+        /// </summary>
+        /// <param name="parent">9枚の表示テンプレートを直下に持つWorld GridのTransformです。</param>
+        /// <returns>直下のGameObjectにTilemapが付いている子の数です。</returns>
+        private static int CountDirectChildTilemaps(Transform parent)
+        {
+            int count = 0;
+            for (int childIndex = 0; childIndex < parent.childCount; childIndex++)
+            {
+                // チャンク別表示は孫階層へ9枚を実行時生成するため、再帰検索せずSceneテンプレートだけを検証します。
+                if (parent.GetChild(childIndex).GetComponent<Tilemap>() != null)
+                {
+                    count++;
+                }
+            }
+
+            return count;
         }
     }
 }
