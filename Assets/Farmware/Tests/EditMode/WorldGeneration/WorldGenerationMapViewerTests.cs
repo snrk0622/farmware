@@ -21,6 +21,22 @@ namespace Farmware.WorldGeneration.Tests
     public sealed class WorldGenerationMapViewerTests
     {
         /// <summary>
+        /// Map Viewerの最小Window寸法を取得し、地図と17行Hover診断を上下の固定UIと同時表示できる高さを保証します。
+        /// レビュー対応前の480pxへ戻り、最小サイズで地図または診断が切れる退行を防ぎます。
+        /// </summary>
+        [Test]
+        public void MinimumWindowSize_ContainsMapAndExpandedHoverDiagnostics()
+        {
+            Vector2 minimumWindowSize = WorldGenerationMapViewerWindow.MinimumWindowSize;
+
+            Assert.That(minimumWindowSize.x, Is.EqualTo(720f));
+            Assert.That(
+                minimumWindowSize.y,
+                Is.EqualTo(700f),
+                "地図240px、Hover診断280px、ヘッダー・操作欄・状態欄を最小Window内へ同時に収める必要があります。");
+        }
+
+        /// <summary>
         /// 1つのRoot配下の兄弟GameObjectへAuthoringを2件配置し、設定取得が重複を見逃さないことを保証します。
         /// Bakerが複数の設定Entityを生成するSceneをMap Viewerだけが正常と誤認する退行を防ぎます。
         /// </summary>

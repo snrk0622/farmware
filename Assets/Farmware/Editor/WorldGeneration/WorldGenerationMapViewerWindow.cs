@@ -37,6 +37,12 @@ namespace Farmware.WorldGeneration.Editor
         private const float MinimumViewportSize = 64f;
 
         /// <summary>
+        /// Map Viewerへ許可する最小Window寸法です。単位はEditorポイントです。
+        /// 横幅は操作欄とSide Panelを保ち、高さは地図240px、Hover診断280px、ヘッダー・操作欄・状態欄を同時表示できる値です。
+        /// </summary>
+        public static Vector2 MinimumWindowSize => new Vector2(720f, 700f);
+
+        /// <summary>
         /// Toolbarへ渡す表示名です。順序と生成契約はCatalogを正とし、UI Toolkitが要求するListへ一度だけコピーします。
         /// </summary>
         private static readonly List<string> ViewModeChoices =
@@ -157,7 +163,8 @@ namespace Farmware.WorldGeneration.Editor
         {
             WorldGenerationMapViewerWindow window =
                 GetWindow<WorldGenerationMapViewerWindow>("Farmware Map Viewer");
-            window.minSize = new Vector2(720f, 480f);
+            // Hover診断を17行へ拡張した後も地図と上下の操作欄を切らず、最小サイズだけで全情報を確認できるようにします。
+            window.minSize = MinimumWindowSize;
             window.Show();
         }
 
