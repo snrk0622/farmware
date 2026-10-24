@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1140" height="740" viewBox="0 0 1140 740" role="img" aria-labelledby="title description">
+  <title id="title">代表5材質の手描き元色とWallTop暗色化結果の比較</title>
+  <desc id="description">GrassLoam、DesertSand、Sandstone、Granite、Basaltについて、GroundTopと同じ手描き元色、0.85倍したWallTop外周生成色、共通WallInteriorDarkを示す。</desc>
+  <rect width="1140" height="740" fill="#20242B"/>
+  <text x="24" y="34" fill="#F1F3F5" font-family="sans-serif" font-size="20" font-weight="700">代表5材質 パレット用途プレビュー</text>
+  <text x="24" y="58" fill="#AEB6C1" font-family="sans-serif" font-size="12">右列はsRGB各成分を0.85倍した生成結果。照明・面積比・ピクセル模様は含まない。</text>
+
+  <g font-family="sans-serif">
+    <g transform="translate(20 78)">
+      <rect width="540" height="198" rx="8" fill="#292E37" stroke="#3A414D"/>
+      <text x="16" y="27" fill="#F1F3F5" font-size="16" font-weight="700">GrassLoam / 草地ローム</text>
+      <text x="16" y="51" fill="#C9D0DA" font-size="12" font-weight="700">GroundTop</text>
+      <text x="286" y="51" fill="#C9D0DA" font-size="12" font-weight="700">生成Wall外周 ×0.85</text>
+      <g font-size="11" fill="#E6E9ED">
+        <rect x="16" y="62" width="18" height="18" fill="#6CAF4F"/><text x="42" y="76"><tspan font-family="monospace">#6CAF4F</tspan><tspan dx="10">草の影 20%</tspan></text>
+        <rect x="16" y="88" width="18" height="18" fill="#76B655"/><text x="42" y="102"><tspan font-family="monospace">#76B655</tspan><tspan dx="10">暗い草 20%</tspan></text>
+        <rect x="16" y="114" width="18" height="18" fill="#7FBD5C"/><text x="42" y="128"><tspan font-family="monospace">#7FBD5C</tspan><tspan dx="10">基調の草 20%</tspan></text>
+        <rect x="16" y="140" width="18" height="18" fill="#88C363"/><text x="42" y="154"><tspan font-family="monospace">#88C363</tspan><tspan dx="10">明るい草 20%</tspan></text>
+        <rect x="16" y="166" width="18" height="18" fill="#92CA6A"/><text x="42" y="180"><tspan font-family="monospace">#92CA6A</tspan><tspan dx="10">草の最明部 20%</tspan></text>
+        <rect x="286" y="62" width="18" height="18" fill="#5C9543"/><text x="312" y="76"><tspan font-family="monospace">#5C9543</tspan><tspan dx="10">草の影 20%</tspan></text>
+        <rect x="286" y="88" width="18" height="18" fill="#649B48"/><text x="312" y="102"><tspan font-family="monospace">#649B48</tspan><tspan dx="10">暗い草 20%</tspan></text>
+        <rect x="286" y="114" width="18" height="18" fill="#6CA14E"/><text x="312" y="128"><tspan font-family="monospace">#6CA14E</tspan><tspan dx="10">基調の草 20%</tspan></text>
+        <rect x="286" y="140" width="18" height="18" fill="#74A654"/><text x="312" y="154"><tspan font-family="monospace">#74A654</tspan><tspan dx="10">明るい草 20%</tspan></text>
+        <rect x="286" y="166" width="18" height="18" fill="#7CAC5A"/><text x="312" y="180"><tspan font-family="monospace">#7CAC5A</tspan><tspan dx="10">草の最明部 20%</tspan></text>
+      </g>
+    </g>
+
+    <g transform="translate(580 78)">
+      <rect width="540" height="198" rx="8" fill="#292E37" stroke="#3A414D"/>
+      <text x="16" y="27" fill="#F1F3F5" font-size="16" font-weight="700">DesertSand / 砂漠砂</text>
+      <text x="16" y="51" fill="#C9D0DA" font-size="12" font-weight="700">GroundTop</text>
+      <text x="286" y="51" fill="#C9D0DA" font-size="12" font-weight="700">生成Wall外周 ×0.85</text>
+      <g font-size="11" fill="#E6E9ED">
+        <rect x="16" y="62" width="18" height="18" fill="#D8B96F"/><text x="42" y="76"><tspan font-family="monospace">#D8B96F</tspan><tspan dx="10">砂の影 15%</tspan></text>
+        <rect x="16" y="88" width="18" height="18" fill="#E2C57A"/><text x="42" y="102"><tspan font-family="monospace">#E2C57A</tspan><tspan dx="10">暗い砂 20%</tspan></text>
+        <rect x="16" y="114" width="18" height="18" fill="#EBCD86"/><text x="42" y="128"><tspan font-family="monospace">#EBCD86</tspan><tspan dx="10">基調の砂 45%</tspan></text>
+        <rect x="16" y="140" width="18" height="18" fill="#F2D793"/><text x="42" y="154"><tspan font-family="monospace">#F2D793</tspan><tspan dx="10">明るい砂 20%</tspan></text>
+        <rect x="286" y="62" width="18" height="18" fill="#B89D5E"/><text x="312" y="76"><tspan font-family="monospace">#B89D5E</tspan><tspan dx="10">砂の影 15%</tspan></text>
+        <rect x="286" y="88" width="18" height="18" fill="#C0A768"/><text x="312" y="102"><tspan font-family="monospace">#C0A768</tspan><tspan dx="10">暗い砂 20%</tspan></text>
+        <rect x="286" y="114" width="18" height="18" fill="#C8AE72"/><text x="312" y="128"><tspan font-family="monospace">#C8AE72</tspan><tspan dx="10">基調の砂 45%</tspan></text>
+        <rect x="286" y="140" width="18" height="18" fill="#CEB77D"/><text x="312" y="154"><tspan font-family="monospace">#CEB77D</tspan><tspan dx="10">明るい砂 20%</tspan></text>
+      </g>
+    </g>
+
+    <g transform="translate(20 294)">
+      <rect width="540" height="198" rx="8" fill="#292E37" stroke="#3A414D"/>
+      <text x="16" y="27" fill="#F1F3F5" font-size="16" font-weight="700">Sandstone / 砂岩</text>
+      <text x="16" y="51" fill="#C9D0DA" font-size="12" font-weight="700">GroundTop</text>
+      <text x="286" y="51" fill="#C9D0DA" font-size="12" font-weight="700">生成Wall外周 ×0.85</text>
+      <g font-size="11" fill="#E6E9ED">
+        <rect x="16" y="62" width="18" height="18" fill="#C29A5D"/><text x="42" y="76"><tspan font-family="monospace">#C29A5D</tspan><tspan dx="10">岩肌の影 15%</tspan></text>
+        <rect x="16" y="88" width="18" height="18" fill="#CEA768"/><text x="42" y="102"><tspan font-family="monospace">#CEA768</tspan><tspan dx="10">暗い岩肌 20%</tspan></text>
+        <rect x="16" y="114" width="18" height="18" fill="#D9B474"/><text x="42" y="128"><tspan font-family="monospace">#D9B474</tspan><tspan dx="10">基調の岩肌 45%</tspan></text>
+        <rect x="16" y="140" width="18" height="18" fill="#E4C180"/><text x="42" y="154"><tspan font-family="monospace">#E4C180</tspan><tspan dx="10">明るい岩肌 20%</tspan></text>
+        <rect x="286" y="62" width="18" height="18" fill="#A5834F"/><text x="312" y="76"><tspan font-family="monospace">#A5834F</tspan><tspan dx="10">岩肌の影 15%</tspan></text>
+        <rect x="286" y="88" width="18" height="18" fill="#AF8E58"/><text x="312" y="102"><tspan font-family="monospace">#AF8E58</tspan><tspan dx="10">暗い岩肌 20%</tspan></text>
+        <rect x="286" y="114" width="18" height="18" fill="#B89963"/><text x="312" y="128"><tspan font-family="monospace">#B89963</tspan><tspan dx="10">基調の岩肌 45%</tspan></text>
+        <rect x="286" y="140" width="18" height="18" fill="#C2A46D"/><text x="312" y="154"><tspan font-family="monospace">#C2A46D</tspan><tspan dx="10">明るい岩肌 20%</tspan></text>
+      </g>
+    </g>
+
+    <g transform="translate(580 294)">
+      <rect width="540" height="198" rx="8" fill="#292E37" stroke="#3A414D"/>
+      <text x="16" y="27" fill="#F1F3F5" font-size="16" font-weight="700">Granite / 花崗岩</text>
+      <text x="16" y="51" fill="#C9D0DA" font-size="12" font-weight="700">GroundTop</text>
+      <text x="286" y="51" fill="#C9D0DA" font-size="12" font-weight="700">生成Wall外周 ×0.85</text>
+      <g font-size="11" fill="#E6E9ED">
+        <rect x="16" y="62" width="18" height="18" fill="#9C918B"/><text x="42" y="76"><tspan font-family="monospace">#9C918B</tspan><tspan dx="10">石基の影 12%</tspan></text>
+        <rect x="16" y="88" width="18" height="18" fill="#AA9E97"/><text x="42" y="102"><tspan font-family="monospace">#AA9E97</tspan><tspan dx="10">暗い石基 18%</tspan></text>
+        <rect x="16" y="114" width="18" height="18" fill="#B8AAA3"/><text x="42" y="128"><tspan font-family="monospace">#B8AAA3</tspan><tspan dx="10">基調の石基 45%</tspan></text>
+        <rect x="16" y="140" width="18" height="18" fill="#C6B8B0"/><text x="42" y="154"><tspan font-family="monospace">#C6B8B0</tspan><tspan dx="10">明るい石基 15%</tspan></text>
+        <rect x="16" y="166" width="18" height="18" fill="#6E7074"/><text x="42" y="180"><tspan font-family="monospace">#6E7074</tspan><tspan dx="10">暗い斑晶 10%</tspan></text>
+        <rect x="286" y="62" width="18" height="18" fill="#857B76"/><text x="312" y="76"><tspan font-family="monospace">#857B76</tspan><tspan dx="10">石基の影 12%</tspan></text>
+        <rect x="286" y="88" width="18" height="18" fill="#918680"/><text x="312" y="102"><tspan font-family="monospace">#918680</tspan><tspan dx="10">暗い石基 18%</tspan></text>
+        <rect x="286" y="114" width="18" height="18" fill="#9C918B"/><text x="312" y="128"><tspan font-family="monospace">#9C918B</tspan><tspan dx="10">基調の石基 45%</tspan></text>
+        <rect x="286" y="140" width="18" height="18" fill="#A89C96"/><text x="312" y="154"><tspan font-family="monospace">#A89C96</tspan><tspan dx="10">明るい石基 15%</tspan></text>
+        <rect x="286" y="166" width="18" height="18" fill="#5E5F63"/><text x="312" y="180"><tspan font-family="monospace">#5E5F63</tspan><tspan dx="10">暗い斑晶 10%</tspan></text>
+      </g>
+    </g>
+
+    <g transform="translate(20 510)">
+      <rect width="540" height="198" rx="8" fill="#292E37" stroke="#3A414D"/>
+      <text x="16" y="27" fill="#F1F3F5" font-size="16" font-weight="700">Basalt / 玄武岩</text>
+      <text x="16" y="51" fill="#C9D0DA" font-size="12" font-weight="700">GroundTop</text>
+      <text x="286" y="51" fill="#C9D0DA" font-size="12" font-weight="700">生成Wall外周 ×0.85</text>
+      <g font-size="11" fill="#E6E9ED">
+        <rect x="16" y="62" width="18" height="18" fill="#343942"/><text x="42" y="76"><tspan font-family="monospace">#343942</tspan><tspan dx="10">孔・亀裂 8%</tspan></text>
+        <rect x="16" y="88" width="18" height="18" fill="#404650"/><text x="42" y="102"><tspan font-family="monospace">#404650</tspan><tspan dx="10">暗い石基 22%</tspan></text>
+        <rect x="16" y="114" width="18" height="18" fill="#4D535E"/><text x="42" y="128"><tspan font-family="monospace">#4D535E</tspan><tspan dx="10">基調の石基 50%</tspan></text>
+        <rect x="16" y="140" width="18" height="18" fill="#5A616C"/><text x="42" y="154"><tspan font-family="monospace">#5A616C</tspan><tspan dx="10">明るい石基 20%</tspan></text>
+        <rect x="286" y="62" width="18" height="18" fill="#2C3038"/><text x="312" y="76"><tspan font-family="monospace">#2C3038</tspan><tspan dx="10">孔・亀裂 8%</tspan></text>
+        <rect x="286" y="88" width="18" height="18" fill="#363C44"/><text x="312" y="102"><tspan font-family="monospace">#363C44</tspan><tspan dx="10">暗い石基 22%</tspan></text>
+        <rect x="286" y="114" width="18" height="18" fill="#414750"/><text x="312" y="128"><tspan font-family="monospace">#414750</tspan><tspan dx="10">基調の石基 50%</tspan></text>
+        <rect x="286" y="140" width="18" height="18" fill="#4D525C"/><text x="312" y="154"><tspan font-family="monospace">#4D525C</tspan><tspan dx="10">明るい石基 20%</tspan></text>
+      </g>
+    </g>
+
+    <g transform="translate(580 510)">
+      <rect width="540" height="198" rx="8" fill="#292E37" stroke="#3A414D"/>
+      <text x="16" y="27" fill="#F1F3F5" font-size="16" font-weight="700">全材質共通</text>
+      <text x="16" y="51" fill="#C9D0DA" font-size="12" font-weight="700">WallInteriorDark</text>
+      <rect x="16" y="66" width="72" height="72" fill="#0D1016" stroke="#515866"/>
+      <text x="104" y="89" fill="#E6E9ED" font-family="monospace" font-size="14">#0D1016</text>
+      <text x="104" y="114" fill="#E6E9ED" font-size="12">壁上面の内側を埋める共通暗色（中央領域100%）</text>
+      <text x="104" y="136" fill="#AEB6C1" font-size="11">全材質共通・不透明。材質模様には使用しない。</text>
+      <text x="16" y="174" fill="#AEB6C1" font-size="11">生成した外周色は、この暗色との境界もGameビューで確認する。</text>
+    </g>
+  </g>
+</svg>
