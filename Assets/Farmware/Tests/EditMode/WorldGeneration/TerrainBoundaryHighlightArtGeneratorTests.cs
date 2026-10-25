@@ -228,6 +228,38 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(summary.VisibleHighlightStateCount, Is.EqualTo(46));
         }
 
+        /// <summary>
+        /// Wall動的影比較が同一形状の3パネルを持ち、ハイライト、動的影のみ、固定接地影ありを比較できることを確認します。
+        /// 真上の主光と左手前の検証光、左右対称の固定接地影の必要数も固定し、比較条件が意図せず変わる回帰を防ぎます。
+        /// </summary>
+        [Test]
+        public void WallShadowComparison_UsesEquivalentHighlightDynamicAndContactShadowPanels()
+        {
+            TerrainWallShadowComparisonSummary summary =
+                TerrainWallShadowComparisonMapBuilder.ValidateAssetsAndLayout();
+
+            Assert.That(summary.PanelCount, Is.EqualTo(3));
+            Assert.That(summary.HighlightPanelCount, Is.EqualTo(1));
+            Assert.That(summary.ContactShadowPanelCount, Is.EqualTo(1));
+            Assert.That(summary.WallCellCountPerPanel, Is.EqualTo(13));
+            Assert.That(summary.ExposedFaceColumnCountPerPanel, Is.EqualTo(5));
+            Assert.That(summary.FaceDepth, Is.EqualTo(2));
+            Assert.That(
+                TerrainWallShadowComparisonMapBuilder.DynamicShadowCasterOffsetYInTiles,
+                Is.EqualTo(-summary.FaceDepth));
+            Assert.That(summary.FaceSpriteCountPerPanel, Is.EqualTo(10));
+            Assert.That(summary.ShadowCasterCount, Is.EqualTo(39));
+            Assert.That(summary.CompositeShadowCasterCount, Is.EqualTo(3));
+            Assert.That(summary.PointLightCount, Is.EqualTo(6));
+            Assert.That(summary.ContactShadowSpriteCount, Is.EqualTo(36));
+            Assert.That(TerrainWallShadowComparisonMapBuilder.PointLightsPerPanel, Is.EqualTo(2));
+            Assert.That(TerrainWallShadowComparisonMapBuilder.PointLightOuterRadius, Is.EqualTo(8f));
+            Assert.That(TerrainWallShadowComparisonMapBuilder.FrontLeftLightIntensity, Is.EqualTo(0.65f));
+            Assert.That(TerrainWallShadowComparisonMapBuilder.ContactShadowHorizontalSpreadPixels, Is.EqualTo(1));
+            Assert.That(TerrainWallShadowComparisonMapBuilder.ContactShadowOffsetYPixels, Is.EqualTo(-3));
+            Assert.That(TerrainWallShadowComparisonMapBuilder.ContactShadowLayerOpacity, Is.EqualTo(0.22f));
+        }
+
         /// <summary>内角が仕様どおり角の1画素だけになり、隣接画素へ伸びないことを確認します。</summary>
         [Test]
         public void InnerCorner_UsesSinglePixel()

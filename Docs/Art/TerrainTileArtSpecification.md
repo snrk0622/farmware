@@ -23,11 +23,11 @@
 - 断面は境界の有無にかかわらず、1段目から通常の`Face`を使う。
 - `FaceBoundaryOverlay`を持つ材質では、透明背景のOverlayを断面1段目の`Face`へ重ねる。持たない材質には空の透明Spriteや共通の代替境界を作らない。
 - Wall上面には同じ材質の`GroundTop`差分を使い、RGBへ`WallDarkenFactor`を乗算してGroundより暗く表示する。通常材質の初期値は0.85とする。全材質共通の黒い内部、材質別のWall外周部品、専用`WallTop`完成Spriteは作らない。
-- GroundとWallの形状境界には、全材質共通の白い14形状の境界ハイライトを使用する。8近傍47状態を14基本形と90度回転から選ぶ論理契約、Ground用とWall用の専用Tilemap、20%の初期不透明度を維持する。再制作したSpriteは外周を不透明白1 px、内角を欠けた対角側の角に置く不透明白1 pxとし、Editor生成ツールからPNG、14分割、専用Atlas、Scene参照を再現可能に更新する。
+- GroundとWallの形状境界ハイライトは製品表示へ使用しない。比較の結果、Wallは0.85暗色化、手前に露出する`Face`、固定接地影、動的影の組合せで識別する方針を採用した。旧14形状Sprite、専用Atlas、Ground／Wall用Tilemap、選択処理、Scene参照、専用テストは、製品表示を置き換えるC6-Dで同時に削除する。比較SceneのA区画は採用案との比較記録としてのみ残す。
 - Ground崖面とWall前面は、同じ材質の`FaceBoundaryOverlay`入力と`Face`を共有する。境界あり材質ではEditorがGround用の元色合成結果と、Wall用にOverlayだけを暗色化した合成結果を生成する。
 - 地形輪郭は初期実装では論理セルに沿う直線とする。不規則な凹凸は後からPresentation表現として追加できるよう、衝突、採掘、配置、保存から分離する。
 
-Wallの視認性は、`GroundTop`全体の暗色化、再制作する共通境界ハイライト、手前に露出する`Face`、URP 2D Rendererの`Light 2D`と`Shadow Caster 2D`を組み合わせて確保する。材質が異なるWall同士も連続したWall領域として接続し、共有辺には境界ハイライト、`Face`、影の切れ目を出さない。材質の違いは`GroundTop`の色と模様で表現する。
+Wallの視認性は、`GroundTop`全体の0.85暗色化、手前に露出する`Face`、2段Wall向けに左右各1px・手前3pxへ広げた固定接地影、URP 2D Rendererの`Light 2D`と`Shadow Caster 2D`による動的影を組み合わせて確保する。固定接地影は各レイヤーAlpha 22%の2枚を重ねる。材質が異なるWall同士も連続したWall領域として接続し、共有辺には`Face`、固定接地影、動的影の切れ目を出さない。材質の違いは`GroundTop`の色と模様で表現する。
 
 ## 3. 材質ごとの上面・境界・断面構成
 
@@ -60,8 +60,8 @@ Ground崖面とWall前面の表示段数はGameビュー比較後に個別に決
 - 同じ材質のGround崖面とWall前面は、同一の`FaceBoundaryOverlay`入力と`Face`を参照する。境界ありではGround用の元色合成結果とWall用の暗色化合成結果を分け、暗色化が無効ならWallもGround用合成結果を再利用する。
 - Wall前面の下へ同じ材質の水中Ground崖面が続く場合も、同じ`Face`を使って縦方向へ連続させる。
 - Wallと下地Groundの材質が異なる場合は、論理的な材質境界で使用する断面素材を切り替える。
-- Wall同士の物理接続判定は、Wall前面、Wall境界ハイライト、Shadow Caster輪郭に使う。材質IDを比較せず、隣接セルがWallなら接続扱いとする。
-- 孤立Wallは四辺に境界ハイライトを表示する。材質が異なるWall同士の共有辺には境界ハイライトを表示せず、連続したWall領域の外周と内角だけを表示する。
+- Wall同士の物理接続判定は、Wall前面、固定接地影、`Shadow Caster 2D`輪郭に使う。材質IDを比較せず、隣接セルがWallなら接続扱いとする。
+- 孤立Wallは結合シルエット全体から固定接地影と動的影を表示する。材質が異なるWall同士の共有辺には`Face`、固定接地影、動的影の切れ目を出さず、連続したWall領域として扱う。
 
 ### 3.3 材質ごとの可変配列とSprite数
 
@@ -82,7 +82,7 @@ Ground崖面とWall前面の表示段数はGameビュー比較後に個別に決
 | Editorが生成する完成Sprite | `B > 0ならF×B×(1 + D)、B = 0なら0` |
 | Runtimeで参照する材質Sprite候補 | `G + F + （B > 0ならF×B×(1 + D)、B = 0なら0）` |
 
-最小構成の`G = 1`、`F = 1`、`B = 0`では、手描き入力は2 Sprite、Editor生成は0 Sprite、Runtime参照候補は2 Spriteとなる。境界ありの最小構成`G = F = B = 1`かつWall暗色化有効`D = 1`では、手描き入力は3 Sprite、Editor生成はGround用とWall用の2 Sprite、Runtime参照候補は5 Spriteとなる。全材質で共有する14形状の境界ハイライトは材質ごとのSprite数へ含めない。
+最小構成の`G = 1`、`F = 1`、`B = 0`では、手描き入力は2 Sprite、Editor生成は0 Sprite、Runtime参照候補は2 Spriteとなる。境界ありの最小構成`G = F = B = 1`かつWall暗色化有効`D = 1`では、手描き入力は3 Sprite、Editor生成はGround用とWall用の2 Sprite、Runtime参照候補は5 Spriteとなる。固定接地影と動的影は材質Spriteを追加せず、表示側がWall領域の結合シルエットから生成する。
 
 ## 4. 手描き制作の基準
 
@@ -100,7 +100,7 @@ Ground崖面とWall前面の表示段数はGameビュー比較後に個別に決
 - 1材質・1部位は原則3〜5色とする。必要な特徴が読める場合は3色未満でもよい。
 - 写真調の細かなノイズ、全画素が激しく明滅する高コントラスト、輪郭線で囲んだ1セル単位のタイル感を避ける。
 - 1 pxの点、2〜4 px程度の小塊、短い層、割れ、斑晶を材質に応じて使い分ける。同じ模様規則を全材質へ一律適用しない。
-- Base Spriteには弱い上方光を基本として、わずかに画面左上へ寄せた固定明暗を含める。硬い投影影、松明など特定光源の色、時間帯の暗さは焼き込まず、動的な影はURP 2D Rendererの`Light 2D`と`Shadow Caster 2D`へ分離する。
+- Base Spriteには左右へ偏らない弱い上方光を基準とする固定明暗を含める。硬い投影影、松明など特定光源の色、時間帯の暗さは焼き込まず、動的な影はURP 2D Rendererの`Light 2D`と`Shadow Caster 2D`へ分離する。
 - Normal Mapは初回41材質の必須成果物にしない。Base Sprite完成後、TIME-01Bで代表材質だけを比較する。
 
 ### 4.3 差分と接続
@@ -110,11 +110,8 @@ Ground崖面とWall前面の表示段数はGameビュー比較後に個別に決
 - `GroundTop`は外周を共通化せず、隣接した際に単一色の枠、密度の段差、規則的な帯が見えないようにする。
 - 材質ごとにInspectorへ`DarkenWallSurface`と`WallDarkenFactor`を表示する。`DarkenWallSurface`は既定で有効とし、通常の材質ブロックは機械的に暗色化する。無効時は係数1.0として元色を使う。`WallDarkenFactor`は0より大きく1以下とし、初期比較値を0.85とする。最終値は代表5材質のGameビュー確認で調整する。
 - Wall上面の暗色化は、Wall表示レイヤーが参照する`GroundTop` Sprite全体へ同じ`WallDarkenFactor`を乗算する。Alpha、Ground表示、Ground用`FaceBoundaryOverlay`、`Face`は変更しない。Wall用`FaceBoundaryOverlay`の不透明画素には同じ有効状態と係数を使う。
-- GroundとWallの境界ハイライトは、全材質共通の14基本Spriteと90度回転を使う。8方向の接続を47状態へ正規化し、完全接続を除く状態へ外周辺・内角を表示する。材質ごとの境界Spriteは作らない。
-- 14基本Spriteは224×16 pxの横一列PNGへ、左から`terrain_boundary_highlight_01`〜`14`の順で格納する。各区画は16×16 px、Point、16 PPU、非圧縮、Mip Mapなし、`Full Rect`、中央Pivotとし、14枚を専用`BoundaryHighlightAtlas`の同一ページへ収録する。
-- 外周辺はSprite端へ接する不透明白1 pxの連続線とする。内角は欠けた対角側の角に置く不透明白1 pxの点とし、隣接画素へ伸ばさない。色とAlphaは元画像で不透明白に固定し、実表示の強さはTile側の初期Alpha 20%で調整する。Groundでは白のまま重ね、Wallでは白いハイライトのRGBにもWall上面と同じ既定暗化係数0.85を掛けてから重ねる。描画順はBaseの後を維持しつつ、通常色へハイライトを合成してから全体を0.85倍した場合と同じ色関係にする。
-- Ground境界は従来どおり水・マグマ側だけへ表示し、Biomeや材質の違いでは表示しない。Wall境界は材質IDを比較せず、隣接セルがWallなら接続扱いにする。異材質Wall間の共有辺へ境界を出さない。
-- Wall領域の投影影は`Shadow Caster 2D`で表現する。Caster形状は現在の有効地形からサブチャンク単位で結合し、タイルごとのGameObjectやCasterを作らない。材質境界では分割せず、Wall領域の外周だけを影輪郭にする。
+- GroundとWallの形状境界ハイライトは作らず、14基本Spriteと90度回転による47状態の選択も製品表示では行わない。GroundとLiquidの境界は各Base SpriteとLiquid表現、Wall外周は固定接地影と動的影で読み分ける。
+- Wall領域の投影影は`Shadow Caster 2D`で表現する。Caster形状は表示中のWall上面ではなく、Wall前面の表示段数だけ手前へ移した設置面を起点にする。現在の有効地形からサブチャンク単位で結合し、タイルごとのGameObjectやCasterを作らない。材質境界では分割せず、設置面へ投影したWall領域の外周だけを影輪郭にする。
 - `FaceBoundaryOverlay`は左右方向に並べた際、表層の厚さや境界線の高さが不自然に途切れないようにする。透明部分では下の`Face`をそのまま見せ、不透明画素だけで必要な範囲を覆う。
 - `Face`は、配列内の任意差分同士を上下左右へ隣接させても破綻しないようにする。境界を横断する地層や割れを描く場合は、全差分で接続座標と幅を共通化するか、外周をまたがせない。接続グループは初期仕様へ追加せず、相互接続では表現できない材質が実際に生じた場合だけ後続で検討する。
 - どの差分同士でも完全に大模様を接続するのではなく、接続を必要とする模様を限定する。小石や斑晶などの独立模様は外周をまたがせない。
@@ -130,7 +127,7 @@ Ground崖面とWall前面の表示段数はGameビュー比較後に個別に決
 - マグマは不透明とし、接触する最初の段から背後の`Face`と`FaceBoundaryOverlay`合成結果を見せない。半透明の深度表現をマグマへ流用しない。
 - 淡水・海水用およびマグマ用の専用断面Spriteは作らない。マグマの波や発光を表す透明な表面エフェクトを使う場合も、不透明なマグマBaseの上へ重ねる。
 - 崖面表示深度より下は、不透明な`DeepBackground` `#0D1016`で塞ぐ。見えない断面を無制限に反復しない。
-- 白い14形状の地形境界ハイライトの接続契約を継続使用する。Ground用とWall用のTilemapを分け、Wall用は材質を問わないWall領域の外周・内角へ表示する。再制作したSprite、専用Atlas、SampleSceneの14参照は接続済みであり、固定検品Sceneで47状態をGround色と0.85暗化Wall色の両方に一覧表示する。Wall側はBaseだけでなくハイライトRGBにも0.85を掛け、白い線だけが暗いWallから浮くことを防ぐ。F4のタイル・サブチャンク・チャンク診断表示は別機能として維持する。
+- 白い14形状の地形境界ハイライトは製品表示へ使用しない。旧素材、専用Atlas、Ground／Wall用Tilemap、Scene参照、選択処理、専用テストはC6-Dで削除する。F4のタイル・サブチャンク・チャンク診断表示は地形アートとは別機能として維持する。
 
 ## 6. 部位別パレットの読み方
 
@@ -144,7 +141,7 @@ Ground崖面とWall前面の表示段数はGameビュー比較後に個別に決
 - `FaceBoundaryOverlay`と`Face`は、同じ材質の`GroundTop`より全体として暗くする。比較は使用比率を反映したOKLab Lの加重平均で行い、各パレット内部の明暗差は前項の目安以内に保つ。上面、境界、断面で同じ色相を使う必要はなく、草から土、風化層から母岩のような材質構造を優先する。41材質への調整では、各部位の加重平均明度、色相、彩度をできるだけ維持し、過剰な明暗差だけを圧縮している。
 - 亀裂、孔、斑晶などへ相対的に暗い色または明るい色が必要な場合も、使用面積を小さくして面全体が斑に明滅しないようにする。1セル外周を暗色で囲む表現や、常時白く見えるハイライトは使用しない。
 - Wall上面は`GroundTop`と同じSpriteを使い、表示時にSprite全体へ`WallDarkenFactor`を適用する。暗色化済み画像を手描き入力へ戻して二重に暗くしない。
-- Ground／Wallの輪郭は全材質共通の14形状境界ハイライトで示し、材質別の外周パレットや外周幅は設けない。Wall同士は材質にかかわらず接続する。
+- Ground／Wallの読み分けにはWallの0.85暗色化、`Face`、共通寸法の固定接地影、設置面起点の動的影を使い、材質別の外周パレットや境界ハイライトは設けない。Wall同士は材質にかかわらず接続する。
 - `境界色`が`なし`なら、断面1段目へ通常の`Face`をそのまま使う。
 - 境界ありの場合も、`FaceBoundaryOverlay`専用の色を必ず増やす必要はない。原則として`GroundTop色`と`Face色`の一部を組み合わせる。ただし、`GrassLoam`の暗色化試作のように、上面と断面の中間明度を低コントラストで保つ必要がある場合は、境界専用の中間色パレットを使ってよい。Wall用の境界色は別途手描きせず、この元色OverlayをEditorで暗色化する。
 - 表内のHEXは原則として暗部から明部のおおよその順で記す。地層の上下関係を優先する境界色は、上面側から断面側の順で記す。手描き時に色の調整が必要になった場合は、個々のSpriteへ閉じた変更にせず、本表を更新してから全該当差分へ反映する。
@@ -164,10 +161,10 @@ Ground崖面とWall前面の表示段数はGameビュー比較後に個別に決
 | `MeadowSoil` | 牧草地土壌 |  | <span style="color: #7EBE5A;">■</span> 影 15% `#7EBE5A`<br><span style="color: #88C663;">■</span> 暗部 20% `#88C663`<br><span style="color: #93CE6C;">■</span> 基調 45% `#93CE6C`<br><span style="color: #A0D777;">■</span> 明部 20% `#A0D777` | <span style="color: #6FAF4B;">■</span> 上面側暗部 25% `#6FAF4B`<br><span style="color: #7AB352;">■</span> 上面側明部 25% `#7AB352`<br><span style="color: #9E785A;">■</span> 断面側暗部 25% `#9E785A`<br><span style="color: #B88658;">■</span> 断面側明部 25% `#B88658` | <span style="color: #795B48;">■</span> 影 15% `#795B48`<br><span style="color: #866144;">■</span> 暗部 20% `#866144`<br><span style="color: #916641;">■</span> 基調 45% `#916641`<br><span style="color: #9D6C40;">■</span> 明部 20% `#9D6C40` | GrassLoamより明るく均一な草。薄い草層から明るい土へ切り替える |
 | `ClaySoil` | 粘土質土壌 |  | <span style="color: #A3664A;">■</span> 溝の影 10% `#A3664A`<br><span style="color: #AE6D4D;">■</span> 暗い溝 15% `#AE6D4D`<br><span style="color: #B87754;">■</span> 粘土の基調 65% `#B87754`<br><span style="color: #C3805D;">■</span> 溝のハイライト 10% `#C3805D` | なし | <span style="color: #865240;">■</span> 溝の影 10% `#865240`<br><span style="color: #925740;">■</span> 暗い溝 15% `#925740`<br><span style="color: #9E5C40;">■</span> 粘土の基調 65% `#9E5C40`<br><span style="color: #AB6140;">■</span> 溝のハイライト 10% `#AB6140` | 全ての粘土面を同じ基本色で統一し、連結した暗い溝と、その上・左側の控えめな縁ハイライトで丸石状の不規則な網目を描く。上面と断面は同系色 |
 | `DryGrassSoil` | 乾燥草地土壌 |  | <span style="color: #AAA553;">■</span> 影 15% `#AAA553`<br><span style="color: #B4AD5A;">■</span> 暗部 20% `#B4AD5A`<br><span style="color: #BFB662;">■</span> 基調 45% `#BFB662`<br><span style="color: #CAC16B;">■</span> 明部 20% `#CAC16B` | <span style="color: #9C9745;">■</span> 上面側暗部 25% `#9C9745`<br><span style="color: #A89F4B;">■</span> 上面側明部 25% `#A89F4B`<br><span style="color: #9E734E;">■</span> 断面側暗部 25% `#9E734E`<br><span style="color: #AB794D;">■</span> 断面側明部 25% `#AB794D` | <span style="color: #846045;">■</span> 影 15% `#846045`<br><span style="color: #906641;">■</span> 暗部 20% `#906641`<br><span style="color: #9C6B3F;">■</span> 基調 45% `#9C6B3F`<br><span style="color: #A77140;">■</span> 明部 20% `#A77140` | 黄緑の短い草片。境界で乾いた草層を薄く見せる |
-| `TropicalRedSoil` | 熱帯赤色土 |  | <span style="color: #B0543B;">■</span> 影 15% `#B0543B`<br><span style="color: #BB5D40;">■</span> 暗部 20% `#BB5D40`<br><span style="color: #C56745;">■</span> 基調 45% `#C56745`<br><span style="color: #CE714B;">■</span> 明部 20% `#CE714B` | なし | <span style="color: #8D453B;">■</span> 影 15% `#8D453B`<br><span style="color: #9B4936;">■</span> 暗部 20% `#9B4936`<br><span style="color: #A94D34;">■</span> 基調 45% `#A94D34`<br><span style="color: #B45235;">■</span> 明部 20% `#B45235` | 赤土の小粒と少数の暗い鉄質斑点 |
-| `SandySoil` | 砂質土壌 |  | <span style="color: #CBAA69;">■</span> 影 15% `#CBAA69`<br><span style="color: #D4B472;">■</span> 暗部 20% `#D4B472`<br><span style="color: #DCBF7C;">■</span> 基調 45% `#DCBF7C`<br><span style="color: #E4C986;">■</span> 明部 20% `#E4C986` | なし | <span style="color: #B28D5D;">■</span> 影 15% `#B28D5D`<br><span style="color: #BC945E;">■</span> 暗部 20% `#BC945E`<br><span style="color: #C59D60;">■</span> 基調 45% `#C59D60`<br><span style="color: #C7A765;">■</span> 明部 20% `#C7A765` | 細かな砂粒。長い縞や波紋はSurfaceへ分離する |
+| `TropicalRedSoil` | 熱帯赤色土 | ![熱帯赤色土](https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQwHvJ3EWB-BQmtCFlfT9lDZyb1isJC_El_QxhRi9n8JY0BST8f0SaXdH8&s=10) | <span style="color: #B0543B;">■</span> 影 15% `#B0543B`<br><span style="color: #BB5D40;">■</span> 暗部 20% `#BB5D40`<br><span style="color: #C56745;">■</span> 基調 45% `#C56745`<br><span style="color: #CE714B;">■</span> 明部 20% `#CE714B` | なし | <span style="color: #8D453B;">■</span> 影 15% `#8D453B`<br><span style="color: #9B4936;">■</span> 暗部 20% `#9B4936`<br><span style="color: #A94D34;">■</span> 基調 45% `#A94D34`<br><span style="color: #B45235;">■</span> 明部 20% `#B45235` | 赤土の小粒と少数の暗い鉄質斑点 |
+| `SandySoil` | 砂質土壌 | ![砂質土壌](https://cdn.poliigon.com/assets/7002/122242-1778622884000/900px) | <span style="color: #CBAA69;">■</span> 影 15% `#CBAA69`<br><span style="color: #D4B472;">■</span> 暗部 20% `#D4B472`<br><span style="color: #DCBF7C;">■</span> 基調 45% `#DCBF7C`<br><span style="color: #E4C986;">■</span> 明部 20% `#E4C986` | なし | <span style="color: #B28D5D;">■</span> 影 15% `#B28D5D`<br><span style="color: #BC945E;">■</span> 暗部 20% `#BC945E`<br><span style="color: #C59D60;">■</span> 基調 45% `#C59D60`<br><span style="color: #C7A765;">■</span> 明部 20% `#C7A765` | 細かな砂粒。長い縞や波紋はSurfaceへ分離する |
 | `ForestLoam` | 森林ローム |  | <span style="color: #5D7E46;">■</span> 影 15% `#5D7E46`<br><span style="color: #66874B;">■</span> 暗部 20% `#66874B`<br><span style="color: #718F52;">■</span> 基調 45% `#718F52`<br><span style="color: #7B9859;">■</span> 明部 20% `#7B9859` | <span style="color: #55753E;">■</span> 上面側暗部 25% `#55753E`<br><span style="color: #607D41;">■</span> 上面側明部 25% `#607D41`<br><span style="color: #685042;">■</span> 断面側暗部 25% `#685042`<br><span style="color: #735642;">■</span> 断面側明部 25% `#735642` | <span style="color: #524136;">■</span> 影 15% `#524136`<br><span style="color: #5D4639;">■</span> 暗部 20% `#5D4639`<br><span style="color: #684B39;">■</span> 基調 45% `#684B39`<br><span style="color: #72523A;">■</span> 明部 20% `#72523A` | 暗めの草・有機質表層から湿った褐色土へ移る |
-| `HumusSoil` | 腐植土 |  | <span style="color: #503B30;">■</span> 影 15% `#503B30`<br><span style="color: #5B4233;">■</span> 暗部 20% `#5B4233`<br><span style="color: #674937;">■</span> 基調 45% `#674937`<br><span style="color: #72503D;">■</span> 明部 20% `#72503D` | <span style="color: #563D2E;">■</span> 上面側暗部 25% `#563D2E`<br><span style="color: #674632;">■</span> 上面側明部 25% `#674632`<br><span style="color: #3C322A;">■</span> 断面側暗部 25% `#3C322A`<br><span style="color: #48362D;">■</span> 断面側明部 25% `#48362D` | <span style="color: #3F342D;">■</span> 影 15% `#3F342D`<br><span style="color: #4A382E;">■</span> 暗部 20% `#4A382E`<br><span style="color: #543D30;">■</span> 基調 45% `#543D30`<br><span style="color: #5F4431;">■</span> 明部 20% `#5F4431` | 腐植の暗い小塊。境界はわずかに密な有機層 |
+| `HumusSoil` | 腐植土 | ![腐植土](https://agriport.jp/wp-content/uploads/2023/06/p15_s1.png) | <span style="color: #503B30;">■</span> 影 15% `#503B30`<br><span style="color: #5B4233;">■</span> 暗部 20% `#5B4233`<br><span style="color: #674937;">■</span> 基調 45% `#674937`<br><span style="color: #72503D;">■</span> 明部 20% `#72503D` | <span style="color: #563D2E;">■</span> 上面側暗部 25% `#563D2E`<br><span style="color: #674632;">■</span> 上面側明部 25% `#674632`<br><span style="color: #3C322A;">■</span> 断面側暗部 25% `#3C322A`<br><span style="color: #48362D;">■</span> 断面側明部 25% `#48362D` | <span style="color: #3F342D;">■</span> 影 15% `#3F342D`<br><span style="color: #4A382E;">■</span> 暗部 20% `#4A382E`<br><span style="color: #543D30;">■</span> 基調 45% `#543D30`<br><span style="color: #5F4431;">■</span> 明部 20% `#5F4431` | 腐植の暗い小塊。境界はわずかに密な有機層 |
 | `MountainLoam` | 山地ローム |  | <span style="color: #778651;">■</span> 影 15% `#778651`<br><span style="color: #819057;">■</span> 暗部 20% `#819057`<br><span style="color: #8B995D;">■</span> 基調 45% `#8B995D`<br><span style="color: #95A263;">■</span> 明部 20% `#95A263` | <span style="color: #6E7D48;">■</span> 上面側暗部 25% `#6E7D48`<br><span style="color: #7C8A4E;">■</span> 上面側明部 25% `#7C8A4E`<br><span style="color: #7B5E48;">■</span> 断面側暗部 25% `#7B5E48`<br><span style="color: #87664D;">■</span> 断面側明部 25% `#87664D` | <span style="color: #6A5341;">■</span> 影 15% `#6A5341`<br><span style="color: #745842;">■</span> 暗部 20% `#745842`<br><span style="color: #7F5E45;">■</span> 基調 45% `#7F5E45`<br><span style="color: #896546;">■</span> 明部 20% `#896546` | 疎らな高地草と小石、締まった褐色土 |
 | `IslandLoam` | 島嶼ローム |  | <span style="color: #61AB52;">■</span> 影 15% `#61AB52`<br><span style="color: #6AB55A;">■</span> 暗部 20% `#6AB55A`<br><span style="color: #74BE62;">■</span> 基調 45% `#74BE62`<br><span style="color: #80C86C;">■</span> 明部 20% `#80C86C` | <span style="color: #549E45;">■</span> 上面側暗部 25% `#549E45`<br><span style="color: #5EA74C;">■</span> 上面側明部 25% `#5EA74C`<br><span style="color: #936951;">■</span> 断面側暗部 25% `#936951`<br><span style="color: #9F7050;">■</span> 断面側明部 25% `#9F7050` | <span style="color: #7B5744;">■</span> 影 15% `#7B5744`<br><span style="color: #855D44;">■</span> 暗部 20% `#855D44`<br><span style="color: #906343;">■</span> 基調 45% `#906343`<br><span style="color: #9A6943;">■</span> 明部 20% `#9A6943` | 明るい草面と暖色寄りの湿った土 |
 | `PodzolSoil` | ポドゾル土 |  | <span style="color: #7E8A71;">■</span> 影 15% `#7E8A71`<br><span style="color: #87937B;">■</span> 暗部 20% `#87937B`<br><span style="color: #919C85;">■</span> 基調 45% `#919C85`<br><span style="color: #9BA58F;">■</span> 明部 20% `#9BA58F` | <span style="color: #78836B;">■</span> 上面側暗部 25% `#78836B`<br><span style="color: #86917B;">■</span> 上面側明部 25% `#86917B`<br><span style="color: #958268;">■</span> 溶脱層暗部 25% `#958268`<br><span style="color: #A59E81;">■</span> 溶脱層明部 25% `#A59E81` | <span style="color: #765C52;">■</span> 集積層の暗部 20% `#765C52`<br><span style="color: #7E5F4F;">■</span> 集積層の基調 45% `#7E5F4F`<br><span style="color: #806D54;">■</span> 溶脱層の暗部 20% `#806D54`<br><span style="color: #80795E;">■</span> 溶脱層の明部 15% `#80795E` | 灰白色の溶脱層を境界で明確にし、その下を暗褐色にする |
@@ -238,7 +235,7 @@ Ground崖面とWall前面の表示段数はGameビュー比較後に個別に決
 | 明るい草 20% | `#88C363` | `#74A654` |
 | 草の最明部 20% | `#92CA6A` | `#7CAC5A` |
 
-全材質共通のWall境界ハイライトは初期不透明度20%とし、材質別の幅Overrideを持たない。暗色化の有効状態と`WallDarkenFactor`は材質設定で共有し、同じ材質の全`GroundTop`差分へ同じ値を適用する。
+固定接地影は全材質で左右各1px・手前3px・各レイヤーAlpha 22%を共有し、材質別Overrideを持たない。暗色化の有効状態と`WallDarkenFactor`は材質設定で共有し、同じ材質の全`GroundTop`差分へ同じ値を適用する。
 
 ## 8. 模様の方向性見本
 
@@ -257,11 +254,12 @@ Ground崖面とWall前面の表示段数はGameビュー比較後に個別に決
 | 3 | Groundの`GroundTop` |
 | 4 | 淡水・海水の`Liquid深度Overlay`、または不透明なマグマBase |
 | 5 | Liquid波紋・反射・流れ |
-| 6 | Wallの`Face`（1段目は必要に応じて`FaceBoundaryOverlay`合成済み） |
-| 7 | `GroundTop`を再利用して暗色化したWall上面と、共通Wall境界ハイライト |
-| 8 | Surface、資源、配置物 |
+| 6 | 固定接地影。Ground／Liquidより手前、Wallの`Face`と上面より奥 |
+| 7 | Wallの`Face`（1段目は必要に応じて`FaceBoundaryOverlay`合成済み） |
+| 8 | `GroundTop`を再利用して0.85暗色化したWall上面 |
+| 9 | Surface、資源、配置物 |
 
-Wall上面と境界ハイライトには2D Lightの影響を受けるLit系Materialを使用する。Wall領域の外周からサブチャンク単位の`Shadow Caster 2D`形状を作り、Light 2Dに対する動的な投影影を表示する。境界ハイライト自体はCasterに含めない。
+Wall上面には2D Lightの影響を受けるLit系Materialを使用する。Wall領域をWall前面の表示段数だけ手前へ投影し、その設置面外周からサブチャンク単位の`Shadow Caster 2D`形状を作る。動的な投影影はWall上面ではなく、最下段Faceの根元から伸ばす。固定接地影は環境光で消えないUnlit表示とし、WallとFaceの結合シルエットからサブチャンク単位で作る。2段Wallの採用値は、同じ不透明形状を左右各1px・手前3pxへずらした2レイヤー、各レイヤーAlpha 22%とする。中央の重なりは約39%、左右外縁は22%となる。材質別Spriteやセル別GameObjectは作らない。
 
 表示側は有効地形を参照し、変更セルを含むDirtyサブチャンクと必要な外周Haloだけを再構築する。Tilemap全走査や全チャンク再描画を行わない。
 
@@ -288,7 +286,7 @@ Editor生成ツールは断面の完成PNGを`Point`、16 PPU、非圧縮、Mip 
 
 | 材質 | 主な検証 |
 | --- | --- |
-| `GrassLoam` | Ground／Wallで共有する草の`GroundTop`、Wall表示時の0.85暗色化、共通境界ハイライト、暗めの緑の草層から暗めの茶色い土層へ切り替える透明な`FaceBoundaryOverlay`、低コントラストな茶色の土層と小石の`Face`。根は使わない |
+| `GrassLoam` | Ground／Wallで共有する草の`GroundTop`、Wall表示時の0.85暗色化、暗めの緑の草層から暗めの茶色い土層へ切り替える透明な`FaceBoundaryOverlay`、低コントラストな茶色の土層と小石の`Face`。根は使わない |
 | `DesertSand` | 境界なし、明るい細粒、低コントラスト |
 | `Sandstone` | 風化境界と方向性のある地層、左右・上下の接続 |
 | `Granite` | 境界なし、粗い斑晶、5色材質の可読性 |
@@ -296,9 +294,9 @@ Editor生成ツールは断面の完成PNGを`Point`、16 PPU、非圧縮、Mip 
 
 ### 11.1 Wall表示の比較
 
-`GrassLoam`の最初の確認には、Unityメニュー`Farmware > World Generation > Open Wall Surface Darken Comparison`で再構築する比較Sceneを使う。全面へ通常の`GroundTop`を描画し、Wallセルへ同じSpriteを重ねて暗色化する。採用値は0.85とする。共通境界ハイライトは`Open Boundary Highlight Inspection Map`で47状態を別途確認し、`Shadow Caster 2D`を追加した後にGroundとWallの読み分け、反復感、光源移動時の影、Faceとの連続性を確認する。
+`GrassLoam`の最初の確認には、Unityメニュー`Farmware > World Generation > Open Wall Surface Darken Comparison`で再構築する比較Sceneを使い、Wall暗色化係数0.85を採用した。続く`Open Wall Shadow Comparison`では、同じWall形状の「ハイライト＋Shadow Caster 2D」「Shadow Caster 2Dのみ」「左右対称の固定接地影＋Shadow Caster 2D」を比較し、右端のCを採用した。本番想定のWall前面は16×16 pxの`Face`を縦2段にし、1段目だけにWall用`FaceBoundaryOverlay`合成結果、2段目に通常`Face`を使う。動的影用CasterはWall上面から2段分手前へ移した設置面に置き、最下段Faceの根元を影の起点にする。固定接地影は段間ではなく2段目の下端にだけ表示する。
 
-`Open Terrain Tile Inspection Map`と材質生成Editorは、`GroundTop`のGround／Wall共用、表示時のWall暗色化、通常`Face`、任意の`FaceBoundaryOverlay`合成を扱う。専用`WallTop`、材質別7部品、共通暗色内部、47枚の材質別Wall完成Spriteは生成しない。共通境界ハイライトは独立した固定検品SceneでGround／Wall各47状態を確認する。`Shadow Caster 2D`は現段階の固定検品Sceneにはまだ含めない。
+`Open Terrain Tile Inspection Map`と材質生成Editorは、`GroundTop`のGround／Wall共用、表示時のWall暗色化、通常`Face`、任意の`FaceBoundaryOverlay`合成を扱う。専用`WallTop`、材質別7部品、共通暗色内部、47枚の材質別Wall完成Spriteは生成しない。動的影は専用比較Sceneで検証する。各区画の主光は真上に置き、左右へ偏らせない。比較SceneのGlobal Light強度0.35、上方Point Light強度1.0、半径8.0、影強度0.9、影の柔らかさ0.05、左手前Point Light強度0.65は、Cの選択に使った検証条件であり、製品照明の確定値ではない。固定接地影は左右各1px・手前3px・各レイヤーAlpha 22%を採用値とする。
 
 ## 12. 残る要確認事項
 
@@ -307,11 +305,11 @@ Editor生成ツールは断面の完成PNGを`Point`、16 PPU、非圧縮、Mip 
 1. **41材質の低コントラストパレット確認**
    `GrassLoam`の部位別OKLab L幅を基準として、残り40材質の`GroundTop`、`FaceBoundaryOverlay`、`Face`を調整した。色相、彩度、上面から断面へ移る材質構造は維持し、部位内の明暗差だけを圧縮している。まず固定検品Sceneで`GrassLoam`のGroundTop反復、Ground／Wall境界全組合せ、1段・3段断面を確認する。その後、残りの代表材質をGameビューへ配置し、材質同士の識別、Groundと断面の識別、縦反復、水越しの見え方を確認する。
 
-2. **Wall暗色化と境界ハイライト**
-   通常材質の暗色化係数は0.85、共通境界ハイライトの初期不透明度は20%とする。残る確認は、代表5材質と暗い環境でGroundとの識別が維持され、境界が明るく浮きすぎず、材質色が失われないことである。必要な例外だけを理由とともに記録する。
+2. **Wall暗色化・固定接地影・動的影**
+   人間によるGameビュー比較でCを採用した。通常材質の暗色化係数は0.85、固定接地影は左右各1px・手前3px・各レイヤーAlpha 22%、動的影は設置面起点とし、境界ハイライトは廃止する。比較Sceneのセル別GameObjectと暫定Point Light設定は本番へ持ち込まず、固定接地影とCaster形状をDirtyサブチャンク単位で結合する。旧14形状の素材、Atlas、Scene参照、選択処理、専用テストはC6-Dの製品表示置換で削除する。
 
 3. **Wall領域の接続表現と動的影**
-   材質を問わずWall同士を接続扱いにし、共有辺では境界ハイライト、Face、影の切れ目を出さない。残る確認は、外周・内角の全47状態、異材質Wallの連続領域、チャンク境界、`Shadow Caster 2D`の結合輪郭、移動するLight 2Dに対する影で継ぎ目や旧影が残らないことである。
+   材質を問わずWall同士を接続扱いにし、共有辺では`Face`、固定接地影、動的影の切れ目を出さない。`Shadow Caster 2D`の結合輪郭はWall上面ではなく、Wall前面の表示段数だけ手前へ移した設置面から作る。残る確認は、異材質Wallの連続領域、チャンク境界、設置面の結合輪郭、移動するLight 2Dに対する影で継ぎ目や旧影が残らないことである。
 
 4. **細道と凹凸輪郭**
    細道の要否は以前の合意どおり後で確認する。不規則な凹凸輪郭も初期実装には含めない。
@@ -319,12 +317,12 @@ Editor生成ツールは断面の完成PNGを`Point`、16 PPU、非圧縮、Mip 
 ## 13. 地形タイル試作の完了条件
 
 - 上面・境界・断面構成、1段目からの`Face`使用、任意の`FaceBoundaryOverlay`とのEditor合成を、代表5材質の16×16 px手描きSpriteで確認した。
-- 同じ`GroundTop`を通常表示するGroundと、0.85で暗色化するWallを使ったGameビューで、共通境界ハイライトとFaceを含めて両者を識別できることを人間が確認した。
+- 同じ`GroundTop`を通常表示するGroundと、0.85で暗色化するWallを使ったGameビューで、Face、固定接地影、動的影を含めて両者を識別できることを人間が確認した。比較SceneのCを採用し、境界ハイライトの廃止を決定した。
 - `DarkenWallSurface`、`WallDarkenFactor`、均等選択する可変長配列、Ground用`F×B`・暗色化有効時のWall用`F×B`出力、Ground崖面段数、Wall前面段数を確認した。
-- 材質を問わないWall接続、14基本形と回転による境界ハイライト、サブチャンク単位の`Shadow Caster 2D`輪郭、Light 2Dへ追従する動的影を確認した。
+- 材質を問わないWall接続、Wall前面の表示段数だけ手前へ移した設置面の`Shadow Caster 2D`輪郭、Light 2Dへ追従する動的影、固定接地影の結合シルエットと左右各1px・手前3px・各レイヤーAlpha 22%の基準ずらしを確認した。
 - 淡水・海水の`Liquid深度Overlay`で、専用水中断面なしに断面が浅部から深部へ消えることを確認した。
 - マグマが接触する最初の段から不透明になり、背後の断面が透けないことを確認した。
 - 41材質表の確定済み境界有無と、Ground崖面・Wall前面でOverlay入力を共有し、Ground用元色合成結果とWall用暗色化合成結果を使い分ける契約どおりに、境界あり17材質・なし24材質を扱えることを確認した。
 - 41材質表の確定`GroundTop`・`FaceBoundaryOverlay`・`Face`パレット、7.6節のWall表示暗色化規則、各部位の使用比率、模様方針どおりに代表Spriteを制作し、人間がGameビューで確認した。`GrassLoam`で採用した部位別コントラスト基準を残り40材質へ適用し、仕様値を変更した場合は表と全該当Spriteを同時に更新した。
 - Atlas、Pivot、描画Bounds、カリング余白、Dirty更新、Floating Origin、Pixel Perfect表示の実装条件を記録した。
-- 再制作した白い14形状境界ハイライトをGround／Wallの新表示へ接続し、Wallでは材質境界ではなくWall領域の外周・内角だけへ表示できた。
+- 廃止した白い14形状境界ハイライトの素材、Atlas、Scene参照、選択処理、専用テストが製品表示の置換後に残っていないことを確認した。
