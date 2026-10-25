@@ -432,7 +432,30 @@ Projectビューの`Create > Farmware > Terrain Tile Art Generation Settings`か
 
 この固定Sceneは`GrassLoam`単一材質のアート試作を対象とし、異材質Wall境界、チャンク境界、完成版Liquid・水際波線の配色、Runtimeの本番差分選択は扱わない。黒・青Overlayの色と仮波線の2色は比較用の暫定値である。旧共通境界ハイライトとの比較記録は`Open Boundary Highlight Inspection Map`、Wall暗色化は`Open Wall Surface Darken Comparison`、採用した固定接地影＋動的影は`Open Wall Shadow Comparison`で確認し、残りは本番表示を接続する後続工程で追加する。
 
-### 2.12 Open Wall Surface Darken Comparison
+### 2.12 Open Water Reflection Comparison
+
+- メニュー: `Farmware > World Generation > Open Water Reflection Comparison`
+- 実装: `TerrainWaterReflectionComparisonMapBuilder`
+- PlayMode: 反射像と1 px波線の整数Pixelアニメーション確認時に使用する。
+- 出力: `Assets/Scenes/Development/TerrainWaterReflectionComparison.unity`
+
+#### 用途
+
+同じGrassLoam岸、2段Wall、横5×手前方向4セルの淡水を左右へ並べ、左を反射なし、右を反射ありとして垂直面反射Proxy方式を比較する。右区画ではWallの各`Face`と同じSpriteを水際の手前へ上下反転して置き、縦0.75倍、最大深度32 px、最大Alpha 0.22、左右0／+1／0／-1 pxを毎秒4 pxで切り替える。水平な`GroundTop`／`WallTop`、水中床、固定接地影、動的影、UIにはProxyを作らない。反射Proxyと両区画の1 px波線は`WaterSurface` Sorting Layerへ置き、波線を反射より後に描く。
+
+メニュー実行時に`WaterSurface` Sorting Layerが`Default`より後にあること、GrassLoam、淡水仮Sprite、既存波線Material、反射Shaderを検証する。反射Materialは`Assets/Farmware/Art/WorldGeneration/Generated/Inspection/WaterSurfaceReflection.mat`へ再現可能に生成する。不足やShaderエラーがある場合は、現在Sceneを比較Sceneへ置き換えずに停止する。Camera Sorting Layer Textureや追加の画面コピーは使用しない。
+
+#### 確認手順
+
+1. メニューを実行し、Gameビューを480×270またはその整数倍にする。
+2. 左右のGround、2段Wall、水中Face、淡水Base、奥岸の1 px波線が同じ配置であることを確認する。
+3. 右だけに2段のWall `Face`の上下反転像が薄く表示され、最大32 pxの手前端へ向けて連続的に消えることを確認する。水平な`GroundTop`と`WallTop`が映っていないことも確認する。
+4. Play Modeで反射がぼけずに左右1 pxだけ段階移動し、波線より奥へ描かれ、左区画へ反射が出ないことを確認する。
+5. 水中Faceと淡水色が読めるか、反射がWall前面の実体と誤認されないかを比較し、最大Alpha、深さ、縦圧縮の調整要否を判断する。
+
+このSceneの比較により、垂直面だけを映す反射Proxy方式を採用した。完成Liquid色、屋内外や時間帯による反射量、動的オブジェクトの対象範囲、サブチャンク単位の本番描画、性能合格値は対象外とし、C6-Dの製品表示接続時に詳細を調整する。方式の回帰確認では、水平な`GroundTop`／`WallTop`、床、影、UIが反射へ混入していないことを確認する。
+
+### 2.13 Open Wall Surface Darken Comparison
 
 - メニュー: `Farmware > World Generation > Open Wall Surface Darken Comparison`
 - 実装: `TerrainTileArtInspectionMapBuilder`
@@ -452,7 +475,7 @@ Projectビューの`Create > Farmware > Terrain Tile Art Generation Settings`か
 3. 暗い洞窟背景でもWall形状を読めるか、0.55で材質色が失われないか、0.85でGroundと混同しないかを確認する。
 4. 続けて`Open Wall Shadow Comparison`を実行し、同じWall形状に対する「旧ハイライト＋動的影」「動的影のみ」「左右対称の固定接地影＋動的影」を比較する。2026-10-25の人間確認では右端のCを採用した。
 
-### 2.13 Generate／Open Boundary Highlight Art
+### 2.14 Generate／Open Boundary Highlight Art
 
 - 生成メニュー: `Farmware > World Generation > Generate Boundary Highlight Art`
 - 検品メニュー: `Farmware > World Generation > Open Boundary Highlight Inspection Map`
@@ -475,7 +498,7 @@ Runtimeの8近傍47状態と同じ特徴マスクから、旧方式の全材質�
 4. 20%の白線が明るく浮きすぎず、0.85暗化Wall上でも形状を読めることを確認する。
 5. `Build Fallback Map Prototype`を実行した場合は、SampleSceneのGround／Wall境界Sprite配列が14件で、Missing参照がないことも確認する。
 
-### 2.14 Open Wall Shadow Comparison
+### 2.15 Open Wall Shadow Comparison
 
 - メニュー: `Farmware > World Generation > Open Wall Shadow Comparison`
 - 実装: `TerrainWallShadowComparisonMapBuilder`
@@ -511,6 +534,7 @@ Runtimeの8近傍47状態と同じ特徴マスクから、旧方式の全材質�
 | 広域形状、特定Seed・遠距離座標の探索 | Map Viewer |
 | 地形タイル試作工程の材質Sprite入力、境界合成、均等差分選択、Wall暗色化 | Terrain Tile Art Generation Settings Inspector |
 | `GrassLoam`の反復、Ground／Wall共通上面、Wall暗色化、通常Face、Ground／Wall用境界合成のGameビュー検品 | Open Terrain Tile Inspection Map |
+| 水面反射なし／あり、垂直面反射Proxyの深さ・縦圧縮・Alpha・整数Pixel変位の比較 | Open Water Reflection Comparison |
 | GroundTopをWall上面へ再利用した場合の暗化係数とGround上への重なり比較 | Open Wall Surface Darken Comparison |
 | 共通境界14 Spriteの再生成、Atlas登録、Ground／Wall各47状態の外周・内角確認 | Generate Boundary Highlight Art、Open Boundary Highlight Inspection Map |
 | Wallの動的影、結合輪郭、採用した固定接地影と旧ハイライトの比較記録 | Open Wall Shadow Comparison |

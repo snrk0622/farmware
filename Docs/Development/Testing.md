@@ -315,6 +315,12 @@ Sprite Packer ModeがV2であること、土地Atlasが現行Biome仮色Texture�
 
 実際のScene保存、480×270 Pixel Perfect表示、色・模様・継ぎ目の良否は自動テストだけで決めず、`Open Terrain Tile Inspection Map`実行後のGameビューで人間が確認する。
 
+#### `TerrainWaterReflectionComparisonMapBuilderTests`
+
+水面反射の比較Sceneを開閉せず、垂直面反射Proxy方式の前提と生成Assetを確認する。`WaterSurface`が`Default`より後にあることを保証し、Camera Sorting Layer Textureは前提としない。初期比較値は最大反射深度32 px、縦圧縮0.75、最大Alpha 0.22、整数Pixel変位速度4 px/秒とし、反射軸上と軸より1 unit奥にある垂直面の投影座標、軸より手前にある不正な反射元の拒否を検証する。再構築後は反射Shaderにコンパイルエラーがなく、生成Materialの最大深度を含む値と専用比較SceneをAssetDatabaseから再読込できることを保証する。
+
+自動テストは水平な`GroundTop`／`WallTop`が映っていない見た目、鏡像の向き、反射の強さ、波線との重なり、ドットの読みやすさを合格判定しない。これらは`Open Water Reflection Comparison`を実行し、Edit Modeで左右差、Play Modeで0／+1／0／-1 pxの段階移動を人間が確認する。採用前の検証値なので、本番Runtimeの描画契約や性能合格値には含めない。
+
 `Open Wall Surface Darken Comparison`では0.85、0.70、0.55を比較し、0.85を採用した。`Open Wall Shadow Comparison`では同じ13セル形状を3区画へ置き、「旧ハイライト＋動的影」「動的影のみ」「左右各1px・手前3px・各レイヤーAlpha 22%の固定接地影＋動的影」を同じ照明条件で比較し、2026-10-25の人間確認で右端のCを採用した。比較SceneのPoint Light配置とセル別Casterは製品照明の正ではなく、方式を同条件で比較するための仮構成である。動的影用CasterはWall上面からFace段数だけ手前の設置面へ移し、影が最下段Faceの根元から伸びて上面から始まらないことを確認する。本番の固定接地影と`Shadow Caster 2D`は材質境界で分割せず、Dirtyな16×16サブチャンクのWall設置面輪郭から結合形状を更新すること、移動する`Light 2D`へ動的影だけが追従すること、アンロード・再利用後に旧影が残らないことをEditMode／PlayMode／Gameビューで検証する。旧境界ハイライトの素材、Atlas、Scene参照、選択処理、専用テストがC6-D後に残っていないことも検索と参照確認で保証する。
 
 #### `WorldGenerationSceneBootstrapTests`
