@@ -52,7 +52,7 @@ Wall・境界あり:   GroundTop×0.85 → (Face + 暗色化OverlayのWall用合
 Wall・境界なし:   GroundTop×0.85 → Face                                     → Face → Face → …
 ```
 
-Ground崖面とWall前面の表示段数はGameビュー比較後に個別に決める。段数はPresentation専用の表示高であり、論理的な水深、Liquid量、WorldLayer、通行、採掘、セーブ値を変更しない。
+初期実装の表示段数はGround崖面を3段（48 px）、Wall前面を2段（32 px）とする。段数はPresentation専用の表示高であり、論理的な水深、Liquid量、WorldLayer、通行、採掘、セーブ値を変更しない。実画面で調整が必要になった場合も、GroundとWallの段数は個別に変更できる構成を維持する。
 
 ### 3.2 GroundとWallの組み立て
 
@@ -122,11 +122,15 @@ Ground崖面とWall前面の表示段数はGameビュー比較後に個別に決
 
 ## 5. Liquidと深部
 
+- 淡水と海水の水面は、同じ論理セルの`GroundTop`基準面より画面下へ3 px投影する。水Tile全体を下へ移動して隣接段へ重ねず、穴全体を覆う描画面の上端3 pxだけをShaderでクリップする。これはPresentation上の高さだけを変え、液体のWorldLayer、セル座標、通行、量、伝播を変更しない。マグマは本項の水面3 px低下を流用せず、不透明な専用表示規則を維持する。
+- 淡水・海水がGroundまたはWallへ接する箇所には、画面手前辺を除く奥・左・右の露出辺へ、液体種ごとに共通の水際波線アニメーションを重ねる。飛沫や高さのある白波にはせず、太さ1 pxの連続線を2色の2px帯へ分け、整数Pixel単位で流す。材質別Spriteは作らず、現在の有効地形からU字状の接触辺を選ぶ。固定検品SceneではShaderで奥辺1本・左右辺各1本を描き、手前辺には描かない。波線を停止しても岸形状と液体種別をBase表示だけで判別できるようにし、仮配色の品質は完成素材の合否判定に含めない。
 - 淡水と海水は断面を不透明な床Tileで置換せず、通常の`Face`または`FaceBoundaryOverlay`合成済みの1段目用Spriteの上へ、半透明の`Liquid深度Overlay`を重ねる。
-- 淡水と海水は浅部で背後の断面を読み取れる透明度を保ち、下へ進むほど液体色と暗さを増して見えなくする。
+- Ground崖面の素材配置は1～3段目とする。液体のない乾燥崖では全段に黒い下地を置き、穴上端で100%見える`Face`を1枚の黒Overlayによって連続的に暗くし、48 px（3タイル目の下端）で可視Alpha 0%へ到達させる。4段目以降は完全な暗黒だけを表示する。淡水・海水では黒暗化を一切使わず、通常の`Face`または直下Underwater床の上へ青系`Liquid深度Overlay`を重ね、1枚の描画面内で1 px単位の連続Alpha勾配を作る。
+- Surface表示では、同じX/Yの直下にあるUnderwaterの地面を4段目から簡易投影し、その地面上の表示対象オブジェクトも水越しに見せる。青Overlayはクリップ後の実表示深度45 px、すなわち穴上端から48 pxでAlpha 50%へ到達し、それより深い範囲では50%を維持する。黒OverlayやRGB暗化は加えない。これは直下1層だけのPresentationプレビューであり、図鑑発見、選択、遠隔操作、衝突、Simulation処理を発生させない。上層のGroundまたは不透明Wallに遮られるセルは表示しない。
+- Underwaterの地面がない場合、SurfaceからDeepSeaの地面・配置物・生物は描画しない。代わりに現在材質の`Face`を6段目まで下地として続け、青Overlayをクリップ後の実表示深度93 px、すなわち穴上端から96 pxでAlpha 100%へ到達させる。以降は不透明な青を維持するため、Surfaceから2層下を透視しない。乾燥崖用の黒を水の背後へ入れず、途中で黒から青へ変わる不自然な色遷移を避ける。プレイヤーがUnderwaterにいる場合だけ、同じ方式で直下のDeepSeaを簡易表示できる。
 - マグマは不透明とし、接触する最初の段から背後の`Face`と`FaceBoundaryOverlay`合成結果を見せない。半透明の深度表現をマグマへ流用しない。
 - 淡水・海水用およびマグマ用の専用断面Spriteは作らない。マグマの波や発光を表す透明な表面エフェクトを使う場合も、不透明なマグマBaseの上へ重ねる。
-- 崖面表示深度より下は、不透明な`DeepBackground` `#0D1016`で塞ぐ。見えない断面を無制限に反復しない。
+- `GrassLoam`固定検品Sceneでは、1セル幅のGroundTopで囲んだ横3×手前方向10セルの穴を、左から乾燥、淡水＋Underwater床、海水＋Underwater床、Underwater床なし、マグマの5条件で横1列へ並べる。乾燥穴は1～3段目の`Face`を黒い下地の上へ置き、穴全体を覆う黒Overlayで48 pxかけて可視Alpha 100%から0%へ連続変化させ、以降は完全な暗黒にする。淡水・海水はタイル単位のAlphaを廃止し、穴全体を覆う1枚のShader描画面で上端3 pxをクリップする。Underwater床ありは45 pxで青Overlay Alpha 50%、床なしは現在材質の`Face`を背後へ続けて93 pxでAlpha 100%へ到達する連続勾配とする。DeepSeaの内容自体は下地に使わない。水際は手前を除く奥・左・右へ、2色が整数Pixel単位で流れる1px波線をU字状に描く。マグマは全段Alpha 100%とする。これらは投影位置、重なり順、遮蔽、波線Animationを確認する検品値であり、製品版の最終的な液体色と波線配色ではない。
 - 白い14形状の地形境界ハイライトは製品表示へ使用しない。旧素材、専用Atlas、Ground／Wall用Tilemap、Scene参照、選択処理、専用テストはC6-Dで削除する。F4のタイル・サブチャンク・チャンク診断表示は地形アートとは別機能として維持する。
 
 ## 6. 部位別パレットの読み方
@@ -166,8 +170,8 @@ Ground崖面とWall前面の表示段数はGameビュー比較後に個別に決
 | `ForestLoam` | 森林ローム |  | <span style="color: #5D7E46;">■</span> 影 15% `#5D7E46`<br><span style="color: #66874B;">■</span> 暗部 20% `#66874B`<br><span style="color: #718F52;">■</span> 基調 45% `#718F52`<br><span style="color: #7B9859;">■</span> 明部 20% `#7B9859` | <span style="color: #55753E;">■</span> 上面側暗部 25% `#55753E`<br><span style="color: #607D41;">■</span> 上面側明部 25% `#607D41`<br><span style="color: #685042;">■</span> 断面側暗部 25% `#685042`<br><span style="color: #735642;">■</span> 断面側明部 25% `#735642` | <span style="color: #524136;">■</span> 影 15% `#524136`<br><span style="color: #5D4639;">■</span> 暗部 20% `#5D4639`<br><span style="color: #684B39;">■</span> 基調 45% `#684B39`<br><span style="color: #72523A;">■</span> 明部 20% `#72523A` | 暗めの草・有機質表層から湿った褐色土へ移る |
 | `HumusSoil` | 腐植土 | ![腐植土](https://agriport.jp/wp-content/uploads/2023/06/p15_s1.png) | <span style="color: #503B30;">■</span> 影 15% `#503B30`<br><span style="color: #5B4233;">■</span> 暗部 20% `#5B4233`<br><span style="color: #674937;">■</span> 基調 45% `#674937`<br><span style="color: #72503D;">■</span> 明部 20% `#72503D` | <span style="color: #563D2E;">■</span> 上面側暗部 25% `#563D2E`<br><span style="color: #674632;">■</span> 上面側明部 25% `#674632`<br><span style="color: #3C322A;">■</span> 断面側暗部 25% `#3C322A`<br><span style="color: #48362D;">■</span> 断面側明部 25% `#48362D` | <span style="color: #3F342D;">■</span> 影 15% `#3F342D`<br><span style="color: #4A382E;">■</span> 暗部 20% `#4A382E`<br><span style="color: #543D30;">■</span> 基調 45% `#543D30`<br><span style="color: #5F4431;">■</span> 明部 20% `#5F4431` | 腐植の暗い小塊。境界はわずかに密な有機層 |
 | `MountainLoam` | 山地ローム |  | <span style="color: #778651;">■</span> 影 15% `#778651`<br><span style="color: #819057;">■</span> 暗部 20% `#819057`<br><span style="color: #8B995D;">■</span> 基調 45% `#8B995D`<br><span style="color: #95A263;">■</span> 明部 20% `#95A263` | <span style="color: #6E7D48;">■</span> 上面側暗部 25% `#6E7D48`<br><span style="color: #7C8A4E;">■</span> 上面側明部 25% `#7C8A4E`<br><span style="color: #7B5E48;">■</span> 断面側暗部 25% `#7B5E48`<br><span style="color: #87664D;">■</span> 断面側明部 25% `#87664D` | <span style="color: #6A5341;">■</span> 影 15% `#6A5341`<br><span style="color: #745842;">■</span> 暗部 20% `#745842`<br><span style="color: #7F5E45;">■</span> 基調 45% `#7F5E45`<br><span style="color: #896546;">■</span> 明部 20% `#896546` | 疎らな高地草と小石、締まった褐色土 |
-| `IslandLoam` | 島嶼ローム |  | <span style="color: #61AB52;">■</span> 影 15% `#61AB52`<br><span style="color: #6AB55A;">■</span> 暗部 20% `#6AB55A`<br><span style="color: #74BE62;">■</span> 基調 45% `#74BE62`<br><span style="color: #80C86C;">■</span> 明部 20% `#80C86C` | <span style="color: #549E45;">■</span> 上面側暗部 25% `#549E45`<br><span style="color: #5EA74C;">■</span> 上面側明部 25% `#5EA74C`<br><span style="color: #936951;">■</span> 断面側暗部 25% `#936951`<br><span style="color: #9F7050;">■</span> 断面側明部 25% `#9F7050` | <span style="color: #7B5744;">■</span> 影 15% `#7B5744`<br><span style="color: #855D44;">■</span> 暗部 20% `#855D44`<br><span style="color: #906343;">■</span> 基調 45% `#906343`<br><span style="color: #9A6943;">■</span> 明部 20% `#9A6943` | 明るい草面と暖色寄りの湿った土 |
-| `PodzolSoil` | ポドゾル土 |  | <span style="color: #7E8A71;">■</span> 影 15% `#7E8A71`<br><span style="color: #87937B;">■</span> 暗部 20% `#87937B`<br><span style="color: #919C85;">■</span> 基調 45% `#919C85`<br><span style="color: #9BA58F;">■</span> 明部 20% `#9BA58F` | <span style="color: #78836B;">■</span> 上面側暗部 25% `#78836B`<br><span style="color: #86917B;">■</span> 上面側明部 25% `#86917B`<br><span style="color: #958268;">■</span> 溶脱層暗部 25% `#958268`<br><span style="color: #A59E81;">■</span> 溶脱層明部 25% `#A59E81` | <span style="color: #765C52;">■</span> 集積層の暗部 20% `#765C52`<br><span style="color: #7E5F4F;">■</span> 集積層の基調 45% `#7E5F4F`<br><span style="color: #806D54;">■</span> 溶脱層の暗部 20% `#806D54`<br><span style="color: #80795E;">■</span> 溶脱層の明部 15% `#80795E` | 灰白色の溶脱層を境界で明確にし、その下を暗褐色にする |
+| `IslandLoam` | 島嶼ローム |  | <span style="color: #4AA47A;">■</span> 影 15% `#4AA47A`<br><span style="color: #53AE82;">■</span> 暗部 20% `#53AE82`<br><span style="color: #5DB88A;">■</span> 基調 45% `#5DB88A`<br><span style="color: #68C293;">■</span> 明部 20% `#68C293` | <span style="color: #47946E;">■</span> 上面側暗部 25% `#47946E`<br><span style="color: #509D76;">■</span> 上面側明部 25% `#509D76`<br><span style="color: #936951;">■</span> 断面側暗部 25% `#936951`<br><span style="color: #9F7050;">■</span> 断面側明部 25% `#9F7050` | <span style="color: #7B5744;">■</span> 影 15% `#7B5744`<br><span style="color: #855D44;">■</span> 暗部 20% `#855D44`<br><span style="color: #906343;">■</span> 基調 45% `#906343`<br><span style="color: #9A6943;">■</span> 明部 20% `#9A6943` | GrassLoamの黄緑と隣接しても識別できる青緑の草面。境界上面側も同じ青緑へ寄せ、暖色寄りの湿った土へ切り替える |
+| `PodzolSoil` | ポドゾル土 | ![ポドゾル土](https://ars.els-cdn.com/content/image/3-s2.0-B9780128229743002007-f00200-04-9780128229743.jpg) | <span style="color: #7E8A71;">■</span> 影 15% `#7E8A71`<br><span style="color: #87937B;">■</span> 暗部 20% `#87937B`<br><span style="color: #919C85;">■</span> 基調 45% `#919C85`<br><span style="color: #9BA58F;">■</span> 明部 20% `#9BA58F` | <span style="color: #78836B;">■</span> 上面側暗部 25% `#78836B`<br><span style="color: #86917B;">■</span> 上面側明部 25% `#86917B`<br><span style="color: #958268;">■</span> 溶脱層暗部 25% `#958268`<br><span style="color: #A59E81;">■</span> 溶脱層明部 25% `#A59E81` | <span style="color: #765C52;">■</span> 集積層の暗部 20% `#765C52`<br><span style="color: #7E5F4F;">■</span> 集積層の基調 45% `#7E5F4F`<br><span style="color: #806D54;">■</span> 溶脱層の暗部 20% `#806D54`<br><span style="color: #80795E;">■</span> 溶脱層の明部 15% `#80795E` | 灰白色の溶脱層を境界で明確にし、その下を暗褐色にする |
 | `PeatSoil` | 泥炭土 |  | <span style="color: #454131;">■</span> 影 15% `#454131`<br><span style="color: #4D4834;">■</span> 暗部 20% `#4D4834`<br><span style="color: #575139;">■</span> 基調 45% `#575139`<br><span style="color: #60593E;">■</span> 明部 20% `#60593E` | <span style="color: #48432F;">■</span> 上面側暗部 25% `#48432F`<br><span style="color: #564F34;">■</span> 上面側明部 25% `#564F34`<br><span style="color: #3B332C;">■</span> 断面側暗部 25% `#3B332C`<br><span style="color: #45392F;">■</span> 断面側明部 25% `#45392F` | <span style="color: #3D342D;">■</span> 影 15% `#3D342D`<br><span style="color: #463A2F;">■</span> 暗部 20% `#463A2F`<br><span style="color: #4F4033;">■</span> 基調 45% `#4F4033`<br><span style="color: #584635;">■</span> 明部 20% `#584635` | 黒褐色の圧縮された有機片。強い光沢は入れない |
 | `SteppeSoil` | ステップ土壌 |  | <span style="color: #9C994F;">■</span> 影 15% `#9C994F`<br><span style="color: #A7A252;">■</span> 暗部 20% `#A7A252`<br><span style="color: #B2AB58;">■</span> 基調 45% `#B2AB58`<br><span style="color: #BDB45F;">■</span> 明部 20% `#BDB45F` | <span style="color: #928F45;">■</span> 上面側暗部 25% `#928F45`<br><span style="color: #A19A47;">■</span> 上面側明部 25% `#A19A47`<br><span style="color: #996E4E;">■</span> 断面側暗部 25% `#996E4E`<br><span style="color: #A7754E;">■</span> 断面側明部 25% `#A7754E` | <span style="color: #846248;">■</span> 影 15% `#846248`<br><span style="color: #916747;">■</span> 暗部 20% `#916747`<br><span style="color: #9E6C45;">■</span> 基調 45% `#9E6C45`<br><span style="color: #A97345;">■</span> 明部 20% `#A97345` | 短い乾燥草と明るい褐色土 |
 | `DryScrubSoil` | 乾燥低木地土壌 |  | <span style="color: #928954;">■</span> 影 15% `#928954`<br><span style="color: #9C925A;">■</span> 暗部 20% `#9C925A`<br><span style="color: #A69B60;">■</span> 基調 45% `#A69B60`<br><span style="color: #B1A567;">■</span> 明部 20% `#B1A567` | <span style="color: #8D844F;">■</span> 上面側暗部 25% `#8D844F`<br><span style="color: #9D9258;">■</span> 上面側明部 25% `#9D9258`<br><span style="color: #94684D;">■</span> 断面側暗部 25% `#94684D`<br><span style="color: #A27151;">■</span> 断面側明部 25% `#A27151` | <span style="color: #86604A;">■</span> 影 15% `#86604A`<br><span style="color: #92664B;">■</span> 暗部 20% `#92664B`<br><span style="color: #9D6C4C;">■</span> 基調 45% `#9D6C4C`<br><span style="color: #A8734D;">■</span> 明部 20% `#A8734D` | くすんだ表層と粗めの乾いた土粒 |
@@ -249,13 +253,14 @@ Ground崖面とWall前面の表示段数はGameビュー比較後に個別に決
 
 | 順序 | 表示内容 |
 | ---: | --- |
-| 1 | `DeepBackground` |
+| 1 | 深部へ続くGroundの`Face`または直下WorldLayerの簡易プレビュー |
 | 2 | Groundの`Face`（1段目は必要に応じて`FaceBoundaryOverlay`合成済み） |
 | 3 | Groundの`GroundTop` |
 | 4 | 淡水・海水の`Liquid深度Overlay`、または不透明なマグマBase |
 | 5 | Liquid波紋・反射・流れ |
-| 6 | 固定接地影。Ground／Liquidより手前、Wallの`Face`と上面より奥 |
-| 7 | Wallの`Face`（1段目は必要に応じて`FaceBoundaryOverlay`合成済み） |
+| 6 | 直下WorldLayerと深部へ掛ける黒の暗化Overlay |
+| 7 | 固定接地影。Ground／Liquidより手前、Wallの`Face`と上面より奥 |
+| 8 | Wallの`Face`（1段目は必要に応じて`FaceBoundaryOverlay`合成済み） |
 | 8 | `GroundTop`を再利用して0.85暗色化したWall上面 |
 | 9 | Surface、資源、配置物 |
 
@@ -296,14 +301,14 @@ Editor生成ツールは断面の完成PNGを`Point`、16 PPU、非圧縮、Mip 
 
 `GrassLoam`の最初の確認には、Unityメニュー`Farmware > World Generation > Open Wall Surface Darken Comparison`で再構築する比較Sceneを使い、Wall暗色化係数0.85を採用した。続く`Open Wall Shadow Comparison`では、同じWall形状の「ハイライト＋Shadow Caster 2D」「Shadow Caster 2Dのみ」「左右対称の固定接地影＋Shadow Caster 2D」を比較し、右端のCを採用した。本番想定のWall前面は16×16 pxの`Face`を縦2段にし、1段目だけにWall用`FaceBoundaryOverlay`合成結果、2段目に通常`Face`を使う。動的影用CasterはWall上面から2段分手前へ移した設置面に置き、最下段Faceの根元を影の起点にする。固定接地影は段間ではなく2段目の下端にだけ表示する。
 
-`Open Terrain Tile Inspection Map`と材質生成Editorは、`GroundTop`のGround／Wall共用、表示時のWall暗色化、通常`Face`、任意の`FaceBoundaryOverlay`合成を扱う。専用`WallTop`、材質別7部品、共通暗色内部、47枚の材質別Wall完成Spriteは生成しない。動的影は専用比較Sceneで検証する。各区画の主光は真上に置き、左右へ偏らせない。比較SceneのGlobal Light強度0.35、上方Point Light強度1.0、半径8.0、影強度0.9、影の柔らかさ0.05、左手前Point Light強度0.65は、Cの選択に使った検証条件であり、製品照明の確定値ではない。固定接地影は左右各1px・手前3px・各レイヤーAlpha 22%を採用値とする。
+`Open Terrain Tile Inspection Map`と材質生成Editorは、`GroundTop`のGround／Wall共用、表示時のWall暗色化、Ground崖面3段、Wall前面2段、通常`Face`、任意の`FaceBoundaryOverlay`合成を扱う。固定検品SceneにはGroundTopで囲んだ横3×手前方向10セルの穴を5つ横並びに置き、乾燥、淡水海底、海水海底、Underwater床なし、不透明マグマを同じGameビューで確認する。乾燥穴は1枚の黒Overlayで`Face`の見える割合を48 pxかけて100%から0%へ連続変化させ、その下を完全な暗黒にする。淡水・海水は穴全体を覆うShader描画面の上端3 pxをクリップし、1～3段目の通常崖面から連続する青Overlayを表示する。直下Underwater床があれば45 pxでAlpha 50%、床がなければ現在材質の`Face`を背後へ続けて93 pxでAlpha 100%へ到達させる。10セルは穴の平面上の長さを示し、WorldLayer間の論理距離ではない。水際は手前を除く奥・左・右へ1pxの2色波線を配置し、Shaderで整数Pixel単位に流す。専用`WallTop`、材質別7部品、共通暗色内部、47枚の材質別Wall完成Spriteは生成しない。Wallの暗化・固定接地影・動的影は専用比較Sceneで検証する。各区画の主光は真上に置き、左右へ偏らせない。比較SceneのGlobal Light強度0.35、上方Point Light強度1.0、半径8.0、影強度0.9、影の柔らかさ0.05、左手前Point Light強度0.65は、Cの選択に使った検証条件であり、製品照明の確定値ではない。固定接地影は左右各1px・手前3px・各レイヤーAlpha 22%を採用値とする。
 
 ## 12. 残る要確認事項
 
 41材質の境界有無、部位別パレット、Ground／Wallで`GroundTop`を共有する方式、Ground崖面・Wall前面で同じ`FaceBoundaryOverlay`入力を共有する方式は確定済みである。`GrassLoam`で採用した部位内コントラストを残り40材質へ反映済みであり、残る判断と実画面確認は次のとおり。
 
 1. **41材質の低コントラストパレット確認**
-   `GrassLoam`の部位別OKLab L幅を基準として、残り40材質の`GroundTop`、`FaceBoundaryOverlay`、`Face`を調整した。色相、彩度、上面から断面へ移る材質構造は維持し、部位内の明暗差だけを圧縮している。まず固定検品Sceneで`GrassLoam`のGroundTop反復、Ground／Wall境界全組合せ、1段・3段断面を確認する。その後、残りの代表材質をGameビューへ配置し、材質同士の識別、Groundと断面の識別、縦反復、水越しの見え方を確認する。
+   `GrassLoam`の部位別OKLab L幅を基準として、残り40材質の`GroundTop`、`FaceBoundaryOverlay`、`Face`を調整した。色相、彩度、上面から断面へ移る材質構造は維持し、部位内の明暗差だけを圧縮している。まず固定検品Sceneで`GrassLoam`の横3×手前方向10セルの穴、Ground／Wall境界全組合せ、48 pxで可視Alpha 0%へ達する乾燥崖、45 pxでAlpha 50%へ達する海中床、93 pxでAlpha 100%へ達する床なし水域、3 px低い水面、手前を除くU字の仮波線を確認する。Wall前面2段の本番表示高は専用比較または本番表示接続時に確認する。その後、残りの代表材質をGameビューへ配置し、材質同士の識別、Groundと断面の識別、縦反復、水越しの見え方を確認する。
 
 2. **Wall暗色化・固定接地影・動的影**
    人間によるGameビュー比較でCを採用した。通常材質の暗色化係数は0.85、固定接地影は左右各1px・手前3px・各レイヤーAlpha 22%、動的影は設置面起点とし、境界ハイライトは廃止する。比較Sceneのセル別GameObjectと暫定Point Light設定は本番へ持ち込まず、固定接地影とCaster形状をDirtyサブチャンク単位で結合する。旧14形状の素材、Atlas、Scene参照、選択処理、専用テストはC6-Dの製品表示置換で削除する。
