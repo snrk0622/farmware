@@ -64,7 +64,7 @@ Ground崖面とWall前面の表示段数はGameビュー比較後に個別に決
 
 ### 3.3 材質ごとの可変配列とSprite数
 
-各部位の差分数は事前に固定しない。材質定義のInspectorで必要な数だけ要素を追加できる可変長配列とし、各要素はSpriteまたは外周部品一式と、1以上の整数`Weight`を持つ。Inspectorには重みの合計から算出した出現率も表示する。不要な要素は`Weight = 0`で残さず配列から外す。
+各部位の差分数は事前に固定しない。材質定義のInspectorで必要な数だけ要素を追加できる可変長配列とし、登録した全要素を均等確率で選ぶ。個別のWeightや出現率Overrideは持たせない。不要な差分は配列へ残さず外し、特定の見た目を増やす必要が生じた場合も、同じSpriteを重複登録せず差分構成そのものを見直す。
 
 材質ごとの数量を次の記号で表す。
 
@@ -107,7 +107,7 @@ Ground崖面とWall前面の表示段数はGameビュー比較後に個別に決
 
 ### 4.3 差分と接続
 
-`GroundTop`、`Face`、`FaceBoundaryOverlay`、`WallTop`外周セットは、すべて第3.3節の可変長配列で管理する。固定差分数は設けない。`Face`と`FaceBoundaryOverlay`はそれぞれの重みで独立に選択し、境界あり材質ではGround用の全組合せ`F×B`をEditorで事前生成する。Wall暗色化が有効なら、同じ組合せから暗色化Overlayを使うWall用`F×B`も生成する。`WallTop`は外周セットを重み付き選択した後、そのセットに対応する16接続状態から1枚を使う。
+`GroundTop`、`Face`、`FaceBoundaryOverlay`、`WallTop`外周セットは、すべて第3.3節の可変長配列で管理する。固定差分数は設けず、各配列内の候補は均等確率で選ぶ。`Face`と`FaceBoundaryOverlay`は独立に選択し、境界あり材質ではGround用の全組合せ`F×B`をEditorで事前生成する。Wall暗色化が有効なら、同じ組合せから暗色化Overlayを使うWall用`F×B`も生成する。`WallTop`は外周セットを均等に選択した後、そのセットに対応する16接続状態から1枚を使う。
 
 - `GroundTop`は外周を共通化せず、隣接した際に単一色の枠、密度の段差、規則的な帯が見えないようにする。
 - `WallTop`の外周幅は材質ごとに変更可能な整数制作設定とする。初期値は、斜め見下ろしの遠近感を出すため、奥側である上辺3 px、左右4 px、手前側である下辺5 pxとする。四隅は、その材質に設定された幅で接する二辺を自然につなぐ角表現を持つ。
@@ -119,13 +119,14 @@ Ground崖面とWall前面の表示段数はGameビュー比較後に個別に決
 - 材質ごとにInspectorへ`DarkenWallSurface`と`WallDarkenFactor`を表示する。`DarkenWallSurface`は既定で有効とし、通常の材質ブロックは機械的に暗色化する。無効時は係数1.0として元色を使う。`WallDarkenFactor`は0より大きく1以下とし、C6-Aの初期比較値を0.85とする。最終値は代表5材質のGameビュー確認で調整する。
 - 暗色化はsRGBの8bit RGB各成分へ同じ`WallDarkenFactor`を乗算し、最も近い整数へ丸める。Alphaは変更しない。`WallTop`では材質固有の外周画素だけ、Wall用`FaceBoundaryOverlay`では不透明画素だけを対象にする。`GroundTop`、Ground用`FaceBoundaryOverlay`、`Face`、`WallInteriorDark`は暗色化しない。同じ材質では`WallTop`外周とWall用Overlayへ必ず同じ有効状態と係数を使う。
 - 制作時は共通暗色Baseと、各材質の上辺、下辺、左辺、左上角、左下角を用意する。Editor生成ツールが左側3部品を水平反転して右側部品を作り、暗色化後の外周と共通暗色Baseから上下左右4bit接続に対応する16枚の完成`WallTop` Spriteを生成する。Runtimeは材質IDと接続Maskから完成Spriteを1枚選び、辺・角をセルごとに複数描画しない。
+- 4bit接続Maskは`上 = 1`、`右 = 2`、`下 = 4`、`左 = 8`とする。bitが立つ方向は同材質Wallへ接続して外周を隠し、`0`は孤立Wall、`15`は全方向接続の内部Wallを表す。二辺がともに露出する交差領域では角部品を使い、一辺だけが露出する場合はその辺部品を端まで使う。
 - `FaceBoundaryOverlay`は左右方向に並べた際、表層の厚さや境界線の高さが不自然に途切れないようにする。透明部分では下の`Face`をそのまま見せ、不透明画素だけで必要な範囲を覆う。
 - `Face`は、配列内の任意差分同士を上下左右へ隣接させても破綻しないようにする。境界を横断する地層や割れを描く場合は、全差分で接続座標と幅を共通化するか、外周をまたがせない。接続グループは初期仕様へ追加せず、相互接続では表現できない材質が実際に生じた場合だけ後続で検討する。
 - どの差分同士でも完全に大模様を接続するのではなく、接続を必要とする模様を限定する。小石や斑晶などの独立模様は外周をまたがせない。
-- 差分の重み付き選択は`UnityEngine.Random`を使わず、WorldLayer、絶対X/Y、断面段、安定材質ID、用途別の表示専用Saltから決定論的に求める。材質定義と生成バージョンが同じなら、同じワールド位置はロード、再描画、実行順にかかわらず毎回同じ差分になる。
+- 差分の均等選択は`UnityEngine.Random`を使わず、WorldLayer、絶対X/Y、断面段、安定材質ID、用途別の表示専用Saltから決定論的に求める。材質定義と生成バージョンが同じなら、同じワールド位置はロード、再描画、実行順にかかわらず毎回同じ差分になる。
 - `GroundTop`、`Face`、`FaceBoundaryOverlay`、`WallTop`外周セットには別々のSaltを使う。`WallTop`では接続Maskが変わっても外周セットの選択は変えず、同じセット内の接続Spriteだけを切り替える。
-- 配列要素、順序、`Weight`または生成バージョンを変更すれば表示結果が変わり得る。これらはPresentation設定の意図的な変更として扱い、Simulation状態や保存データは変更しない。
-- Inspectorと生成ツールは、必須配列が空、Sprite参照が未設定、`Weight`が1未満、寸法が16×16 pxでない、`FaceBoundaryOverlay`に半透明画素がある、同材質の`WallTop`外周セット間で幅が一致しない、または`WallDarkenFactor`が0以下・1超の場合に生成を拒否して日本語で理由を表示する。生成数が大きい場合は、`16W`、Ground用`F×B`、暗色化有効時のWall用`F×B`の内訳を示して警告する。暗色化の有効状態、係数、外周部品、Overlay、`WallInteriorDark`のいずれかを変更した場合は、影響する完成Spriteが古いことを表示して再生成する。
+- 配列要素、順序またはRuntime側の表示選択バージョンを変更すれば表示結果が変わり得る。これらはPresentation設定の意図的な変更として扱い、Simulation状態や保存データは変更しない。
+- Inspectorと生成ツールは、必須配列が空、Sprite参照が未設定、寸法が16×16 pxでない、いずれかの手描き入力に半透明画素がある、同材質の`WallTop`外周セット間で幅が一致しない、または`WallDarkenFactor`が0以下・1超の場合に生成を拒否して日本語で理由を表示する。生成数が大きい場合は、`16W`、Ground用`F×B`、暗色化有効時のWall用`F×B`の内訳を示して警告する。配列内容や順序、暗色化の有効状態・係数、外周部品、Overlay、`WallInteriorDark`のいずれかを変更した場合は、影響する完成Spriteが古いことを表示して再生成する。
 
 ## 5. Liquidと深部
 
@@ -278,8 +279,13 @@ C6-Aの確定値は、断面境界あり17材質、なし24材質である。境
 - Compression: `None`
 - Generate Mip Maps: `Off`
 - Mesh Type: 原則`Full Rect`
+- sRGB (Color Texture): `On`
+- Read/Write: 手描き入力はEditor生成時の画素読取に必要なため`On`。生成済み完成Spriteは`Off`
+- Alpha: すべての手描き入力で0または255だけを使用し、半透明画素を含めない
 - Pivot: `GroundTop`と`WallTop`は中央、`FaceBoundaryOverlay`と`Face`はEditor合成時に画素位置が一致するよう同じ上端基準へ統一する。正確な値は試作後に固定する
 - AtlasのPaddingとTight Packingは、隣接色のにじみがない設定を実機表示で確認する
+
+Editor生成ツールは完成PNGを`Point`、16 PPU、非圧縮、Mip Mapなし、sRGB、`Full Rect`、中央Pivotの単一SpriteとしてImportする。入力または設定の画像Fingerprintを材質ごとに記録し、画像内容、配列順、外周幅、暗色化、共通内部色、出力先のいずれかが変わった場合は要再生成と表示する。再生成時は同じパスを上書きして`.meta`とGUIDを維持し、前回その材質が生成した記録済みPNGのうち今回不要になったものだけを削除する。手描き入力、記録外Asset、フォルダーは削除しない。
 
 ## 11. C6-Aで先に作る代表材質
 
@@ -323,7 +329,7 @@ C6-Aの確定値は、断面境界あり17材質、なし24材質である。境
 
 - 四部構成、1段目からの`Face`使用、任意の`FaceBoundaryOverlay`とのEditor合成を、代表5材質の16×16 px手描きSpriteで確認した。
 - `GroundTop`と、通常色の手描き元外周を機械的に暗色化して共通暗色内部と合成した`WallTop`を使ったGameビューで、GroundとWallを識別できることを人間が確認した。
-- `WallInteriorDark`の初期値`#0D1016`、不透明固定、`DarkenWallSurface`、`WallDarkenFactor`、Inspector変更と再生成の導線を確認した。材質別の外周幅、可変長の重み付き配列、5入力部品からの水平反転、生成ツールの`16W`・Ground用`F×B`・暗色化有効時のWall用`F×B`出力、Ground崖面段数、Wall前面段数を確認した。
+- `WallInteriorDark`の初期値`#0D1016`、不透明固定、`DarkenWallSurface`、`WallDarkenFactor`、Inspector変更と再生成の導線を確認した。材質別の外周幅、均等選択する可変長配列、5入力部品からの水平反転、生成ツールの`16W`・Ground用`F×B`・暗色化有効時のWall用`F×B`出力、Ground崖面段数、Wall前面段数を確認した。
 - 淡水・海水の`Liquid深度Overlay`で、専用水中断面なしに断面が浅部から深部へ消えることを確認した。
 - マグマが接触する最初の段から不透明になり、背後の断面が透けないことを確認した。
 - 41材質表の確定済み境界有無と、Ground崖面・Wall前面でOverlay入力を共有し、Ground用元色合成結果とWall用暗色化合成結果を使い分ける契約どおりに、境界あり17材質・なし24材質を扱えることを確認した。

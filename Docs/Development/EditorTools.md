@@ -360,6 +360,42 @@ C3基礎水文5モードはGameビューと同じRGBで、流向、終端、集�
 4. 同じSeed・座標・縮尺へ戻ると同じ画像になる。
 5. 開いた直後に単色の1×1画像を引き伸ばさず、地図領域に生成進捗が表示され、完成後に画像へ切り替わる。連続操作で古い非同期結果や進捗が後から上書きされず、Editorが長時間応答不能にならない。
 
+### 2.10 Terrain Tile Art Generation Settings Inspector
+
+#### 用途
+
+C6-Aの16×16 px手描き入力から、材質ごとの16接続`WallTop`と、`Face`・`FaceBoundaryOverlay`を事前合成した断面1段目Spriteを生成する。Runtime表示やSimulation状態は変更せず、C6-Dが参照する完成PNGの制作工程だけを担当する。
+
+Projectビューの`Create > Farmware > Terrain Tile Art Generation Settings`から設定Assetを作成する。Inspectorでは次を編集・確認できる。
+
+- 全材質共通の不透明な`WallInteriorDark`と、`Assets/`配下の出力ルート。
+- 材質ID、日本語確認名、全候補を均等確率で選ぶ可変長の`GroundTop`、`Face`、任意の`FaceBoundaryOverlay`、5 Spriteから成る`WallTop`外周セット。個別Weightや出現率Overrideは持たない。
+- 材質単位で共有する上・左右・下の外周幅、`DarkenWallSurface`、`WallDarkenFactor`。新規材質の初期値は上3 px・左右4 px・下5 px、暗色化ON、係数0.85とする。
+- 選択材質の手描き入力数、生成数、Runtime候補数、内訳、中央暗色領域、要再生成状態。
+- 選択材質で生成済みの`WallTop` 16接続状態、Ground用境界、Wall用境界の画像一覧。各画像をクリックするとProjectビューで対応するSpriteを選択する。
+
+`対象材質を検証`／`対象材質を生成`は、ほかの未制作材質が空でも代表材質を1件ずつ試作できる。`全材質を検証`／`全材質を生成`は登録済み全材質を先に検証し、総出力枚数の確認後に一括生成する。入力Spriteは16×16 px、Read/Write有効、Point、非圧縮、Mip Mapなし、sRGB、Alpha 0または255とする。不正なID、重複ID、空の必須配列、未設定Sprite、無効な外周幅、範囲外の暗色化係数も生成前に日本語で報告する。
+
+各配列内の完成Sprite候補はC6-Dで均等確率かつ決定論的に選ぶ。生成設定AssetとInspectorにはWeight調整を設けず、配列内容と順序の変更は画像Fingerprintと要再生成状態へ反映する。
+
+出力先は`<Output Root>/<Material ID>/WallTop/`と`FaceBoundary/`である。`WallTop`はMask 0〜15を生成し、接続bitは上1・右2・下4・左8とする。生成後のInspectorでは、Maskごとに接続方向を併記して最大4列で並べ、Ground／Wall境界は`Face`番号と`FaceBoundaryOverlay`番号の組合せを併記して別一覧にする。16×16画像はドットを崩さない64×64の整数4倍で表示し、再コンパイルやEditor再起動後も保存済み生成パスからSpriteサブアセットを再読込する。暗色化が無効ならWall用境界PNGを重複生成せずGround用を再利用する。同名PNGの再生成ではGUIDを維持し、差分数を減らした場合は前回記録された同材質の不要PNGだけを削除する。
+
+#### 次の修正をしたら確認する
+
+- 外周の接続bit、角と辺の優先順、左右反転、外周幅、共通内部色の規則を変更した。
+- 暗色化の色空間、丸め、対象部位、Alpha規則を変更した。
+- 入力配列、画像Fingerprint、生成ファイル名、出力先、Import設定を変更した。
+- C6-Dで完成Spriteの参照方法やPivotを確定・変更した。
+
+#### 確認内容
+
+1. 専用EditModeテストが、暗色化、Overlay合成、半透明拒否、孤立Wall、内部Wall、右側反転、可変Sprite数、外周幅を保証する。
+2. `GrassLoam`で対象材質の検証・生成を行い、16枚の`WallTop`と必要なGround／Wall境界合成Spriteが所定フォルダーへ出る。
+3. 生成PNGのImporterがPoint、16 PPU、非圧縮、Mip Mapなし、sRGB、`Full Rect`、中央Pivotになり、再生成後もGUIDが変わらない。
+4. 入力画像、配列順、幅、係数または`WallInteriorDark`を変更すると要再生成表示へ変わり、再生成後に最新表示へ戻る。
+5. Inspectorの生成結果プレビューに、Mask 0〜15が接続方向付きで16枚表示され、Ground／Wall境界の全`F×B`組合せが別一覧に64×64の整数4倍で表示される。再コンパイルまたはEditor再起動後も0枚表示へ戻らず、画像をクリックすると対応する生成SpriteをProjectビューで選択する。
+6. Mask 0、1、2、4、8、15と異材質接触をGameビューで確認する。左右反転した右側に光方向や模様の破綻がなく、GroundTop、Face、共通内部色が暗色化されていないことを確認する。
+
 ## 3. 変更時の選び方
 
 | 変更内容 | 最低限確認するEditorツール |
@@ -371,6 +407,7 @@ C3基礎水文5モードはGameビューと同じRGBで、流向、終端、集�
 | 水文の流向・終端・集水・河川・湖分布 | Hydrology表示、Analyze Hydrology Distribution、Map Viewer |
 | 地下水、自然飽和、最終湖区分、泉、自然冠水、湿原の分布 | Analyze Derived Hydrology Distribution、Map Viewer、Debug Visualization |
 | 広域形状、特定Seed・遠距離座標の探索 | Map Viewer |
+| C6-Aの材質Sprite入力、WallTop接続、境界合成、均等差分選択、暗色化 | Terrain Tile Art Generation Settings Inspector |
 | 生成規則と表示の両方 | Analyze Distribution、Map Viewer、Debug Visualization |
 
 Editorツールだけで検証を完了しない。対応する自動テストは[テスト](./Testing.md)に従って実行し、見た目に関係する変更はGameビューでも確認する。
@@ -381,9 +418,9 @@ Editorツールだけで検証を完了しない。対応する自動テスト�
 
 - WORLD-01CでLayerキーをビューア・中央情報・可視化の検索へ接続済み。Map Viewerの`Layer`欄、または`Farmware > World Generation > Debug Visualization > Layer`からSurface／Underwater／Deep Seaを選ぶ。Surface以外の自然生成はTERRAIN-01Cまで未接続のため、Map Viewerは暗色と未接続メッセージ、Gameビュー可視化は空表示を返す。
 - TERRAIN-01AではBlock定義と有効セルAPIをSimulationへ追加するが、色判定は既存`GeneratedTile`互換のままとする。仕様転換に合わせて`Terrain Placement`からベルト固有のHUDと凡例だけを除き、差分込み表示、Blockパレット、自然生成と実ワールドの表示切替はTERRAIN-01Cで追加する。
-- TERRAIN-01Bで採用したバイオーム構成と安定ID方針に基づき、TERRAIN-01C1〜C5で環境軸・地質・水文・Biome診断、TERRAIN-01C6でBlockパレットと変更後地形、TERRAIN-01C7で完成タイル上のBiome・水系・Block景観比較、TERRAIN-01C8で資源診断、TERRAIN-01Dでスポーン許可・探索失敗理由を追加する。C6-Aでは[地形タイル表現仕様](../Art/TerrainTileArtSpecification.md)に従い、別Spriteの16×16 `GroundTop`・16×16 `WallTop`、材質ごとに任意の透明な16×16 `FaceBoundaryOverlay`、Ground崖面とWall前面で共用する16×16 `Face`を代表5材質で手制作・試作してから量産方式を決める。`WallTop`は材質ごとに変更可能な整数外周幅と、全材質共通・不透明の`WallInteriorDark`（初期値`#0D1016`）を持ち、初期値は上3 px・左右4 px・下5 px・中央8×8 pxとする。外周の手描き元色には同材質の`GroundTop`パレットを使用し、上辺・下辺・左辺・左上角・左下角の5部品を作る。Editorツールが左側部品を水平反転して右辺・右上角・右下角を補い、外周へ材質別のWall暗色化設定を適用して4bitの16接続Spriteを生成する。`WallInteriorDark`は生成設定アセットのInspectorへAlphaなしの色フィールドとして表示し、暗色化の有効状態と係数も材質設定から変更できるようにする。いずれかを変更した場合は影響する生成結果が古いことを示して再生成できるようにする。同材質Wallだけを接続し、異材質Wall間では双方の外周を表示する。淡水・海水では通常断面へ半透明の`Liquid深度Overlay`を重ね、マグマは接触する最初の段から不透明にして背後の断面を隠す。断面は境界の有無にかかわらず1段目から`Face`を使う。境界ありではGround用に元色Overlay、Wall用に同じ係数で暗色化したOverlayを`Face`へ事前合成し、Runtimeでは用途に対応する完成Spriteを1枚だけ使う。`Face`自体は暗色化しない。各部位は1以上の整数Weightを持つ可変長配列とし、固定差分数を設けない。全`Face`差分は相互接続可能とし、同材質の全`WallTop`外周セットは同じ幅を共有する。Ground崖面とWall前面の段数、Wall暗色化係数、`WallTop`の材質別外周幅はGameビュー比較後に決める。穴と崖面表示深度より下には不透明な`DeepBackground` `#0D1016`を表示する。液体専用断面と斜め判定による内角・外角専用Spriteは作らず、細道の要否は試作後に別途判断する。Map Viewerの18Biome識別と自然生成・実ワールド差分の明示は、最終BiomeとBlockを接続するC5・C6で更新する。C7では同じSeed・範囲の変更前後を比較できる出力を維持し、Biome分類、水文、Blockのどの入力を調整したかを個別モードで判別できるようにする。
+- TERRAIN-01Bで採用したバイオーム構成と安定ID方針に基づき、TERRAIN-01C1〜C5で環境軸・地質・水文・Biome診断、TERRAIN-01C6でBlockパレットと変更後地形、TERRAIN-01C7で完成タイル上のBiome・水系・Block景観比較、TERRAIN-01C8で資源診断、TERRAIN-01Dでスポーン許可・探索失敗理由を追加する。C6-Aでは[地形タイル表現仕様](../Art/TerrainTileArtSpecification.md)に従い、別Spriteの16×16 `GroundTop`・16×16 `WallTop`、材質ごとに任意の透明な16×16 `FaceBoundaryOverlay`、Ground崖面とWall前面で共用する16×16 `Face`を代表5材質で手制作・試作してから量産方式を決める。`WallTop`は材質ごとに変更可能な整数外周幅と、全材質共通・不透明の`WallInteriorDark`（初期値`#0D1016`）を持ち、初期値は上3 px・左右4 px・下5 px・中央8×8 pxとする。外周の手描き元色には同材質の`GroundTop`パレットを使用し、上辺・下辺・左辺・左上角・左下角の5部品を作る。Editorツールが左側部品を水平反転して右辺・右上角・右下角を補い、外周へ材質別のWall暗色化設定を適用して4bitの16接続Spriteを生成する。`WallInteriorDark`は生成設定アセットのInspectorへAlphaなしの色フィールドとして表示し、暗色化の有効状態と係数も材質設定から変更できるようにする。いずれかを変更した場合は影響する生成結果が古いことを示して再生成できるようにする。同材質Wallだけを接続し、異材質Wall間では双方の外周を表示する。淡水・海水では通常断面へ半透明の`Liquid深度Overlay`を重ね、マグマは接触する最初の段から不透明にして背後の断面を隠す。断面は境界の有無にかかわらず1段目から`Face`を使う。境界ありではGround用に元色Overlay、Wall用に同じ係数で暗色化したOverlayを`Face`へ事前合成し、Runtimeでは用途に対応する完成Spriteを1枚だけ使う。`Face`自体は暗色化しない。各部位は全候補を均等確率で選ぶ可変長配列とし、個別Weightや出現率Overrideは設けない。固定差分数は設けない。全`Face`差分は相互接続可能とし、同材質の全`WallTop`外周セットは同じ幅を共有する。Ground崖面とWall前面の段数、Wall暗色化係数、`WallTop`の材質別外周幅はGameビュー比較後に決める。穴と崖面表示深度より下には不透明な`DeepBackground` `#0D1016`を表示する。液体専用断面と斜め判定による内角・外角専用Spriteは作らず、細道の要否は試作後に別途判断する。Map Viewerの18Biome識別と自然生成・実ワールド差分の明示は、最終BiomeとBlockを接続するC5・C6で更新する。C7では同じSeed・範囲の変更前後を比較できる出力を維持し、Biome分類、水文、Blockのどの入力を調整したかを個別モードで判別できるようにする。
 - 41材質の`GroundTop`色・使用比率・模様方針は、地形タイル表現仕様第7章の確定値として扱う。`WallTop`外周の手描き元には同じ`GroundTop`パレットを使い、通常材質ではEditorがsRGB各成分へ同じ係数を乗算して暗色化する。初期比較値は0.85とし、Alpha、使用比率、`WallInteriorDark`は変更しない。Wall用`FaceBoundaryOverlay`の不透明画素にも同じ係数を使い、Ground用Overlayと`Face`は変更しない。`FaceBoundaryOverlay`と`Face`の元パレットは`GrassLoam`の試作を人間確認後、同じ明度関係を残り40材質へ適用して確定する。
-- C6-Aの材質生成設定Inspectorでは、`GroundTop`、`Face`、`FaceBoundaryOverlay`、`WallTop`外周セットを追加・削除・並べ替えできる一覧として表示する。各要素にはSpriteプレビュー、1以上の整数Weight、重み合計から算出した出現率を表示する。`WallTop`外周セットは上辺・下辺・左辺・左上角・左下角の5 Spriteを表示する。材質ごとに`DarkenWallSurface`と0超1以下の`WallDarkenFactor`を表示し、既定は有効・初期比較値0.85とする。`GroundTop`・`Face`・`WallTop`外周セットが空、Weightが1未満、Sprite未設定、16×16 px以外、半透明な`FaceBoundaryOverlay`、同材質内で外周幅が不一致、または係数が範囲外なら生成を拒否する。生成前に、手描き入力`G + F + B + 5W`、生成結果`16W + F×B×(1 + D)`の内訳を表示する。`B = 0`では境界合成結果を生成せず、暗色化無効`D = 0`ではWall用境界Spriteを追加生成せずGround用を再利用する。差分選択はWorldLayer・絶対座標・断面段・安定材質ID・用途別Saltで決定し、同じ設定と生成バージョンなら同じ位置で同じ差分になるようにする。
+- C6-Aの材質生成設定Inspectorは2.10節のとおり実装済みである。均等選択する可変長入力、Sprite数内訳、外周幅、共通内部色、Wall暗色化、要再生成判定、単体／一括生成を提供する。WorldLayer・絶対座標・断面段・安定材質ID・用途別SaltによるRuntimeの決定論的な均等差分選択は、生成Spriteを表示へ接続するC6-Dで実装する。
 - TERRAIN-01C3-D2では、生成済み固定水文セルの流向・下流座標・終端・辺数・集水面積・打切り・最遠寄与距離・流出・流域・湖をGameビューとMap Viewerへ接続した。海洋流出口は流向なしの`Marine`終端、4,096辺または4,096セルで確定できない結果は`LongDrainage`または打切り色として表示する。Level 0〜6集約SummaryとLevel 0〜12 Downstream Summaryの利用・分解・キャッシュ統計は固定生成結果ではない比較実装の内部診断なので、性能テストだけで記録し表示へ混ぜない。打切られた大規模閉鎖流域は固定湖候補と別色・別理由で表示する。
 - TERRAIN-01C5では、環境として自然な直接接続を認めるv0.48の方針に合わせ、安定`BiomeId` 1〜18、全18Biomeの153ペアの境界長・接触率、両側の気温・湿度・標高と差、植生・地質・火山段階・水文・海岸条件、最終選択理由を境界診断へ追加する。C5前の旧7種や旧IDを選べるモード、凡例、配色、中央情報は残さず、旧版データは表示で補完せず版不一致として拒否する。TERRAIN-01C1で削除した旧7Biome向けの`Biome Transition`を復活させず、第三Biome強制の仕様へ戻さない。新方式では橋不足や接続例への未記載を異常表示にせず、不正候補・必須ゲート違反と、景観品質の確認事項を区別する。湿原の専用Host許可・不許可とOverlay理由、火山中核の地質・活動度を表示し、周縁リングの欠落だけをエラーにしない。153ペア監査と最終選択理由はC5の更新予定であり、C1時点で実装済みとは扱わない。
 - TERRAIN-01C6では、最終Block・Liquid表示への置換と同時に、旧`GeneratedTile.WaterBodyType`、旧River・Pond生成、旧Biome直結配色を読むモード、凡例、中央情報、互換変換を削除する。さらに14形状の白い地形境界ハイライト、そのAtlas、Tilemap、構築・Runtime経路を削除する。比較用の旧表示切替は残さず、新しい固定水文・有効地形だけを診断の入力にする。F4のタイル・サブチャンク・チャンク境界診断は地形アートとは別機能なので維持する。

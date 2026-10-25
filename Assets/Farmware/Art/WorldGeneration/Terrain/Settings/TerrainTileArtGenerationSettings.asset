@@ -1,0 +1,95 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6d0ef66f82d14a1797843bb9611178d0, type: 3}
+  m_Name: TerrainTileArtGenerationSettings
+  m_EditorClassIdentifier: Farmware.WorldGeneration.Authoring::Farmware.WorldGeneration.Authoring.TerrainTileArtGenerationSettings
+  wallInteriorDark: {r: 0.050980393, g: 0.0627451, b: 0.08627451, a: 1}
+  outputRootFolder: Assets/Farmware/Art/Generated/TerrainTiles
+  materials:
+  - materialId: GrassLoam
+    japaneseName: "\u8349\u5730\u30ED\u30FC\u30E0"
+    groundTopSprites:
+    - {fileID: -490774559, guid: 2379daebd48f74b2e83d5dfef9eff0d2, type: 3}
+    - {fileID: 882261201, guid: 2379daebd48f74b2e83d5dfef9eff0d2, type: 3}
+    - {fileID: -1669016600, guid: 2379daebd48f74b2e83d5dfef9eff0d2, type: 3}
+    - {fileID: -316357503, guid: 2379daebd48f74b2e83d5dfef9eff0d2, type: 3}
+    faceSprites:
+    - {fileID: -282030099, guid: 2379daebd48f74b2e83d5dfef9eff0d2, type: 3}
+    - {fileID: 545779258, guid: 2379daebd48f74b2e83d5dfef9eff0d2, type: 3}
+    - {fileID: -310426238, guid: 2379daebd48f74b2e83d5dfef9eff0d2, type: 3}
+    - {fileID: -315827475, guid: 2379daebd48f74b2e83d5dfef9eff0d2, type: 3}
+    faceBoundaryOverlays:
+    - {fileID: 2051627330, guid: 2379daebd48f74b2e83d5dfef9eff0d2, type: 3}
+    - {fileID: 1966598597, guid: 2379daebd48f74b2e83d5dfef9eff0d2, type: 3}
+    - {fileID: 2486130, guid: 2379daebd48f74b2e83d5dfef9eff0d2, type: 3}
+    - {fileID: 577737752, guid: 2379daebd48f74b2e83d5dfef9eff0d2, type: 3}
+    wallTopRims:
+    - topEdge: {fileID: 276165879, guid: 2379daebd48f74b2e83d5dfef9eff0d2, type: 3}
+      bottomEdge: {fileID: 1428783041, guid: 2379daebd48f74b2e83d5dfef9eff0d2, type: 3}
+      leftEdge: {fileID: 503955379, guid: 2379daebd48f74b2e83d5dfef9eff0d2, type: 3}
+      topLeftCorner: {fileID: 556245701, guid: 2379daebd48f74b2e83d5dfef9eff0d2, type: 3}
+      bottomLeftCorner: {fileID: -85680739, guid: 2379daebd48f74b2e83d5dfef9eff0d2, type: 3}
+    topRimWidth: 3
+    sideRimWidth: 4
+    bottomRimWidth: 5
+    darkenWallSurface: 1
+    wallDarkenFactor: 0.85
+    lastGeneratedFingerprint: 286781b54f46f3acede56db432e215fa
+    lastGeneratedAssetPaths:
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/WallTop/GrassLoam_WallTop_w00_m0.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/WallTop/GrassLoam_WallTop_w00_m1.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/WallTop/GrassLoam_WallTop_w00_m2.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/WallTop/GrassLoam_WallTop_w00_m3.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/WallTop/GrassLoam_WallTop_w00_m4.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/WallTop/GrassLoam_WallTop_w00_m5.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/WallTop/GrassLoam_WallTop_w00_m6.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/WallTop/GrassLoam_WallTop_w00_m7.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/WallTop/GrassLoam_WallTop_w00_m8.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/WallTop/GrassLoam_WallTop_w00_m9.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/WallTop/GrassLoam_WallTop_w00_mA.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/WallTop/GrassLoam_WallTop_w00_mB.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/WallTop/GrassLoam_WallTop_w00_mC.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/WallTop/GrassLoam_WallTop_w00_mD.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/WallTop/GrassLoam_WallTop_w00_mE.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/WallTop/GrassLoam_WallTop_w00_mF.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/FaceBoundary/GrassLoam_GroundFace_f00_b00.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/FaceBoundary/GrassLoam_WallFace_f00_b00.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/FaceBoundary/GrassLoam_GroundFace_f00_b01.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/FaceBoundary/GrassLoam_WallFace_f00_b01.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/FaceBoundary/GrassLoam_GroundFace_f00_b02.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/FaceBoundary/GrassLoam_WallFace_f00_b02.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/FaceBoundary/GrassLoam_GroundFace_f00_b03.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/FaceBoundary/GrassLoam_WallFace_f00_b03.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/FaceBoundary/GrassLoam_GroundFace_f01_b00.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/FaceBoundary/GrassLoam_WallFace_f01_b00.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/FaceBoundary/GrassLoam_GroundFace_f01_b01.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/FaceBoundary/GrassLoam_WallFace_f01_b01.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/FaceBoundary/GrassLoam_GroundFace_f01_b02.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/FaceBoundary/GrassLoam_WallFace_f01_b02.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/FaceBoundary/GrassLoam_GroundFace_f01_b03.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/FaceBoundary/GrassLoam_WallFace_f01_b03.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/FaceBoundary/GrassLoam_GroundFace_f02_b00.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/FaceBoundary/GrassLoam_WallFace_f02_b00.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/FaceBoundary/GrassLoam_GroundFace_f02_b01.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/FaceBoundary/GrassLoam_WallFace_f02_b01.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/FaceBoundary/GrassLoam_GroundFace_f02_b02.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/FaceBoundary/GrassLoam_WallFace_f02_b02.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/FaceBoundary/GrassLoam_GroundFace_f02_b03.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/FaceBoundary/GrassLoam_WallFace_f02_b03.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/FaceBoundary/GrassLoam_GroundFace_f03_b00.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/FaceBoundary/GrassLoam_WallFace_f03_b00.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/FaceBoundary/GrassLoam_GroundFace_f03_b01.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/FaceBoundary/GrassLoam_WallFace_f03_b01.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/FaceBoundary/GrassLoam_GroundFace_f03_b02.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/FaceBoundary/GrassLoam_WallFace_f03_b02.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/FaceBoundary/GrassLoam_GroundFace_f03_b03.png
+    - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/FaceBoundary/GrassLoam_WallFace_f03_b03.png
