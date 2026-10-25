@@ -271,9 +271,9 @@ namespace Farmware.WorldGeneration.Editor
             centerXField.tooltip = "移動先の水平ワールドタイル座標です。負座標も入力できます。";
             centerYField.tooltip = "移動先の垂直ワールドタイル座標です。負座標も入力できます。";
             viewModeField.tooltip =
-                "Terrainは最終地形、Biomeは論理バイオーム、Environmentは連続軸、GeologyはTERRAIN-01C2、HydrologyはTERRAIN-01C3〜C4の固定結果を表示します。派生水文は完成チャンク生成のため低解像度です。";
+                "Terrainは最終地形、Biomeは論理バイオーム、Environmentは連続軸、Geologyは固定地質、Hydrologyは固定水文の結果を表示します。派生水文は完成チャンク生成のため低解像度です。";
             layerField.tooltip =
-                "診断する固定ワールドレイヤーです。WORLD-01CではSurfaceだけに自然生成が接続され、別層は未接続表示になります。";
+                "診断する固定ワールドレイヤーです。現在はSurfaceだけに自然生成が接続され、別層は未接続表示になります。";
             gridToggle.tooltip = "白線は16タイル、青線は64タイル境界です。遠距離では自動的に省略します。";
 
             seedField.RegisterValueChangedCallback(_ => seedWasEdited = true);
@@ -550,7 +550,7 @@ namespace Farmware.WorldGeneration.Editor
                 if (!result.HasGeneratedData)
                 {
                     completionMessage =
-                        $"{result.Layer}: 自然生成はTERRAIN-01Cで接続予定です。座標キーだけを表示しています。";
+                        $"{result.Layer}: 自然生成は未接続です。座標キーだけを表示しています。";
                 }
                 else if (result.DiagnosticChunkCount > 0)
                 {

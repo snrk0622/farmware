@@ -9,7 +9,7 @@
 
 > **現行の材質タイル制作方針（2026-10-25）**
 >
-> TERRAIN-01C6-Aの材質タイルはAsepriteまたはPixeloramaで手描きする。PixelLabは材質タイルの生成、Prompt作成、配色決定には使用しない。材質タイルの部位、寸法、パレット、境界の有無は[地形タイル表現仕様](./TerrainTileArtSpecification.md)を正とする。
+> 材質タイルはAsepriteまたはPixeloramaで手描きする。PixelLabは材質タイルの生成、Prompt作成、配色決定には使用しない。材質タイルの部位、寸法、パレット、境界の有無は[地形タイル表現仕様](./TerrainTileArtSpecification.md)を正とする。
 
 ## 1. この文書の使い方
 
@@ -25,7 +25,7 @@ GUIに存在しない項目は、Promptで表現できる美術要件と、Unity
 
 ## 2. 地形制作での位置付け
 
-PixelLabの`Tiles`、`Paths`、`Tileset`、`Building`は、TERRAIN-01C6-Aの材質タイル制作には使用しない。材質タイルの`GroundTop`、専用`WallTop`、任意の透明な`FaceBoundaryOverlay`、`Face`はAsepriteまたはPixeloramaで1 px単位に手描きする。`WallTop`外周は上辺・下辺・左辺・左上角・左下角の5部品を作り、Editorが右側を水平反転で補って機械的に暗色化する。断面は1段目から`Face`を使い、境界ありではEditorがGround用の元色Overlay版とWall用の暗色化Overlay版を事前合成する。41材質の境界有無は境界あり17材質・なし24材質で確定し、境界あり材質は同じOverlay入力をGround崖面とWall前面で共有する。細道や建築物など、材質タイル以外の用途でPixelLabを使うかは、該当機能の制作開始時に別途判断する。
+PixelLabの`Tiles`、`Paths`、`Tileset`、`Building`は、材質タイル制作には使用しない。材質タイルの`GroundTop`、専用`WallTop`、任意の透明な`FaceBoundaryOverlay`、`Face`はAsepriteまたはPixeloramaで1 px単位に手描きする。`WallTop`外周は上辺・下辺・左辺・左上角・左下角の5部品を作り、Editorが右側を水平反転で補って機械的に暗色化する。断面は1段目から`Face`を使い、境界ありではEditorがGround用の元色Overlay版とWall用の暗色化Overlay版を事前合成する。41材質の境界有無は境界あり17材質・なし24材質で確定し、境界あり材質は同じOverlay入力をGround崖面とWall前面で共有する。細道や建築物など、材質タイル以外の用途でPixelLabを使うかは、該当機能の制作開始時に別途判断する。
 
 ## 3. Creator — Create image
 
@@ -59,7 +59,7 @@ PixelLabの`Tiles`、`Paths`、`Tileset`、`Building`は、TERRAIN-01C6-Aの材�
 | 129〜170 px | 2×2、4 variations |
 | 171 px以上 | 1 variation |
 
-### 3.2 C6-Aへの非適用
+### 3.2 材質タイルへの非適用
 
 `Create image`の設定とPromptは材質タイルへ使用しない。材質ごとの配色、模様、差分、接続規則は[地形タイル表現仕様](./TerrainTileArtSpecification.md)に従って手描きする。
 
@@ -99,7 +99,7 @@ GUIで確認した項目:
 - `Outline` / `No outline`。
 - `Color palette (Beta)`、`Max colours`。
 
-TERRAIN-01C6-Aの材質タイルには使用しない。材質タイル以外で独立タイル候補が必要になった場合だけ、対象仕様を確認して利用する。
+材質タイルには使用しない。材質タイル以外で独立タイル候補が必要になった場合だけ、対象仕様を確認して利用する。
 
 ### 4.2 Paths (Beta)
 
@@ -147,19 +147,19 @@ GUIで確認した主な項目:
 - Obliqueでは`Wall tilt`、`Floor thickness`。
 - `Outline`、`Color palette (Beta)`、`Max colours`。
 
-Wallを1〜3タイル高くする指定は可能だが、地形Wall一枚ではなく建築キット全体を生成する機能である。C6-Aの採掘可能な地形Wallには使わない。
+Wallを1〜3タイル高くする指定は可能だが、地形Wall一枚ではなく建築キット全体を生成する機能である。採掘可能な地形Wallには使わない。
 
 ## 5. PixeloramaまたはAseprite
 
 PixelLab公式は、PixeloramaをPixelLabのAI生成ツールを統合したブラウザ内ピクセルアートエディターとして案内している。デスクトップブラウザ専用である。
 
-AsepriteはPixelLabとは別のデスクトップ用ピクセルアート編集ソフトである。材質タイルはAsepriteまたはPixeloramaで最初から手描きし、レイヤー編集、透明ピクセル確認、接続位置の固定、Sprite sheet整理を行う。AsepriteのTiled Modeは上下・左右の反復を見ながら継ぎ目を確認する用途に使える。PixelLab用Aseprite拡張はC6-Aの必須要件としない。
+AsepriteはPixelLabとは別のデスクトップ用ピクセルアート編集ソフトである。材質タイルはAsepriteまたはPixeloramaで最初から手描きし、レイヤー編集、透明ピクセル確認、接続位置の固定、Sprite sheet整理を行う。AsepriteのTiled Modeは上下・左右の反復を見ながら継ぎ目を確認する用途に使える。PixelLab用Aseprite拡張は材質タイル制作の必須要件としない。
 
-C6-AではPixeloramaまたはAsepriteを次に使う。
+材質タイル制作ではPixeloramaまたはAsepriteを次に使う。
 
 - 16×16 pxの`GroundTop`、専用`WallTop`、任意の透明な`FaceBoundaryOverlay`、`Face`を1 px単位に手描きする。
 - 左右または上下へ並べたときの継ぎ目を確認し、同じ編集ツールで修正する。
-- `GroundTop`、`Face`、`FaceBoundaryOverlay`、`WallTop`外周セットの差分数は固定せず、材質定義の重み付き可変長配列へ必要な数だけ登録する。`GrassLoam`の独立した1 pxドットは共通外周を使わず、境界で密度や色が急変しないよう全組合せを検品する。大きなヒビや岩形状が境界を横断する材質は、すべての任意差分同士が接続できるよう、必要な接続座標と幅だけを合わせる。
+- `GroundTop`、`Face`、`FaceBoundaryOverlay`、`WallTop`外周セットの差分数は固定せず、材質定義の可変長配列へ必要な数だけ登録する。配列内の候補は均等確率で選ぶ。`GrassLoam`の独立した1 pxドットは共通外周を使わず、境界で密度や色が急変しないよう全組合せを検品する。大きなヒビや岩形状が境界を横断する材質は、すべての任意差分同士が接続できるよう、必要な接続座標と幅だけを合わせる。
 - `FaceBoundaryOverlay`は左右、`Face`は上下左右へ並べ、任意の差分とOverlayを合成しても継ぎ目が破綻しないことを確認する。さらにWall前面から同材質のGround崖面へ`Face`を連続配置して検品する。
 - `Top`、透明な`FaceBoundaryOverlay`、`Face`を別レイヤーまたは別ファイルとして管理し、Editor合成後も上面と断面が余分な輪郭線を挟まず直線境界でつながることを確認する。
 - 透明背景と半透明ピクセルの有無を確認する。
@@ -193,10 +193,10 @@ Farmwareへ採用するファイルは次を満たすものだけとする。
 
 必要な見た目は`Description`へ書き、PixelLabが生成後に保証できない寸法、接続、透明度、PivotはPixelorama、AsepriteまたはUnityで検証する。
 
-## 8. C6-A開始時の最小試作手順
+## 8. 材質タイルの最小試作手順
 
-1. AsepriteまたはPixeloramaを選び、代表材質`GrassLoam`の16×16 px `GroundTop`を、比較に必要な数だけ手描きして重み付き配列へ登録する。
-2. 同じ編集ソフトで16×16 px `WallTop`の材質別外周セット、透明な`FaceBoundaryOverlay`、`Face`を必要な数だけ手描きする。各要素へ1以上の整数Weightを設定する。`WallTop`内部は材質ごとに描き分けず、全材質共通・不透明の`WallInteriorDark`（初期値`#0D1016`）を使う。
+1. AsepriteまたはPixeloramaを選び、代表材質`GrassLoam`の16×16 px `GroundTop`を、比較に必要な数だけ手描きして可変長配列へ登録する。
+2. 同じ編集ソフトで16×16 px `WallTop`の材質別外周セット、透明な`FaceBoundaryOverlay`、`Face`を必要な数だけ手描きする。各配列内の候補は均等確率で選ぶ。`WallTop`内部は材質ごとに描き分けず、全材質共通・不透明の`WallInteriorDark`（初期値`#0D1016`）を使う。
 3. 指定色、Alpha、接続、反復感を検品する。
 4. Unityで`GroundTop`をGroundへ、5部品の反転・暗色化から生成した専用`WallTop`をWallへ、同じ`Face`と、必要に応じて元色または暗色化した`FaceBoundaryOverlay`をEditor合成した1段目用完成SpriteをGround崖面とWall前面へ仮接続する。
 5. `Face`の表示段数、液体越しの見え方、GroundとWallの識別性をGameビューで比較する。

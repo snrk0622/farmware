@@ -2,7 +2,7 @@
 
 - 作成日: 2026-10-24
 - 最終更新日: 2026-10-25
-- 状態: TERRAIN-01C6-Aで試作・確定する設計仕様
+- 状態: 地形タイル表現の試作・確定用設計仕様
 - 対象: GroundBlock、WallBlock、Liquidと、それらを表示するTilemap・Atlas・オートタイル
 - 正となる論理データ: [バイオーム・生態コンテンツ仕様](../GameSpecification/BiomeEcologyContentSpecification.md)、[ランダムマップ生成仕様](../GameSpecification/RandomMapGenerationSpecification.md)
 - 実装順: [実装ロードマップ](../Development/ImplementationRoadmap.md)
@@ -12,7 +12,7 @@
 
 本書は、41種類の地形材質を、少数色と単純なブロック状の模様で読み分けられるタイルとして制作するための基準を定める。全体の質感はMinecraftの材質ブロックのような簡潔さを参考にするが、既存作品の配色、模様、画素配置、固有意匠は複製しない。
 
-本書の対象は地形のBase表現である。資源、鉱床、植物、生物、建築物、舗装、耕地、積雪、苔、落葉、灰、塩殻などは、地形とは別の状態またはOverlayとして扱う。TERRAIN-01C6-Aでは代表材質を試作して仕様を確定し、全41材質の量産とRuntime切替は後続項目で行う。
+本書の対象は地形のBase表現である。資源、鉱床、植物、生物、建築物、舗装、耕地、積雪、苔、落葉、灰、塩殻などは、地形とは別の状態またはOverlayとして扱う。まず代表材質を試作して仕様を確定し、全41材質の量産とRuntime切替は後続工程で行う。
 
 ## 2. 2026-10-24以降に変更した基本方針
 
@@ -116,7 +116,7 @@ Ground崖面とWall前面の表示段数はGameビュー比較後に個別に決
 - 同じ材質の`WallTop`外周セットを複数登録する場合も、上・左右・下の幅は材質単位で共有する。外周セットごとに幅を変えて、隣接セル間で輪郭を跳ねさせない。
 - `WallTop`内部は全材質共通・不透明の`WallInteriorDark`で埋め、材質ごとの色差や透明度差を付けない。初期値は`DeepBackground`と同じ`#0D1016`とするが、用途と設定値は別に管理する。
 - `WallInteriorDark`は`WallTop`生成設定アセットのInspectorに色フィールドとして表示し、全材質分を一括して簡単に変更できるようにする。Alphaは編集対象にせず常に100%とする。色を変更した場合は、生成ツールで全材質の16接続`WallTop` Spriteを再生成する。
-- 材質ごとにInspectorへ`DarkenWallSurface`と`WallDarkenFactor`を表示する。`DarkenWallSurface`は既定で有効とし、通常の材質ブロックは機械的に暗色化する。無効時は係数1.0として元色を使う。`WallDarkenFactor`は0より大きく1以下とし、C6-Aの初期比較値を0.85とする。最終値は代表5材質のGameビュー確認で調整する。
+- 材質ごとにInspectorへ`DarkenWallSurface`と`WallDarkenFactor`を表示する。`DarkenWallSurface`は既定で有効とし、通常の材質ブロックは機械的に暗色化する。無効時は係数1.0として元色を使う。`WallDarkenFactor`は0より大きく1以下とし、初期比較値を0.85とする。最終値は代表5材質のGameビュー確認で調整する。
 - 暗色化はsRGBの8bit RGB各成分へ同じ`WallDarkenFactor`を乗算し、最も近い整数へ丸める。Alphaは変更しない。`WallTop`では材質固有の外周画素だけ、Wall用`FaceBoundaryOverlay`では不透明画素だけを対象にする。`GroundTop`、Ground用`FaceBoundaryOverlay`、`Face`、`WallInteriorDark`は暗色化しない。同じ材質では`WallTop`外周とWall用Overlayへ必ず同じ有効状態と係数を使う。
 - 制作時は共通暗色Baseと、各材質の上辺、下辺、左辺、左上角、左下角を用意する。Editor生成ツールが左側3部品を水平反転して右側部品を作り、暗色化後の外周と共通暗色Baseから上下左右4bit接続に対応する16枚の完成`WallTop` Spriteを生成する。Runtimeは材質IDと接続Maskから完成Spriteを1枚選び、辺・角をセルごとに複数描画しない。
 - 4bit接続Maskは`上 = 1`、`右 = 2`、`下 = 4`、`左 = 8`とする。bitが立つ方向は同材質Wallへ接続して外周を隠し、`0`は孤立Wall、`15`は全方向接続の内部Wallを表す。二辺がともに露出する交差領域では角部品を使い、一辺だけが露出する場合はその辺部品を端まで使う。
@@ -139,7 +139,7 @@ Ground崖面とWall前面の表示段数はGameビュー比較後に個別に決
 
 ## 6. 部位別パレットの読み方
 
-第7章の境界色の有無、`GroundTop`、`FaceBoundaryOverlay`、`Face`の色・使用比率・模様方針は、`GrassLoam`で確認した低コントラスト基準を41材質へ適用したC6-Aの基準値である。`WallTop`外周の手描き元は同じ材質の`GroundTop`パレットを使用し、Wall用の表示色はEditor生成時の機械的な暗色化で作る。以前の暗い`WallTop`専用パレットは廃止する。代表SpriteのGameビュー確認で問題が見つかった場合は、個別Spriteだけを調整せず、第7章の仕様値またはWall暗色化設定を先に更新して同じ材質・部位の全差分へ反映する。
+第7章の境界色の有無、`GroundTop`、`FaceBoundaryOverlay`、`Face`の色・使用比率・模様方針は、`GrassLoam`で確認した低コントラスト基準を41材質へ適用した基準値である。`WallTop`外周の手描き元は同じ材質の`GroundTop`パレットを使用し、Wall用の表示色はEditor生成時の機械的な暗色化で作る。以前の暗い`WallTop`専用パレットは廃止する。代表SpriteのGameビュー確認で問題が見つかった場合は、個別Spriteだけを調整せず、第7章の仕様値またはWall暗色化設定を先に更新して同じ材質・部位の全差分へ反映する。
 
 - `日本語名（案）`は制作・レビュー時に材質を読みやすくする表示名候補であり、既存仕様で固定済みの英語`TerrainMaterial ID`を変更しない。正式なゲーム内表示名として採用する場合は、ローカライズ仕様で別途確定する。
 - `イメージ画像`は参考にするネット画像をMarkdown画像リンク（`![説明](https://...)`）で貼り、表内にプレビューするための欄である。画像は選定できた材質から追加し、未選定の材質は空欄のままでよい。
@@ -227,7 +227,7 @@ Ground崖面とWall前面の表示段数はGameビュー比較後に個別に決
 | `Serpentinite` | 蛇紋岩 |  | <span style="color: #466E5C;">■</span> 影 15% `#466E5C`<br><span style="color: #4E7762;">■</span> 暗部 20% `#4E7762`<br><span style="color: #578169;">■</span> 基調 45% `#578169`<br><span style="color: #608970;">■</span> 明部 20% `#608970` | なし | <span style="color: #375448;">■</span> 影 15% `#375448`<br><span style="color: #3C5C4B;">■</span> 暗部 20% `#3C5C4B`<br><span style="color: #406451;">■</span> 基調 45% `#406451`<br><span style="color: #456C56;">■</span> 明部 20% `#456C56` | 緑色の不規則な短い脈を少数入れる |
 | `Peridotite` | かんらん岩 |  | <span style="color: #6F7B4A;">■</span> 影 15% `#6F7B4A`<br><span style="color: #79834E;">■</span> 暗部 20% `#79834E`<br><span style="color: #848D53;">■</span> 基調 45% `#848D53`<br><span style="color: #8E9658;">■</span> 明部 20% `#8E9658` | なし | <span style="color: #565F3B;">■</span> 影 15% `#565F3B`<br><span style="color: #5D673D;">■</span> 暗部 20% `#5D673D`<br><span style="color: #656F3F;">■</span> 基調 45% `#656F3F`<br><span style="color: #6C7640;">■</span> 明部 20% `#6C7640` | 黄緑〜オリーブの粗い鉱物粒を配置する |
 
-C6-Aの確定値は、`境界色`あり17材質、`なし`24材質である。境界の有無は地質学的な厳密分類ではなく、16×16 pxのゲーム画面で上面から断面への変化を見せる価値があるか、追加Spriteの制作費に見合うかで判断した。境界あり材質は同じ`FaceBoundaryOverlay`入力をGround崖面とWall前面で共有するが、Editor合成結果はGround用の元色版とWall用の暗色化版に分ける。用途別の手描きOverlayは設けない。今後`境界色`欄の有無を変更する場合は、単なるアート調整ではなくC6-A仕様変更として扱う。
+本仕様の確定値は、`境界色`あり17材質、`なし`24材質である。境界の有無は地質学的な厳密分類ではなく、16×16 pxのゲーム画面で上面から断面への変化を見せる価値があるか、追加Spriteの制作費に見合うかで判断した。境界あり材質は同じ`FaceBoundaryOverlay`入力をGround崖面とWall前面で共有するが、Editor合成結果はGround用の元色版とWall用の暗色化版に分ける。用途別の手描きOverlayは設けない。今後`境界色`欄の有無を変更する場合は、単なるアート調整ではなく地形タイル表現の仕様変更として扱う。
 
 ### 7.6 `WallTop`外周の手描き元パレットと暗色化
 
@@ -235,7 +235,7 @@ C6-Aの確定値は、`境界色`あり17材質、`なし`24材質である。�
 
 `WallTop`は`GroundTop`と同じ完成Spriteを流用するのではない。上辺、下辺、左辺、左上角、左下角の5部品を外周専用の画素配置で手描きし、同じ材質の`GroundTop`が持つ粒、溝、亀裂、斑晶などの模様方針を外周幅の範囲で簡略化して引き継ぐ。右辺、右上角、右下角はEditorが左側部品を水平反転して生成する。
 
-通常の材質ブロックは`DarkenWallSurface = true`を基本とし、`WallTop`外周とWall用`FaceBoundaryOverlay`へ同じ`WallDarkenFactor`を適用する。C6-Aの初期比較値は0.85とする。暗色化後のHEXは仕様表へ手入力せず、第4.3節の決定論的な変換結果を正とする。発光など、暗色化が材質の意味を損なう例外だけを`DarkenWallSurface = false`とし、その理由を材質設定へ記録する。
+通常の材質ブロックは`DarkenWallSurface = true`を基本とし、`WallTop`外周とWall用`FaceBoundaryOverlay`へ同じ`WallDarkenFactor`を適用する。初期比較値は0.85とする。暗色化後のHEXは仕様表へ手入力せず、第4.3節の決定論的な変換結果を正とする。発光など、暗色化が材質の意味を損なう例外だけを`DarkenWallSurface = false`とし、その理由を材質設定へ記録する。
 
 初期比較値0.85を使った`GrassLoam`の例を次に示す。右列はEditorの生成結果であり、手描きパレットではない。
 
@@ -257,7 +257,7 @@ C6-Aの確定値は、`境界色`あり17材質、`なし`24材質である。�
 
 ## 9. 描画レイヤー
 
-奥から手前への基本順序は次とする。実際のTilemap数はC6-Aでバッチ数と更新範囲を比較して決める。
+奥から手前への基本順序は次とする。実際のTilemap数は試作時にバッチ数と更新範囲を比較して決める。
 
 | 順序 | 表示内容 |
 | ---: | --- |
@@ -289,7 +289,7 @@ C6-Aの確定値は、`境界色`あり17材質、`なし`24材質である。�
 
 Editor生成ツールは完成PNGを`Point`、16 PPU、非圧縮、Mip Mapなし、sRGB、`Full Rect`、中央Pivotの単一SpriteとしてImportする。入力または設定の画像Fingerprintを材質ごとに記録し、画像内容、配列順、外周幅、暗色化、共通内部色、出力先のいずれかが変わった場合は要再生成と表示する。再生成時は同じパスを上書きして`.meta`とGUIDを維持し、前回その材質が生成した記録済みPNGのうち今回不要になったものだけを削除する。手描き入力、記録外Asset、フォルダーは削除しない。
 
-## 11. C6-Aで先に作る代表材質
+## 11. 先に作る代表材質
 
 最初から41材質を量産せず、次の5材質で四部構成を検証する。
 
@@ -327,7 +327,7 @@ Editor生成ツールは完成PNGを`Point`、16 PPU、非圧縮、Mip Mapなし
 4. **細道と凹凸輪郭**
    細道の要否は以前の合意どおり後で確認する。不規則な凹凸輪郭も初期実装には含めない。
 
-## 13. C6-Aの完了条件
+## 13. 地形タイル試作の完了条件
 
 - 四部構成、1段目からの`Face`使用、任意の`FaceBoundaryOverlay`とのEditor合成を、代表5材質の16×16 px手描きSpriteで確認した。
 - `GroundTop`と、通常色の手描き元外周を機械的に暗色化して共通暗色内部と合成した`WallTop`を使ったGameビューで、GroundとWallを識別できることを人間が確認した。
@@ -337,4 +337,4 @@ Editor生成ツールは完成PNGを`Point`、16 PPU、非圧縮、Mip Mapなし
 - 41材質表の確定済み境界有無と、Ground崖面・Wall前面でOverlay入力を共有し、Ground用元色合成結果とWall用暗色化合成結果を使い分ける契約どおりに、境界あり17材質・なし24材質を扱えることを確認した。
 - 41材質表の確定`GroundTop`・`FaceBoundaryOverlay`・`Face`パレット、7.6節の`WallTop`手描き元パレットと暗色化規則、各部位の使用比率、模様方針どおりに代表Spriteを制作し、人間がGameビューで確認した。`GrassLoam`で採用した部位別コントラスト基準を残り40材質へ適用し、仕様値を変更した場合は表と全該当Spriteを同時に更新した。
 - Atlas、Pivot、描画Bounds、カリング余白、Dirty更新、Floating Origin、Pixel Perfect表示の実装条件を記録した。
-- 白い旧境界ハイライトを新表示で不要と判断できた。削除自体はC6-Dの表示置換と同じ変更単位で行う。
+- 白い旧境界ハイライトを新表示で不要と判断できた。削除自体はRuntime表示を新方式へ置換する変更単位で行う。

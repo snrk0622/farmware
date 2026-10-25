@@ -1,4 +1,4 @@
-// このファイルは、C6-Aの地形材質入力を16×16 pxの完成画素へ合成する純粋処理を提供します。
+// このファイルは、地形材質入力を16×16 pxの完成画素へ合成する純粋処理を提供します。
 // AssetDatabaseやTextureImporterへ依存しないため、接続Mask、反転、暗色化、Overlay合成をEditModeテストで直接検証できます。
 
 using System;

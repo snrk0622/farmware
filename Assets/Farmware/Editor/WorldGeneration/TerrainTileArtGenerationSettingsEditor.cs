@@ -12,7 +12,7 @@ using UnityEngine;
 namespace Farmware.WorldGeneration.Editor
 {
     /// <summary>
-    /// C6-A地形タイル生成設定へ、段階的な代表材質試作と41材質一括生成の入口を追加します。
+    /// 地形タイル生成設定へ、段階的な代表材質試作と41材質一括生成の入口を追加します。
     /// UndoとAsset保存は標準SerializedObjectへ任せ、生成時だけTerrainTileArtGeneratorを呼びます。
     /// </summary>
     [CustomEditor(typeof(TerrainTileArtGenerationSettings))]
@@ -133,7 +133,7 @@ namespace Farmware.WorldGeneration.Editor
             }
 
             EditorGUILayout.Space(10f);
-            EditorGUILayout.LabelField("C6-A 生成ツール", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("地形タイル生成ツール", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox(
                 "入力Spriteは16×16 px、Read/Write有効、Alpha 0/255で用意してください。"
                 + " 生成先の同名PNGは更新しますが、手描き入力は変更しません。",

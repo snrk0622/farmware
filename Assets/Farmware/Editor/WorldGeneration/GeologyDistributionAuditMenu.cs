@@ -34,7 +34,7 @@ namespace Farmware.WorldGeneration.Editor
             }
 
             isRunning = true;
-            Debug.Log("[Farmware] TERRAIN-01C2 地質分布監査を開始しました。Editor操作は継続できます。");
+            Debug.Log("[Farmware] 地質分布監査を開始しました。Editor操作は継続できます。");
             try
             {
                 WorldGenerationDistributionAuditSettings settings =

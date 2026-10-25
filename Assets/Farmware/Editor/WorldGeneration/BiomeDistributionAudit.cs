@@ -366,11 +366,11 @@ namespace Farmware.WorldGeneration.Editor
         private string BuildReport()
         {
             var builder = new StringBuilder(32768);
-            builder.AppendLine("C5-E Biome分布・境界監査");
+            builder.AppendLine("Biome分布・境界監査");
             builder.AppendLine($"Seed={SeedCount}, Chunks={TotalChunks}, Tiles={TotalTiles}, Land={LandTiles}, Ocean={OceanTiles}");
             builder.AppendLine($"LandEdges={TotalLandAdjacencyEdges}, DifferentEdges={DifferentBiomeEdges}, Signature=0x{Signature:X16}");
             builder.AppendLine($"VolcanicCore={VolcanicCoreSelections}, VolcanicFringe={VolcanicFringeSelections}, MarshPromotion={FreshwaterMarshPromotions}, SwampPromotion={SwampForestPromotions}");
-            builder.AppendLine("判定注記: C5-Eでは景観の合否閾値を新設せず、C6後のC7調整で比較できる実測値を固定します。");
+            builder.AppendLine("判定注記: この監査では景観の合否閾値を新設せず、後続の景観調整で比較できる実測値を固定します。");
             builder.AppendLine("Biome別: Area(率) / Candidate(陸地率) / NormalWin(陸地率) / Regions / MaxArea / Small(1-3) / Clipped / 平均Fit(T,M,E,W,R,G,V,C) / 平均Score寄与(T,M,E,W,R,G,V,C)");
             for (int stableId = BiomeStableIds.First; stableId <= BiomeStableIds.Last; stableId++)
             {

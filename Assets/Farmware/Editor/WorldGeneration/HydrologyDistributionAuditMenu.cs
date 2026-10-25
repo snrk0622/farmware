@@ -38,7 +38,7 @@ namespace Farmware.WorldGeneration.Editor
             }
 
             isRunning = true;
-            Debug.Log("[Farmware] TERRAIN-01C3-D2 水文分布監査を開始しました。Editor操作は継続できます。");
+            Debug.Log("[Farmware] 水文分布監査を開始しました。Editor操作は継続できます。");
             try
             {
                 HydrologyDistributionAuditSettings settings =
@@ -82,7 +82,7 @@ namespace Farmware.WorldGeneration.Editor
             }
 
             isDerivedRunning = true;
-            Debug.Log("[Farmware] TERRAIN-01C4-E1b 派生水文分布監査を開始しました。Editor操作は継続できます。");
+            Debug.Log("[Farmware] 派生水文分布監査を開始しました。Editor操作は継続できます。");
             try
             {
                 HydrologyDistributionAuditSettings settings =

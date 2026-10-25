@@ -1,4 +1,4 @@
-// このファイルは、C6-A地形タイルEditor生成の画素規則、Sprite数、入力拒否条件を検証します。
+// このファイルは、地形タイルEditor生成の画素規則、Sprite数、入力拒否条件を検証します。
 // 実ワールドやSceneを生成せず、16×16 pxの小さな入力だけで反転・接続・暗色化の退行を検出します。
 
 using System;
@@ -576,7 +576,7 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 生成PNGがC6-Aの完成Sprite向けImport設定になっていることを確認します。
+        /// 生成PNGが完成Sprite向けImport設定になっていることを確認します。
         /// </summary>
         /// <param name="assetPath">生成済みPNGのプロジェクト相対パスです。</param>
         private static void AssertGeneratedImporter(string assetPath)

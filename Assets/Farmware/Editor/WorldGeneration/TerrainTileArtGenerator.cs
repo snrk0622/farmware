@@ -1,4 +1,4 @@
-// このファイルは、C6-Aの地形材質設定を検証し、手描き入力から完成PNG Spriteを生成します。
+// このファイルは、地形材質設定を検証し、手描き入力から完成PNG Spriteを生成します。
 // 画素規則はTerrainTileArtPixelComposerへ分離し、このクラスはAsset読込、Fingerprint、出力、Import設定を担当します。
 
 using System;
@@ -200,7 +200,7 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>
         /// 設定アセット全体を検証し、41材質の準備状況と全入力の問題をまとめます。
         /// </summary>
-        /// <param name="settings">検証するC6-A設定アセットです。</param>
+        /// <param name="settings">検証する地形タイル生成設定アセットです。</param>
         /// <returns>エラーと警告を追加順で保持するReportです。</returns>
         public static TerrainTileArtValidationReport ValidateAll(
             TerrainTileArtGenerationSettings settings)
@@ -216,7 +216,7 @@ namespace Farmware.WorldGeneration.Editor
             {
                 report.AddWarning(
                     $"最終仕様は41材質ですが、現在の登録数は{materials.Length}件です。"
-                    + " C6-Aの代表材質だけを試す間は生成できます。");
+                    + " 代表材質だけを試す間は生成できます。");
             }
 
             HashSet<string> materialIds = new HashSet<string>(StringComparer.Ordinal);
@@ -243,7 +243,7 @@ namespace Farmware.WorldGeneration.Editor
         /// 選択した1材質と共通設定だけを検証します。
         /// ほかの未制作材質が空でも、代表材質から段階的に試作できるようにします。
         /// </summary>
-        /// <param name="settings">検証するC6-A設定アセットです。</param>
+        /// <param name="settings">検証する地形タイル生成設定アセットです。</param>
         /// <param name="materialIndex">Materials配列内の0始まりの対象位置です。</param>
         /// <returns>選択材質の生成可否を示すReportです。</returns>
         public static TerrainTileArtValidationReport ValidateMaterial(

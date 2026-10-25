@@ -39,7 +39,7 @@ namespace Farmware.Authoring
             [SerializeField] private string displayName = string.Empty;
 
             // 数値はセーブ互換境界になるため、既存分類の値を後から変更しません。
-            [Tooltip("定義の分類です。現在この配列へ追加できるのはアイテム、設備、施設、レシピ、動物種です。地形4分類はTERRAIN-01Cまで組み込み定義だけを使用し、手動追加するとBakeエラーになります。作成後は意味を変更しません。")]
+            [Tooltip("定義の分類です。現在この配列へ追加できるのはアイテム、設備、施設、レシピ、動物種です。地形4分類は組み込み定義だけを使用し、手動追加するとBakeエラーになります。作成後は意味を変更しません。")]
             [SerializeField] private DefinitionKind kind = DefinitionKind.None;
 
             // GUIDは定義の永続キーなので、名前変更や配列並べ替えでも同じ文字列を維持します。
@@ -380,7 +380,7 @@ namespace Farmware.Authoring
                     ? $"Definition[{definitionIndex}]"
                     : $"Definition[{definitionIndex}] ({displayName})";
                 throw new InvalidOperationException(
-                    $"地形分類はTERRAIN-01Cまで組み込み定義だけを使用してください: {definitionLabel}, 分類 {kind}");
+                    $"地形分類は組み込み定義だけを使用してください: {definitionLabel}, 分類 {kind}");
             }
 
             /// <summary>

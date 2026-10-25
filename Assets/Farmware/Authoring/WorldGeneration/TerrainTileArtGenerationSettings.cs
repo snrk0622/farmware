@@ -1,4 +1,4 @@
-// このファイルは、C6-Aの地形材質Sprite生成に必要な手描き入力と調整値を保持します。
+// このファイルは、地形材質Sprite生成に必要な手描き入力と調整値を保持します。
 // Runtimeの地形状態は保持せず、Editor生成ツールが完成Spriteを作るためのAuthoringアセットとしてだけ使用します。
 
 using System;
@@ -184,7 +184,7 @@ namespace Farmware.WorldGeneration.Authoring
     }
 
     /// <summary>
-    /// 全材質で共有するWall内部色、生成先、材質別入力を保持するC6-A用設定アセットです。
+    /// 全材質で共有するWall内部色、生成先、材質別入力を保持する地形タイル生成用設定アセットです。
     /// ProjectビューのCreateメニューから作成し、専用Inspectorの検証・生成ボタンで使用します。
     /// </summary>
     [CreateAssetMenu(
@@ -205,8 +205,8 @@ namespace Farmware.WorldGeneration.Authoring
         [SerializeField] private string outputRootFolder =
             "Assets/Farmware/Art/Generated/TerrainTiles";
 
-        // 41材質を最終的に登録する可変長配列です。C6-Aでは代表材質から順に設定できます。
-        [Tooltip("材質別の手描き入力と生成設定です。C6-Aでは代表5材質から登録し、最終的に41材質を管理します。")]
+        // 41材質を最終的に登録する可変長配列です。まず代表材質から順に設定できます。
+        [Tooltip("材質別の手描き入力と生成設定です。まず代表5材質から登録し、最終的に41材質を管理します。")]
         [SerializeField] private TerrainMaterialArtSource[] materials =
             Array.Empty<TerrainMaterialArtSource>();
 

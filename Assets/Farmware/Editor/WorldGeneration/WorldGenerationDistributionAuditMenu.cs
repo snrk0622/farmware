@@ -39,7 +39,7 @@ namespace Farmware.WorldGeneration.Editor
             }
 
             isRunning = true;
-            Debug.Log("[Farmware] C5-E Biome分布・境界監査を開始しました。Editor操作は継続できます。");
+            Debug.Log("[Farmware] Biome分布・境界監査を開始しました。Editor操作は継続できます。");
 
             try
             {
@@ -52,7 +52,7 @@ namespace Farmware.WorldGeneration.Editor
                     () => BiomeDistributionAnalyzer.Analyze(settings));
                 stopwatch.Stop();
                 LogReport(result.Report);
-                Debug.Log($"[Farmware] C5-E Biome分布・境界監査を完了しました。実行時間={stopwatch.Elapsed.TotalSeconds:F1}秒");
+                Debug.Log($"[Farmware] Biome分布・境界監査を完了しました。実行時間={stopwatch.Elapsed.TotalSeconds:F1}秒");
             }
             catch (Exception exception)
             {
@@ -89,7 +89,7 @@ namespace Farmware.WorldGeneration.Editor
                 if (chunk.Length > 0
                     && chunk.Length + line.Length + Environment.NewLine.Length > MaximumCharactersPerLog)
                 {
-                    Debug.Log($"[Farmware] C5-E監査レポート part {partNumber}\n{chunk}");
+                    Debug.Log($"[Farmware] Biome監査レポート part {partNumber}\n{chunk}");
                     chunk.Clear();
                     partNumber++;
                 }
@@ -99,7 +99,7 @@ namespace Farmware.WorldGeneration.Editor
 
             if (chunk.Length > 0)
             {
-                Debug.Log($"[Farmware] C5-E監査レポート part {partNumber}\n{chunk}");
+                Debug.Log($"[Farmware] Biome監査レポート part {partNumber}\n{chunk}");
             }
         }
     }
