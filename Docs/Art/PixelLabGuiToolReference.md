@@ -25,7 +25,7 @@ GUIに存在しない項目は、Promptで表現できる美術要件と、Unity
 
 ## 2. 地形制作での位置付け
 
-PixelLabの`Tiles`、`Paths`、`Tileset`、`Building`は、材質タイル制作には使用しない。材質タイルの`GroundTop`、専用`WallTop`、任意の透明な`FaceBoundaryOverlay`、`Face`はAsepriteまたはPixeloramaで1 px単位に手描きする。`WallTop`外周は上辺・下辺・左辺・左上角・左下角の5部品を作り、Editorが右側を水平反転で補って機械的に暗色化する。断面は1段目から`Face`を使い、境界ありではEditorがGround用の元色Overlay版とWall用の暗色化Overlay版を事前合成する。41材質の境界有無は境界あり17材質・なし24材質で確定し、境界あり材質は同じOverlay入力をGround崖面とWall前面で共有する。細道や建築物など、材質タイル以外の用途でPixelLabを使うかは、該当機能の制作開始時に別途判断する。
+PixelLabの`Tiles`、`Paths`、`Tileset`、`Building`は、材質タイル制作には使用しない。材質タイルの`GroundTop`、任意の透明な`FaceBoundaryOverlay`、`Face`はAsepriteまたはPixeloramaで1 px単位に手描きする。Wall上面は専用Spriteを作らず、同じ材質の`GroundTop`を表示時だけ係数0.85で暗色化する。Ground／Wallの形状境界には既存14形状の共通境界ハイライトを使い、異なる材質のWall同士も接続扱いにする。断面は1段目から`Face`を使い、境界ありではEditorがGround用の元色Overlay版とWall用の暗色化Overlay版を事前合成する。41材質の境界有無は境界あり17材質・なし24材質で確定し、境界あり材質は同じOverlay入力をGround崖面とWall前面で共有する。細道や建築物など、材質タイル以外の用途でPixelLabを使うかは、該当機能の制作開始時に別途判断する。
 
 ## 3. Creator — Create image
 
@@ -130,7 +130,7 @@ GUIで確認した主な項目:
 
 32px・Square top-downで確認した`Terrain height`のGUI上限は4px、32px・Obliqueでは3pxだった。選択条件により上限が変わる可能性があるため、他寸法へ一般化しない。少なくとも、20〜32pxの独立したGround崖面やWall前面をこの値だけで作る前提にはしない。
 
-また、現行のFarmware仕様は斜め判定による地形輪郭の内角・外角専用Spriteを作らないため、16-tile corner setをそのまま採用しない。Groundの`GroundTop`とWallの`WallTop`は別Spriteとして手描きする。`WallTop`は材質ごとに変更可能な外周幅と、全材質共通・不透明の`WallInteriorDark`（初期値`#0D1016`）で構成し、初期値は上3 px・左右4 px・下5 px・中央8×8 pxとする。手描きした辺・角からEditorツールが4bitの16接続Spriteを生成する。同材質Wallだけを接続し、異材質Wall間では双方の外周を表示する。`WallInteriorDark`は生成設定アセットのInspectorから全材質共通値として変更できる。
+また、現行のFarmware仕様は一般的な16-tile corner setを材質ごとに生成しない。GroundとWallは同じ材質の`GroundTop` Spriteを共有し、Wall表示だけRGBを初期値0.85で暗色化する。形状境界には全材質共通の既存14形状境界ハイライトを使い、8近傍47状態を基本形と90度回転から選ぶ。材質が異なるWall同士も接続扱いとし、共有辺へ境界を出さない。動的な投影影はURP 2D Rendererの`Light 2D`と`Shadow Caster 2D`で表現する。
 
 ### 4.4 Building (Beta)
 
@@ -157,9 +157,9 @@ AsepriteはPixelLabとは別のデスクトップ用ピクセルアート編集�
 
 材質タイル制作ではPixeloramaまたはAsepriteを次に使う。
 
-- 16×16 pxの`GroundTop`、専用`WallTop`、任意の透明な`FaceBoundaryOverlay`、`Face`を1 px単位に手描きする。
+- 16×16 pxの`GroundTop`、任意の透明な`FaceBoundaryOverlay`、`Face`を1 px単位に手描きする。Wall上面は`GroundTop`を再利用するため、専用素材を作らない。
 - 左右または上下へ並べたときの継ぎ目を確認し、同じ編集ツールで修正する。
-- `GroundTop`、`Face`、`FaceBoundaryOverlay`、`WallTop`外周セットの差分数は固定せず、材質定義の可変長配列へ必要な数だけ登録する。配列内の候補は均等確率で選ぶ。`GrassLoam`の独立した1 pxドットは共通外周を使わず、境界で密度や色が急変しないよう全組合せを検品する。大きなヒビや岩形状が境界を横断する材質は、すべての任意差分同士が接続できるよう、必要な接続座標と幅だけを合わせる。
+- `GroundTop`、`Face`、`FaceBoundaryOverlay`の差分数は固定せず、材質定義の可変長配列へ必要な数だけ登録する。配列内の候補は均等確率で選ぶ。`GrassLoam`の独立した1 pxドットは共通外周を使わず、境界で密度や色が急変しないよう全組合せを検品する。大きなヒビや岩形状が境界を横断する材質は、すべての任意差分同士が接続できるよう、必要な接続座標と幅だけを合わせる。
 - `FaceBoundaryOverlay`は左右、`Face`は上下左右へ並べ、任意の差分とOverlayを合成しても継ぎ目が破綻しないことを確認する。さらにWall前面から同材質のGround崖面へ`Face`を連続配置して検品する。
 - `Top`、透明な`FaceBoundaryOverlay`、`Face`を別レイヤーまたは別ファイルとして管理し、Editor合成後も上面と断面が余分な輪郭線を挟まず直線境界でつながることを確認する。
 - 透明背景と半透明ピクセルの有無を確認する。
@@ -196,9 +196,9 @@ Farmwareへ採用するファイルは次を満たすものだけとする。
 ## 8. 材質タイルの最小試作手順
 
 1. AsepriteまたはPixeloramaを選び、代表材質`GrassLoam`の16×16 px `GroundTop`を、比較に必要な数だけ手描きして可変長配列へ登録する。
-2. 同じ編集ソフトで16×16 px `WallTop`の材質別外周セット、透明な`FaceBoundaryOverlay`、`Face`を必要な数だけ手描きする。各配列内の候補は均等確率で選ぶ。`WallTop`内部は材質ごとに描き分けず、全材質共通・不透明の`WallInteriorDark`（初期値`#0D1016`）を使う。
+2. 同じ編集ソフトで16×16 pxの透明な`FaceBoundaryOverlay`と`Face`を必要な数だけ手描きする。各配列内の候補は均等確率で選ぶ。専用`WallTop`、材質別外周、共通暗色内部は作らない。
 3. 指定色、Alpha、接続、反復感を検品する。
-4. Unityで`GroundTop`をGroundへ、5部品の反転・暗色化から生成した専用`WallTop`をWallへ、同じ`Face`と、必要に応じて元色または暗色化した`FaceBoundaryOverlay`をEditor合成した1段目用完成SpriteをGround崖面とWall前面へ仮接続する。
+4. Unityで同じ`GroundTop`をGroundとWallへ接続し、Wall表示だけを0.85で暗色化する。同じ`Face`と、必要に応じて元色または暗色化した`FaceBoundaryOverlay`をEditor合成した1段目用完成SpriteをGround崖面とWall前面へ仮接続する。既存14形状の共通境界ハイライトをGround／Wall領域の外周・内角へ重ね、Wall接続では材質IDを比較しない。
 5. `Face`の表示段数、液体越しの見え方、GroundとWallの識別性をGameビューで比較する。
 6. `GrassLoam`が成立してから、`DesertSand`、`Sandstone`、`Granite`、`Basalt`へ広げる。
 

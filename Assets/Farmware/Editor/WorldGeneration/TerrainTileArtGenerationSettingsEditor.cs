@@ -1,9 +1,8 @@
 // このファイルは、TerrainTileArtGenerationSettingsを編集・検証・生成する専用Inspectorを提供します。
-// 通常のSerializedProperty表示を維持しながら、選択材質のSprite数、要再生成状態、生成操作を追加します。
+// Unity標準の配列編集を維持しながら、選択材質のSprite数、壁暗化設定、生成結果を見やすく表示します。
 
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.IO;
 using Farmware.WorldGeneration.Authoring;
 using UnityEditor;
@@ -12,82 +11,61 @@ using UnityEngine;
 namespace Farmware.WorldGeneration.Editor
 {
     /// <summary>
-    /// 地形タイル生成設定へ、段階的な代表材質試作と41材質一括生成の入口を追加します。
-    /// UndoとAsset保存は標準SerializedObjectへ任せ、生成時だけTerrainTileArtGeneratorを呼びます。
+    /// 地形タイル生成設定へ、代表材質の試作と41材質一括生成の入口を追加します。
+    /// GroundTopは複製せず、FaceBoundaryのGround／Wall用合成結果だけを一覧表示します。
     /// </summary>
     [CustomEditor(typeof(TerrainTileArtGenerationSettings))]
     public sealed class TerrainTileArtGenerationSettingsEditor : UnityEditor.Editor
     {
-        // Inspector幅に応じて折り返しつつ、16×16 pxの模様を確認できる表示サイズです。
+        // 16×16 pxのドットを4倍で確認するプレビュー表示サイズです。
         private const float PreviewImageSize = 64f;
 
-        // 16接続を4×4で読みやすく並べるため、横方向の最大セル数を4に固定します。
+        // Inspectorを縦長にしすぎず各画像も読めるよう、横方向の最大セル数を4に固定します。
         private const int MaximumPreviewColumns = 4;
 
-        // Inspector内でプレビュー・単体生成するMaterials配列位置です。設定Asset自体へ制作上不要な選択状態を保存しません。
-        [Tooltip("専用Inspectorでプレビュー・単体生成する材質Indexです。地形材質設定アセットやRuntime結果には保存しません。")]
-        [SerializeField] private int selectedMaterialIndex;
+        // Inspector内でプレビュー・単体生成するMaterials配列位置です。Assetには保存しません。
+        private int selectedMaterialIndex;
 
-        // 最後にボタンで実行した検証結果です。全Repaintで入力Textureを読み直さないよう明示操作時だけ更新します。
+        // 最後にボタンで実行した検証結果です。毎Repaintで入力Textureを読み直さないため保持します。
         private TerrainTileArtValidationReport lastValidationReport;
 
-        // 直前の生成または検証結果を短く表示し、操作が完了した材質と出力枚数を確認できるようにします。
+        // 直前の生成または検証結果を短く表示します。
         private string lastOperationMessage;
 
-        // 生成結果一覧全体の開閉状態です。大量のSprite設定を編集するときは閉じてInspectorを短くできます。
+        // 生成結果一覧全体と用途別一覧の開閉状態です。
         private bool showGeneratedPreviews = true;
-
-        // 16接続WallTop一覧の開閉状態です。
-        private bool showWallTopPreviews = true;
-
-        // Ground用FaceBoundary合成結果一覧の開閉状態です。
         private bool showGroundBoundaryPreviews = true;
-
-        // Wall用FaceBoundary合成結果一覧の開閉状態です。
         private bool showWallBoundaryPreviews = true;
 
-        // 現在キャッシュしているMaterials配列位置です。選択変更時だけAssetDatabaseから読み直します。
+        // 現在キャッシュしている材質位置とFingerprintです。
         private int cachedPreviewMaterialIndex = -1;
-
-        // 現在キャッシュしている正常生成Fingerprintです。再生成後に一覧を自動更新するため使用します。
         private string cachedPreviewFingerprint;
 
-        // WallTop生成物をMask順で保持し、OnInspectorGUIの再描画ごとのAsset検索を避けます。
-        private readonly List<GeneratedPreviewEntry> wallTopPreviewEntries =
-            new List<GeneratedPreviewEntry>();
-
-        // Ground用FaceBoundary生成物をFace・Boundary順で保持します。
+        // Ground／Wall用FaceBoundary生成物を用途別に保持します。
         private readonly List<GeneratedPreviewEntry> groundBoundaryPreviewEntries =
             new List<GeneratedPreviewEntry>();
-
-        // Wall用FaceBoundary生成物をFace・Boundary順で保持します。
         private readonly List<GeneratedPreviewEntry> wallBoundaryPreviewEntries =
             new List<GeneratedPreviewEntry>();
 
-        // 各プレビューセルの短い識別名を中央揃えで表示するため、一度だけ作るGUIStyleです。
+        // 各プレビューセルの識別名を中央揃えで表示するため、一度だけ作るGUIStyleです。
         private GUIStyle previewLabelStyle;
 
-        /// <summary>
-        /// 生成済みSpriteの表示名、選択用GUIContent、Asset参照をまとめます。
-        /// Inspector再描画のたびに文字列やGUIContentを作り直さないためのEditor専用キャッシュです。
-        /// </summary>
+        /// <summary>生成済みSpriteの表示名、選択用内容、Asset参照をまとめます。</summary>
         private sealed class GeneratedPreviewEntry
         {
-            /// <summary>セル上部へ表示するMaskまたはFace・Boundary番号です。</summary>
+            /// <summary>セル上部へ表示するFace・Boundary番号です。</summary>
             public string Label { get; }
 
-            /// <summary>Projectビューで選択する生成済みSpriteです。削除済みの場合はnullです。</summary>
+            /// <summary>Projectビューで選択する生成済みSpriteです。</summary>
             public Sprite Sprite { get; }
 
-            /// <summary>AssetパスTooltipを持つ、再利用可能な透明ボタン内容です。</summary>
+            /// <summary>AssetパスTooltipを持つ透明ボタン内容です。</summary>
             public GUIContent ButtonContent { get; }
 
-            /// <summary>
-            /// 生成済みSpriteをInspectorの1セルとして表示できる形へまとめます。
-            /// </summary>
-            /// <param name="label">Maskまたは差分番号を示す短い表示名です。</param>
+            /// <summary>生成済みSpriteをInspectorの1セルとして表示できる形へまとめます。</summary>
+            /// <param name="label">差分番号を示す短い表示名です。</param>
             /// <param name="sprite">AssetDatabaseから読み込んだ完成Spriteです。</param>
-            /// <param name="assetPath">マウスを重ねたときに表示するプロジェクト相対パスです。</param>
+            /// <param name="assetPath">Tooltipへ表示するAssetパスです。</param>
             public GeneratedPreviewEntry(string label, Sprite sprite, string assetPath)
             {
                 Label = label;
@@ -96,9 +74,7 @@ namespace Farmware.WorldGeneration.Editor
             }
         }
 
-        /// <summary>
-        /// プレビューの識別名を中央揃え・折り返しで描くStyleを必要になった時点で一度だけ作ります。
-        /// </summary>
+        /// <summary>プレビュー識別名用Styleを必要になった時点で一度だけ作ります。</summary>
         private GUIStyle PreviewLabelStyle
         {
             get
@@ -116,27 +92,27 @@ namespace Farmware.WorldGeneration.Editor
             }
         }
 
-        /// <summary>
-        /// UnityがInspectorを描画するときに呼び、標準設定、材質プレビュー、検証・生成ボタンを順に表示します。
-        /// </summary>
+        /// <summary>UnityがInspectorを描画するときに設定、要約、操作、結果を順に表示します。</summary>
         public override void OnInspectorGUI()
         {
             TerrainTileArtGenerationSettings settings =
                 (TerrainTileArtGenerationSettings)target;
 
-            // 標準描画を使うことで、可変長配列の追加・削除、Object Picker、Undo、Prefab差分をUnity標準挙動に揃えます。
+            // 標準描画に任せることで、可変長配列、Object Picker、UndoをUnity標準挙動に揃えます。
             bool changed = DrawDefaultInspector();
             if (changed)
             {
                 lastValidationReport = null;
                 lastOperationMessage = "設定が変更されました。対象材質を再検証してください。";
+                InvalidatePreviewCache();
             }
 
             EditorGUILayout.Space(10f);
             EditorGUILayout.LabelField("地形タイル生成ツール", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox(
-                "入力Spriteは16×16 px、Read/Write有効、Alpha 0/255で用意してください。"
-                + " 生成先の同名PNGは更新しますが、手描き入力は変更しません。",
+                "GroundTopはGroundとWallで同じ入力Spriteを使い、生成ツールでは複製しません。"
+                + " Wall上面は表示時Tint、Wall用FaceBoundaryOverlayは生成時に同じ係数で暗くします。"
+                + " 入力は16×16 px、Read/Write有効、Alpha 0/255で用意してください。",
                 MessageType.Info);
 
             TerrainMaterialArtSource[] materials = settings.Materials;
@@ -148,15 +124,11 @@ namespace Farmware.WorldGeneration.Editor
                 return;
             }
 
-            selectedMaterialIndex = Mathf.Clamp(
-                selectedMaterialIndex,
-                0,
-                materials.Length - 1);
+            selectedMaterialIndex = Mathf.Clamp(selectedMaterialIndex, 0, materials.Length - 1);
             selectedMaterialIndex = EditorGUILayout.Popup(
                 "対象材質",
                 selectedMaterialIndex,
                 BuildMaterialChoices(materials));
-
             TerrainMaterialArtSource selectedMaterial = materials[selectedMaterialIndex];
             DrawSelectedMaterialSummary(settings, selectedMaterial);
             DrawOperationButtons(settings);
@@ -164,10 +136,8 @@ namespace Farmware.WorldGeneration.Editor
             DrawGeneratedPreviews(selectedMaterial);
         }
 
-        /// <summary>
-        /// 材質ID、日本語名、Sprite数、要再生成状態を選択材質の下へ表示します。
-        /// </summary>
-        /// <param name="settings">共通内部色と出力先を持つ設定アセットです。</param>
+        /// <summary>選択材質のSprite数、暗化方法、要再生成状態を表示します。</summary>
+        /// <param name="settings">出力先を持つ設定アセットです。</param>
         /// <param name="material">Inspectorで選択中の材質です。</param>
         private static void DrawSelectedMaterialSummary(
             TerrainTileArtGenerationSettings settings,
@@ -186,10 +156,12 @@ namespace Farmware.WorldGeneration.Editor
                 $"手描き {counts.HandDrawnInputCount} / 生成 {counts.GeneratedOutputCount} / Runtime候補 {counts.RuntimeCandidateCount}");
             EditorGUILayout.LabelField(
                 "生成内訳",
-                $"WallTop {counts.WallTopOutputCount} / Ground境界 {counts.GroundBoundaryOutputCount} / Wall境界 {counts.WallBoundaryOutputCount}");
+                $"Ground境界 {counts.GroundBoundaryOutputCount} / Wall境界 {counts.WallBoundaryOutputCount}");
             EditorGUILayout.LabelField(
-                "中央暗色領域",
-                $"{16 - material.SideRimWidth * 2}×{16 - material.TopRimWidth - material.BottomRimWidth} px");
+                "Wall上面",
+                material.DarkenWallSurface
+                    ? $"GroundTop共有 / 表示時RGB×{material.WallDarkenFactor:0.00}"
+                    : "GroundTop共有 / 暗色化なし");
 
             bool requiresRegeneration =
                 TerrainTileArtGenerator.RequiresRegeneration(settings, material);
@@ -198,12 +170,9 @@ namespace Farmware.WorldGeneration.Editor
                     ? "未生成、または入力・設定が前回生成時から変わっています。"
                     : "入力・設定は前回の正常生成時と一致しています。",
                 requiresRegeneration ? MessageType.Warning : MessageType.Info);
-
         }
 
-        /// <summary>
-        /// 選択材質と全材質の検証・生成ボタンを表示し、例外をConsoleとInspectorの両方へ残します。
-        /// </summary>
+        /// <summary>対象材質と全材質の検証・生成ボタンを表示します。</summary>
         /// <param name="settings">操作対象の設定アセットです。</param>
         private void DrawOperationButtons(TerrainTileArtGenerationSettings settings)
         {
@@ -242,9 +211,7 @@ namespace Farmware.WorldGeneration.Editor
             }
         }
 
-        /// <summary>
-        /// 選択材質だけを同期生成し、完了結果または失敗理由をInspectorへ保存します。
-        /// </summary>
+        /// <summary>選択材質だけを同期生成し、完了結果または失敗理由を表示用に保存します。</summary>
         /// <param name="settings">操作対象の設定アセットです。</param>
         private void RunSelectedGeneration(TerrainTileArtGenerationSettings settings)
         {
@@ -254,60 +221,38 @@ namespace Farmware.WorldGeneration.Editor
                     TerrainTileArtGenerator.ValidateMaterial(settings, selectedMaterialIndex);
                 if (lastValidationReport.HasErrors)
                 {
-                    lastOperationMessage = "対象材質を生成できません。下の検証エラーを修正してください。";
+                    lastOperationMessage =
+                        "対象材質を生成できません。下の検証エラーを修正してください。";
                     return;
                 }
 
                 TerrainTileArtGenerationResult result =
                     TerrainTileArtGenerator.GenerateMaterial(settings, selectedMaterialIndex);
-                InvalidatePreviewCache();
                 lastOperationMessage =
-                    $"{result.MaterialId}: {result.GeneratedSpriteCount}枚を生成しました。出力: {result.OutputFolder}";
+                    $"{result.MaterialId}: 境界Sprite {result.GeneratedSpriteCount}枚の生成が完了しました。";
+                InvalidatePreviewCache();
             }
             catch (Exception exception)
             {
                 Debug.LogException(exception);
-                lastOperationMessage = $"生成に失敗しました: {exception.Message}";
+                lastOperationMessage = $"対象材質生成に失敗しました: {exception.Message}";
             }
         }
 
-        /// <summary>
-        /// 全材質の事前検証後、出力枚数を確認してから一括生成します。
-        /// </summary>
+        /// <summary>全材質を同期生成し、完了数または失敗理由を表示用に保存します。</summary>
         /// <param name="settings">操作対象の設定アセットです。</param>
         private void RunAllGeneration(TerrainTileArtGenerationSettings settings)
         {
-            lastValidationReport = TerrainTileArtGenerator.ValidateAll(settings);
-            if (lastValidationReport.HasErrors)
-            {
-                lastOperationMessage = "全材質を生成できません。下の検証エラーを修正してください。";
-                return;
-            }
-
-            int totalOutputCount = 0;
-            for (int materialIndex = 0;
-                 materialIndex < settings.Materials.Length;
-                 materialIndex++)
-            {
-                totalOutputCount = checked(
-                    totalOutputCount
-                    + TerrainTileArtGenerator.CalculateSpriteCounts(
-                        settings.Materials[materialIndex]).GeneratedOutputCount);
-            }
-
-            bool accepted = EditorUtility.DisplayDialog(
-                "全地形材質Spriteを生成",
-                $"{settings.Materials.Length}材質、合計{totalOutputCount}枚のPNGを生成・再Importします。続行しますか？",
-                "生成する",
-                "キャンセル");
-            if (!accepted)
-            {
-                lastOperationMessage = "全材質生成をキャンセルしました。";
-                return;
-            }
-
             try
             {
+                lastValidationReport = TerrainTileArtGenerator.ValidateAll(settings);
+                if (lastValidationReport.HasErrors)
+                {
+                    lastOperationMessage =
+                        "全材質を生成できません。下の検証エラーを修正してください。";
+                    return;
+                }
+
                 IReadOnlyList<TerrainTileArtGenerationResult> results =
                     TerrainTileArtGenerator.GenerateAll(settings);
                 int generatedCount = 0;
@@ -318,7 +263,7 @@ namespace Farmware.WorldGeneration.Editor
                 }
 
                 lastOperationMessage =
-                    $"全{results.Count}材質、{generatedCount}枚のSprite生成が完了しました。";
+                    $"全{results.Count}材質、境界Sprite {generatedCount}枚の生成が完了しました。";
                 InvalidatePreviewCache();
             }
             catch (Exception exception)
@@ -328,9 +273,7 @@ namespace Farmware.WorldGeneration.Editor
             }
         }
 
-        /// <summary>
-        /// 最後の操作結果と、検証で見つかった全エラー・警告をHelpBoxとして表示します。
-        /// </summary>
+        /// <summary>最後の操作結果と検証で見つかった全エラー・警告を表示します。</summary>
         private void DrawLastReport()
         {
             if (!string.IsNullOrEmpty(lastOperationMessage))
@@ -344,30 +287,19 @@ namespace Farmware.WorldGeneration.Editor
                 return;
             }
 
-            for (int errorIndex = 0;
-                 errorIndex < lastValidationReport.Errors.Count;
-                 errorIndex++)
+            for (int index = 0; index < lastValidationReport.Errors.Count; index++)
             {
-                EditorGUILayout.HelpBox(
-                    lastValidationReport.Errors[errorIndex],
-                    MessageType.Error);
+                EditorGUILayout.HelpBox(lastValidationReport.Errors[index], MessageType.Error);
             }
 
-            for (int warningIndex = 0;
-                 warningIndex < lastValidationReport.Warnings.Count;
-                 warningIndex++)
+            for (int index = 0; index < lastValidationReport.Warnings.Count; index++)
             {
-                EditorGUILayout.HelpBox(
-                    lastValidationReport.Warnings[warningIndex],
-                    MessageType.Warning);
+                EditorGUILayout.HelpBox(lastValidationReport.Warnings[index], MessageType.Warning);
             }
         }
 
-        /// <summary>
-        /// 選択材質の16接続WallTopとGround／Wall境界合成結果を、比較しやすい画像グリッドで表示します。
-        /// 画像をクリックするとProjectビューで対象Spriteを選択し、Importerや拡大表示へすぐ移動できます。
-        /// </summary>
-        /// <param name="material">生成履歴とAssetパスを持つ、現在選択中の材質です。</param>
+        /// <summary>選択材質のGround／Wall境界合成結果を画像グリッドで表示します。</summary>
+        /// <param name="material">生成履歴を持つ、現在選択中の材質です。</param>
         private void DrawGeneratedPreviews(TerrainMaterialArtSource material)
         {
             EditorGUILayout.Space(10f);
@@ -383,44 +315,25 @@ namespace Farmware.WorldGeneration.Editor
             if (material == null || material.LastGeneratedAssetPaths.Count == 0)
             {
                 EditorGUILayout.HelpBox(
-                    "対象材質を生成すると、WallTop 16接続状態とGround／Wall境界をここへ一覧表示します。",
+                    "FaceBoundaryOverlayがある材質を生成すると、Ground／Wall境界をここへ一覧表示します。",
                     MessageType.Info);
                 return;
             }
 
-            // 生成履歴の変更またはDomain Reloadによる空キャッシュを検出した場合だけAsset参照を再構築し、
-            // 通常のInspector再描画ではAssetDatabaseを繰り返し検索しないようにします。
-            int cachedPreviewCount = wallTopPreviewEntries.Count
-                + groundBoundaryPreviewEntries.Count
-                + wallBoundaryPreviewEntries.Count;
+            int cachedCount = groundBoundaryPreviewEntries.Count + wallBoundaryPreviewEntries.Count;
             if (cachedPreviewMaterialIndex != selectedMaterialIndex
                 || !string.Equals(
                     cachedPreviewFingerprint,
                     material.LastGeneratedFingerprint,
                     StringComparison.Ordinal)
-                || cachedPreviewCount != material.LastGeneratedAssetPaths.Count)
+                || cachedCount != material.LastGeneratedAssetPaths.Count)
             {
                 RebuildPreviewCache(material);
             }
 
-            using (new EditorGUILayout.HorizontalScope())
+            if (GUILayout.Button("一覧を再読込", GUILayout.Width(96f)))
             {
-                EditorGUILayout.HelpBox(
-                    "画像をクリックするとProjectビューで生成Spriteを選択します。",
-                    MessageType.None);
-                if (GUILayout.Button("一覧を再読込", GUILayout.Width(96f)))
-                {
-                    RebuildPreviewCache(material);
-                }
-            }
-
-            showWallTopPreviews = EditorGUILayout.Foldout(
-                showWallTopPreviews,
-                $"WallTop 16接続 ({wallTopPreviewEntries.Count}枚)",
-                true);
-            if (showWallTopPreviews)
-            {
-                DrawPreviewGrid(wallTopPreviewEntries);
+                RebuildPreviewCache(material);
             }
 
             showGroundBoundaryPreviews = EditorGUILayout.Foldout(
@@ -445,24 +358,20 @@ namespace Farmware.WorldGeneration.Editor
                 else
                 {
                     EditorGUILayout.HelpBox(
-                        "Wall暗色化が無効なため、Wall境界はGround境界の生成Spriteを再利用します。",
+                        "Wall暗色化が無効なため、Wall境界はGround境界Spriteを再利用します。",
                         MessageType.Info);
                 }
             }
         }
 
-        /// <summary>
-        /// 生成履歴のパスを用途別に分類し、画像、Tooltip、比較用ラベルを一度だけ読み込みます。
-        /// </summary>
+        /// <summary>生成履歴のパスを用途別に分類してAsset参照を読み込みます。</summary>
         /// <param name="material">再構築する選択材質です。</param>
         private void RebuildPreviewCache(TerrainMaterialArtSource material)
         {
-            wallTopPreviewEntries.Clear();
             groundBoundaryPreviewEntries.Clear();
             wallBoundaryPreviewEntries.Clear();
             cachedPreviewMaterialIndex = selectedMaterialIndex;
             cachedPreviewFingerprint = material?.LastGeneratedFingerprint;
-
             if (material == null)
             {
                 return;
@@ -479,15 +388,7 @@ namespace Farmware.WorldGeneration.Editor
 
                 Sprite sprite = LoadGeneratedSprite(assetPath);
                 string fileName = Path.GetFileNameWithoutExtension(assetPath);
-                if (assetPath.Contains("/WallTop/", StringComparison.Ordinal))
-                {
-                    wallTopPreviewEntries.Add(
-                        new GeneratedPreviewEntry(
-                            BuildWallTopPreviewLabel(fileName),
-                            sprite,
-                            assetPath));
-                }
-                else if (fileName.Contains("_GroundFace_", StringComparison.Ordinal))
+                if (fileName.Contains("_GroundFace_", StringComparison.Ordinal))
                 {
                     groundBoundaryPreviewEntries.Add(
                         new GeneratedPreviewEntry(
@@ -506,13 +407,9 @@ namespace Farmware.WorldGeneration.Editor
             }
         }
 
-        /// <summary>
-        /// 生成PNGから完成Spriteを取得します。
-        /// UnityはImport直後とDomain Reload後でPNGの主ObjectをTextureまたはSpriteとして返す場合があるため、
-        /// 直接取得できないときは同じPNG内のサブアセットも調べます。
-        /// </summary>
-        /// <param name="assetPath">生成履歴へ保存したPNGのプロジェクト相対パスです。</param>
-        /// <returns>最初に見つかったSprite、またはImport不備・削除済みならnullです。</returns>
+        /// <summary>生成PNGから完成Spriteを取得します。</summary>
+        /// <param name="assetPath">生成履歴へ保存したPNGのAssetパスです。</param>
+        /// <returns>最初に見つかったSprite、またはImport不備ならnullです。</returns>
         private static Sprite LoadGeneratedSprite(string assetPath)
         {
             Sprite directSprite = AssetDatabase.LoadAssetAtPath<Sprite>(assetPath);
@@ -521,7 +418,6 @@ namespace Farmware.WorldGeneration.Editor
                 return directSprite;
             }
 
-            // Single Sprite設定でもSpriteがTextureのサブアセットになる環境があるため、型を確認しながら探索します。
             UnityEngine.Object[] importedObjects = AssetDatabase.LoadAllAssetsAtPath(assetPath);
             for (int objectIndex = 0; objectIndex < importedObjects.Length; objectIndex++)
             {
@@ -534,17 +430,13 @@ namespace Farmware.WorldGeneration.Editor
             return null;
         }
 
-        /// <summary>
-        /// キャッシュ済みの生成結果をInspector幅に応じて1〜4列へ折り返して描画します。
-        /// </summary>
+        /// <summary>キャッシュ済み生成結果をInspector幅に応じて1〜4列へ折り返して描画します。</summary>
         /// <param name="entries">同じ用途に分類済みの生成Sprite一覧です。</param>
         private void DrawPreviewGrid(IReadOnlyList<GeneratedPreviewEntry> entries)
         {
             if (entries.Count == 0)
             {
-                EditorGUILayout.HelpBox(
-                    "生成済みSpriteが見つかりません。一覧を再読込するか、対象材質を再生成してください。",
-                    MessageType.Warning);
+                EditorGUILayout.HelpBox("生成済みSpriteがありません。", MessageType.Info);
                 return;
             }
 
@@ -572,9 +464,7 @@ namespace Farmware.WorldGeneration.Editor
             }
         }
 
-        /// <summary>
-        /// 1枚の生成Spriteを識別名と4倍画像ボタンで表示し、クリック時にProjectビューへ誘導します。
-        /// </summary>
+        /// <summary>1枚の生成Spriteを識別名と4倍画像ボタンで表示します。</summary>
         /// <param name="entry">表示名、画像、Assetパスを持つ生成結果です。</param>
         /// <param name="cellWidth">Inspector内でこのセルへ割り当てる横幅です。</param>
         private void DrawPreviewCell(GeneratedPreviewEntry entry, float cellWidth)
@@ -595,8 +485,6 @@ namespace Farmware.WorldGeneration.Editor
                     return;
                 }
 
-                // 16×16画像を64×64へ整数倍拡大し、ドットの形と境界を比較しやすくします。
-                // 通常の画像付きButtonはTextureを原寸付近で描くため、背景枠・画像・透明ボタンを分けます。
                 Rect outerRect = GUILayoutUtility.GetRect(
                     PreviewImageSize + 2f,
                     PreviewImageSize + 2f,
@@ -615,13 +503,7 @@ namespace Farmware.WorldGeneration.Editor
                     sourceRect.y / texture.height,
                     sourceRect.width / texture.width,
                     sourceRect.height / texture.height);
-                GUI.DrawTextureWithTexCoords(
-                    imageRect,
-                    texture,
-                    normalizedSourceRect,
-                    true);
-
-                // GUIStyle.noneの透明ボタンを画像へ重ね、拡大表示を隠さず選択操作とTooltipだけを受け持たせます。
+                GUI.DrawTextureWithTexCoords(imageRect, texture, normalizedSourceRect, true);
                 if (GUI.Button(imageRect, entry.ButtonContent, GUIStyle.none))
                 {
                     Selection.activeObject = entry.Sprite;
@@ -630,43 +512,11 @@ namespace Farmware.WorldGeneration.Editor
             }
         }
 
-        /// <summary>
-        /// WallTopファイル名から外周セット番号、16進Mask、同材質Wallへの接続方向を組み立てます。
-        /// </summary>
-        /// <param name="fileName">拡張子を除いた生成ファイル名です。</param>
-        /// <returns>例として「w00 m3 / 上+右」のような比較用ラベルを返します。</returns>
-        private static string BuildWallTopPreviewLabel(string fileName)
-        {
-            int wallMarker = fileName.LastIndexOf("_w", StringComparison.Ordinal);
-            int maskMarker = fileName.LastIndexOf("_m", StringComparison.Ordinal);
-            if (wallMarker < 0 || maskMarker <= wallMarker || maskMarker + 2 >= fileName.Length)
-            {
-                return fileName;
-            }
-
-            string rimNumber = fileName.Substring(wallMarker + 2, maskMarker - wallMarker - 2);
-            string maskText = fileName.Substring(maskMarker + 2);
-            if (!int.TryParse(
-                maskText,
-                NumberStyles.HexNumber,
-                CultureInfo.InvariantCulture,
-                out int maskValue))
-            {
-                return $"w{rimNumber} m{maskText}";
-            }
-
-            return $"w{rimNumber} m{maskText}\n{BuildConnectionDirectionLabel(maskValue)}";
-        }
-
-        /// <summary>
-        /// Ground／Wall境界のファイル名からFace番号とBoundary番号だけを取り出します。
-        /// </summary>
+        /// <summary>境界ファイル名からFace番号とBoundary番号だけを取り出します。</summary>
         /// <param name="fileName">拡張子を除いた生成ファイル名です。</param>
         /// <param name="usageMarker">GroundFaceまたはWallFaceの用途文字列です。</param>
-        /// <returns>例として「f00 × b00」のような差分組合せラベルを返します。</returns>
-        private static string BuildBoundaryPreviewLabel(
-            string fileName,
-            string usageMarker)
+        /// <returns>「f00 × b00」のような差分組合せラベルです。</returns>
+        private static string BuildBoundaryPreviewLabel(string fileName, string usageMarker)
         {
             string marker = $"_{usageMarker}_";
             int markerIndex = fileName.LastIndexOf(marker, StringComparison.Ordinal);
@@ -678,67 +528,20 @@ namespace Farmware.WorldGeneration.Editor
             return fileName.Substring(markerIndex + marker.Length).Replace("_", " × ");
         }
 
-        /// <summary>
-        /// 4bit Maskを、外周を隠す同材質Wallの接続方向へ変換します。
-        /// </summary>
-        /// <param name="maskValue">上1・右2・下4・左8で構成する0〜15の値です。</param>
-        /// <returns>接続なし、全接続、または「上+右」のような方向一覧です。</returns>
-        private static string BuildConnectionDirectionLabel(int maskValue)
-        {
-            if (maskValue == 0)
-            {
-                return "接続なし";
-            }
-
-            if (maskValue == (int)TerrainWallConnectionMask.All)
-            {
-                return "全接続";
-            }
-
-            List<string> directions = new List<string>(4);
-            if ((maskValue & (int)TerrainWallConnectionMask.Up) != 0)
-            {
-                directions.Add("上");
-            }
-
-            if ((maskValue & (int)TerrainWallConnectionMask.Right) != 0)
-            {
-                directions.Add("右");
-            }
-
-            if ((maskValue & (int)TerrainWallConnectionMask.Down) != 0)
-            {
-                directions.Add("下");
-            }
-
-            if ((maskValue & (int)TerrainWallConnectionMask.Left) != 0)
-            {
-                directions.Add("左");
-            }
-
-            return string.Join("+", directions);
-        }
-
-        /// <summary>
-        /// 生成または対象切替後に、次のInspector描画でAsset参照を読み直すようキャッシュを無効化します。
-        /// </summary>
+        /// <summary>次のInspector描画でAsset参照を読み直すようキャッシュを無効化します。</summary>
         private void InvalidatePreviewCache()
         {
             cachedPreviewMaterialIndex = -1;
             cachedPreviewFingerprint = null;
         }
 
-        /// <summary>
-        /// Materials配列を、日本語名と安定IDを併記したPopup表示名へ変換します。
-        /// </summary>
+        /// <summary>Materials配列を日本語名と安定IDを併記したPopup表示名へ変換します。</summary>
         /// <param name="materials">登録順の材質設定配列です。</param>
         /// <returns>配列位置と1対1に対応するPopup選択肢です。</returns>
         private static string[] BuildMaterialChoices(TerrainMaterialArtSource[] materials)
         {
             string[] choices = new string[materials.Length];
-            for (int materialIndex = 0;
-                 materialIndex < materials.Length;
-                 materialIndex++)
+            for (int materialIndex = 0; materialIndex < materials.Length; materialIndex++)
             {
                 TerrainMaterialArtSource material = materials[materialIndex];
                 if (material == null)
@@ -758,6 +561,5 @@ namespace Farmware.WorldGeneration.Editor
 
             return choices;
         }
-
     }
 }

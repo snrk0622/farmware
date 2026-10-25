@@ -197,7 +197,7 @@ namespace Farmware.WorldGeneration.Tests
         /// <summary>
         /// 地形固有値の入力欄が未実装の段階ではInspector由来の地形分類を明示拒否し、件数不一致だけの曖昧なBake失敗にしないことを保証します。
         /// </summary>
-        /// <param name="terrainKind">TERRAIN-01Cまで組み込み専用とする地形分類です。</param>
+        /// <param name="terrainKind">現段階では組み込み専用とする地形分類です。</param>
         [TestCase(DefinitionKind.GroundBlock)]
         [TestCase(DefinitionKind.WallBlock)]
         [TestCase(DefinitionKind.Liquid)]
@@ -224,7 +224,7 @@ namespace Farmware.WorldGeneration.Tests
                 invocationException.InnerException,
                 Is.TypeOf<InvalidOperationException>());
             StringAssert.Contains(
-                "TERRAIN-01Cまで組み込み定義だけ",
+                "地形分類は組み込み定義だけ",
                 invocationException.InnerException?.Message);
             StringAssert.Contains(
                 "Definition[2] (Custom Terrain)",
