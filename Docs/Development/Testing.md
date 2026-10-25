@@ -295,7 +295,13 @@ Editor構築ツールが生成した7種類の16×24土地PNGと16×28岩壁PNG�
 
 #### `WorldGenerationSpriteAtlasTests`
 
-Sprite Packer ModeがV2であること、土地Atlasが現行Biome仮色Textureだけ、岩壁Atlasが岩壁TextureだけをPackableに持つこと、両AtlasがBuilt-in配信とPixel Art向け設定を持つことを検証する。旧境界PNGと旧`BoundaryHighlightAtlas`は新しい14形状を再制作するため撤去済みなので、現段階のAtlasテスト対象に含めない。新Spriteを追加する変更では、14区画の可視画素、Alpha、色、上下方向、論理特徴マスクとの一致、単一Atlasページを同じ変更で再び検証する。
+Sprite Packer ModeがV2であること、土地Atlasが現行Biome仮色Textureだけ、岩壁Atlasが岩壁TextureだけをPackableに持つこと、両AtlasがBuilt-in配信とPixel Art向け設定を持つことを検証する。共通境界ハイライトは専用の`TerrainBoundaryHighlightArtGeneratorTests`でPNGと`BoundaryHighlightAtlas`を検証する。
+
+#### `TerrainBoundaryHighlightArtGeneratorTests`
+
+再制作した共通境界ハイライトについて、224×16 pxのPNGが16×16 pxの14区画へ順番どおり分割され、Point、16 PPU、非圧縮、Mip Mapなし、`Full Rect`、中央PivotでImportされることを検証する。PNGの全画素を論理特徴マスクと照合し、可視画素が不透明白、非表示画素が完全透明、外周と内角がともに1 pxであることを保証する。
+
+`BoundaryHighlightAtlas`が境界PNGだけをPackableに持ち、14 Spriteを同一Textureページへ収録することも確認する。固定検品Sceneの入力契約は、14基本形、正規化済み47状態、完全接続を除く46表示状態として検証する。SampleSceneではWall境界専用TilemapのRGBが既定の0.85、Alphaが1であり、各境界Tileの20% Alphaを二重に弱めないことをPlayModeで保証する。Scene内の色の見え方、20%の線の強さ、Wall上面とハイライトの一体感、回転後の外周・内角は自動テストだけで合否を決めず、`Open Boundary Highlight Inspection Map`のGameビューで人間が確認する。
 
 #### `TerrainTileArtGeneratorTests`
 
@@ -305,11 +311,11 @@ Sprite Packer ModeがV2であること、土地Atlasが現行Biome仮色Texture�
 
 #### `TerrainTileArtInspectionMapBuilderTests`
 
-`GrassLoam`固定検品Sceneを開閉せず、構築に必要なAsset契約を検証する。設定アセットの可変長`GroundTop`・通常`Face`と全`Face×FaceBoundaryOverlay`合成結果を、固定差分数ではなく現在の登録数から保証する。比較Sceneで使用する暗色化係数0.85、0.70、0.55も固定契約として検証する。作り直し中の14形状境界ハイライト、`Shadow Caster 2D`、本番Runtime差分選択は現段階の検品Sceneテストに含めない。
+`GrassLoam`固定検品Sceneを開閉せず、構築に必要なAsset契約を検証する。設定アセットの可変長`GroundTop`・通常`Face`と全`Face×FaceBoundaryOverlay`合成結果を、固定差分数ではなく現在の登録数から保証する。比較Sceneで使用する暗色化係数0.85、0.70、0.55も固定契約として検証する。共通境界ハイライトは別の専用テストと固定検品Sceneで扱い、`Shadow Caster 2D`、本番Runtime差分選択は現段階の検品Sceneテストに含めない。
 
 実際のScene保存、480×270 Pixel Perfect表示、色・模様・継ぎ目の良否は自動テストだけで決めず、`Open Terrain Tile Inspection Map`実行後のGameビューで人間が確認する。
 
-`Open Wall Surface Darken Comparison`では0.85、0.70、0.55を比較し、0.85を採用した。次の更新では採用値を固定し、各セルへ通常Groundを先に描き、Wallセルへ同じ`GroundTop` Spriteを0.85で暗化して重ね、手前が空くWallへ通常`Face`を1段重ねる。既存14形状Wall境界ハイライトを外周・内角へ表示し、異材質Wall間では表示しないことも確認する。`Shadow Caster 2D`は材質境界で分割せず、Dirtyな16×16サブチャンクのWall輪郭から結合形状を更新すること、移動する`Light 2D`へ影が追従すること、アンロード・再利用後に旧影が残らないことをEditMode／PlayMode／Gameビューで検証する。
+`Open Wall Surface Darken Comparison`では0.85、0.70、0.55を比較し、0.85を採用した。`Open Boundary Highlight Inspection Map`では通常Groundと0.85暗化Wallへ同じ14基本形を重ね、47状態の外周・内角と完全接続時の非表示を比較する。Wall側はBaseとハイライトRGBの両方へ0.85を掛け、白い線だけが浮かないことを確認する。異材質Wall同士は接続扱いとし、共有辺に境界を表示しない。`Shadow Caster 2D`は材質境界で分割せず、Dirtyな16×16サブチャンクのWall輪郭から結合形状を更新すること、移動する`Light 2D`へ影が追従すること、アンロード・再利用後に旧影が残らないことをEditMode／PlayMode／Gameビューで検証する。
 
 #### `WorldGenerationSceneBootstrapTests`
 

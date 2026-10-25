@@ -373,6 +373,9 @@ namespace Farmware.WorldGeneration.Editor
                 DeleteObsoleteFallbackTile(legacyName + "Sandy");
             }
 
+            // 14基本形は論理マスクから再現可能に生成し、画像順と47接続選択の対応を常に一致させます。
+            TerrainBoundaryHighlightArtGenerator.GenerateOrUpdateSpriteSheet();
+
             // 本番PNG自体は書き換えず、Importerと専用Tileだけを冪等に設定します。
             // これを毎回行うことで、構築ツールの再実行後もFallback岩壁へ参照が戻りません。
             CreateOrUpdateProductionRockWallTile();
@@ -405,8 +408,8 @@ namespace Farmware.WorldGeneration.Editor
                 LoadRequiredFallbackAnimatedTile("SaltWaterAnimation");
             AnimatedTile magmaAnimationTile =
                 LoadRequiredFallbackAnimatedTile("MagmaAnimation");
-            // 境界ハイライト画像は新デザインへ作り直す間だけ未設定とし、選択ロジックとTilemap層だけを維持します。
-            Sprite[] boundaryHighlightSprites = Array.Empty<Sprite>();
+            Sprite[] boundaryHighlightSprites =
+                TerrainBoundaryHighlightArtGenerator.LoadRequiredSprites();
 
             SceneAsset settingsSubSceneAsset = CreateOrUpdateSettingsSubScene();
             ConfigureMainScene(
@@ -1480,6 +1483,15 @@ namespace Farmware.WorldGeneration.Editor
                 0f,
                 TerrainLayerPresentationUtility.RockWallElevationInCells,
                 0f);
+            // ハイライトを白のまま暗いWallへ重ねると輪郭だけが浮くため、Wall上面と同じ既定係数をRGBへ掛けます。
+            // Tile自身の20% Alphaは維持するので、合成済みのWall全体を0.85倍した場合と同じ色関係になります。
+            float wallBoundaryHighlightDarkenFactor =
+                TerrainMaterialArtSource.DefaultWallDarkenFactor;
+            rockWallBoundaryHighlightTilemap.color = new Color(
+                wallBoundaryHighlightDarkenFactor,
+                wallBoundaryHighlightDarkenFactor,
+                wallBoundaryHighlightDarkenFactor,
+                1f);
             ConfigureTilemapRenderer(
                 rockWallBoundaryHighlightTilemapObject,
                 sortingOrder: 4);
@@ -2044,6 +2056,18 @@ namespace Farmware.WorldGeneration.Editor
                 || !Mathf.Approximately(
                     rockWallBoundaryHighlightTilemapTransform.localPosition.y,
                     TerrainLayerPresentationUtility.RockWallElevationInCells)
+                || !Mathf.Approximately(
+                    rockWallBoundaryHighlightTilemapTransform.GetComponent<Tilemap>().color.r,
+                    TerrainMaterialArtSource.DefaultWallDarkenFactor)
+                || !Mathf.Approximately(
+                    rockWallBoundaryHighlightTilemapTransform.GetComponent<Tilemap>().color.g,
+                    TerrainMaterialArtSource.DefaultWallDarkenFactor)
+                || !Mathf.Approximately(
+                    rockWallBoundaryHighlightTilemapTransform.GetComponent<Tilemap>().color.b,
+                    TerrainMaterialArtSource.DefaultWallDarkenFactor)
+                || !Mathf.Approximately(
+                    rockWallBoundaryHighlightTilemapTransform.GetComponent<Tilemap>().color.a,
+                    1f)
                 || rockWallResourceTilemapTransform == null
                 || rockWallResourceTilemapTransform.GetComponent<Tilemap>() == null
                 || rockWallResourceTilemapTransform.GetComponent<TilemapRenderer>() == null
@@ -2170,9 +2194,20 @@ namespace Farmware.WorldGeneration.Editor
                 serializedPresenter.FindProperty("boundaryHighlightSprites");
             if (boundarySpritesProperty == null
                 || !boundarySpritesProperty.isArray
-                || boundarySpritesProperty.arraySize != 0)
+                || boundarySpritesProperty.arraySize
+                    != TerrainBoundaryHighlightUtility.ExpectedSpriteCount)
             {
                 return false;
+            }
+
+            for (int index = 0; index < boundarySpritesProperty.arraySize; index++)
+            {
+                SerializedProperty spriteProperty =
+                    boundarySpritesProperty.GetArrayElementAtIndex(index);
+                if (spriteProperty.objectReferenceValue == null)
+                {
+                    return false;
+                }
             }
 
             SerializedProperty boundaryOpacityProperty =

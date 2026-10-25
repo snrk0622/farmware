@@ -23,7 +23,7 @@
 - 断面は境界の有無にかかわらず、1段目から通常の`Face`を使う。
 - `FaceBoundaryOverlay`を持つ材質では、透明背景のOverlayを断面1段目の`Face`へ重ねる。持たない材質には空の透明Spriteや共通の代替境界を作らない。
 - Wall上面には同じ材質の`GroundTop`差分を使い、RGBへ`WallDarkenFactor`を乗算してGroundより暗く表示する。通常材質の初期値は0.85とする。全材質共通の黒い内部、材質別のWall外周部品、専用`WallTop`完成Spriteは作らない。
-- GroundとWallの形状境界には、全材質共通の白い14形状の境界ハイライトを使用する。8近傍47状態を14基本形と90度回転から選ぶ論理契約、Ground用とWall用の専用Tilemap、20%の初期不透明度は維持する。旧PNGと旧Atlasは絵柄を作り直すため一時撤去し、新しい14形状Spriteを再接続するまで境界ハイライトは非表示とする。
+- GroundとWallの形状境界には、全材質共通の白い14形状の境界ハイライトを使用する。8近傍47状態を14基本形と90度回転から選ぶ論理契約、Ground用とWall用の専用Tilemap、20%の初期不透明度を維持する。再制作したSpriteは外周を不透明白1 px、内角を欠けた対角側の角に置く不透明白1 pxとし、Editor生成ツールからPNG、14分割、専用Atlas、Scene参照を再現可能に更新する。
 - Ground崖面とWall前面は、同じ材質の`FaceBoundaryOverlay`入力と`Face`を共有する。境界あり材質ではEditorがGround用の元色合成結果と、Wall用にOverlayだけを暗色化した合成結果を生成する。
 - 地形輪郭は初期実装では論理セルに沿う直線とする。不規則な凹凸は後からPresentation表現として追加できるよう、衝突、採掘、配置、保存から分離する。
 
@@ -111,6 +111,8 @@ Ground崖面とWall前面の表示段数はGameビュー比較後に個別に決
 - 材質ごとにInspectorへ`DarkenWallSurface`と`WallDarkenFactor`を表示する。`DarkenWallSurface`は既定で有効とし、通常の材質ブロックは機械的に暗色化する。無効時は係数1.0として元色を使う。`WallDarkenFactor`は0より大きく1以下とし、初期比較値を0.85とする。最終値は代表5材質のGameビュー確認で調整する。
 - Wall上面の暗色化は、Wall表示レイヤーが参照する`GroundTop` Sprite全体へ同じ`WallDarkenFactor`を乗算する。Alpha、Ground表示、Ground用`FaceBoundaryOverlay`、`Face`は変更しない。Wall用`FaceBoundaryOverlay`の不透明画素には同じ有効状態と係数を使う。
 - GroundとWallの境界ハイライトは、全材質共通の14基本Spriteと90度回転を使う。8方向の接続を47状態へ正規化し、完全接続を除く状態へ外周辺・内角を表示する。材質ごとの境界Spriteは作らない。
+- 14基本Spriteは224×16 pxの横一列PNGへ、左から`terrain_boundary_highlight_01`〜`14`の順で格納する。各区画は16×16 px、Point、16 PPU、非圧縮、Mip Mapなし、`Full Rect`、中央Pivotとし、14枚を専用`BoundaryHighlightAtlas`の同一ページへ収録する。
+- 外周辺はSprite端へ接する不透明白1 pxの連続線とする。内角は欠けた対角側の角に置く不透明白1 pxの点とし、隣接画素へ伸ばさない。色とAlphaは元画像で不透明白に固定し、実表示の強さはTile側の初期Alpha 20%で調整する。Groundでは白のまま重ね、Wallでは白いハイライトのRGBにもWall上面と同じ既定暗化係数0.85を掛けてから重ねる。描画順はBaseの後を維持しつつ、通常色へハイライトを合成してから全体を0.85倍した場合と同じ色関係にする。
 - Ground境界は従来どおり水・マグマ側だけへ表示し、Biomeや材質の違いでは表示しない。Wall境界は材質IDを比較せず、隣接セルがWallなら接続扱いにする。異材質Wall間の共有辺へ境界を出さない。
 - Wall領域の投影影は`Shadow Caster 2D`で表現する。Caster形状は現在の有効地形からサブチャンク単位で結合し、タイルごとのGameObjectやCasterを作らない。材質境界では分割せず、Wall領域の外周だけを影輪郭にする。
 - `FaceBoundaryOverlay`は左右方向に並べた際、表層の厚さや境界線の高さが不自然に途切れないようにする。透明部分では下の`Face`をそのまま見せ、不透明画素だけで必要な範囲を覆う。
@@ -128,7 +130,7 @@ Ground崖面とWall前面の表示段数はGameビュー比較後に個別に決
 - マグマは不透明とし、接触する最初の段から背後の`Face`と`FaceBoundaryOverlay`合成結果を見せない。半透明の深度表現をマグマへ流用しない。
 - 淡水・海水用およびマグマ用の専用断面Spriteは作らない。マグマの波や発光を表す透明な表面エフェクトを使う場合も、不透明なマグマBaseの上へ重ねる。
 - 崖面表示深度より下は、不透明な`DeepBackground` `#0D1016`で塞ぐ。見えない断面を無制限に反復しない。
-- 白い14形状の地形境界ハイライトの接続契約は継続使用する。Ground用とWall用のTilemapを分け、Wall用は材質を問わないWall領域の外周・内角へ表示する。旧Spriteと旧Atlasは再制作のため一時撤去中であり、後続で新しい14形状を接続する。F4のタイル・サブチャンク・チャンク診断表示は別機能として維持する。
+- 白い14形状の地形境界ハイライトの接続契約を継続使用する。Ground用とWall用のTilemapを分け、Wall用は材質を問わないWall領域の外周・内角へ表示する。再制作したSprite、専用Atlas、SampleSceneの14参照は接続済みであり、固定検品Sceneで47状態をGround色と0.85暗化Wall色の両方に一覧表示する。Wall側はBaseだけでなくハイライトRGBにも0.85を掛け、白い線だけが暗いWallから浮くことを防ぐ。F4のタイル・サブチャンク・チャンク診断表示は別機能として維持する。
 
 ## 6. 部位別パレットの読み方
 
@@ -294,9 +296,9 @@ Editor生成ツールは断面の完成PNGを`Point`、16 PPU、非圧縮、Mip 
 
 ### 11.1 Wall表示の比較
 
-`GrassLoam`の最初の確認には、Unityメニュー`Farmware > World Generation > Open Wall Surface Darken Comparison`で再構築する比較Sceneを使う。全面へ通常の`GroundTop`を描画し、Wallセルへ同じSpriteを重ねて暗色化する。採用値は0.85とし、新しい14形状のWall境界ハイライト、Lit Material、`Shadow Caster 2D`を追加してから、GroundとWallの読み分け、反復感、光源移動時の影、Faceとの連続性を確認する。
+`GrassLoam`の最初の確認には、Unityメニュー`Farmware > World Generation > Open Wall Surface Darken Comparison`で再構築する比較Sceneを使う。全面へ通常の`GroundTop`を描画し、Wallセルへ同じSpriteを重ねて暗色化する。採用値は0.85とする。共通境界ハイライトは`Open Boundary Highlight Inspection Map`で47状態を別途確認し、`Shadow Caster 2D`を追加した後にGroundとWallの読み分け、反復感、光源移動時の影、Faceとの連続性を確認する。
 
-`Open Terrain Tile Inspection Map`と材質生成Editorは、`GroundTop`のGround／Wall共用、表示時のWall暗色化、通常`Face`、任意の`FaceBoundaryOverlay`合成だけを扱う方式へ更新した。専用`WallTop`、材質別7部品、共通暗色内部、47枚の材質別Wall完成Spriteは生成しない。再制作中の14形状境界ハイライトと`Shadow Caster 2D`は、現段階の固定検品Sceneにはまだ含めない。
+`Open Terrain Tile Inspection Map`と材質生成Editorは、`GroundTop`のGround／Wall共用、表示時のWall暗色化、通常`Face`、任意の`FaceBoundaryOverlay`合成を扱う。専用`WallTop`、材質別7部品、共通暗色内部、47枚の材質別Wall完成Spriteは生成しない。共通境界ハイライトは独立した固定検品SceneでGround／Wall各47状態を確認する。`Shadow Caster 2D`は現段階の固定検品Sceneにはまだ含めない。
 
 ## 12. 残る要確認事項
 

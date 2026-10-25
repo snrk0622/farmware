@@ -26,10 +26,10 @@
 - 上面16pxと断面8pxを結合した16×24の仮色土地Tile、16×16の仮色液体・資源Tileを生成または更新する。土地上面は安定`BiomeId` 1〜18に対応する18種類の仮色だけで塗り、未制作Biomeを別BiomeのTileへフォールバックさせない。草、葉、砂紋などの固有模様やSoilType別派生Tileは生成しない。旧7種の土地フォールバックと旧14枚の肥沃・砂質派生アセットが存在する場合は削除する。
 - 上面16pxと側面12pxを結合した16×28フォールバック岩壁Tile、淡水・海水・マグマ各4枚の透明フレームとAnimatedTileを生成または更新する。フォールバックは構築確認用として維持し、本番用`terrain_rock_wall_01.png`を上書きしない。
 - 本番用`terrain_rock_wall_01.png`へPoint、PPU 16、Mip Maps Off、Compression None、Full Rect、Pivot Y `8/28`を設定し、専用Tileを作成または更新する。Sprite PivotはSprite Editor Data Provider経由で設定する。
-- 新18Biomeの仮色土地Spriteを同じTextureページへ収める`GroundTerrainAtlas.spriteatlasv2`と、本番用岩壁を収める`RockWallAtlas.spriteatlasv2`を生成または更新し、現在のBuild Target向けにパックする。C6のBlock用本番素材が未制作の間だけ、この18枚を表示契約とAtlas検証に使う。旧14形状の境界PNGと`BoundaryHighlightAtlas`は再制作のため撤去済みであり、このツールは再生成しない。
+- 新18Biomeの仮色土地Spriteを同じTextureページへ収める`GroundTerrainAtlas.spriteatlasv2`、本番用岩壁を収める`RockWallAtlas.spriteatlasv2`、共通境界14 Spriteを収める`BoundaryHighlightAtlas.spriteatlasv2`を生成または更新し、現在のBuild Target向けにパックする。C6のBlock用本番素材が未制作の間だけ、18枚の仮色土地を表示契約とAtlas検証に使う。境界PNGの画素と14分割は専用の境界生成ツールが担当し、このツールはImport済みTextureの検証・Atlas登録・同一ページ検証を担当する。
 - `WorldGenerationSettingsSubScene`へ生成設定のAuthoringと、最初の動物種である鶏の共通定義・生成条件を配置する。鶏は草原の通常陸地、群れ3〜6羽、有効地形4096タイル当たり8羽、待機20〜80固定Tick、1タイル移動5固定Tick、最大徘徊8タイル、外見差分3種類を開発用初期値とする。
 - `DefinitionCatalogAuthoring`の専用Inspectorでは、`animalSpeciesDefinitions`の各要素を共通定義GUIDで照合し、`0: Chicken`のように`definitions`側の表示名を見出しへ表示する。表示名を動物種固有設定へ重複保存しないため、名称変更は`definitions`側だけで行う。GUID未設定または参照切れの場合は、見出しへ未解決理由と短縮GUIDを表示する。
-- `SampleScene`へCamera、原点固定のGrid、Ground・静止液面・液面アニメーション・土地境界・岩壁・岩壁境界・岩壁背面資源・通常前面資源・岩壁上資源の9枚のTilemap、表示用Component、SubScene参照を接続する。Cameraの`CameraPanController`を全Tilemap Presenterの共通表示原点として接続し、絶対初期位置をTransformへ直接保存しない。通常移動では512タイル未満の間はCameraの相対座標だけを更新し、閾値へ達するとGridを動かさず表示原点を所属チャンク境界へ自動更新する。静止液面と液面アニメーションは土地より8px下、岩壁境界と岩壁上資源は土地基準面より12px上へ設定する。GroundとRock WallはIndividual ModeかつTop Left順で描画する。土地境界はOrder 1、岩壁境界はOrder 4としてTilemap自体は維持するが、再制作中は境界Sprite配列を空にして描画しない。通常資源は直前方の岩壁有無からOrder 2の背面用TilemapとOrder 10の前面用Tilemapへ振り分ける。
+- `SampleScene`へCamera、原点固定のGrid、Ground・静止液面・液面アニメーション・土地境界・岩壁・岩壁境界・岩壁背面資源・通常前面資源・岩壁上資源の9枚のTilemap、表示用Component、SubScene参照を接続する。Cameraの`CameraPanController`を全Tilemap Presenterの共通表示原点として接続し、絶対初期位置をTransformへ直接保存しない。通常移動では512タイル未満の間はCameraの相対座標だけを更新し、閾値へ達するとGridを動かさず表示原点を所属チャンク境界へ自動更新する。静止液面と液面アニメーションは土地より8px下、岩壁境界と岩壁上資源は土地基準面より12px上へ設定する。GroundとRock WallはIndividual ModeかつTop Left順で描画する。土地境界はOrder 1、岩壁境界はOrder 4とし、生成済みの共通境界14 Spriteを両方へ接続する。通常資源は直前方の岩壁有無からOrder 2の背面用TilemapとOrder 10の前面用Tilemapへ振り分ける。
 - Pixel Perfect Cameraの基準解像度480×270を含む、再現可能な確認環境を構築する。
 - `Use Chunk Local Tilemaps`を既定ON、空き表示プール上限を8とする。自動原点変更では既存Tilemap・影と画面外の先行表示を再配置する。Presenterは可視範囲の外側1チャンクまで準備し、反映・消去合計4サブチャンク/フレームを維持する。OFFは旧共有方式との診断・比較用であり、原点変更直後の表示遅れが残る。
 
@@ -55,9 +55,9 @@
 
 1. Consoleに例外または新規警告が出ていない。
 2. メニュー実行をキャンセルした場合はアセットやSceneが変更されず、実行した場合は成功・失敗のどちらでも元の複数Scene構成、読込状態、Active Sceneへ戻る。
-3. 必要なPNG、Tile、AnimatedTile、Sprite Atlas、`.meta`が揃っている。18枚の土地フォールバックは安定`BiomeId` 1〜18と一対一で、上面はBiome別の仮色一色とし、草・葉・砂紋やSoil模様を含まない。旧7種の土地フォールバックは存在せず、18枚が`GroundTerrainAtlas`の同じパック後Textureを参照する。本番用`terrain_rock_wall_01.png`と専用Tileが16×28、Pivot Y `8/28`で同じSpriteを参照し、`RockWallAtlas`へ収録される。再制作中は旧境界PNGと旧`BoundaryHighlightAtlas`が存在せず、Sceneの境界Sprite配列が空である。
+3. 必要なPNG、Tile、AnimatedTile、Sprite Atlas、`.meta`が揃っている。18枚の土地フォールバックは安定`BiomeId` 1〜18と一対一で、上面はBiome別の仮色一色とし、草・葉・砂紋やSoil模様を含まない。旧7種の土地フォールバックは存在せず、18枚が`GroundTerrainAtlas`の同じパック後Textureを参照する。本番用`terrain_rock_wall_01.png`と専用Tileが16×28、Pivot Y `8/28`で同じSpriteを参照し、`RockWallAtlas`へ収録される。共通境界PNGは16×16の14区画を持ち、`BoundaryHighlightAtlas`の同じパック後Textureへ収録され、Sceneの境界Sprite配列へ14件すべて接続される。
 4. SampleSceneとSubSceneの参照がMissingになっていない。`WorldGenerationSettingsSubScene`の`DefinitionCatalogAuthoring`が鶏の定義GUIDと開発用初期値を保持し、共通定義の分類が`AnimalSpecies`になっている。Inspectorの`animalSpeciesDefinitions`を展開すると要素見出しが`0: Chicken`になり、GUIDが未設定または不一致なら未解決表示になる。World GridのTransformが原点・無回転・等倍で、Cameraの`CameraPanController`が`ChunkTilemapPresenter`と`InitialCameraPositionController`へ接続され、自動Floating Origin距離が512タイルになっている。
-5. PlayModeで土地が16×24、岩壁が16×28の一体型ブロックとして表示される。土地は論理Biomeだけを反映し、同じBiome内では標準・肥沃・砂質のいずれも同じTileに見える。静止液面と透明アニメーションは同じ8px下、岩壁内部影・露出資源は12px上へ表示される。再制作中の境界ハイライトは表示されない。液体はGround Tilemapへ重複せず、液面下辺と奥側ブロックの断面・側面は手前ブロックに隠れる。直前方が岩壁の通常資源は背面用Tilemapへ入り、それ以外は前面用へ入る。カメラをサブチャンク・チャンク境界へ寄せても立体Spriteが途中で消えない。
+5. PlayModeで土地が16×24、岩壁が16×28の一体型ブロックとして表示される。土地は論理Biomeだけを反映し、同じBiome内では標準・肥沃・砂質のいずれも同じTileに見える。静止液面と透明アニメーションは同じ8px下、岩壁内部影・露出資源は12px上へ表示される。Ground／Wallの境界ハイライトは14基本形と回転から選ばれ、20%のAlphaで表示される。液体はGround Tilemapへ重複せず、液面下辺と奥側ブロックの断面・側面は手前ブロックに隠れる。直前方が岩壁の通常資源は背面用Tilemapへ入り、それ以外は前面用へ入る。カメラをサブチャンク・チャンク境界へ寄せても立体Spriteが途中で消えない。
 6. Gameビューの地形描画領域が480×270基準の黒帯内へ収まり、HUDとF4表示も同じ領域を使用する。F3には現在タイルのサブチャンク座標、Biome、GeneratorVersion、16桁16進数のワールドシードが表示される。
 7. 最大ズームアウトで通常移動とShift移動を行い、512タイル境界の前後でCamera、Tilemap、F3、F4、開発者用可視化が同じ絶対セルを示し、空白や旧セルの残留が見えない。Profilerでは`Farmware.WorldGeneration.FloatingOriginRebase`、`Farmware.WorldGeneration.TilemapPresentation`、`Farmware.WorldGeneration.ChunkStreaming`を記録し、原点変更フレームのCPU時間、GC Alloc、生成待ち数を変更前後で比較する。
 
@@ -93,7 +93,7 @@ ANIMAL-01Bの個体群Worldでは、通常フレームで座標順の有限バ�
 #### 用途
 
 - Sprite Packer Modeを`Sprite Atlas V2`へ統一する。
-- 新18Biomeの仮色土地PNG 18枚を`GroundTerrainAtlas`、本番用`terrain_rock_wall_01.png`を`RockWallAtlas`のPackableへ登録する。旧7種の`terrain_biomes_base.png`はSceneやAtlasから参照しない。旧14形状の境界PNGと`BoundaryHighlightAtlas`は再制作のため撤去済みであり、現段階では生成・登録しない。
+- 新18Biomeの仮色土地PNG 18枚を`GroundTerrainAtlas`、本番用`terrain_rock_wall_01.png`を`RockWallAtlas`、14区画の`terrain_boundary_highlights.png`を`BoundaryHighlightAtlas`のPackableへ登録する。旧7種の`terrain_biomes_base.png`と撤去済みの旧境界TextureはSceneやAtlasから参照しない。
 - Built-in配信、Point、Mip Maps Off、Read/Write Off、RGBA32、無圧縮、Padding 4 px、Rotation/Tight Packing/Alpha Dilation Off、Max Texture Size 512を再適用する。
 - 対象Build Target向けにパックし、各Atlas内のSpriteが1枚のTextureページへ収まらない場合はビルドを中止する。特に土地の複数ページ化は、バイオーム境界をまたぐIndividual Yソートを壊すため許可しない。
 
@@ -424,7 +424,7 @@ Projectビューの`Create > Farmware > Terrain Tile Art Generation Settings`か
 
 #### 現段階で対象外の確認
 
-この固定Sceneは`GrassLoam`単一材質のアート試作を対象とし、作り直し中の14形状境界ハイライト、異材質Wall境界、`Shadow Caster 2D`、チャンク境界、Liquid、Runtimeの本番差分選択はまだ扱わない。それらは新境界Spriteと本番表示を接続する後続工程で追加する。
+この固定Sceneは`GrassLoam`単一材質のアート試作を対象とし、共通境界ハイライトの47状態、異材質Wall境界、`Shadow Caster 2D`、チャンク境界、Liquid、Runtimeの本番差分選択は扱わない。共通境界ハイライトは専用の`Open Boundary Highlight Inspection Map`で確認し、残りは本番表示を接続する後続工程で追加する。
 
 ### 2.12 Open Wall Surface Darken Comparison
 
@@ -435,7 +435,7 @@ Projectビューの`Create > Farmware > Terrain Tile Art Generation Settings`か
 
 #### 用途
 
-`GrassLoam`の`GroundTop`を地面とWall上面で共有し、Wall上面全体を暗化した場合の視認性を比較する。比較の結果、正仕様では係数0.85、再制作するWall境界ハイライト、`Face`、`Light 2D`と`Shadow Caster 2D`の組合せを採用した。現行Sceneは暗化係数とFaceだけを比較する途中段階であり、境界ハイライトと動的影は新しい14形状Spriteの接続時に追加する。
+`GrassLoam`の`GroundTop`を地面とWall上面で共有し、Wall上面全体を暗化した場合の視認性を比較する。比較の結果、正仕様では係数0.85、共通Wall境界ハイライト、`Face`、`Light 2D`と`Shadow Caster 2D`の組合せを採用した。現行Sceneは暗化係数とFaceだけを比較し、境界ハイライトは専用の47状態検品Scene、動的影は後続のShadow Caster検品で確認する。
 
 各比較領域では全面へ通常の`GroundTop`を描画し、固定Wall形状のセルだけ、直下のGroundと同じSprite参照をWall層へ重ねる。Wall層の`SpriteRenderer.color`へRGB係数を乗算し、左から0.85、0.70、0.55の3条件を同じ差分配置で並べる。手前が空いているWallには通常`Face`を1段だけGroundより手前へ重ね、上面の区別と立体感を同時に比較する。未制作の内角Sprite、47接続の生成PNG、入力Fingerprintには依存しないため、Wall方式の変更前でも実行できる。
 
@@ -444,7 +444,30 @@ Projectビューの`Create > Farmware > Terrain Tile Art Generation Settings`か
 1. メニューを実行し、Gameビューを480×270またはその整数倍にする。
 2. 左0.85、中央0.70、右0.55を見比べ、GroundとWallの境界、Wall内部の模様、Faceとのつながりを確認する。
 3. 暗い洞窟背景でもWall形状を読めるか、0.55で材質色が失われないか、0.85でGroundと混同しないかを確認する。
-4. 採用値0.85へ固定した表示に、再制作したWall境界ハイライトと`Shadow Caster 2D`を追加した後、光源移動、外周・内角、異材質Wallの共有辺、チャンク境界を確認する。
+4. 採用値0.85とWall境界ハイライトの組合せは専用47状態検品Sceneで確認する。`Shadow Caster 2D`を追加した後、光源移動、異材質Wallの共有辺、チャンク境界を確認する。
+
+### 2.13 Generate／Open Boundary Highlight Art
+
+- 生成メニュー: `Farmware > World Generation > Generate Boundary Highlight Art`
+- 検品メニュー: `Farmware > World Generation > Open Boundary Highlight Inspection Map`
+- 実装: `TerrainBoundaryHighlightArtGenerator`、`TerrainBoundaryHighlightInspectionMapBuilder`
+- 出力PNG: `Assets/Farmware/Art/WorldGeneration/Terrain/Highlights/terrain_boundary_highlights.png`
+- 出力Atlas: `Assets/Farmware/Art/WorldGeneration/Atlases/BoundaryHighlightAtlas.spriteatlasv2`
+- 出力Scene: `Assets/Scenes/Development/TerrainBoundaryHighlightInspection.unity`
+
+#### 用途
+
+Runtimeの8近傍47状態と同じ特徴マスクから、全材質共通の境界ハイライト14基本形を再現可能に生成する。PNGは224×16 pxで、16×16 pxの14区画を横一列へ配置する。外周は不透明白1 pxの連続線、内角は欠けた対角側の角に置く不透明白1 pxの点とし、実表示ではTile側のAlpha 20%を掛ける。GroundハイライトのRGBは白、WallハイライトのRGBはWall上面と同じ既定係数0.85で暗化し、いずれもBaseより後から描画する。ImporterはPoint、16 PPU、非圧縮、Mip Mapなし、`Full Rect`、中央Pivotに固定し、専用Atlasの同一ページへ収録する。
+
+固定検品Sceneは正規化済み47状態を8列で並べ、左へ通常の`GrassLoam` Ground、右へ同じSpriteを0.85暗化したWallを表示する。各状態のHierarchy名には接続Mask、14基本形番号、時計回り90度回転数を含める。完全接続の1状態だけは境界なし、残り46状態には境界が表示される。これは形状と暗化時の見え方を比較するSceneであり、`Face`、Liquid、`Light 2D`、`Shadow Caster 2D`は含めない。
+
+#### 確認手順
+
+1. 生成メニューを実行し、PNGが14 Spriteへ分割され、`BoundaryHighlightAtlas`の同一ページへ収録されることを確認する。
+2. 検品メニューを実行し、Gameビューを480×270または整数倍にする。
+3. 左のGround 47状態と右のWall 47状態で、外周1 px、内角1 px、90度回転、完全接続だけが境界なしであることを確認する。右側ではBaseとハイライトRGBの両方へ0.85が掛かり、白い線だけが浮いて見えないことも確認する。
+4. 20%の白線が明るく浮きすぎず、0.85暗化Wall上でも形状を読めることを確認する。
+5. `Build Fallback Map Prototype`を実行した場合は、SampleSceneのGround／Wall境界Sprite配列が14件で、Missing参照がないことも確認する。
 
 ## 3. 変更時の選び方
 
@@ -460,6 +483,7 @@ Projectビューの`Create > Farmware > Terrain Tile Art Generation Settings`か
 | 地形タイル試作工程の材質Sprite入力、境界合成、均等差分選択、Wall暗色化 | Terrain Tile Art Generation Settings Inspector |
 | `GrassLoam`の反復、Ground／Wall共通上面、Wall暗色化、通常Face、Ground／Wall用境界合成のGameビュー検品 | Open Terrain Tile Inspection Map |
 | GroundTopをWall上面へ再利用した場合の暗化係数とGround上への重なり比較 | Open Wall Surface Darken Comparison |
+| 共通境界14 Spriteの再生成、Atlas登録、Ground／Wall各47状態の外周・内角確認 | Generate Boundary Highlight Art、Open Boundary Highlight Inspection Map |
 | 生成規則と表示の両方 | Analyze Distribution、Map Viewer、Debug Visualization |
 
 Editorツールだけで検証を完了しない。対応する自動テストは[テスト](./Testing.md)に従って実行し、見た目に関係する変更はGameビューでも確認する。
@@ -475,7 +499,7 @@ Editorツールだけで検証を完了しない。対応する自動テスト�
 - 地形タイル試作工程の材質生成設定Inspectorは2.10節のとおり、`GroundTop`・`Face`・任意`FaceBoundaryOverlay`とWall暗色化だけを扱う方式へ更新済みである。専用`WallTop`、7外周部品、共通暗色内部、47枚の材質別Wall完成Spriteは削除した。WorldLayer・絶対座標・断面段・安定材質ID・用途別SaltによるRuntimeの決定論的な均等差分選択は、表示へ接続するC6-Dで実装する。
 - TERRAIN-01C3-D2では、生成済み固定水文セルの流向・下流座標・終端・辺数・集水面積・打切り・最遠寄与距離・流出・流域・湖をGameビューとMap Viewerへ接続した。海洋流出口は流向なしの`Marine`終端、4,096辺または4,096セルで確定できない結果は`LongDrainage`または打切り色として表示する。Level 0〜6集約SummaryとLevel 0〜12 Downstream Summaryの利用・分解・キャッシュ統計は固定生成結果ではない比較実装の内部診断なので、性能テストだけで記録し表示へ混ぜない。打切られた大規模閉鎖流域は固定湖候補と別色・別理由で表示する。
 - TERRAIN-01C5では、環境として自然な直接接続を認めるv0.48の方針に合わせ、安定`BiomeId` 1〜18、全18Biomeの153ペアの境界長・接触率、両側の気温・湿度・標高と差、植生・地質・火山段階・水文・海岸条件、最終選択理由を境界診断へ追加する。C5前の旧7種や旧IDを選べるモード、凡例、配色、中央情報は残さず、旧版データは表示で補完せず版不一致として拒否する。TERRAIN-01C1で削除した旧7Biome向けの`Biome Transition`を復活させず、第三Biome強制の仕様へ戻さない。新方式では橋不足や接続例への未記載を異常表示にせず、不正候補・必須ゲート違反と、景観品質の確認事項を区別する。湿原の専用Host許可・不許可とOverlay理由、火山中核の地質・活動度を表示し、周縁リングの欠落だけをエラーにしない。153ペア監査と最終選択理由はC5の更新予定であり、C1時点で実装済みとは扱わない。
-- TERRAIN-01C6では、最終Block・Liquid表示への置換と同時に、旧`GeneratedTile.WaterBodyType`、旧River・Pond生成、旧Biome直結配色を読むモード、凡例、中央情報、互換変換を削除する。14形状の接続選択処理とGround／Wall用Tilemapは維持し、再制作した白い境界Spriteと新Atlasを新しい有効地形へ接続する。旧PNGと旧Atlasは再制作開始時に撤去済みであり、再接続までSceneの境界Sprite配列は空とする。Wall接続では材質IDを比較せず、連続したWall領域の外周・内角だけへ表示する。比較用の旧表示切替は残さず、新しい固定水文・有効地形だけを診断の入力にする。F4のタイル・サブチャンク・チャンク境界診断は地形アートとは別機能なので維持する。
+- TERRAIN-01C6では、最終Block・Liquid表示への置換と同時に、旧`GeneratedTile.WaterBodyType`、旧River・Pond生成、旧Biome直結配色を読むモード、凡例、中央情報、互換変換を削除する。14形状の接続選択処理、Ground／Wall用Tilemap、再制作した白い境界Spriteと専用Atlasを維持し、新しい有効地形へ接続する。Sceneの境界Sprite配列は14件を必須とし、Missingや空配列を許可しない。Wall接続では材質IDを比較せず、連続したWall領域の外周・内角だけへ表示する。比較用の旧表示切替は残さず、新しい固定水文・有効地形だけを診断の入力にする。F4のタイル・サブチャンク・チャンク境界診断は地形アートとは別機能なので維持する。
 - TERRAIN-01C／GATHER-01／AUTO-01D: 編集後の隣接差分、穴・液体、反応・保留キューに加え、`LooseSurface`／`GroundEmbedded`／`WallEmbedded`／`MassiveDeposit`の形態、Host、採掘済み差分、巨大鉱床の残量・占有を表示する。自然生成Block、配置済みBlock、クラフト用資源を区別し、元生成を現在地形と誤表示しない。
 - ECO-01／JOURNAL-01: 永続／匿名、地域会計、収容数・回復、証拠判定を確認可能にする。
 - DIVE-01／VEHICLE-01: 現在Layerと直下プレビュー、遷移失敗、高速先読み・生成待ちを診断する。
