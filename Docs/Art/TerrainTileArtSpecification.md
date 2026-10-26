@@ -85,6 +85,22 @@ Wall・境界なし:   GroundTop×0.85 → (Face + 32px折れ目影前半)      
 
 最小構成の`G = 1`、`F = 1`、`B = 0`では、手描き入力は2 Sprite、Editor生成は0 Sprite、Runtime参照候補は2 Spriteとなる。境界ありの最小構成`G = F = B = 1`かつWall暗色化有効`D = 1`では、手描き入力は3 Sprite、Editor生成はGround用とWall用の2 Sprite、Runtime参照候補は5 Spriteとなる。固定接地影と動的影は材質Spriteを追加せず、表示側がWall領域の結合シルエットから生成する。
 
+### 3.4 製品表示カタログと素材設定の境界
+
+製品Runtimeは、手描き素材を管理するEditor専用設定や`Source`フォルダーを直接参照せず、公開済みの`TerrainMaterialPresentationCatalog`だけを参照する。製品カタログは安定材質ID 1〜41を各1件保持し、各行には`GroundTop`、`Face`、境界候補数、Ground用境界合成結果、Wall用境界合成結果、`DarkenWallSurface`、`WallDarkenFactor`を保存する。境界の手描きOverlayそのものはRuntime参照へ含めず、境界あり材質ではEditorが生成した用途別完成Spriteだけを渡す。
+
+製品カタログは公開前に次をすべて検証し、欠落時に別材質や仮Spriteへフォールバックしない。
+
+- 安定材質ID 1〜41が各1件あり、範囲外、重複、欠落がない。
+- `GroundTop`と`Face`は各1件以上で、各候補が16×16 px・16 PPU、nullなし、同じ配列内の重複なしである。
+- 境界なしではGround用・Wall用の境界合成配列がともに空である。
+- 境界ありではGround用が`F×B`件あり、Wall暗色化が有効ならWall用も`F×B`件ある。暗色化が無効ならWall用配列を作らずGround用を再利用する。
+- `WallDarkenFactor`は0より大きく1以下である。
+
+ECSの`GroundBlockRuntimeId`と`WallBlockRuntimeId`は、41材質Blobから表示開始時に別々の安定材質ID検索表へ変換する。Runtime IDは保存IDではなくカタログ寿命内の値なので、表示アセットへ直接保存しない。Ground IDをWallとして、またはWall IDをGroundとして代替解決せず、不正入力は明示的に失敗させる。検索表はRuntime ID昇順へ整列して二分探索し、表示セルごとに41行を線形走査しない。
+
+差分選択の初期Versionは1とする。ワールドシード、固定Version、WorldLayer、絶対X/Y、安定材質ID、断面段、`GroundTop`・`Face`・境界ごとの固定Saltを64bitで混合し、候補数による剰余から添字を得る。候補ごとのWeightは持たず、同一配列内の候補を同じ規則で扱う。チャンク座標、表示原点、ロード順、再描画順、Job完了順、`UnityEngine.Random`には依存しない。境界合成結果はFace候補を外側、境界候補を内側にした`faceIndex×B + boundaryIndex`の順で格納し、Editor生成とRuntime参照で同じ添字を使う。
+
 ## 4. 手描き制作の基準
 
 ### 4.1 制作ツール
