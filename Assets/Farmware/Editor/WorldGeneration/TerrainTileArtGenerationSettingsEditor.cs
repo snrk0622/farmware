@@ -112,8 +112,13 @@ namespace Farmware.WorldGeneration.Editor
             EditorGUILayout.HelpBox(
                 "GroundTopはGroundとWallで同じ入力Spriteを使い、生成ツールでは複製しません。"
                 + " Wall上面は表示時Tint、Wall用FaceBoundaryOverlayは生成時に同じ係数で暗くします。"
-                + " 入力は16×16 px、Read/Write有効、Alpha 0/255で用意してください。",
+                + " 入力PNGはSourceフォルダーへ置くと共通Import設定と4×3分割が自動適用されます。",
                 MessageType.Info);
+            EditorGUILayout.HelpBox(
+                "境界なし: FaceBoundaryOverlayを0件にし、GroundTopとFaceを直接使うため生成操作は不要です。\n"
+                + "境界あり: FaceBoundaryOverlayを1件以上登録し、Face・Overlay・Wall暗色化設定を変更した後に境界Spriteを更新してください。"
+                + " GroundTopだけの変更は直接反映されるため再生成不要です。",
+                MessageType.None);
 
             TerrainMaterialArtSource[] materials = settings.Materials;
             if (materials == null || materials.Length == 0)
@@ -131,7 +136,7 @@ namespace Farmware.WorldGeneration.Editor
                 BuildMaterialChoices(materials));
             TerrainMaterialArtSource selectedMaterial = materials[selectedMaterialIndex];
             DrawSelectedMaterialSummary(settings, selectedMaterial);
-            DrawOperationButtons(settings);
+            DrawOperationButtons(settings, selectedMaterial);
             DrawLastReport();
             DrawGeneratedPreviews(selectedMaterial);
         }
@@ -163,18 +168,39 @@ namespace Farmware.WorldGeneration.Editor
                     ? $"GroundTop共有 / 表示時RGB×{material.WallDarkenFactor:0.00}"
                     : "GroundTop共有 / 暗色化なし");
 
+            bool hasBoundaryInputs = material.FaceBoundaryOverlays != null
+                && material.FaceBoundaryOverlays.Length > 0;
+            bool hasPreviousGeneratedAssets = material.LastGeneratedAssetPaths.Count > 0;
             bool requiresRegeneration =
                 TerrainTileArtGenerator.RequiresRegeneration(settings, material);
-            EditorGUILayout.HelpBox(
-                requiresRegeneration
-                    ? "未生成、または入力・設定が前回生成時から変わっています。"
-                    : "入力・設定は前回の正常生成時と一致しています。",
-                requiresRegeneration ? MessageType.Warning : MessageType.Info);
+            if (!hasBoundaryInputs && !hasPreviousGeneratedAssets)
+            {
+                EditorGUILayout.HelpBox(
+                    "境界なし: 派生PNGの生成は不要です。GroundTopとFaceの修正は再Import後に直接反映されます。",
+                    MessageType.Info);
+            }
+            else if (!hasBoundaryInputs)
+            {
+                EditorGUILayout.HelpBox(
+                    "境界なしへ変更されています。対象材質の境界Spriteを整理し、以前の生成PNGを削除してください。",
+                    MessageType.Warning);
+            }
+            else
+            {
+                EditorGUILayout.HelpBox(
+                    requiresRegeneration
+                        ? "境界あり: 未生成、またはFace・Overlay・Wall暗色化設定が前回生成時から変わっています。"
+                        : "境界あり: Ground／Wall用の境界合成Spriteは現在の入力と一致しています。",
+                    requiresRegeneration ? MessageType.Warning : MessageType.Info);
+            }
         }
 
         /// <summary>対象材質と全材質の検証・生成ボタンを表示します。</summary>
         /// <param name="settings">操作対象の設定アセットです。</param>
-        private void DrawOperationButtons(TerrainTileArtGenerationSettings settings)
+        /// <param name="selectedMaterial">境界生成または旧出力整理の要否を表示へ反映する選択材質です。</param>
+        private void DrawOperationButtons(
+            TerrainTileArtGenerationSettings settings,
+            TerrainMaterialArtSource selectedMaterial)
         {
             EditorGUILayout.Space(6f);
             using (new EditorGUILayout.HorizontalScope())
@@ -188,9 +214,24 @@ namespace Farmware.WorldGeneration.Editor
                         : "対象材質の検証が完了しました。";
                 }
 
-                if (GUILayout.Button("対象材質を生成"))
+                bool hasBoundaryInputs = selectedMaterial?.FaceBoundaryOverlays != null
+                    && selectedMaterial.FaceBoundaryOverlays.Length > 0;
+                bool hasObsoleteGeneratedAssets = !hasBoundaryInputs
+                    && selectedMaterial != null
+                    && selectedMaterial.LastGeneratedAssetPaths.Count > 0;
+                string selectedActionLabel = hasBoundaryInputs
+                    ? "対象材質の境界Spriteを更新"
+                    : hasObsoleteGeneratedAssets
+                        ? "不要な境界Spriteを整理"
+                        : "境界なし（生成不要）";
+                using (new EditorGUI.DisabledScope(
+                    selectedMaterial == null
+                    || !hasBoundaryInputs && !hasObsoleteGeneratedAssets))
                 {
-                    RunSelectedGeneration(settings);
+                    if (GUILayout.Button(selectedActionLabel))
+                    {
+                        RunSelectedGeneration(settings);
+                    }
                 }
             }
 
@@ -204,7 +245,7 @@ namespace Farmware.WorldGeneration.Editor
                         : "全材質の検証が完了しました。";
                 }
 
-                if (GUILayout.Button("全材質を生成"))
+                if (GUILayout.Button("全材質の境界Spriteを更新"))
                 {
                     RunAllGeneration(settings);
                 }
@@ -222,14 +263,15 @@ namespace Farmware.WorldGeneration.Editor
                 if (lastValidationReport.HasErrors)
                 {
                     lastOperationMessage =
-                        "対象材質を生成できません。下の検証エラーを修正してください。";
+                        "対象材質の境界Spriteを更新できません。下の検証エラーを修正してください。";
                     return;
                 }
 
                 TerrainTileArtGenerationResult result =
                     TerrainTileArtGenerator.GenerateMaterial(settings, selectedMaterialIndex);
-                lastOperationMessage =
-                    $"{result.MaterialId}: 境界Sprite {result.GeneratedSpriteCount}枚の生成が完了しました。";
+                lastOperationMessage = result.GeneratedSpriteCount > 0
+                    ? $"{result.MaterialId}: 境界Sprite {result.GeneratedSpriteCount}枚の更新が完了しました。"
+                    : $"{result.MaterialId}: 境界なし材質の不要な生成物を整理しました。";
                 InvalidatePreviewCache();
             }
             catch (Exception exception)
@@ -249,7 +291,7 @@ namespace Farmware.WorldGeneration.Editor
                 if (lastValidationReport.HasErrors)
                 {
                     lastOperationMessage =
-                        "全材質を生成できません。下の検証エラーを修正してください。";
+                        "全材質の境界Spriteを更新できません。下の検証エラーを修正してください。";
                     return;
                 }
 
@@ -263,7 +305,8 @@ namespace Farmware.WorldGeneration.Editor
                 }
 
                 lastOperationMessage =
-                    $"全{results.Count}材質、境界Sprite {generatedCount}枚の生成が完了しました。";
+                    $"全{results.Count}材質を確認し、境界Sprite {generatedCount}枚の更新が完了しました。"
+                    + " 境界なし材質は派生PNGを生成していません。";
                 InvalidatePreviewCache();
             }
             catch (Exception exception)

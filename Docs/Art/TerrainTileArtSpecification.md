@@ -271,10 +271,10 @@ Wall上面には2D Lightの影響を受けるLit系Materialを使用する。Wal
 
 表示側は有効地形を参照し、変更セルを含むDirtyサブチャンクと必要な外周Haloだけを再構築する。Tilemap全走査や全チャンク再描画を行わない。
 
-## 10. Unity取込の暫定基準
+## 10. Unity取込基準
 
 - Texture Type: `Sprite (2D and UI)`
-- Sprite Mode: シートは`Multiple`、単体は`Single`
+- Sprite Mode: 手描き材質シートは`Multiple`、生成済み完成Spriteは`Single`
 - Pixels Per Unit: `16`
 - Filter Mode: `Point`
 - Compression: `None`
@@ -283,10 +283,12 @@ Wall上面には2D Lightの影響を受けるLit系Materialを使用する。Wal
 - sRGB (Color Texture): `On`
 - Read/Write: 手描き入力はEditor生成時の画素読取に必要なため`On`。生成済み完成Spriteは`Off`
 - Alpha: すべての手描き入力で0または255だけを使用し、半透明画素を含めない
-- Pivot: `GroundTop`は中央、`FaceBoundaryOverlay`と`Face`はEditor合成時に画素位置が一致するよう同じ上端基準へ統一する。正確な値は試作後に固定する
+- Pivot: すべて中央。`GroundTop`、`FaceBoundaryOverlay`、`Face`は同じ16×16 px区画と中央Pivotを使い、Editor合成時の画素位置を一致させる
 - AtlasのPaddingとTight Packingは、隣接色のにじみがない設定を実機表示で確認する
 
-Editor生成ツールは断面の完成PNGを`Point`、16 PPU、非圧縮、Mip Mapなし、sRGB、`Full Rect`、中央Pivotの単一SpriteとしてImportする。入力または設定の画像Fingerprintを材質ごとに記録し、画像内容、配列順、暗色化、出力先のいずれかが変わった場合は要再生成と表示する。再生成時は同じパスを上書きして`.meta`とGUIDを維持し、前回その材質が生成した記録済みPNGのうち今回不要になったものだけを削除する。手描き入力、記録外Asset、フォルダーは削除しない。
+手描き材質PNGは64×48 pxとし、`Assets/Farmware/Art/WorldGeneration/Source/`へ置く。材質専用Importer監視が上記設定を自動適用し、未分割の新規PNGだけを16×16 pxの4列×3行へ分割する。制作画像の上段4枚を`GroundTop`、中段4枚を`Face`、下段4枚を`FaceBoundaryOverlay`として扱う。境界なし材質は下段Spriteを設定へ登録せず、`FaceBoundaryOverlay`配列を0件にする。既存の境界なし材質が上2行だけを分割した8区画も有効とする。既存Sprite IDとSerialized参照を守るため、既存分割が規約外でも自動再分割は行わない。`.meta`を維持し、画素修正は同じPNGパスへの上書きで行う。
+
+Editor生成ツールは断面の完成PNGを`Point`、16 PPU、非圧縮、Mip Mapなし、sRGB、`Full Rect`、中央Pivotの単一SpriteとしてImportする。境界あり材質では`Face`、`FaceBoundaryOverlay`、暗色化、出力先のFingerprintを材質ごとに記録し、いずれかが変わった場合は要更新と表示する。`GroundTop`は合成PNGへ使わず直接表示するため、上面だけの修正では境界合成を更新しない。境界なし材質は派生PNGを生成しない。境界ありから境界なしへ変更した場合だけ、明示的な整理操作で前回その材質が生成した記録済みPNGを削除する。再生成時は同じパスを上書きして`.meta`とGUIDを維持し、手描き入力、記録外Asset、フォルダーは削除しない。
 
 ## 11. 先に作る代表材質
 

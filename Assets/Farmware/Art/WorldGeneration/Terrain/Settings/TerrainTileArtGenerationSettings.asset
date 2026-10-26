@@ -33,7 +33,7 @@ MonoBehaviour:
     - {fileID: -1765189702, guid: 2379daebd48f74b2e83d5dfef9eff0d2, type: 3}
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: a6b97a32887d28beea9efd5efed83b14
+    lastGeneratedFingerprint: 7f91bd60dec6be444ee1514cbabb20fb
     lastGeneratedAssetPaths:
     - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/FaceBoundary/GrassLoam_GroundFace_f00_b00.png
     - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/FaceBoundary/GrassLoam_WallFace_f00_b00.png

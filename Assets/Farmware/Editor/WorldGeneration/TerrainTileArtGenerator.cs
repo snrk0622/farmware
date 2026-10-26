@@ -130,7 +130,7 @@ namespace Farmware.WorldGeneration.Editor
     public static class TerrainTileArtGenerator
     {
         /// <summary>合成規則変更時に既存出力を古いと判定するFingerprint版です。</summary>
-        public const int GeneratorVersion = 3;
+        public const int GeneratorVersion = 4;
 
         /// <summary>入力Spriteと完成Spriteで共通して使用するPixels Per Unitです。</summary>
         public const float PixelsPerUnit = 16f;
@@ -254,7 +254,10 @@ namespace Farmware.WorldGeneration.Editor
             return report;
         }
 
-        /// <summary>現在の設定と入力Sprite内容から要再生成判定用Fingerprintを作ります。</summary>
+        /// <summary>
+        /// 現在の境界合成入力から要再生成判定用Fingerprintを作ります。
+        /// GroundTopは生成PNGへ使わず直接表示するため、上面だけの変更で不要な境界再生成を要求しません。
+        /// </summary>
         /// <param name="settings">出力先を持つ設定アセットです。</param>
         /// <param name="material">Fingerprintを計算する材質です。</param>
         /// <returns>Unity Hash128を小文字16進文字列にした安定Fingerprintです。</returns>
@@ -280,13 +283,15 @@ namespace Farmware.WorldGeneration.Editor
             source.Append("factor=")
                 .Append(material.WallDarkenFactor.ToString("R", CultureInfo.InvariantCulture))
                 .Append('|');
-            AppendSprites(source, "ground", material.GroundTopSprites);
             AppendSprites(source, "face", material.FaceSprites);
             AppendSprites(source, "boundary", material.FaceBoundaryOverlays);
             return Hash128.Compute(source.ToString()).ToString();
         }
 
-        /// <summary>入力または調整値が未生成、または直前の正常生成から変わっているか調べます。</summary>
+        /// <summary>
+        /// 境界合成入力が未生成、直前の正常生成から変わった、または不要な旧出力が残るか調べます。
+        /// 境界なし材質はGroundTopとFaceを直接使うため、旧生成物の整理が不要なら生成不要です。
+        /// </summary>
         /// <param name="settings">共通設定を持つ設定アセットです。</param>
         /// <param name="material">確認する材質です。</param>
         /// <returns>完成Spriteを再生成すべき場合はtrueです。</returns>
@@ -297,6 +302,13 @@ namespace Farmware.WorldGeneration.Editor
             if (settings == null || material == null)
             {
                 return true;
+            }
+
+            bool hasBoundaryInputs = GetLength(material.FaceBoundaryOverlays) > 0;
+            if (!hasBoundaryInputs)
+            {
+                // 境界ありから境界なしへ変更した場合だけ、一度生成処理を通して以前の合成PNGを安全に削除します。
+                return material.LastGeneratedAssetPaths.Count > 0;
             }
 
             string currentFingerprint = CalculateFingerprint(settings, material);

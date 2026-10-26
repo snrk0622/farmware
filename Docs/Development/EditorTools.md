@@ -371,33 +371,49 @@ Projectビューの`Create > Farmware > Terrain Tile Art Generation Settings`か
 
 `TerrainTileArtGenerationSettings`と材質入力型は`Farmware.WorldGeneration.Editor` Assemblyに置き、Player対応のAuthoring Assemblyへ含めない。設定Asset、手描き制作入力、検品用生成物、Development Scene／Shaderは製品Build Sceneから参照しない。`TerrainProductIsolationTests.EnabledBuildScenes_DoNotDependOnDevelopmentOnlyAssets`が、Build Settingsで有効な全Sceneの再帰依存を通常のEditModeテストで検査する。
 
+#### 材質入力PNGの自動Import
+
+`Assets/Farmware/Art/WorldGeneration/Source/`配下へ64×48 pxのPNGを追加すると、Project変更後に材質専用Importer監視がPoint、16 PPU、非圧縮、Mip Mapなし、Clamp、sRGB、Read/Write有効、`Full Rect`、Sprite Multipleを自動適用する。新規PNGが未分割なら、16×16 pxを4列×3行へ、制作画像の上段左から`<ファイル名>_0`～`_11`の順で分割する。上段4枚を`GroundTop`、中段4枚を`Face`、下段4枚を`FaceBoundaryOverlay`として使用する。
+
+既存のSprite区画とSprite IDは、Sceneや設定Assetの参照を維持するため自動で作り直さない。境界なしの既存材質は上2行だけの8区画、境界候補を持つ材質は全3行の12区画を許可する。規定位置、中央Pivot、規定名と一致しない場合は自動修復せずConsoleへ理由を表示する。`.meta`を削除せず、画素修正は同じPNGパスへの上書きで行う。別フォルダーのPNG、液体、動物、植物、UI、Animation Spriteにはこの規則を適用しない。
+
+材質PNGを修正した後の流れは次のとおりである。
+
+1. AsepriteまたはPixeloramaから同じPNGパスへ上書きし、Unityの自動再Importを待つ。
+2. `Terrain Tile Art Generation Settings`の対象材質で入力Spriteと検証結果を確認する。
+3. `FaceBoundaryOverlay`が0件の境界なし材質では、`GroundTop`と`Face`を直接使用するため派生PNG生成は行わない。
+4. `FaceBoundaryOverlay`が1件以上の境界あり材質では、`Face`、`FaceBoundaryOverlay`、`DarkenWallSurface`、`WallDarkenFactor`のいずれかを変更した後に`対象材質の境界Spriteを更新`を実行する。`GroundTop`だけの変更では境界合成PNGを更新しない。
+5. 境界ありから境界なしへ変更した場合は、Inspectorの`不要な境界Spriteを整理`を一度実行し、以前その材質が所有していた合成PNGだけを削除する。
+6. 固定検品Sceneまたは後続の製品表示で、境界あり／なしの1段目と差分の接続を確認する。
+
 - `Assets/`配下の出力ルート。
 - 材質ID、日本語確認名、全候補を均等確率で選ぶ可変長の`GroundTop`、`Face`、任意の`FaceBoundaryOverlay`。個別Weightや出現率Overrideは持たない。
 - `DarkenWallSurface`と`WallDarkenFactor`。新規材質の初期値は暗色化ON、係数0.85とする。
 - 選択材質の手描き入力数、境界生成数、Runtime候補数、Ground／Wall用境界の内訳、要再生成状態。
 - 選択材質で生成済みのGround用境界とWall用境界の画像一覧。各画像をクリックするとProjectビューで対応するSpriteを選択する。
 
-`対象材質を検証`／`対象材質を生成`は、ほかの未制作材質が空でも代表材質を1件ずつ試作できる。`全材質を検証`／`全材質を生成`は登録済み全材質を先に検証し、総出力枚数の確認後に一括生成する。入力Spriteは16×16 px、Read/Write有効、Point、非圧縮、Mip Mapなし、sRGB、Alpha 0または255とする。不正なID、重複ID、空の必須配列、未設定Sprite、範囲外の暗色化係数も生成前に日本語で報告する。
+`対象材質を検証`／`対象材質の境界Spriteを更新`は、ほかの未制作材質が空でも代表材質を1件ずつ試作できる。`全材質を検証`／`全材質の境界Spriteを更新`は登録済み全材質を先に検証し、総出力枚数の確認後に一括更新する。入力Spriteは16×16 px、Read/Write有効、Point、非圧縮、Mip Mapなし、sRGB、Alpha 0または255とする。不正なID、重複ID、空の必須配列、未設定Sprite、範囲外の暗色化係数も生成前に日本語で報告する。
 
-各配列内の完成Sprite候補はC6-Dで均等確率かつ決定論的に選ぶ。生成設定AssetとInspectorにはWeight調整を設けず、配列内容と順序の変更は画像Fingerprintと要再生成状態へ反映する。
+各配列内の完成Sprite候補はC6-Dで均等確率かつ決定論的に選ぶ。生成設定AssetとInspectorにはWeight調整を設けない。`Face`と`FaceBoundaryOverlay`の内容・順序は境界合成Fingerprintと要更新状態へ反映し、派生PNGへ使わない`GroundTop`は直接反映する。
 
 出力先は`<Output Root>/<Material ID>/FaceBoundary/`である。Ground／Wall境界は`Face`番号と`FaceBoundaryOverlay`番号の全組合せを用途別に生成する。16×16画像は64×64の整数4倍で表示し、再コンパイルやEditor再起動後も保存済み生成パスからSpriteを再読込する。暗色化が無効ならWall用境界PNGを重複生成せずGround用を再利用する。同名PNGの再生成ではGUIDを維持し、差分数を減らした場合は前回記録された同材質の不要PNGだけを削除する。旧`WallTop`生成フォルダーは新方式への移行時に削除済みである。
 
 #### 次の修正をしたら確認する
 
 - 暗色化の色空間、丸め、対象部位、Alpha規則を変更した。
-- 入力配列、画像Fingerprint、生成ファイル名、出力先、Import設定を変更した。
+- 入力配列、境界合成Fingerprint、生成ファイル名、出力先、材質入力の自動Import設定または4×3分割規則を変更した。
 - C6-Dで完成Spriteの参照方法やPivotを確定・変更した。
 
 #### 確認内容
 
 1. 専用EditModeテストが、暗色化、Overlay合成、半透明拒否、可変Sprite数、専用WallTop設定の不存在を保証する。
-2. `GrassLoam`で対象材質の検証・生成を行い、必要なGround／Wall境界合成Spriteだけが所定フォルダーへ出る。
-3. 生成PNGのImporterがPoint、16 PPU、非圧縮、Mip Mapなし、sRGB、`Full Rect`、中央Pivotになり、再生成後もGUIDが変わらない。
-4. 入力画像、配列順、暗化の有効状態または係数を変更すると要再生成表示へ変わり、再生成後に最新表示へ戻る。
-5. Inspectorの生成結果プレビューにGround／Wall境界の全`F×B`組合せが別一覧に64×64の整数4倍で表示され、画像をクリックすると対応する生成SpriteをProjectビューで選択する。
-6. Wall上面は生成PNGではなく同じ`GroundTop`参照へ表示時Tintを掛けること、`Face`自体は暗色化されないことをGameビューで確認する。
-7. Build Settingsで有効な製品Sceneが、設定Asset、手描き制作入力、検品用Material、Development Scene／Shaderへ依存していないことを`TerrainProductIsolationTests`で確認する。
+2. 材質Source配下へ新規64×48 px PNGをImportすると、共通設定と12区画が自動適用され、再検査でSprite IDが変化しない。規約外寸法と不正な既存分割は参照を壊さず拒否される。
+3. `GrassLoam`で対象材質の検証・更新を行い、必要なGround／Wall境界合成Spriteだけが所定フォルダーへ出る。境界なし材質は生成不要と表示される。
+4. 生成PNGのImporterがPoint、16 PPU、非圧縮、Mip Mapなし、sRGB、`Full Rect`、中央Pivotになり、再生成後もGUIDが変わらない。
+5. `Face`、`FaceBoundaryOverlay`、暗化の有効状態または係数を変更すると要更新表示へ変わり、更新後に最新表示へ戻る。`GroundTop`だけの変更では不要な境界再生成を要求しない。
+6. Inspectorの生成結果プレビューにGround／Wall境界の全`F×B`組合せが別一覧に64×64の整数4倍で表示され、画像をクリックすると対応するSpriteをProjectビューで選択する。
+7. Wall上面は生成PNGではなく同じ`GroundTop`参照へ表示時Tintを掛けること、`Face`自体は暗色化されないことをGameビューで確認する。
+8. Build Settingsで有効な製品Sceneが、設定Asset、手描き制作入力、検品用Material、Development Scene／Shaderへ依存していないことを`TerrainProductIsolationTests`で確認する。
 
 ### 2.11 Open Terrain Tile Inspection Map
 

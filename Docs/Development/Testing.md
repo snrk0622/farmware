@@ -330,7 +330,11 @@ Sprite Packer ModeがV2であること、土地Atlasが現行Biome仮色Texture�
 
 専用`WallTop`、材質別7外周部品、共通暗色内部、47枚のWall完成Spriteを対象とした旧試作テストは削除済みである。現行テストは、sRGB 8bit RGBの0.85暗色化と最近傍丸め、Alpha維持、`Face`を変えず不透明な`FaceBoundaryOverlay`だけを暗色化するGround／Wall合成、半透明Overlay拒否を検証する。
 
-可変長配列については、手描き入力`G + F + B`、生成結果`F×B×(1 + D)`、Runtime候補数の計算を確認する。設定検証では16×16 px、Read/Write、Point、16 PPU、非圧縮、Mip Mapなし、sRGB、`Full Rect`、Alpha 0／255、材質ID、暗色化係数を対象とする。差分配列が個別Weightを持たず全候補を均等に扱うこと、暗色化ON・0.85、専用WallTop設定が存在しないことを専用テストとInspector確認で保証する。生成PNGの実Import、再生成時のGUID維持、Fingerprintによる要再生成、旧出力整理はGeneratorの実操作で確認する。固定検品Sceneの構築前検証では、境界生成物を持つ材質だけ現在Fingerprintと最終正常生成Fingerprintを比較し、画像や設定が変わったままなら同数の旧生成物を受理しない。境界なし材質は現在の入力Spriteを直接使うため、生成物がないことを理由に拒否しない。代表材質のInspector操作では、Ground／Wall境界の全`F×B`組合せが用途別に64×64の整数4倍で表示されることを確認する。
+可変長配列については、手描き入力`G + F + B`、生成結果`F×B×(1 + D)`、Runtime候補数の計算を確認する。設定検証では16×16 px、Read/Write、Point、16 PPU、非圧縮、Mip Mapなし、sRGB、`Full Rect`、Alpha 0／255、材質ID、暗色化係数を対象とする。差分配列が個別Weightを持たず全候補を均等に扱うこと、暗色化ON・0.85、専用WallTop設定が存在しないことを専用テストとInspector確認で保証する。生成PNGの実Import、再生成時のGUID維持、Fingerprintによる要再生成、旧出力整理はGeneratorの実操作で確認する。境界なし材質は旧生成物が残らない限り初回から生成不要であり、GroundTopだけの変更は境界Fingerprintを変えない。境界ありから境界なしへ変えた場合は、以前の生成物を整理するまで更新必要と判定する。固定検品Sceneの構築前検証では、境界生成物を持つ材質だけ現在Fingerprintと最終正常生成Fingerprintを比較し、画像や設定が変わったままなら同数の旧生成物を受理しない。境界なし材質は現在の入力Spriteを直接使うため、生成物がないことを理由に拒否しない。代表材質のInspector操作では、Ground／Wall境界の全`F×B`組合せが用途別に64×64の整数4倍で表示されることを確認する。
+
+#### `TerrainMaterialSpriteImportUtilityTests`
+
+材質専用Sourceフォルダー配下のPNGだけを対象とし、他用途の画像を変更しないことを保証する。新規64×48 px PNGへSprite Multiple、Point、16 PPU、Clamp、非圧縮、Mip Mapなし、sRGB、Read/Write有効、`Full Rect`を適用し、16×16 pxの4列×3行を上段左から安定した名前で分割する。同じパスへ修正版PNGを書き戻して再Importした後は設定変更なしとなり、全12区画のSprite IDが維持されることを確認する。既存の境界なし材質は上2行の8区画も許可する。規約外寸法と8／12以外の既存分割はSerialized参照保護のため自動修復しない。
 
 #### `TerrainTileArtInspectionMapBuilderTests`
 
