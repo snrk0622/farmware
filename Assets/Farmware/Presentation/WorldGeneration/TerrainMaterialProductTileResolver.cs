@@ -156,6 +156,70 @@ namespace Farmware.WorldGeneration.Presentation
             return true;
         }
 
+        /// <summary>
+        /// 淡水・海水越しへ続ける通常Ground Faceを選び、乾燥崖の黒Fadeを掛けず不透明な下地として返します。
+        /// </summary>
+        /// <param name="catalog">41材質を完全登録した製品表示カタログです。</param>
+        /// <param name="runtimeLookup">Ground Runtime IDから安定材質IDを引く検索表です。</param>
+        /// <param name="worldSeed">保存済みの64bitワールドシードです。</param>
+        /// <param name="sourceCoordinate">水際奥のGround元セル絶対座標です。</param>
+        /// <param name="runtimeId">投影元GroundのRuntime IDです。</param>
+        /// <param name="faceDepth">水際直下を0とする0〜5の段数です。</param>
+        /// <param name="selection">成功時に通常Faceまたは1段目用境界完成Spriteを受け取ります。</param>
+        /// <returns>Ground材質とFace候補をフォールバックなしで解決できた場合はtrueです。</returns>
+        public static bool TryResolveSubmergedGroundFace(
+            TerrainMaterialPresentationCatalog catalog,
+            TerrainMaterialPresentationRuntimeLookup runtimeLookup,
+            ulong worldSeed,
+            WorldTileCoordinate sourceCoordinate,
+            DefinitionRuntimeId runtimeId,
+            int faceDepth,
+            out TerrainMaterialProductTileSelection selection)
+        {
+            selection = default;
+            if (faceDepth < 0
+                || !TryResolveDefinition(
+                    catalog,
+                    runtimeLookup,
+                    runtimeId,
+                    forWall: false,
+                    out TerrainMaterialPresentationDefinition definition)
+                || !TerrainMaterialSpriteVariantSelector.TrySelectFaceIndex(
+                    worldSeed,
+                    sourceCoordinate,
+                    definition.StableId,
+                    faceDepth,
+                    definition.FaceSpriteCount,
+                    out int faceVariantIndex))
+            {
+                return false;
+            }
+
+            Sprite selectedSprite = definition.GetFaceSprite(faceVariantIndex);
+            if (faceDepth == 0 && definition.HasFaceBoundary)
+            {
+                if (!TerrainMaterialSpriteVariantSelector.TrySelectBoundaryIndex(
+                        worldSeed,
+                        sourceCoordinate,
+                        definition.StableId,
+                        faceDepth,
+                        definition.FaceBoundaryVariantCount,
+                        out int boundaryVariantIndex))
+                {
+                    return false;
+                }
+
+                selectedSprite = definition.GetBoundaryFaceSprite(
+                    faceVariantIndex,
+                    boundaryVariantIndex,
+                    forWall: false);
+            }
+
+            // 水中ではFaceを黒く減衰させず、前面の青い深度Overlayだけで45px/93pxの深さを表します。
+            selection = new TerrainMaterialProductTileSelection(selectedSprite, Color.white);
+            return true;
+        }
+
         /// <summary>用途別Runtime IDから、対応する製品表示定義をフォールバックなしで取得します。</summary>
         /// <param name="catalog">完全な製品表示カタログです。</param>
         /// <param name="runtimeLookup">役割別Runtime検索表です。</param>

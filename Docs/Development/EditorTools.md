@@ -377,6 +377,20 @@ Projectビューの`Create > Farmware > Terrain Tile Art Generation Settings`か
 
 既存のSprite区画とSprite IDは、Sceneや設定Assetの参照を維持するため自動で作り直さない。境界なしの既存材質は上2行だけの8区画、境界候補を持つ材質は全3行の12区画を許可する。規定位置、中央Pivot、規定名と一致しない場合は自動修復せずConsoleへ理由を表示する。`.meta`を削除せず、画素修正は同じPNGパスへの上書きで行う。別フォルダーのPNG、液体、動物、植物、UI、Animation Spriteにはこの規則を適用しない。
 
+#### Liquid水際アニメーションの自動Importと生成
+
+- メニュー: `Farmware > World Generation > Generation > Generate Selected Liquid Edge Waves`
+- 実装: `TerrainLiquidEdgeWaveGenerator`、`TerrainLiquidEdgeWaveSourcePostprocessor`
+- PlayMode: 不要。Projectビューで入力PNGを1枚選択して実行する。
+
+`Assets/Farmware/Art/WorldGeneration/Liquids/Source/`直下の`FreshWaterEdgeWave.png`、`SaltWaterEdgeWave.png`、`MagmaEdgeGlow.png`だけを自動Import対象とする。追加または同じパスへ上書きすると、Point、Mip Maps Off、Compression None、Clamp、sRGB、Read/Write Onを自動適用する。材質PNGの4×3分割は適用しない。
+
+入力は64×48 pxとし、横4列をフレーム0〜3、縦3行を上から奥・左・右の16×16 pxセルとして描く。透明背景、1 px線、2色を基本とし、Alphaは0または255だけを使用する。左と右は自動反転しないため、両方向を個別に用意する。マグマは波線ではなく発光・流れとして描くが、寸法と配置は水と共通にする。
+
+メニュー実行時は選択中の1枚を検証し、奥・左・右の3bit非空組合せ7形状を各4フレームへ合成する。`Liquids/Generated/`へ112×64 pxの28 Sprite Atlasと7件のAnimatedTileを作成または更新する。形状順はbit値1〜7、すなわち奥、左、奥＋左、右、奥＋右、左＋右、奥＋左＋右である。生成後、`TerrainLiquidPresentationCatalog`の該当液体行へ16×16 px・16 PPU Spriteを持つ静止Surface Tile、7 AnimatedTile、深度色を設定する。Surface TileのColor Alphaは1とし、Runtimeが通常セルと岸側3 pxクリップセルの共有Tileを生成する。完成した41材質と製品Sceneへの最終割当はC6-D6で行う。
+
+確認では、Consoleに例外・警告がないこと、28 Spriteが16×16 px・16 PPU・中央Pivotであること、7 AnimatedTileが各4フレームを正しい順で参照すること、Backだけ・Leftだけ・Rightだけ・全3辺の形が入力どおりで、画面手前辺を含まないことを確認する。入力を同じパスへ上書きして再実行した場合も、生成Assetパスとカタログ参照が維持されることを確認する。
+
 材質PNGを修正した後の流れは次のとおりである。
 
 1. AsepriteまたはPixeloramaから同じPNGパスへ上書きし、Unityの自動再Importを待つ。
