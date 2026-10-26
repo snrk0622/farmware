@@ -1917,6 +1917,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                         ComponentType.ReadOnly<ChunkCoordinateComponent>(),
                         ComponentType.ReadOnly<ChunkGenerationStatus>(),
                         ComponentType.ReadOnly<GeneratedTile>(),
+                        ComponentType.ReadOnly<GeneratedTerrainCell>(),
                         ComponentType.ReadOnly<GeneratedResourceTile>());
                     queriesCreated = true;
                 }
@@ -2686,6 +2687,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                         ComponentType.ReadOnly<ChunkCoordinateComponent>(),
                         ComponentType.ReadOnly<ChunkGenerationStatus>(),
                         ComponentType.ReadOnly<GeneratedTile>(),
+                        ComponentType.ReadOnly<GeneratedTerrainCell>(),
                         ComponentType.ReadOnly<GeneratedResourceTile>());
                     queriesCreated = true;
                 }
@@ -2777,7 +2779,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     initialSpawnChunk.Y,
                     out _),
                 Is.True,
-                "初期チャンクの描画完了時に左隣チャンクの5 Bufferが先読み完了していません。");
+                "初期チャンクの描画完了時に左隣チャンクの6 Bufferが先読み完了していません。");
 
             // 実際のSubScene Baker結果を読み、Sceneの文字列だけ正しくてもRuntime Blobが欠ける回帰を検出します。
             DefinitionCatalog runtimeDefinitionCatalog =
@@ -3500,7 +3502,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
         }
 
         /// <summary>
-        /// 指定座標のチャンクを調べ、Active状態かつ地形・資源を各4096件保持するEntityを取得します。
+        /// 指定座標のチャンクを調べ、Active状態かつ旧地形・Blockセル・資源を各4096件保持するEntityを取得します。
         /// </summary>
         /// <param name="entityManager">Default WorldのEntityManagerです。</param>
         /// <param name="chunkQuery">座標、状態、地形・資源Bufferを持つチャンクQueryです。</param>
@@ -3532,9 +3534,12 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 }
 
                 DynamicBuffer<GeneratedTile> tiles = entityManager.GetBuffer<GeneratedTile>(entities[index], true);
+                DynamicBuffer<GeneratedTerrainCell> terrainCells =
+                    entityManager.GetBuffer<GeneratedTerrainCell>(entities[index], true);
                 DynamicBuffer<GeneratedResourceTile> resources =
                     entityManager.GetBuffer<GeneratedResourceTile>(entities[index], true);
                 if (tiles.Length == WorldGridConstants.TilesPerChunk
+                    && terrainCells.Length == WorldGridConstants.TilesPerChunk
                     && resources.Length == WorldGridConstants.TilesPerChunk)
                 {
                     chunkEntity = entities[index];
@@ -3547,15 +3552,15 @@ namespace Farmware.WorldGeneration.PlayModeTests
         }
 
         /// <summary>
-        /// 指定座標でReadyToApply、Active、Inactiveのいずれかとなり、5種類の固定生成Bufferがそろったチャンクを取得します。
+        /// 指定座標でReadyToApply、Active、Inactiveのいずれかとなり、6種類の固定生成Bufferがそろったチャンクを取得します。
         /// 画面外の先読みはTilemap反映前のReadyToApplyまたは反映後のInactiveなので、Active限定の検索と分けます。
         /// </summary>
-        /// <param name="entityManager">5種類のBufferを所有するDefault WorldのEntityManagerです。</param>
+        /// <param name="entityManager">6種類のBufferを所有するDefault WorldのEntityManagerです。</param>
         /// <param name="chunkQuery">座標、状態、地形・資源Bufferを持つチャンクQueryです。</param>
         /// <param name="chunkX">検索する水平論理チャンク座標です。</param>
         /// <param name="chunkY">検索する垂直論理チャンク座標です。</param>
         /// <param name="chunkEntity">成功時に、完全生成済みのチャンクEntityを返します。</param>
-        /// <returns>Simulationの5 Buffer公開と表示対象判定が完了していればtrueです。</returns>
+        /// <returns>Simulationの6 Buffer公開と表示対象判定が完了していればtrueです。</returns>
         private static bool TryGetCompleteChunk(
             EntityManager entityManager,
             EntityQuery chunkQuery,
@@ -3583,8 +3588,10 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 }
 
                 Entity entity = entities[index];
-                // 5 Bufferのいずれかが欠ける部分公開も、先読み完了とはみなしません。
+                // 6 Bufferのいずれかが欠ける部分公開も、先読み完了とはみなしません。
                 if (entityManager.GetBuffer<GeneratedTile>(entity, true).Length
+                        == WorldGridConstants.TilesPerChunk
+                    && entityManager.GetBuffer<GeneratedTerrainCell>(entity, true).Length
                         == WorldGridConstants.TilesPerChunk
                     && entityManager.GetBuffer<GeneratedResourceTile>(entity, true).Length
                         == WorldGridConstants.TilesPerChunk

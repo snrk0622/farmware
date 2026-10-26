@@ -18,11 +18,14 @@ namespace Farmware.WorldGeneration.Tests
         /// <summary>各テストで所有し、終了時に破棄する地形定義Blobです。</summary>
         private BlobAssetReference<TerrainBlockCatalogBlob> terrainCatalog;
 
-        /// <summary>既存GeneratedTileをBlockへ変換する解決済みIDです。</summary>
+        /// <summary>状態ハッシュと生成Buffer接続テストで使用する固定BlockパレットBlobです。</summary>
+        private BlobAssetReference<TerrainBlockPaletteCatalogBlob> paletteCatalog;
+
+        /// <summary>海水、淡水、マグマなど自然生成の固定用途へ解決済みのRuntime IDです。</summary>
         private BuiltInTerrainBlockRuntimeIds runtimeIds;
 
         /// <summary>
-        /// 暫定5地形と41材質を含む共通カタログ・地形カタログを構築します。
+        /// 自然生成の固定用途と41材質を含む共通・地形・パレットカタログを構築します。
         /// </summary>
         [SetUp]
         public void SetUp()
@@ -58,6 +61,34 @@ namespace Farmware.WorldGeneration.Tests
                     out runtimeIds),
                 Is.True,
                 "組み込み地形IDを解決できませんでした。");
+
+            BlobAssetReference<TerrainBlockMaterialCatalogBlob> materialCatalog = default;
+            try
+            {
+                Assert.That(
+                    TerrainBlockMaterialCatalogBuilder.TryBuild(
+                        definitionCatalog,
+                        TerrainBlockMaterialDefinitions.CreateDefault(),
+                        out materialCatalog),
+                    Is.True,
+                    "41材質対応を構築できませんでした。");
+                Assert.That(
+                    TerrainBlockPaletteCatalogBuilder.TryBuild(
+                        terrainCatalog,
+                        materialCatalog,
+                        TerrainBlockPaletteDefinitions.CreateBiomeSurfaceDefaults(),
+                        TerrainBlockPaletteDefinitions.CreateGeologyDefaults(),
+                        out paletteCatalog),
+                    Is.True,
+                    "固定Blockパレットを構築できませんでした。");
+            }
+            finally
+            {
+                if (materialCatalog.IsCreated)
+                {
+                    materialCatalog.Dispose();
+                }
+            }
         }
 
         /// <summary>
@@ -66,6 +97,11 @@ namespace Farmware.WorldGeneration.Tests
         [TearDown]
         public void TearDown()
         {
+            if (paletteCatalog.IsCreated)
+            {
+                paletteCatalog.Dispose();
+            }
+
             if (terrainCatalog.IsCreated)
             {
                 terrainCatalog.Dispose();
@@ -134,6 +170,72 @@ namespace Farmware.WorldGeneration.Tests
                     out EffectiveTerrainCell effectiveCell),
                 Is.EqualTo(EffectiveTerrainResolveResult.Success));
 
+            Assert.That(effectiveCell.Biome, Is.EqualTo(BiomeId.AlpineRockland));
+            Assert.That(effectiveCell.GroundBlockRuntimeId, Is.EqualTo(runtimeIds.LandGround));
+            Assert.That(effectiveCell.WallBlockRuntimeId.IsValid, Is.False);
+        }
+
+        /// <summary>
+        /// 生成チャンクの4096件Bufferから対象セルを読み、別Entityの疎な差分を適用して現在地形を返すことを保証します。
+        /// </summary>
+        [Test]
+        public void QueryFromChunk_GeneratedBufferAndDelta_ReturnsEffectiveCell()
+        {
+            using World world = new World("Effective Terrain Chunk Query");
+            EntityManager manager = world.EntityManager;
+            Entity chunkEntity = manager.CreateEntity();
+            manager.AddComponentData(chunkEntity, new ChunkCoordinateComponent
+            {
+                Layer = WorldLayer.Surface,
+                X = 0,
+                Y = 0
+            });
+            DynamicBuffer<GeneratedTerrainCell> generated =
+                manager.AddBuffer<GeneratedTerrainCell>(chunkEntity);
+            generated.ResizeUninitialized(WorldGridConstants.TilesPerChunk);
+            for (int index = 0; index < generated.Length; index++)
+            {
+                // 問い合わせ対象以外を既定値で埋め、行優先添字の取り違えを結果へ混ぜません。
+                generated[index] = default;
+            }
+
+            WorldTileCoordinate coordinate = new WorldTileCoordinate(
+                WorldLayer.Surface,
+                3,
+                5);
+            int localTileIndex = WorldGrid.ToTileIndex(3, 5);
+            generated[localTileIndex] = new GeneratedTerrainCell
+            {
+                Biome = BiomeId.AlpineRockland,
+                GroundBlockRuntimeId = runtimeIds.LandGround,
+                WallBlockRuntimeId = runtimeIds.NaturalRockWall
+            };
+
+            Entity deltaEntity = manager.CreateEntity();
+            manager.AddComponentData(deltaEntity, new TerrainChunkDeltaOwner
+            {
+                Layer = WorldLayer.Surface,
+                ChunkX = 0,
+                ChunkY = 0
+            });
+            DynamicBuffer<TerrainCellDelta> deltas =
+                manager.AddBuffer<TerrainCellDelta>(deltaEntity);
+            deltas.Add(new TerrainCellDelta
+            {
+                LocalTileIndex = (ushort)localTileIndex,
+                ChangeMask = TerrainCellChangeMask.WallBlock,
+                WallBlockRuntimeId = default
+            });
+
+            Assert.That(
+                EffectiveTerrainCellQuery.TryResolveFromChunk(
+                    manager,
+                    chunkEntity,
+                    deltaEntity,
+                    coordinate,
+                    terrainCatalog,
+                    out EffectiveTerrainCell effectiveCell),
+                Is.EqualTo(EffectiveTerrainResolveResult.Success));
             Assert.That(effectiveCell.Biome, Is.EqualTo(BiomeId.AlpineRockland));
             Assert.That(effectiveCell.GroundBlockRuntimeId, Is.EqualTo(runtimeIds.LandGround));
             Assert.That(effectiveCell.WallBlockRuntimeId.IsValid, Is.False);
@@ -381,6 +483,64 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// 1つのBiomeパレット内で重みを移した場合に状態ハッシュが変わり、自然Block生成規則を比較対象へ含むことを保証します。
+        /// </summary>
+        [Test]
+        public void TerrainStateHash_ChangedPaletteWeight_IsDifferent()
+        {
+            BlobAssetReference<TerrainBlockMaterialCatalogBlob> materialCatalog = default;
+            BlobAssetReference<TerrainBlockPaletteCatalogBlob> changedPalette = default;
+            try
+            {
+                Assert.That(
+                    TerrainBlockMaterialCatalogBuilder.TryBuild(
+                        definitionCatalog,
+                        TerrainBlockMaterialDefinitions.CreateDefault(),
+                        out materialCatalog),
+                    Is.True);
+                BiomeSurfaceBlockPaletteDefinition[] changedBiomes =
+                    TerrainBlockPaletteDefinitions.CreateBiomeSurfaceDefaults();
+                // 合計256を保ったまま先頭Biomeの確率だけを変え、構造不正ではなく意味の差を比較します。
+                changedBiomes[0].Entries[0].Weight--;
+                changedBiomes[0].Entries[1].Weight++;
+                Assert.That(
+                    TerrainBlockPaletteCatalogBuilder.TryBuild(
+                        terrainCatalog,
+                        materialCatalog,
+                        changedBiomes,
+                        TerrainBlockPaletteDefinitions.CreateGeologyDefaults(),
+                        out changedPalette),
+                    Is.True);
+
+                using World defaultWorld = new World("Terrain Hash Default Palette");
+                using World changedWorld = new World("Terrain Hash Changed Palette");
+                AddCatalogComponents(defaultWorld.EntityManager);
+                AddCatalogComponents(changedWorld.EntityManager);
+                using EntityQuery paletteQuery = changedWorld.EntityManager.CreateEntityQuery(
+                    ComponentType.ReadOnly<TerrainBlockPaletteCatalog>());
+                changedWorld.EntityManager.SetComponentData(
+                    paletteQuery.GetSingletonEntity(),
+                    new TerrainBlockPaletteCatalog { Value = changedPalette });
+
+                Assert.That(
+                    ComputeTerrainHash(changedWorld.EntityManager),
+                    Is.Not.EqualTo(ComputeTerrainHash(defaultWorld.EntityManager)));
+            }
+            finally
+            {
+                if (changedPalette.IsCreated)
+                {
+                    changedPalette.Dispose();
+                }
+
+                if (materialCatalog.IsCreated)
+                {
+                    materialCatalog.Dispose();
+                }
+            }
+        }
+
+        /// <summary>
         /// 淡水と海水の互換ID対応が入れ替わった破損状態を拒否し、同じ定義一覧でも生成結果の意味が変わる状態を見逃さないことを保証します。
         /// </summary>
         [Test]
@@ -502,8 +662,8 @@ namespace Farmware.WorldGeneration.Tests
             };
         }
 
-        /// <summary>テストWorldへ同じ共通・地形定義Blobを参照するSingleton候補を追加します。</summary>
-        /// <param name="entityManager">定義Componentを追加するテストWorldです。</param>
+        /// <summary>テストWorldへ同じ共通・地形・パレットBlobを参照するSingleton候補を追加します。</summary>
+        /// <param name="entityManager">定義と自然生成パレットComponentを追加するテストWorldです。</param>
         private void AddCatalogComponents(EntityManager entityManager)
         {
             Entity catalogEntity = entityManager.CreateEntity();
@@ -515,6 +675,10 @@ namespace Farmware.WorldGeneration.Tests
             {
                 Value = terrainCatalog,
                 BuiltInRuntimeIds = runtimeIds
+            });
+            entityManager.AddComponentData(catalogEntity, new TerrainBlockPaletteCatalog
+            {
+                Value = paletteCatalog
             });
         }
 
@@ -548,9 +712,9 @@ namespace Farmware.WorldGeneration.Tests
             });
         }
 
-        /// <summary>地形セクションだけを追加した完成状態ハッシュを計算し、検証失敗ならテストを停止します。</summary>
-        /// <param name="entityManager">共通定義、地形定義、任意差分を保持するテストWorldです。</param>
-        /// <returns>地形定義と差分から完成した128bit状態ハッシュです。</returns>
+        /// <summary>地形の定義・自然生成パレット・差分セクションを追加した状態ハッシュを計算します。</summary>
+        /// <param name="entityManager">共通定義、地形定義、自然生成パレット、任意差分を保持するテストWorldです。</param>
+        /// <returns>固定定義と永続差分から完成した128bit状態ハッシュです。</returns>
         private static SimulationStateHash ComputeTerrainHash(EntityManager entityManager)
         {
             SimulationStateHashBuilder builder = new SimulationStateHashBuilder(

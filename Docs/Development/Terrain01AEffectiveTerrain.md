@@ -37,7 +37,7 @@
 
 ## 3. 現行生成からの互換変換（C6-C1で廃止）
 
-以下はTERRAIN-01A実装時点の履歴である。C6-C1では、完成Biome・地質・固定水文から`GeneratedTerrainCell`のGroundBlock、WallBlock、Liquidを直接選ぶ純粋確定処理へ置換した。`BaseTerrainCell`と`EffectiveTerrainResolver.TryCreateBaseCell`は削除され、有効地形差分は新しい生成セルを直接基準にする。ECSチャンクBufferへの公開と全利用側の切替はC6-C2・C6-C3で完了させる。
+以下はTERRAIN-01A実装時点の履歴である。C6-C1では、完成Biome・地質・固定水文から`GeneratedTerrainCell`のGroundBlock、WallBlock、Liquidを直接選ぶ純粋確定処理へ置換した。`BaseTerrainCell`と`EffectiveTerrainResolver.TryCreateBaseCell`は削除され、有効地形差分は新しい生成セルを直接基準にする。C6-C2ではECSチャンクBuffer、ストリーミング寿命、生成署名、状態ハッシュへ接続した。旧`GeneratedTile`利用側の一括削除はC6-C3で完了させる。
 
 TERRAIN-01Aでは既存Surfaceの地形生成結果と署名を変えない。`EffectiveTerrainResolver.TryCreateBaseCell`が、`GeneratedTile`を次のようにBlock区画へ分ける。
 
@@ -71,11 +71,15 @@ Biomeは差分へ含めず、人工地形へ置換しても座標由来の地域
 
 `TerrainTraversalRules`は壁、穴、液体、耐熱能力を評価する。`TerrainPlacementRules`の有効セル版は通常設備、通常ベルト、橋の地形条件だけを評価する。例えば水域は泳げる主体なら移動可能だが、通常設備は置けず橋を置ける。自然資源、配置物、所持品、到達距離は後続Commandが別途検証する。
 
-`TerrainStateHasher`は、地形定義属性をRuntimeId順、差分所有者をLayer・チャンクX・チャンクY順、各BufferをLocalTileIndex順で追加する。Blobアドレス、Entity作成順、チャンク読込順、表示キャッシュは含めない。同じ差分集合はEntity作成順が異なっても一致し、同じX/YでもLayerが異なれば別の状態になる。`TerrainChunkDeltaOwner`と`TerrainCellDelta` Bufferは独立したQueryで件数と対応Entityを確認し、どちらか片方だけが残った不完全な永続状態を「差分なし」として見逃さず拒否する。
+`EffectiveTerrainCellQuery.TryResolveFromChunk`は、チャンクEntityの行優先4096件`GeneratedTerrainCell` Bufferから絶対座標に対応する自然セルを読み、任意の永続差分所有者を適用する。チャンク座標、Layer、Buffer件数、差分Ownerの対応が不正なら成功値を返さない。
+
+`TerrainStateHasher`は、地形定義属性をRuntimeId順、18Biomeと8地質の自然Blockパレットを安定ID・用途・候補順、差分所有者をLayer・チャンクX・チャンクY順、各BufferをLocalTileIndex順で追加する。Blobアドレス、Entity作成順、チャンク読込順、表示キャッシュは含めない。同じ差分集合はEntity作成順が異なっても一致し、同じX/YでもLayerが異なれば別の状態になる。パレットの行、連続Range、重み合計256、Ground／Wall分類を検証し、`TerrainChunkDeltaOwner`と`TerrainCellDelta` Bufferは独立したQueryで件数と対応Entityを確認する。片方だけが残った不完全な永続状態を「差分なし」として見逃さず拒否する。
+
+チャンク生成署名は、旧`GeneratedTile`、固定水文、表流水、自然水文に加えて、ECS公開と同じ確定器で得た4096件の`GeneratedTerrainCell`を行優先で混合する。固定パレットまたは組み込みLiquid IDが異なる生成結果を、同じ署名として扱わない。
 
 ## 6. 表示・Editorツールへの影響
 
-地形生成アルゴリズム、閾値、既存`GeneratedTile` Buffer、Tilemap参照は変更しない。Gameビュー、Map Viewer、分布監査、岩壁影、Haloは従来のSurface結果を引き続き表示する。変更差分をTilemap、Map Viewer、凡例へ反映する処理はTERRAIN-01C6の責務である。
+既存`GeneratedTile` BufferとTilemap参照はC6-C3まで維持する。C6-C2では`ChunkGenerationSystem`の再利用枠へ4096件の`GeneratedTerrainCell`を追加し、旧地形、Blockセル、資源、固定水文、表流水、自然水文の6 Bufferを同じ完成境界で一括公開する。`ChunkStreamingSystem`と初期スポーン探索が作るチャンクEntityも空の新Bufferを所有し、生成中アンロードや枠再利用で寿命を分離しない。Gameビュー、Map Viewer、分布監査、岩壁影、Haloの読み取り先はC6-C3・C6-Dで切り替える。
 
 Editorメニューやキー割り当ては追加・変更しない。`Terrain Placement`は探索・建築に必要な通常設備、橋、耐熱橋の判定へ絞り、補助物流であるベルト固有のHUD項目と凡例は表示しない。設定SubSceneのBaker結果には、既存の共通定義・動物定義に加えて`TerrainBlockCatalog`が存在する。
 

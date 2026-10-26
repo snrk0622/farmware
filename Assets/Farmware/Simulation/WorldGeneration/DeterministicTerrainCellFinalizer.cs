@@ -194,5 +194,31 @@ namespace Farmware.WorldGeneration
                     return false;
             }
         }
+
+        /// <summary>
+        /// 1つの自然生成Blockセルを、チャンク生成署名へ固定順で混合します。
+        /// Blobのメモリ表現やpaddingは使わず、論理フィールドだけを明示的に混ぜます。
+        /// </summary>
+        /// <param name="currentHash">直前までの生成結果を反映した64bitハッシュです。</param>
+        /// <param name="terrainCell">次に追加する完成済み自然Blockセルです。</param>
+        /// <returns>Biomeと4区画のRuntime IDを追加した64bitハッシュです。</returns>
+        internal static ulong HashCell(
+            ulong currentHash,
+            in GeneratedTerrainCell terrainCell)
+        {
+            unchecked
+            {
+                ulong biomeHash = WorldSeedUtility.Mix64(
+                    currentHash ^ (byte)terrainCell.Biome);
+                ulong groundHash = WorldSeedUtility.Mix64(
+                    biomeHash ^ (uint)terrainCell.GroundBlockRuntimeId.Value);
+                ulong wallHash = WorldSeedUtility.Mix64(
+                    groundHash ^ (uint)terrainCell.WallBlockRuntimeId.Value);
+                ulong liquidHash = WorldSeedUtility.Mix64(
+                    wallHash ^ (uint)terrainCell.LiquidRuntimeId.Value);
+                return WorldSeedUtility.Mix64(
+                    liquidHash ^ (uint)terrainCell.TerrainSurfaceRuntimeId.Value);
+            }
+        }
     }
 }

@@ -162,6 +162,7 @@ namespace Farmware.WorldGeneration
                         });
                     manager.AddComponent<ChunkGenerationRequest>(entity);
                     manager.AddBuffer<GeneratedTile>(entity);
+                    manager.AddBuffer<GeneratedTerrainCell>(entity);
                     manager.AddBuffer<GeneratedResourceTile>(entity);
                     manager.AddBuffer<GeneratedHydrologyCell>(entity);
                     manager.AddBuffer<GeneratedSurfaceWaterTile>(entity);

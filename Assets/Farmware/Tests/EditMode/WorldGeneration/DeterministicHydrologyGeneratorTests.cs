@@ -1927,15 +1927,20 @@ namespace Farmware.WorldGeneration.Tests
         [Test]
         public void ChunkHash_IncludesDeterministicHydrologyCells()
         {
+            using TerrainGenerationTestCatalogSet catalogs =
+                TerrainGenerationTestCatalogSet.Create();
             WorldGenerationSettings first = CreateSettings("hydrology-hash-first");
             WorldGenerationSettings second = CreateSettings("hydrology-hash-second");
             ChunkCoordinate coordinate = new ChunkCoordinate(-7, 11);
             BiomeClassificationSettings biomeSettings = BiomeDefinitionCatalog.CreateDefault();
             const ulong initialHash = 0xCBF29CE484222325UL;
 
-            ulong firstHash = DeterministicHydrologyGenerator.AppendChunkHash(first, biomeSettings, coordinate, initialHash);
-            ulong repeatedHash = DeterministicHydrologyGenerator.AppendChunkHash(first, biomeSettings, coordinate, initialHash);
-            ulong secondHash = DeterministicHydrologyGenerator.AppendChunkHash(second, biomeSettings, coordinate, initialHash);
+            ulong firstHash = DeterministicHydrologyGenerator.AppendChunkHash(
+                first, biomeSettings, catalogs.PaletteCatalog, catalogs.RuntimeIds, coordinate, initialHash);
+            ulong repeatedHash = DeterministicHydrologyGenerator.AppendChunkHash(
+                first, biomeSettings, catalogs.PaletteCatalog, catalogs.RuntimeIds, coordinate, initialHash);
+            ulong secondHash = DeterministicHydrologyGenerator.AppendChunkHash(
+                second, biomeSettings, catalogs.PaletteCatalog, catalogs.RuntimeIds, coordinate, initialHash);
 
             Assert.That(repeatedHash, Is.EqualTo(firstHash));
             Assert.That(secondHash, Is.Not.EqualTo(firstHash));

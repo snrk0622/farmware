@@ -1,4 +1,4 @@
-// このファイルは、地形定義属性とレイヤー付き疎な変更差分を決定論的な状態ハッシュへ追加します。
+// このファイルは、地形定義属性、自然生成Blockパレット、レイヤー付き疎な変更差分を決定論的な状態ハッシュへ追加します。
 // 表示キャッシュやロード順は含めず、保存対象となる論理値だけを固定順で比較できるようにします。
 
 using System;
@@ -27,7 +27,13 @@ namespace Farmware.WorldGeneration
         TerrainCatalogDataIsInvalid = 3,
 
         /// <summary>差分所有者の座標、重複、Buffer順、変更bit、定義参照が不正です。</summary>
-        TerrainDeltaDataIsInvalid = 4
+        TerrainDeltaDataIsInvalid = 4,
+
+        /// <summary>TerrainBlockPaletteCatalogが存在しないか複数存在します。</summary>
+        TerrainPaletteCatalogIsInvalid = 5,
+
+        /// <summary>Biome・地質パレットの行、範囲、重み、定義参照が不正です。</summary>
+        TerrainPaletteDataIsInvalid = 6
     }
 
     /// <summary>
@@ -59,8 +65,11 @@ namespace Farmware.WorldGeneration
         public const uint TerrainDefinitionSectionId =
             SimulationStateHashSchema.FirstFeatureSectionId + 128;
 
+        /// <summary>自然生成Blockパレットへ割り当てた機能固有セクションIDです。</summary>
+        public const uint TerrainPaletteSectionId = TerrainDefinitionSectionId + 1;
+
         /// <summary>レイヤー付き地形差分へ割り当てた機能固有セクションIDです。</summary>
-        public const uint TerrainDeltaSectionId = TerrainDefinitionSectionId + 1;
+        public const uint TerrainDeltaSectionId = TerrainDefinitionSectionId + 2;
 
         /// <summary>
         /// World内の定義Singletonと全差分所有者を検証し、論理値を固定順で追加します。
@@ -94,6 +103,16 @@ namespace Farmware.WorldGeneration
                 return false;
             }
 
+            if (!TryGetSingleCatalog(
+                    entityManager,
+                    out TerrainBlockPaletteCatalog paletteCatalog)
+                || !paletteCatalog.Value.IsCreated)
+            {
+                error = new TerrainStateHashError(
+                    TerrainStateHashErrorCode.TerrainPaletteCatalogIsInvalid);
+                return false;
+            }
+
             if (!BuiltInTerrainBlockDefinitions.TryResolveRuntimeIds(
                     definitionCatalog.Value,
                     out BuiltInTerrainBlockRuntimeIds expectedBuiltInRuntimeIds)
@@ -116,6 +135,16 @@ namespace Farmware.WorldGeneration
                 return false;
             }
 
+            if (!TryAppendTerrainPalette(
+                    paletteCatalog.Value,
+                    terrainCatalog.Value,
+                    ref builder))
+            {
+                error = new TerrainStateHashError(
+                    TerrainStateHashErrorCode.TerrainPaletteDataIsInvalid);
+                return false;
+            }
+
             if (!TryAppendTerrainDeltas(
                 entityManager,
                 terrainCatalog.Value,
@@ -127,6 +156,149 @@ namespace Farmware.WorldGeneration
             }
 
             error = new TerrainStateHashError(TerrainStateHashErrorCode.None);
+            return true;
+        }
+
+        /// <summary>
+        /// 18Biomeと8地質の固定Blockパレットを、実際の生成参照順で検証して追加します。
+        /// </summary>
+        /// <param name="paletteCatalog">自然Ground・Wall候補を保持する固定パレットBlobです。</param>
+        /// <param name="terrainCatalog">各候補Runtime IDのGround／Wall分類を照合する地形Blobです。</param>
+        /// <param name="builder">自然生成パレットセクションを書き込む状態ハッシュBuilderです。</param>
+        /// <returns>行、Range、重み、定義分類がすべて現行契約どおりならtrueです。</returns>
+        private static bool TryAppendTerrainPalette(
+            BlobAssetReference<TerrainBlockPaletteCatalogBlob> paletteCatalog,
+            BlobAssetReference<TerrainBlockCatalogBlob> terrainCatalog,
+            ref SimulationStateHashBuilder builder)
+        {
+            ref TerrainBlockPaletteCatalogBlob root = ref paletteCatalog.Value;
+            if (root.BiomeSurfacePalettes.Length
+                    != TerrainBlockPaletteDefinitions.BiomePaletteCount
+                || root.GeologyPalettes.Length
+                    != TerrainBlockPaletteDefinitions.GeologyPaletteCount)
+            {
+                return false;
+            }
+
+            builder.BeginSection(TerrainPaletteSectionId);
+            builder.WriteInt32(root.BiomeSurfacePalettes.Length);
+            builder.WriteInt32(root.GeologyPalettes.Length);
+            builder.WriteInt32(root.Entries.Length);
+            int expectedStartIndex = 0;
+            for (int biomeIndex = 0;
+                 biomeIndex < root.BiomeSurfacePalettes.Length;
+                 biomeIndex++)
+            {
+                BiomeSurfaceBlockPaletteBlob row = root.BiomeSurfacePalettes[biomeIndex];
+                BiomeId expectedBiome = (BiomeId)(BiomeStableIds.First + biomeIndex);
+                if (row.BiomeId != expectedBiome)
+                {
+                    return false;
+                }
+
+                builder.WriteByte((byte)row.BiomeId);
+                if (!TryAppendPaletteRange(
+                        ref root,
+                        terrainCatalog,
+                        row.SurfaceGround,
+                        DefinitionKind.GroundBlock,
+                        ref expectedStartIndex,
+                        ref builder))
+                {
+                    return false;
+                }
+            }
+
+            for (int geologyIndex = 0;
+                 geologyIndex < root.GeologyPalettes.Length;
+                 geologyIndex++)
+            {
+                GeologyBlockPaletteBlob row = root.GeologyPalettes[geologyIndex];
+                GeologyClass expectedGeology = (GeologyClass)(
+                    (int)GeologyClass.UnconsolidatedSediment + geologyIndex);
+                if (row.GeologyClass != expectedGeology)
+                {
+                    return false;
+                }
+
+                builder.WriteByte((byte)row.GeologyClass);
+                if (!TryAppendPaletteRange(
+                        ref root,
+                        terrainCatalog,
+                        row.ExposedGround,
+                        DefinitionKind.GroundBlock,
+                        ref expectedStartIndex,
+                        ref builder)
+                    || !TryAppendPaletteRange(
+                        ref root,
+                        terrainCatalog,
+                        row.NaturalWall,
+                        DefinitionKind.WallBlock,
+                        ref expectedStartIndex,
+                        ref builder))
+                {
+                    return false;
+                }
+            }
+
+            // どの行からも参照されない余剰Entryも生成契約の破損なので、状態ハッシュへ黙って残しません。
+            return expectedStartIndex == root.Entries.Length;
+        }
+
+        /// <summary>1パレット範囲の連続性、重み合計、材質ID、Block分類を検証して固定順で追加します。</summary>
+        /// <param name="root">全行と平坦化Entryを保持するパレットBlob本体です。</param>
+        /// <param name="terrainCatalog">Block Runtime IDの分類を照合する地形Blobです。</param>
+        /// <param name="range">今回追加する連続Entry範囲です。</param>
+        /// <param name="expectedKind">Ground行またはWall行が要求する定義分類です。</param>
+        /// <param name="expectedStartIndex">直前範囲の末尾であり、成功時に今回範囲の末尾へ進めます。</param>
+        /// <param name="builder">現在のパレットセクションへ論理値を書き込むBuilderです。</param>
+        /// <returns>範囲が隙間なく有効で、全候補が現行パレット契約を満たす場合はtrueです。</returns>
+        private static bool TryAppendPaletteRange(
+            ref TerrainBlockPaletteCatalogBlob root,
+            BlobAssetReference<TerrainBlockCatalogBlob> terrainCatalog,
+            TerrainBlockPaletteRange range,
+            DefinitionKind expectedKind,
+            ref int expectedStartIndex,
+            ref SimulationStateHashBuilder builder)
+        {
+            if (range.StartIndex != expectedStartIndex
+                || range.Count <= 0
+                || range.StartIndex > root.Entries.Length - range.Count)
+            {
+                return false;
+            }
+
+            builder.WriteInt32(range.Count);
+            int totalWeight = 0;
+            for (int relativeIndex = 0; relativeIndex < range.Count; relativeIndex++)
+            {
+                TerrainBlockPaletteEntryBlob entry =
+                    root.Entries[range.StartIndex + relativeIndex];
+                int materialId = (int)entry.MaterialId;
+                if (materialId < (int)TerrainBlockMaterialId.GrassLoam
+                    || materialId > (int)TerrainBlockMaterialId.Peridotite
+                    || entry.Weight == 0
+                    || !TerrainBlockCatalogLookup.TryGetDefinition(
+                        terrainCatalog,
+                        entry.BlockRuntimeId,
+                        out TerrainBlockDefinitionBlob definition)
+                    || definition.Kind != expectedKind)
+                {
+                    return false;
+                }
+
+                totalWeight += entry.Weight;
+                builder.WriteByte((byte)entry.MaterialId);
+                builder.WriteInt32(entry.BlockRuntimeId.Value);
+                builder.WriteUInt16(entry.Weight);
+            }
+
+            if (totalWeight != TerrainBlockPaletteDefinitions.RequiredWeightTotal)
+            {
+                return false;
+            }
+
+            expectedStartIndex += range.Count;
             return true;
         }
 
@@ -489,7 +661,7 @@ namespace Farmware.WorldGeneration
                 && root.Definitions[index].Kind == DefinitionKind.Item;
         }
 
-        /// <summary>互換生成用IDが固定GUIDから再解決した正しい対応と一致するか確認します。</summary>
+        /// <summary>自然Block生成用IDが固定GUIDから再解決した正しい対応と一致するか確認します。</summary>
         /// <param name="actual">TerrainBlockCatalog Componentに保存された現在値です。</param>
         /// <param name="expected">共通DefinitionCatalogの固定GUIDから再解決した期待値です。</param>
         /// <returns>5種類の用途とRuntimeIdがすべて一致する場合はtrueです。</returns>

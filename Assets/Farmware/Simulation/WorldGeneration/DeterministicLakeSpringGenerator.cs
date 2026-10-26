@@ -727,7 +727,7 @@ namespace Farmware.WorldGeneration
 
         /// <summary>
         /// 正規表流水涵養で21×21地下水を更新した後、準備済み湖・泉結果を対象チャンクへ適用します。
-        /// 失敗時は公開用64セルと4096表流水の更新を開始せず、呼出し元が5 Bufferをまとめて非公開にできます。
+        /// 失敗時は公開用64セルと4096表流水の更新を開始せず、呼出し元がBlockセルを含む6 Bufferをまとめて非公開にできます。
         /// </summary>
         /// <param name="settings">湖・泉を含む固定ワールド生成設定です。</param>
         /// <param name="chunkX">対象の水平論理チャンク座標です。</param>

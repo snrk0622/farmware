@@ -281,6 +281,8 @@ namespace Farmware.WorldGeneration.Tests
         [Test]
         public void ChunkHash_IsIndependentFromGenerationOrder()
         {
+            using TerrainGenerationTestCatalogSet catalogs =
+                TerrainGenerationTestCatalogSet.Create();
             WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
                 WorldSeedUtility.FromString("order-test"),
                 WorldGenerationSettings.CurrentGeneratorVersion);
@@ -288,10 +290,14 @@ namespace Farmware.WorldGeneration.Tests
             ChunkCoordinate secondCoordinate = new ChunkCoordinate(4, -1);
             BiomeClassificationSettings biomeSettings = BiomeDefinitionCatalog.CreateDefault();
 
-            ulong firstThenSecondFirst = DeterministicChunkGenerator.ComputeChunkHash(settings, biomeSettings, firstCoordinate);
-            ulong firstThenSecondSecond = DeterministicChunkGenerator.ComputeChunkHash(settings, biomeSettings, secondCoordinate);
-            ulong secondThenFirstSecond = DeterministicChunkGenerator.ComputeChunkHash(settings, biomeSettings, secondCoordinate);
-            ulong secondThenFirstFirst = DeterministicChunkGenerator.ComputeChunkHash(settings, biomeSettings, firstCoordinate);
+            ulong firstThenSecondFirst = DeterministicChunkGenerator.ComputeChunkHash(
+                settings, biomeSettings, catalogs.PaletteCatalog, catalogs.RuntimeIds, firstCoordinate);
+            ulong firstThenSecondSecond = DeterministicChunkGenerator.ComputeChunkHash(
+                settings, biomeSettings, catalogs.PaletteCatalog, catalogs.RuntimeIds, secondCoordinate);
+            ulong secondThenFirstSecond = DeterministicChunkGenerator.ComputeChunkHash(
+                settings, biomeSettings, catalogs.PaletteCatalog, catalogs.RuntimeIds, secondCoordinate);
+            ulong secondThenFirstFirst = DeterministicChunkGenerator.ComputeChunkHash(
+                settings, biomeSettings, catalogs.PaletteCatalog, catalogs.RuntimeIds, firstCoordinate);
 
             Assert.That(firstThenSecondFirst, Is.EqualTo(secondThenFirstFirst));
             Assert.That(firstThenSecondSecond, Is.EqualTo(secondThenFirstSecond));
@@ -976,6 +982,8 @@ namespace Farmware.WorldGeneration.Tests
         [Test]
         public void ChunkGenerationSystem_ProducesBufferAndDisablesRequest()
         {
+            using TerrainGenerationTestCatalogSet catalogs =
+                TerrainGenerationTestCatalogSet.Create();
             using World world = new World("WorldGenerationTests");
             EntityManager entityManager = world.EntityManager;
             WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
@@ -987,6 +995,7 @@ namespace Farmware.WorldGeneration.Tests
             entityManager.AddComponentData(settingsEntity, BiomeDefinitionCatalog.CreateDefault());
             ResourceGenerationSettings resourceSettings = ResourceGenerationSettings.CreateDefault();
             entityManager.AddComponentData(settingsEntity, resourceSettings);
+            AddTerrainCatalogComponents(entityManager, settingsEntity, catalogs);
 
             Entity chunkEntity = entityManager.CreateEntity();
             entityManager.AddComponentData(
@@ -1004,6 +1013,7 @@ namespace Farmware.WorldGeneration.Tests
             });
             entityManager.AddComponent<ChunkGenerationRequest>(chunkEntity);
             entityManager.AddBuffer<GeneratedTile>(chunkEntity);
+            entityManager.AddBuffer<GeneratedTerrainCell>(chunkEntity);
             entityManager.AddBuffer<GeneratedResourceTile>(chunkEntity);
             entityManager.AddBuffer<GeneratedHydrologyCell>(chunkEntity);
             entityManager.AddBuffer<GeneratedSurfaceWaterTile>(chunkEntity);
@@ -1016,6 +1026,7 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(entityManager.GetComponentData<ChunkGenerationStatus>(chunkEntity).Phase,
                 Is.EqualTo(ChunkGenerationPhase.GeneratingData));
             Assert.That(entityManager.GetBuffer<GeneratedTile>(chunkEntity).Length, Is.Zero);
+            Assert.That(entityManager.GetBuffer<GeneratedTerrainCell>(chunkEntity).Length, Is.Zero);
             Assert.That(entityManager.GetBuffer<GeneratedResourceTile>(chunkEntity).Length, Is.Zero);
             Assert.That(entityManager.GetBuffer<GeneratedHydrologyCell>(chunkEntity).Length, Is.Zero);
             Assert.That(entityManager.GetBuffer<GeneratedSurfaceWaterTile>(chunkEntity).Length, Is.Zero);
@@ -1025,6 +1036,8 @@ namespace Farmware.WorldGeneration.Tests
 
             ChunkGenerationStatus status = entityManager.GetComponentData<ChunkGenerationStatus>(chunkEntity);
             DynamicBuffer<GeneratedTile> tiles = entityManager.GetBuffer<GeneratedTile>(chunkEntity);
+            DynamicBuffer<GeneratedTerrainCell> terrainCells =
+                entityManager.GetBuffer<GeneratedTerrainCell>(chunkEntity);
             DynamicBuffer<GeneratedResourceTile> resources =
                 entityManager.GetBuffer<GeneratedResourceTile>(chunkEntity);
             DynamicBuffer<GeneratedHydrologyCell> hydrology =
@@ -1037,6 +1050,7 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(status.Phase, Is.EqualTo(ChunkGenerationPhase.ReadyToApply));
             Assert.That(status.GeneratedWithVersion, Is.EqualTo(settings.GeneratorVersion));
             Assert.That(tiles.Length, Is.EqualTo(WorldGridConstants.TilesPerChunk));
+            Assert.That(terrainCells.Length, Is.EqualTo(WorldGridConstants.TilesPerChunk));
             Assert.That(resources.Length, Is.EqualTo(WorldGridConstants.TilesPerChunk));
             Assert.That(hydrology.Length, Is.EqualTo(DeterministicHydrologyGenerator.CellsPerChunk));
             Assert.That(surfaceWater.Length, Is.EqualTo(WorldGridConstants.TilesPerChunk));
@@ -1057,6 +1071,31 @@ namespace Farmware.WorldGeneration.Tests
                 Is.True,
                 "製品Jobと同じ完成水文から新18Biomeを確定できる必要があります。");
             AssertTileEqual(expectedFirstTile, tiles[0]);
+            Assert.That(
+                DeterministicTerrainCellFinalizer.TryFinalizeSurfaceCell(
+                    settings,
+                    catalogs.PaletteCatalog,
+                    catalogs.RuntimeIds,
+                    64,
+                    -64,
+                    expectedFirstTile,
+                    hydrologyTiles[0],
+                    surfaceWater[0],
+                    out GeneratedTerrainCell expectedTerrainCell),
+                Is.True);
+            Assert.That(terrainCells[0].Biome, Is.EqualTo(expectedTerrainCell.Biome));
+            Assert.That(
+                terrainCells[0].GroundBlockRuntimeId,
+                Is.EqualTo(expectedTerrainCell.GroundBlockRuntimeId));
+            Assert.That(
+                terrainCells[0].WallBlockRuntimeId,
+                Is.EqualTo(expectedTerrainCell.WallBlockRuntimeId));
+            Assert.That(
+                terrainCells[0].LiquidRuntimeId,
+                Is.EqualTo(expectedTerrainCell.LiquidRuntimeId));
+            Assert.That(
+                terrainCells[0].TerrainSurfaceRuntimeId,
+                Is.EqualTo(expectedTerrainCell.TerrainSurfaceRuntimeId));
             GeneratedResourceTile expectedFirstResource =
                 DeterministicResourceGenerator.GenerateResource(
                     settings,
@@ -1239,6 +1278,8 @@ namespace Farmware.WorldGeneration.Tests
         [Test]
         public void ChunkGenerationSystem_PublishesFinalLakeClassification()
         {
+            using TerrainGenerationTestCatalogSet catalogs =
+                TerrainGenerationTestCatalogSet.Create();
             using World world = new World("WorldGenerationLakeClassificationTests");
             EntityManager entityManager = world.EntityManager;
             WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
@@ -1249,6 +1290,7 @@ namespace Farmware.WorldGeneration.Tests
             entityManager.AddComponentData(settingsEntity, settings);
             entityManager.AddComponentData(settingsEntity, BiomeDefinitionCatalog.CreateDefault());
             entityManager.AddComponentData(settingsEntity, ResourceGenerationSettings.CreateDefault());
+            AddTerrainCatalogComponents(entityManager, settingsEntity, catalogs);
 
             Entity chunkEntity = entityManager.CreateEntity();
             entityManager.AddComponentData(
@@ -1268,6 +1310,7 @@ namespace Farmware.WorldGeneration.Tests
                 });
             entityManager.AddComponent<ChunkGenerationRequest>(chunkEntity);
             entityManager.AddBuffer<GeneratedTile>(chunkEntity);
+            entityManager.AddBuffer<GeneratedTerrainCell>(chunkEntity);
             entityManager.AddBuffer<GeneratedResourceTile>(chunkEntity);
             entityManager.AddBuffer<GeneratedHydrologyCell>(chunkEntity);
             entityManager.AddBuffer<GeneratedSurfaceWaterTile>(chunkEntity);
@@ -1313,11 +1356,13 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// C4-B2だけが拒否する不正比重を準備し、先行Jobが作業配列を生成しても5種類のECS Bufferを部分公開しないことを保証します。
+        /// C4-B2だけが拒否する不正比重を準備し、先行Jobが作業配列を生成しても6種類のECS Bufferを部分公開しないことを保証します。
         /// </summary>
         [Test]
         public void ChunkGenerationSystem_GroundwaterFailureDoesNotPublishAnyBuffer()
         {
+            using TerrainGenerationTestCatalogSet catalogs =
+                TerrainGenerationTestCatalogSet.Create();
             using World world = new World("ChunkGenerationGroundwaterFailureTests");
             EntityManager entityManager = world.EntityManager;
             WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
@@ -1330,6 +1375,7 @@ namespace Farmware.WorldGeneration.Tests
             entityManager.AddComponentData(settingsEntity, settings);
             entityManager.AddComponentData(settingsEntity, BiomeDefinitionCatalog.CreateDefault());
             entityManager.AddComponentData(settingsEntity, ResourceGenerationSettings.CreateDefault());
+            AddTerrainCatalogComponents(entityManager, settingsEntity, catalogs);
             Entity chunkEntity = CreateChunkEntity(
                 entityManager,
                 1,
@@ -1359,6 +1405,7 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(status.Phase, Is.EqualTo(ChunkGenerationPhase.Failed));
             Assert.That(status.GeneratedWithVersion, Is.Zero);
             Assert.That(entityManager.GetBuffer<GeneratedTile>(chunkEntity).Length, Is.Zero);
+            Assert.That(entityManager.GetBuffer<GeneratedTerrainCell>(chunkEntity).Length, Is.Zero);
             Assert.That(entityManager.GetBuffer<GeneratedResourceTile>(chunkEntity).Length, Is.Zero);
             Assert.That(entityManager.GetBuffer<GeneratedHydrologyCell>(chunkEntity).Length, Is.Zero);
             Assert.That(entityManager.GetBuffer<GeneratedSurfaceWaterTile>(chunkEntity).Length, Is.Zero);
@@ -1366,11 +1413,13 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// C4-Cだけが拒否する不正な湖水収支比重を準備し、地下水まで完成しても5種類のECS Bufferを部分公開しないことを保証します。
+        /// C4-Cだけが拒否する不正な湖水収支比重を準備し、地下水まで完成しても6種類のECS Bufferを部分公開しないことを保証します。
         /// </summary>
         [Test]
         public void ChunkGenerationSystem_LakeSpringFailureDoesNotPublishAnyBuffer()
         {
+            using TerrainGenerationTestCatalogSet catalogs =
+                TerrainGenerationTestCatalogSet.Create();
             using World world = new World("ChunkGenerationLakeSpringFailureTests");
             EntityManager entityManager = world.EntityManager;
             WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
@@ -1383,6 +1432,7 @@ namespace Farmware.WorldGeneration.Tests
             entityManager.AddComponentData(settingsEntity, settings);
             entityManager.AddComponentData(settingsEntity, BiomeDefinitionCatalog.CreateDefault());
             entityManager.AddComponentData(settingsEntity, ResourceGenerationSettings.CreateDefault());
+            AddTerrainCatalogComponents(entityManager, settingsEntity, catalogs);
             Entity chunkEntity = CreateChunkEntity(
                 entityManager,
                 1,
@@ -1412,6 +1462,7 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(status.Phase, Is.EqualTo(ChunkGenerationPhase.Failed));
             Assert.That(status.GeneratedWithVersion, Is.Zero);
             Assert.That(entityManager.GetBuffer<GeneratedTile>(chunkEntity).Length, Is.Zero);
+            Assert.That(entityManager.GetBuffer<GeneratedTerrainCell>(chunkEntity).Length, Is.Zero);
             Assert.That(entityManager.GetBuffer<GeneratedResourceTile>(chunkEntity).Length, Is.Zero);
             Assert.That(entityManager.GetBuffer<GeneratedHydrologyCell>(chunkEntity).Length, Is.Zero);
             Assert.That(entityManager.GetBuffer<GeneratedSurfaceWaterTile>(chunkEntity).Length, Is.Zero);
@@ -1419,11 +1470,13 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// C4-D2だけが拒否する不正な冠水比重を準備し、湖・泉まで完成しても5種類のECS Bufferを部分公開しないことを保証します。
+        /// C4-D2だけが拒否する不正な冠水比重を準備し、湖・泉まで完成しても6種類のECS Bufferを部分公開しないことを保証します。
         /// </summary>
         [Test]
         public void ChunkGenerationSystem_NaturalFloodingFailureDoesNotPublishAnyBuffer()
         {
+            using TerrainGenerationTestCatalogSet catalogs =
+                TerrainGenerationTestCatalogSet.Create();
             using World world = new World("ChunkGenerationNaturalFloodingFailureTests");
             EntityManager entityManager = world.EntityManager;
             WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
@@ -1436,6 +1489,7 @@ namespace Farmware.WorldGeneration.Tests
             entityManager.AddComponentData(settingsEntity, settings);
             entityManager.AddComponentData(settingsEntity, BiomeDefinitionCatalog.CreateDefault());
             entityManager.AddComponentData(settingsEntity, ResourceGenerationSettings.CreateDefault());
+            AddTerrainCatalogComponents(entityManager, settingsEntity, catalogs);
             Entity chunkEntity = CreateChunkEntity(
                 entityManager,
                 1,
@@ -1468,6 +1522,7 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(status.Phase, Is.EqualTo(ChunkGenerationPhase.Failed));
             Assert.That(status.GeneratedWithVersion, Is.Zero);
             Assert.That(entityManager.GetBuffer<GeneratedTile>(chunkEntity).Length, Is.Zero);
+            Assert.That(entityManager.GetBuffer<GeneratedTerrainCell>(chunkEntity).Length, Is.Zero);
             Assert.That(entityManager.GetBuffer<GeneratedResourceTile>(chunkEntity).Length, Is.Zero);
             Assert.That(entityManager.GetBuffer<GeneratedHydrologyCell>(chunkEntity).Length, Is.Zero);
             Assert.That(entityManager.GetBuffer<GeneratedSurfaceWaterTile>(chunkEntity).Length, Is.Zero);
@@ -1480,6 +1535,8 @@ namespace Farmware.WorldGeneration.Tests
         [Test]
         public void ChunkGenerationSystem_WetlandExtentMatchesAcrossChunkBoundary()
         {
+            using TerrainGenerationTestCatalogSet catalogs =
+                TerrainGenerationTestCatalogSet.Create();
             using World world = new World("ChunkGenerationWetlandBoundaryTests");
             EntityManager entityManager = world.EntityManager;
             WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
@@ -1489,6 +1546,7 @@ namespace Farmware.WorldGeneration.Tests
             entityManager.AddComponentData(settingsEntity, settings);
             entityManager.AddComponentData(settingsEntity, BiomeDefinitionCatalog.CreateDefault());
             entityManager.AddComponentData(settingsEntity, ResourceGenerationSettings.CreateDefault());
+            AddTerrainCatalogComponents(entityManager, settingsEntity, catalogs);
             Entity left = CreateChunkEntity(
                 entityManager,
                 0,
@@ -1556,11 +1614,13 @@ namespace Farmware.WorldGeneration.Tests
         [Test]
         public void ChunkGenerationSystem_RespectsConcurrentLimitAndReusesSlot()
         {
+            using TerrainGenerationTestCatalogSet catalogs =
+                TerrainGenerationTestCatalogSet.Create();
             using World world = new World("ChunkGenerationSlotLimitTests");
             EntityManager manager = world.EntityManager;
             ChunkStreamingSettings streaming = ChunkStreamingSettings.CreateDefault();
             streaming.MaximumConcurrentGenerations = 1;
-            CreateStreamingSingletons(manager, default, streaming);
+            CreateStreamingSingletons(manager, default, streaming, catalogs);
             Entity first = CreateChunkEntity(manager, -2, 3, ChunkGenerationPhase.Queued, true);
             Entity second = CreateChunkEntity(manager, 4, -5, ChunkGenerationPhase.Queued, true);
             SystemHandle system = world.GetOrCreateSystem<ChunkGenerationSystem>();
@@ -1588,11 +1648,13 @@ namespace Farmware.WorldGeneration.Tests
         [Test]
         public void ChunkGenerationSystem_DestroyedTargetDoesNotPublishToReplacement()
         {
+            using TerrainGenerationTestCatalogSet catalogs =
+                TerrainGenerationTestCatalogSet.Create();
             using World world = new World("ChunkGenerationDiscardTests");
             EntityManager manager = world.EntityManager;
             ChunkStreamingSettings streaming = ChunkStreamingSettings.CreateDefault();
             streaming.MaximumConcurrentGenerations = 1;
-            CreateStreamingSingletons(manager, default, streaming);
+            CreateStreamingSingletons(manager, default, streaming, catalogs);
             Entity old = CreateChunkEntity(manager, -2, -3, ChunkGenerationPhase.Queued, true);
             SystemHandle system = world.GetOrCreateSystem<ChunkGenerationSystem>();
             system.Update(world.Unmanaged);
@@ -1611,10 +1673,16 @@ namespace Farmware.WorldGeneration.Tests
         [Test]
         public void ChunkGenerationSystem_WorldDisposeCompletesOwnedJobs()
         {
+            using TerrainGenerationTestCatalogSet catalogs =
+                TerrainGenerationTestCatalogSet.Create();
             World world = new World("ChunkGenerationDisposeTests");
             try
             {
-                CreateStreamingSingletons(world.EntityManager, default, ChunkStreamingSettings.CreateDefault());
+                CreateStreamingSingletons(
+                    world.EntityManager,
+                    default,
+                    ChunkStreamingSettings.CreateDefault(),
+                    catalogs);
                 CreateChunkEntity(world.EntityManager, -1, 0, ChunkGenerationPhase.Queued, true);
                 SystemHandle system = world.GetOrCreateSystem<ChunkGenerationSystem>();
                 system.Update(world.Unmanaged);
@@ -2099,15 +2167,17 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// テスト用Worldへ生成設定、ストリーミング設定、Observerの3つのSingleton Entityを準備します。
+        /// テスト用Worldへ生成設定、ストリーミング設定、ObserverのSingleton Entityを準備します。
         /// </summary>
         /// <param name="entityManager">テスト用WorldのEntityManagerです。</param>
         /// <param name="observer">カメラ表示範囲として入力する論理チャンク矩形です。</param>
         /// <param name="streamingSettings">生成上限と保持余白を含むテスト条件です。</param>
+        /// <param name="catalogs">生成Systemも実行する場合に追加するBlock定義一式です。寿命は呼び出し側が所有します。</param>
         private static void CreateStreamingSingletons(
             EntityManager entityManager,
             ChunkStreamingObserver observer,
-            ChunkStreamingSettings streamingSettings)
+            ChunkStreamingSettings streamingSettings,
+            TerrainGenerationTestCatalogSet catalogs = null)
         {
             Entity settingsEntity = entityManager.CreateEntity();
             entityManager.AddComponentData(
@@ -2116,6 +2186,11 @@ namespace Farmware.WorldGeneration.Tests
             entityManager.AddComponentData(settingsEntity, BiomeDefinitionCatalog.CreateDefault());
             entityManager.AddComponentData(settingsEntity, ResourceGenerationSettings.CreateDefault());
             entityManager.AddComponentData(settingsEntity, streamingSettings);
+            if (catalogs != null)
+            {
+                // ストリーミング単体テストはBlobを不要とし、生成Systemを動かすテストだけ現行カタログを共有します。
+                AddTerrainCatalogComponents(entityManager, settingsEntity, catalogs);
+            }
 
             Entity observerEntity = entityManager.CreateEntity();
             entityManager.AddComponentData(observerEntity, observer);
@@ -2158,11 +2233,32 @@ namespace Farmware.WorldGeneration.Tests
             entityManager.AddComponent<ChunkGenerationRequest>(entity);
             entityManager.SetComponentEnabled<ChunkGenerationRequest>(entity, requestEnabled);
             entityManager.AddBuffer<GeneratedTile>(entity);
+            entityManager.AddBuffer<GeneratedTerrainCell>(entity);
             entityManager.AddBuffer<GeneratedResourceTile>(entity);
             entityManager.AddBuffer<GeneratedHydrologyCell>(entity);
             entityManager.AddBuffer<GeneratedSurfaceWaterTile>(entity);
             entityManager.AddBuffer<GeneratedHydrologyTile>(entity);
             return entity;
+        }
+
+        /// <summary>既存の設定Entityへ、テストが所有する地形定義と自然BlockパレットをSingletonとして追加します。</summary>
+        /// <param name="entityManager">設定Entityを保持するテストWorldです。</param>
+        /// <param name="settingsEntity">生成設定と同じ寿命でカタログComponentを保持するEntityです。</param>
+        /// <param name="catalogs">呼び出し側がテスト終了まで所有するBlob一式です。</param>
+        private static void AddTerrainCatalogComponents(
+            EntityManager entityManager,
+            Entity settingsEntity,
+            TerrainGenerationTestCatalogSet catalogs)
+        {
+            entityManager.AddComponentData(settingsEntity, new TerrainBlockCatalog
+            {
+                Value = catalogs.TerrainCatalog,
+                BuiltInRuntimeIds = catalogs.RuntimeIds
+            });
+            entityManager.AddComponentData(settingsEntity, new TerrainBlockPaletteCatalog
+            {
+                Value = catalogs.PaletteCatalog
+            });
         }
 
         /// <summary>
@@ -2448,6 +2544,127 @@ namespace Farmware.WorldGeneration.Tests
                 actual.VisualVariant,
                 Is.EqualTo(expected.VisualVariant),
                 $"資源表示差分が一致しません。座標=({worldTileX}, {worldTileY})");
+        }
+    }
+
+    /// <summary>
+    /// チャンク生成署名とECS生成テストが共有する、現行Definition・Blockパレット一式です。
+    /// 各テストはusingで所有し、Persistent Blobを逆依存順に必ず破棄します。
+    /// </summary>
+    internal sealed class TerrainGenerationTestCatalogSet : IDisposable
+    {
+        /// <summary>固定GUID、Runtime ID、分類を保持し、組み込みIDの解決元となる共通Blobです。</summary>
+        public BlobAssetReference<DefinitionCatalogBlob> DefinitionCatalog { get; private set; }
+
+        /// <summary>Ground、Wall、Liquid、TerrainSurfaceの固有属性を保持する地形Blobです。</summary>
+        public BlobAssetReference<TerrainBlockCatalogBlob> TerrainCatalog { get; private set; }
+
+        /// <summary>18Biomeと8地質の自然Ground・Wall候補を保持する固定パレットBlobです。</summary>
+        public BlobAssetReference<TerrainBlockPaletteCatalogBlob> PaletteCatalog { get; private set; }
+
+        /// <summary>海水、淡水、マグマなど固定用途へ解決済みのRuntime IDです。</summary>
+        public BuiltInTerrainBlockRuntimeIds RuntimeIds { get; private set; }
+
+        /// <summary>Factoryだけが構築済みBlobを渡せるよう、空の直接生成を禁止します。</summary>
+        private TerrainGenerationTestCatalogSet()
+        {
+        }
+
+        /// <summary>
+        /// 製品Bakerと同じBuilder列を使い、現在の既定定義とBlockパレットを構築します。
+        /// </summary>
+        /// <returns>usingで破棄すべき、検証済みカタログ一式です。</returns>
+        public static TerrainGenerationTestCatalogSet Create()
+        {
+            TerrainGenerationTestCatalogSet result = new TerrainGenerationTestCatalogSet();
+            BlobAssetReference<TerrainBlockMaterialCatalogBlob> materialCatalog = default;
+            try
+            {
+                DefinitionBuildEntry[] definitions =
+                    BuiltInTerrainBlockDefinitions.CreateCommonDefinitions(
+                        0,
+                        out DefinitionBuildReference[] references);
+                Assert.That(
+                    DefinitionCatalogBuilder.TryBuild(
+                        definitions,
+                        references,
+                        out BlobAssetReference<DefinitionCatalogBlob> definitionCatalog,
+                        out DefinitionCatalogValidationError definitionError),
+                    Is.True,
+                    $"テスト用共通Definitionを構築できませんでした: {definitionError.Code}");
+                result.DefinitionCatalog = definitionCatalog;
+                Assert.That(
+                    BuiltInTerrainBlockDefinitions.TryCreateTerrainDefinitions(
+                        result.DefinitionCatalog,
+                        out TerrainBlockDefinitionBuildEntry[] terrainDefinitions),
+                    Is.True);
+                Assert.That(
+                    TerrainBlockCatalogBuilder.TryBuild(
+                        result.DefinitionCatalog,
+                        terrainDefinitions,
+                        out BlobAssetReference<TerrainBlockCatalogBlob> terrainCatalog),
+                    Is.True);
+                result.TerrainCatalog = terrainCatalog;
+                Assert.That(
+                    TerrainBlockMaterialCatalogBuilder.TryBuild(
+                        result.DefinitionCatalog,
+                        TerrainBlockMaterialDefinitions.CreateDefault(),
+                        out materialCatalog),
+                    Is.True);
+                Assert.That(
+                    TerrainBlockPaletteCatalogBuilder.TryBuild(
+                        result.TerrainCatalog,
+                        materialCatalog,
+                        TerrainBlockPaletteDefinitions.CreateBiomeSurfaceDefaults(),
+                        TerrainBlockPaletteDefinitions.CreateGeologyDefaults(),
+                        out BlobAssetReference<TerrainBlockPaletteCatalogBlob> paletteCatalog),
+                    Is.True);
+                result.PaletteCatalog = paletteCatalog;
+                Assert.That(
+                    BuiltInTerrainBlockDefinitions.TryResolveRuntimeIds(
+                        result.DefinitionCatalog,
+                        out BuiltInTerrainBlockRuntimeIds runtimeIds),
+                    Is.True);
+                result.RuntimeIds = runtimeIds;
+                return result;
+            }
+            catch
+            {
+                // 途中でAssertが失敗した場合も、それ以前に確保したPersistent Blobをテスト実行環境へ残しません。
+                result.Dispose();
+                throw;
+            }
+            finally
+            {
+                if (materialCatalog.IsCreated)
+                {
+                    materialCatalog.Dispose();
+                }
+            }
+        }
+
+        /// <summary>所有するPersistent Blobを依存の逆順に解放し、複数回呼ばれても二重解放しません。</summary>
+        public void Dispose()
+        {
+            if (PaletteCatalog.IsCreated)
+            {
+                PaletteCatalog.Dispose();
+                PaletteCatalog = default;
+            }
+
+            if (TerrainCatalog.IsCreated)
+            {
+                TerrainCatalog.Dispose();
+                TerrainCatalog = default;
+            }
+
+            if (DefinitionCatalog.IsCreated)
+            {
+                DefinitionCatalog.Dispose();
+                DefinitionCatalog = default;
+            }
+
+            RuntimeIds = default;
         }
     }
 }

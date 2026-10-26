@@ -1,5 +1,8 @@
 // このファイルは、新Biome分類より前に必要な連続環境・地質・陸海・岩壁候補を決定論的に生成します。
-// ECS Job、C3/C4水文、テストが同じ基礎タイル生成を共有し、最終BiomeはDeterministicBiomeChunkFinalizerが水文完成後に確定します。
+// ECS Job、C3/C4水文、テストが同じ基礎タイル生成を共有し、最終BiomeとBlockセルは水文完成後に確定します。
+
+using Farmware.Simulation;
+using Unity.Entities;
 
 namespace Farmware.WorldGeneration
 {
@@ -170,16 +173,20 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>
-        /// 指定チャンクの4096地形、地下水反映済み64水文セル、4096表流水、4096自然水文の安定64bitハッシュを求めます。
+        /// 指定チャンクの4096地形・Blockセル、地下水反映済み64水文セル、4096表流水、4096自然水文の安定64bitハッシュを求めます。
         /// 水文と表流水の有限探索用一時配列を確保し、決定性テストと開発用比較表示に使用します。
         /// </summary>
         /// <param name="settings">ワールド生成設定です。</param>
         /// <param name="biomeSettings">C5の新18Biome Definitionです。</param>
+        /// <param name="paletteCatalog">自然Ground・Wallを選ぶ固定Blockパレットです。</param>
+        /// <param name="terrainRuntimeIds">海水・淡水・マグマを直接設定する解決済みIDです。</param>
         /// <param name="chunkCoordinate">生成結果を比較する論理チャンク座標です。</param>
-        /// <returns>地形、水文セル、表流水、自然土壌飽和の順序と全固定値を反映した64bitハッシュです。</returns>
+        /// <returns>地形、Blockセル、水文セル、表流水、自然土壌飽和の順序と全固定値を反映した64bitハッシュです。</returns>
         public static ulong ComputeChunkHash(
             in WorldGenerationSettings settings,
             in BiomeClassificationSettings biomeSettings,
+            BlobAssetReference<TerrainBlockPaletteCatalogBlob> paletteCatalog,
+            in BuiltInTerrainBlockRuntimeIds terrainRuntimeIds,
             ChunkCoordinate chunkCoordinate)
         {
             ulong hash = 0xCBF29CE484222325UL;
@@ -187,6 +194,8 @@ namespace Farmware.WorldGeneration
             return DeterministicHydrologyGenerator.AppendChunkHash(
                 settings,
                 biomeSettings,
+                paletteCatalog,
+                terrainRuntimeIds,
                 chunkCoordinate,
                 hash);
         }

@@ -52,7 +52,7 @@ namespace Farmware.WorldGeneration
         /// <summary>自然生成された液体定義です。液体がなければInvalidです。</summary>
         public DefinitionRuntimeId LiquidRuntimeId;
 
-        /// <summary>自然生成された地表定義です。TERRAIN-01Aの互換生成ではInvalidです。</summary>
+        /// <summary>自然生成された地表定義です。現行の自然生成では未使用のためInvalidです。</summary>
         public DefinitionRuntimeId TerrainSurfaceRuntimeId;
     }
 
@@ -325,6 +325,80 @@ namespace Farmware.WorldGeneration
     /// </summary>
     public static class EffectiveTerrainCellQuery
     {
+        /// <summary>
+        /// 生成チャンクEntityの行優先Block Bufferから対象セルを読み、任意の永続差分を適用します。
+        /// </summary>
+        /// <param name="entityManager">生成チャンクと任意差分所有者を保持する同じECS Worldです。</param>
+        /// <param name="chunkEntity">ChunkCoordinateComponentと4096件のGeneratedTerrainCellを持つ生成済みEntityです。</param>
+        /// <param name="deltaOwnerEntity">対応差分を持つEntityです。差分がない場合はEntity.Nullを指定します。</param>
+        /// <param name="coordinate">問い合わせるレイヤー付き絶対セル座標です。</param>
+        /// <param name="catalog">RuntimeIdの分類を検証する地形定義カタログです。</param>
+        /// <param name="effectiveCell">成功時に自然生成Bufferと差分を合成した現在地形を受け取ります。</param>
+        /// <returns>生成Buffer、座標、任意差分を検証して合成できた場合はSuccessです。</returns>
+        public static EffectiveTerrainResolveResult TryResolveFromChunk(
+            EntityManager entityManager,
+            Entity chunkEntity,
+            Entity deltaOwnerEntity,
+            in WorldTileCoordinate coordinate,
+            BlobAssetReference<TerrainBlockCatalogBlob> catalog,
+            out EffectiveTerrainCell effectiveCell)
+        {
+            effectiveCell = default;
+            if (!entityManager.Exists(chunkEntity)
+                || !entityManager.HasComponent<ChunkCoordinateComponent>(chunkEntity)
+                || !entityManager.HasBuffer<GeneratedTerrainCell>(chunkEntity))
+            {
+                return EffectiveTerrainResolveResult.InvalidBaseTerrain;
+            }
+
+            ChunkCoordinate expectedChunk = WorldGrid.ToChunkCoordinate(coordinate);
+            ChunkCoordinateComponent actualChunk =
+                entityManager.GetComponentData<ChunkCoordinateComponent>(chunkEntity);
+            DynamicBuffer<GeneratedTerrainCell> generatedCells =
+                entityManager.GetBuffer<GeneratedTerrainCell>(chunkEntity, true);
+            if (actualChunk.Layer != expectedChunk.Layer
+                || actualChunk.X != expectedChunk.X
+                || actualChunk.Y != expectedChunk.Y
+                || generatedCells.Length != WorldGridConstants.TilesPerChunk)
+            {
+                return EffectiveTerrainResolveResult.InvalidBaseTerrain;
+            }
+
+            ChunkLocalTileCoordinate local = WorldGrid.ToLocalTileCoordinate(
+                coordinate.X,
+                coordinate.Y);
+            int localTileIndex = WorldGrid.ToTileIndex(local.X, local.Y);
+            GeneratedTerrainCell baseCell = generatedCells[localTileIndex];
+            if (deltaOwnerEntity == Entity.Null)
+            {
+                return EffectiveTerrainResolver.TryResolve(
+                    baseCell,
+                    false,
+                    default,
+                    catalog,
+                    out effectiveCell);
+            }
+
+            if (!entityManager.Exists(deltaOwnerEntity)
+                || !entityManager.HasComponent<TerrainChunkDeltaOwner>(deltaOwnerEntity)
+                || !entityManager.HasBuffer<TerrainCellDelta>(deltaOwnerEntity))
+            {
+                return EffectiveTerrainResolveResult.InvalidDelta;
+            }
+
+            TerrainChunkDeltaOwner owner =
+                entityManager.GetComponentData<TerrainChunkDeltaOwner>(deltaOwnerEntity);
+            DynamicBuffer<TerrainCellDelta> deltas =
+                entityManager.GetBuffer<TerrainCellDelta>(deltaOwnerEntity, true);
+            return TryResolve(
+                coordinate,
+                owner,
+                deltas,
+                baseCell,
+                catalog,
+                out effectiveCell);
+        }
+
         /// <summary>
         /// 指定座標が所有者チャンクに属する場合だけ対応差分を検索し、有効セルを構築します。
         /// </summary>

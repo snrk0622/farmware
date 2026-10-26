@@ -203,6 +203,8 @@ namespace Farmware.WorldGeneration.Tests
         [Timeout(300000)]
         public void NaturalFloodingWetlandGeneration_ReportsScaling(int chunkCount)
         {
+            using TerrainGenerationTestCatalogSet catalogs =
+                TerrainGenerationTestCatalogSet.Create();
             WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
                 WorldSeedUtility.FromString("natural-flooding-wetland-performance"),
                 WorldGenerationSettings.CurrentGeneratorVersion);
@@ -210,6 +212,8 @@ namespace Farmware.WorldGeneration.Tests
             ulong warmup = DeterministicHydrologyGenerator.AppendChunkHash(
                 settings,
                 biomeSettings,
+                catalogs.PaletteCatalog,
+                catalogs.RuntimeIds,
                 new ChunkCoordinate(WorldLayer.Surface, 8, 8),
                 0xC4D0000000000001UL);
             Assert.That(warmup, Is.Not.Zero);
@@ -224,6 +228,8 @@ namespace Farmware.WorldGeneration.Tests
                 aggregate = DeterministicHydrologyGenerator.AppendChunkHash(
                     settings,
                     biomeSettings,
+                    catalogs.PaletteCatalog,
+                    catalogs.RuntimeIds,
                     new ChunkCoordinate(WorldLayer.Surface, chunkX, chunkY),
                     aggregate);
             }
