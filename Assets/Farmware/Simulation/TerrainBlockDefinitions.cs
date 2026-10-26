@@ -162,13 +162,16 @@ namespace Farmware.Simulation
             new DefinitionGuid(0x8f5c1c7a25b84d10UL, 0xa1d63a6ff1f9a005UL);
 
         /// <summary>
-        /// 共通DefinitionCatalogへ追加する5件の定義入力を作ります。
+        /// 共通DefinitionCatalogへ追加する暫定5定義と41材質の123定義入力を作ります。
         /// </summary>
-        /// <param name="referenceStartIndex">先行する定義が使用した参照総数です。組み込み定義は参照を追加しません。</param>
-        /// <returns>既存入力の末尾へ順番どおり追加できる共通定義配列です。</returns>
-        public static DefinitionBuildEntry[] CreateCommonDefinitions(int referenceStartIndex)
+        /// <param name="referenceStartIndex">先行する定義が使用した参照総数です。</param>
+        /// <param name="references">41材質のGround・Wallから共通Itemを指す明示参照を受け取ります。</param>
+        /// <returns>既存入力の末尾へ追加できる、暫定地形と41材質の共通定義配列です。</returns>
+        public static DefinitionBuildEntry[] CreateCommonDefinitions(
+            int referenceStartIndex,
+            out DefinitionBuildReference[] references)
         {
-            return new[]
+            DefinitionBuildEntry[] legacyDefinitions =
             {
                 CreateCommonDefinition(LandGroundGuid, DefinitionKind.GroundBlock, referenceStartIndex),
                 CreateCommonDefinition(NaturalRockWallGuid, DefinitionKind.WallBlock, referenceStartIndex),
@@ -176,16 +179,36 @@ namespace Farmware.Simulation
                 CreateCommonDefinition(SaltWaterGuid, DefinitionKind.Liquid, referenceStartIndex),
                 CreateCommonDefinition(MagmaGuid, DefinitionKind.Liquid, referenceStartIndex)
             };
+
+            DefinitionBuildEntry[] materialDefinitions =
+                TerrainBlockMaterialDefinitions.CreateCommonDefinitions(
+                    referenceStartIndex,
+                    out references);
+            DefinitionBuildEntry[] combined = new DefinitionBuildEntry[
+                legacyDefinitions.Length + materialDefinitions.Length];
+            Array.Copy(legacyDefinitions, 0, combined, 0, legacyDefinitions.Length);
+            Array.Copy(
+                materialDefinitions,
+                0,
+                combined,
+                legacyDefinitions.Length,
+                materialDefinitions.Length);
+            return combined;
         }
 
         /// <summary>
-        /// 地形固有カタログへ入れる最小のゲームルール属性を作ります。
-        /// 採掘硬度と回収品はGATHER-01まで未設定とし、現行の移動・配置結果だけを維持します。
+        /// 地形固有カタログへ入れる暫定5定義と、41材質のGround・Wall属性を作ります。
+        /// 41材質は共通Itemを解決して回収品へ接続し、採掘硬度だけをGATHER-01まで未設定にします。
         /// </summary>
-        /// <returns>共通定義GUIDへ接続する5件の地形固有入力です。</returns>
-        public static TerrainBlockDefinitionBuildEntry[] CreateTerrainDefinitions()
+        /// <param name="definitionCatalog">暫定5定義と41材質を登録済みの共通Definitionカタログです。</param>
+        /// <param name="definitions">成功時に暫定5件と材質82件を連結した地形固有入力を受け取ります。</param>
+        /// <returns>41材質のItem・Ground・Wallをすべて正しい分類へ解決できた場合はtrueです。</returns>
+        public static bool TryCreateTerrainDefinitions(
+            BlobAssetReference<DefinitionCatalogBlob> definitionCatalog,
+            out TerrainBlockDefinitionBuildEntry[] definitions)
         {
-            return new[]
+            definitions = null;
+            TerrainBlockDefinitionBuildEntry[] legacyDefinitions =
             {
                 CreateTerrainDefinition(
                     LandGroundGuid,
@@ -212,6 +235,26 @@ namespace Farmware.Simulation
                     TerrainBlockDefinitionFlags.AllowsBridge |
                     TerrainBlockDefinitionFlags.RequiresHeatResistance)
             };
+
+            if (!TerrainBlockMaterialDefinitions.TryCreateTerrainDefinitions(
+                    definitionCatalog,
+                    out TerrainBlockDefinitionBuildEntry[] materialDefinitions))
+            {
+                return false;
+            }
+
+            TerrainBlockDefinitionBuildEntry[] combined =
+                new TerrainBlockDefinitionBuildEntry[
+                    legacyDefinitions.Length + materialDefinitions.Length];
+            Array.Copy(legacyDefinitions, 0, combined, 0, legacyDefinitions.Length);
+            Array.Copy(
+                materialDefinitions,
+                0,
+                combined,
+                legacyDefinitions.Length,
+                materialDefinitions.Length);
+            definitions = combined;
+            return true;
         }
 
         /// <summary>

@@ -3,6 +3,7 @@
   "rootNamespace": "Farmware.Authoring",
   "references": [
     "Farmware.Simulation",
+    "Farmware.WorldGeneration.Runtime",
     "Unity.Collections",
     "Unity.Entities",
     "Unity.Entities.Hybrid"

@@ -280,6 +280,9 @@ namespace Farmware.WorldGeneration.Authoring
                 LakeSpring = LakeSpringGenerationSettings.CreateDefault(),
                 // TERRAIN-01C4-Dの自然冠水・湿原規模設定もGeneratorVersion対象の共有既定値をBakeします。
                 NaturalFlooding = NaturalFloodingGenerationSettings.CreateDefault(),
+                // Blockパレットのパッチ寸法・比重・露出境界は調整値として重複させず、共有既定値をBakeします。
+                TerrainBlockPaletteSelection =
+                    TerrainBlockPaletteSelectionSettings.CreateDefault(),
                 SeaLevelThreshold = ToNormalizedUShort(waterThreshold),
                 MagmaCellSizeInTiles = magmaCellSizeInTiles,
                 MagmaDetailCellSizeInTiles = magmaDetailCellSizeInTiles,

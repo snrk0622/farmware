@@ -218,9 +218,23 @@ MAP-02Aの純粋な座標変換について、表示原点が相対セル`(0, 0)
 
 #### `EffectiveTerrainCellTests`
 
-TERRAIN-01Aの通常地面、自然岩壁、淡水、海水、マグマを共通Definition GUIDと地形固有Blobへ構築し、RuntimeIdから分類・属性を取得できることを確認する。現行Surface生成との互換変換では、岩壁を地面＋壁へ分け、壁の明示除去後もBiomeと地面を維持する。淡水は地面なし＋Liquidになり、地面と液体の重複は拒否する。
+TERRAIN-01Aの通常地面、自然岩壁、淡水、海水、マグマに加え、C6-Bの41材質Definitionを共通Definition GUIDと地形固有Blobへ構築し、RuntimeIdから分類・属性を取得できることを確認する。現行Surface生成との互換変換では、岩壁を地面＋壁へ分け、壁の明示除去後もBiomeと地面を維持する。淡水は地面なし＋Liquidになり、地面と液体の重複は拒否する。
 
 ECS Bufferでは差分をLocalTileIndex昇順に挿入し、自然状態へ戻したセルの要素を削除する。同じX/YでもSurface所有者の差分をUnderwaterへ適用せず、水域は泳げれば移動可能でも通常設備は配置不可になること、マグマの移動・橋が耐熱能力を要求することを保証する。地形状態ハッシュはEntity作成順を変えても一致し、同じチャンクX/YでもLayerが変われば異なる値になり、固定GUIDと組み込みRuntimeIdの対応、または`TerrainChunkDeltaOwner`と`TerrainCellDelta` Bufferの一対一対応が破損していれば拒否することを確認する。`DefinitionCatalogAuthoring`はTERRAIN-01CまでInspector由来の地形4分類を組み込み定義と併存させず、具体的なBake理由を返すこともEditModeで確認する。
+
+#### `TerrainBlockMaterialDefinitionTests`
+
+C6-B1の初回41材質について、安定材質ID 1〜41、共通Item・Ground形態・Wall形態の全123 GUIDが有効かつ一意であることを保証する。本番Bakerと同じ順序で共通Definition、87件の地形Definition、解決済み材質Blobを構築し、各材質のItem／Ground／Wall分類、GroundとWallが同じ回収Itemを指すこと、自然Wallが移動遮断・水密属性を持つことを確認する。材質入力の逆順でも安定ID検索結果が変わらず、ID重複、GUID重複、行欠落、予約ID・範囲外IDを拒否する。
+
+#### `TerrainBlockPaletteDefinitionTests`
+
+C6-B2の18Biome表層Groundパレットと8地質の露出基盤Ground・自然Wallパレットについて、確定表の材質順と重み、全26行の安定ID、行内材質の一意性、各パレットの重み合計256を保証する。本番Bakerと同じ共通Definition・地形・41材質カタログへ接続してRuntime Blobを構築し、全Ground候補が`GroundBlock`、全Wall候補が移動遮断・水密属性を持つ`WallBlock`へ解決されることを確認する。入力行を逆順にしても安定ID順の検索結果が変わらず、重み合計違反、行内材質重複、安定行ID重複、予約ID、Range外参照を拒否する。C6-B3以降は自然土壌飽和不足の泥炭を必ず置換できるよう、全Biome行に非`PeatSoil`候補が1件以上あることも構築時に保証する。
+
+#### `DeterministicTerrainBlockPaletteSelectorTests`
+
+C6-B3の純粋Blockパレット選択について、表層64／32／16タイル・4：2：1、地質32／16タイル・2：1、露出32／16タイル・2：1の固定設定と用途別Saltを、負座標の明示ノイズ合成と照合する。0〜255へ変換した累積重み区間の全境界、露出式の64bit合成、境界39,320／39,321／39,322、露出率0／65,535の端点、中間値だけの厳密な未満比較を保証する。`SwampForest`で選ばれた`PeatSoil`は自然土壌飽和39,320で最初の非泥炭候補`MarshMud`へ置換し、39,321では維持する。同一入力の再実行とBiome・地質行の逆登録順で、途中ノイズ、候補材質、最終Ground、自然Wallがすべて一致することも確認する。
+
+2026-10-26のC6-B3 AI確認では、Unity 6000.3.8f1 Editorで`DeterministicTerrainBlockPaletteSelectorTests` 7件、B2・B3の`TerrainBlockPalette`関連14件、共有既定設定1件がすべて成功し、対象実行後のConsoleはエラー0件・警告0件だった。生成済みプロジェクト参照を使うRuntime・World Generation Testsの静的ビルドも警告0件・エラー0件で成功した。World Generation EditMode Assembly 622件の一括実行は約52分31秒で完走し、620件成功・2件失敗だった。失敗のうち`WorldGenerationMapViewerTests.Sample_ReportsDiagnosticChunksAndCompletedRowsWithoutChangingPixels`は一括実行時に180秒でTimeoutとなったが、単独再実行では90.55秒で成功した。もう1件の`TerrainProductIsolationTests.LegacyBoundaryHighlightRemovalGate_RemovesAllImplementation`は、後続C6-Dで旧境界ハイライトを削除した後に成功させる明示実行用`Explicit`ゲートであり、現時点では仕様どおり旧表示が残るため失敗する。全体実行後のConsoleはエラー0件で、警告6件は既存ECS Systemの無効な更新順属性2種類が各3回出力されたもので、C6-B3の変更箇所からの新規警告はなかった。
 
 #### `WorldGenerationDistributionAuditTests`
 
@@ -351,7 +365,7 @@ C6-Dで採用方式の本番接続と製品回帰テストが成功した後は�
 
 #### `WorldGenerationScenePlayModeTests`
 
-`SampleScene_StreamsAndDeterministicallyRegeneratesTerrainTiles`は、保存された既定ONを確認し、見本Tilemapではなく実際のチャンク内Tilemapのセルを読む。初期表示、岩壁と下層土地、資源、正負の遠方、アンロード、帰還時の決定論、液面、F3/F4・開発者可視化の既存契約を維持する。さらに、実際のDefault Worldで非0の`AnimalPopulationSeed`、地域状態、共通永続ID・種類・整数位置・群れID・外見差分を持つ野生動物Entityが作られ、`Animal Population`可視化が候補・確定位置Queryを例外なく描画できることを確認する。実際の生成設定と個体座標を照合して資源予約との重複がないこと、候補表示が木のセルを除外し資源なしの草原陸地を受理することも確認する。`SampleScene_SharedModeStreamsAndRegeneratesTerrainTiles`も同じ検証経路をOFFで実行し、旧共有方式の回帰を残す。テスト内の反射は表示参照と候補判定の読取検証に限り、未割当表示をテストから生成しない。
+`SampleScene_StreamsAndDeterministicallyRegeneratesTerrainTiles`は、保存された既定ONを確認し、見本Tilemapではなく実際のチャンク内Tilemapのセルを読む。初期表示、岩壁と下層土地、資源、正負の遠方、アンロード、帰還時の決定論、液面、F3/F4・開発者可視化の既存契約を維持する。さらに、実際のDefault Worldで非0の`AnimalPopulationSeed`、地域状態、共通永続ID・種類・整数位置・群れID・外見差分を持つ野生動物Entityが作られ、`Animal Population`可視化が候補・確定位置Queryを例外なく描画できることを確認する。C6-B1以降は同じSubScene Bakerが`TerrainBlockMaterialCatalog`を1件公開し、代表`GrassLoam`の共通Item・Ground・Wall実行時IDがすべて有効であることも確認する。C6-B2以降は`TerrainBlockPaletteCatalog`も1件公開し、温帯草原の先頭候補が重み160の`GrassLoam` Ground、火山岩地質の自然Wall先頭候補が重み128の`Basalt` Wallであり、後者が移動遮断・水密属性を持つことを確認する。実際の生成設定と個体座標を照合して資源予約との重複がないこと、候補表示が木のセルを除外し資源なしの草原陸地を受理することも確認する。`SampleScene_SharedModeStreamsAndRegeneratesTerrainTiles`も同じ検証経路をOFFで実行し、旧共有方式の回帰を残す。テスト内の反射は表示参照と候補判定の読取検証に限り、未割当表示をテストから生成しない。
 
 | 分類 | 用途 |
 | --- | --- |

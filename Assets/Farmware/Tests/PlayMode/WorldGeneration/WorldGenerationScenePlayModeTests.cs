@@ -2664,7 +2664,9 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     animalCatalogQuery = world.EntityManager.CreateEntityQuery(
                         ComponentType.ReadOnly<DefinitionCatalog>(),
                         ComponentType.ReadOnly<AnimalSpeciesCatalog>(),
-                        ComponentType.ReadOnly<TerrainBlockCatalog>());
+                        ComponentType.ReadOnly<TerrainBlockCatalog>(),
+                        ComponentType.ReadOnly<TerrainBlockMaterialCatalog>(),
+                        ComponentType.ReadOnly<TerrainBlockPaletteCatalog>());
                     animalPopulationSeedQuery = world.EntityManager.CreateEntityQuery(
                         ComponentType.ReadOnly<AnimalPopulationSeed>());
                     animalRegionQuery = world.EntityManager.CreateEntityQuery(
@@ -2784,6 +2786,10 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 animalCatalogQuery.GetSingleton<AnimalSpeciesCatalog>();
             TerrainBlockCatalog runtimeTerrainCatalog =
                 animalCatalogQuery.GetSingleton<TerrainBlockCatalog>();
+            TerrainBlockMaterialCatalog runtimeMaterialCatalog =
+                animalCatalogQuery.GetSingleton<TerrainBlockMaterialCatalog>();
+            TerrainBlockPaletteCatalog runtimeBlockPaletteCatalog =
+                animalCatalogQuery.GetSingleton<TerrainBlockPaletteCatalog>();
             Assert.That(
                 DefinitionGuid.TryParse(
                     "1728e39573b24efa996020e9493cc742",
@@ -2814,7 +2820,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(chickenDefinition.MaximumWanderDistanceInTiles, Is.EqualTo(8));
             Assert.That(chickenDefinition.AppearanceVariantCount, Is.EqualTo(3));
 
-            // TERRAIN-01Aの組み込み5定義も同じSubSceneからBakeし、旧GroundTypeを有効セルへ変換できることを確認します。
+            // TERRAIN-01Aの暫定5定義も同じSubSceneからBakeし、旧GroundTypeを有効セルへ変換できることを確認します。
             Assert.That(runtimeTerrainCatalog.Value.IsCreated, Is.True);
             Assert.That(runtimeTerrainCatalog.BuiltInRuntimeIds.IsValid, Is.True);
             Assert.That(
@@ -2828,6 +2834,76 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(
                 runtimeRockWall.Flags & TerrainBlockDefinitionFlags.BlocksMovement,
                 Is.Not.EqualTo(TerrainBlockDefinitionFlags.None));
+
+            // C6-B1の41材質対応も同じBakerから公開し、代表材質のItem・Ground・Wallが欠けていないことを確認します。
+            Assert.That(runtimeMaterialCatalog.Value.IsCreated, Is.True);
+            Assert.That(
+                TerrainBlockMaterialCatalogLookup.TryGetDefinition(
+                    runtimeMaterialCatalog.Value,
+                    TerrainBlockMaterialId.GrassLoam,
+                    out TerrainBlockMaterialDefinitionBlob runtimeGrassLoam),
+                Is.True,
+                "GrassLoamのItem・Ground・Wall対応がBakeされていません。");
+            Assert.That(runtimeGrassLoam.ItemRuntimeId.IsValid, Is.True);
+            Assert.That(runtimeGrassLoam.GroundRuntimeId.IsValid, Is.True);
+            Assert.That(runtimeGrassLoam.WallRuntimeId.IsValid, Is.True);
+
+            // 固定Blockパレットも同じBakerから公開し、Biome表層と地質Wallが材質対応へ接続されていることを確認します。
+            Assert.That(runtimeBlockPaletteCatalog.Value.IsCreated, Is.True);
+            Assert.That(
+                TerrainBlockPaletteCatalogLookup.TryGetBiomeSurfaceRange(
+                    runtimeBlockPaletteCatalog.Value,
+                    BiomeId.TemperateGrassland,
+                    out TerrainBlockPaletteRange runtimeGrasslandRange),
+                Is.True,
+                "温帯草原の表層GroundパレットがBakeされていません。");
+            Assert.That(
+                TerrainBlockPaletteCatalogLookup.TryGetEntry(
+                    runtimeBlockPaletteCatalog.Value,
+                    runtimeGrasslandRange,
+                    0,
+                    out TerrainBlockPaletteEntryBlob runtimeGrasslandPrimary),
+                Is.True);
+            Assert.That(
+                runtimeGrasslandPrimary.MaterialId,
+                Is.EqualTo(TerrainBlockMaterialId.GrassLoam));
+            Assert.That(
+                runtimeGrasslandPrimary.BlockRuntimeId,
+                Is.EqualTo(runtimeGrassLoam.GroundRuntimeId));
+            Assert.That(runtimeGrasslandPrimary.Weight, Is.EqualTo(160));
+
+            Assert.That(
+                TerrainBlockPaletteCatalogLookup.TryGetGeologyRange(
+                    runtimeBlockPaletteCatalog.Value,
+                    GeologyClass.VolcanicRock,
+                    true,
+                    out TerrainBlockPaletteRange runtimeVolcanicWallRange),
+                Is.True,
+                "火山岩地質の自然WallパレットがBakeされていません。");
+            Assert.That(
+                TerrainBlockPaletteCatalogLookup.TryGetEntry(
+                    runtimeBlockPaletteCatalog.Value,
+                    runtimeVolcanicWallRange,
+                    0,
+                    out TerrainBlockPaletteEntryBlob runtimeVolcanicWallPrimary),
+                Is.True);
+            Assert.That(
+                runtimeVolcanicWallPrimary.MaterialId,
+                Is.EqualTo(TerrainBlockMaterialId.Basalt));
+            Assert.That(runtimeVolcanicWallPrimary.Weight, Is.EqualTo(128));
+            Assert.That(
+                TerrainBlockCatalogLookup.TryGetDefinition(
+                    runtimeTerrainCatalog.Value,
+                    runtimeVolcanicWallPrimary.BlockRuntimeId,
+                    out TerrainBlockDefinitionBlob runtimeVolcanicWallBlock),
+                Is.True);
+            Assert.That(runtimeVolcanicWallBlock.Kind, Is.EqualTo(DefinitionKind.WallBlock));
+            TerrainBlockDefinitionFlags runtimeWallRequiredFlags =
+                TerrainBlockDefinitionFlags.BlocksMovement
+                | TerrainBlockDefinitionFlags.Watertight;
+            Assert.That(
+                runtimeVolcanicWallBlock.Flags & runtimeWallRequiredFlags,
+                Is.EqualTo(runtimeWallRequiredFlags));
 
             // SampleSceneの実際の固定Tickで独立Seedと地域状態まで作られ、静的定義だけで止まっていないことを確認します。
             // 新18Biomeでは初期表示範囲に温帯草原が存在しない場合があるため、鶏0羽を失敗にはしません。

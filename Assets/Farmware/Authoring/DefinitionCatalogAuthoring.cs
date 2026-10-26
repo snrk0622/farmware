@@ -1,17 +1,18 @@
-// このファイルは、Inspectorの地形以外の静的定義・動物種固有値と組み込み地形定義をECS用カタログへ変換します。
-// MonoBehaviourは入力だけを保持し、Bakerが検証済みの連続IDと用途別Blob AssetをSimulationへ渡します。
+// このファイルは、Inspectorの地形以外の静的定義・動物種固有値と、組み込み地形・材質パレットをECS用カタログへ変換します。
+// MonoBehaviourは編集可能な入力だけを保持し、Bakerが検証済みの連続IDと用途別Blob AssetをSimulationへ渡します。
 
 using System;
 using System.Collections.Generic;
 using Farmware.Simulation;
 using Farmware.Simulation.Animals;
+using Farmware.WorldGeneration;
 using Unity.Entities;
 using UnityEngine;
 
 namespace Farmware.Authoring
 {
     /// <summary>
-    /// アイテム、設備、施設、レシピ、動物種のInspector定義と、組み込み地形4分類を用途別Blob AssetへまとめるAuthoring用MonoBehaviourです。
+    /// アイテム、設備、施設、レシピ、動物種のInspector定義と、組み込み地形・固定材質パレットを用途別Blob AssetへまとめるAuthoring用MonoBehaviourです。
     /// SceneまたはSubSceneへ1件だけ配置し、実行中のゲーム状態ではなく編集可能な定義表の入力として使用します。
     /// </summary>
     [DisallowMultipleComponent]
@@ -239,11 +240,13 @@ namespace Farmware.Authoring
                     };
                 }
 
-                // TERRAIN-01Aの最小Blockは既存Sceneへ手作業のGUID追加を要求せず、全Worldで同じ定義を必ず登録します。
-                // 将来の追加パレットは別GUIDで増やし、ここにある5件のGUIDや意味を変更しません。
+                // 暫定5地形とC6-Bの41材質は既存Sceneへ手作業のGUID追加を要求せず、全Worldで同じ定義を登録します。
+                // 暫定5定義はC6-Cの置換まで意味を維持し、新41材質は別GUIDとして並行登録します。
                 DefinitionBuildEntry[] builtInTerrainDefinitions =
                     BuiltInTerrainBlockDefinitions.CreateCommonDefinitions(
-                        buildReferences.Count);
+                        buildReferences.Count,
+                        out DefinitionBuildReference[] builtInTerrainReferences);
+                buildReferences.AddRange(builtInTerrainReferences);
                 int authoredDefinitionCount = buildDefinitions.Length;
                 Array.Resize(
                     ref buildDefinitions,
@@ -312,30 +315,69 @@ namespace Farmware.Authoring
                         CreateAnimalValidationMessage(sourceAnimalSpecies, animalError));
                 }
 
-                if (!TerrainBlockCatalogBuilder.TryBuild(
-                    catalog,
-                    BuiltInTerrainBlockDefinitions.CreateTerrainDefinitions(),
-                    out BlobAssetReference<TerrainBlockCatalogBlob> terrainCatalog)
-                    || !BuiltInTerrainBlockDefinitions.TryResolveRuntimeIds(
+                BlobAssetReference<TerrainBlockCatalogBlob> terrainCatalog = default;
+                BlobAssetReference<TerrainBlockMaterialCatalogBlob> materialCatalog = default;
+                BlobAssetReference<TerrainBlockPaletteCatalogBlob> blockPaletteCatalog = default;
+                BuiltInTerrainBlockRuntimeIds terrainRuntimeIds = default;
+                bool terrainDefinitionsCreated =
+                    BuiltInTerrainBlockDefinitions.TryCreateTerrainDefinitions(
                         catalog,
-                        out BuiltInTerrainBlockRuntimeIds terrainRuntimeIds))
+                        out TerrainBlockDefinitionBuildEntry[] terrainDefinitions);
+                bool terrainCatalogCreated = terrainDefinitionsCreated
+                    && TerrainBlockCatalogBuilder.TryBuild(
+                        catalog,
+                        terrainDefinitions,
+                        out terrainCatalog);
+                bool materialCatalogCreated = terrainCatalogCreated
+                    && TerrainBlockMaterialCatalogBuilder.TryBuild(
+                        catalog,
+                        TerrainBlockMaterialDefinitions.CreateDefault(),
+                        out materialCatalog);
+                bool blockPaletteCatalogCreated = materialCatalogCreated
+                    && TerrainBlockPaletteCatalogBuilder.TryBuild(
+                        terrainCatalog,
+                        materialCatalog,
+                        TerrainBlockPaletteDefinitions.CreateBiomeSurfaceDefaults(),
+                        TerrainBlockPaletteDefinitions.CreateGeologyDefaults(),
+                        out blockPaletteCatalog);
+                bool legacyIdsResolved = blockPaletteCatalogCreated
+                    && BuiltInTerrainBlockDefinitions.TryResolveRuntimeIds(
+                        catalog,
+                        out terrainRuntimeIds);
+                if (!terrainDefinitionsCreated
+                    || !terrainCatalogCreated
+                    || !materialCatalogCreated
+                    || !blockPaletteCatalogCreated
+                    || !legacyIdsResolved)
                 {
-                    // どのBlobもまだBakerへ登録していないため、失敗時はこの処理が3件すべての所有権を解放します。
+                    // どのBlobもまだBakerへ登録していないため、失敗時はこの処理が作成済みBlobの所有権を解放します。
                     if (terrainCatalog.IsCreated)
                     {
                         terrainCatalog.Dispose();
                     }
 
+                    if (materialCatalog.IsCreated)
+                    {
+                        materialCatalog.Dispose();
+                    }
+
+                    if (blockPaletteCatalog.IsCreated)
+                    {
+                        blockPaletteCatalog.Dispose();
+                    }
+
                     animalCatalog.Dispose();
                     catalog.Dispose();
                     throw new InvalidOperationException(
-                        "組み込み地形定義を共通DefinitionCatalogへ接続できませんでした。");
+                        "組み込み地形定義、41材質対応、または固定Blockパレットを共通DefinitionCatalogへ接続できませんでした。");
                 }
 
                 // Bakerへ登録して差分Bake時の参照数を正しく管理し、手動Disposeによる二重解放を避けます。
                 AddBlobAsset(ref catalog, out _);
                 AddBlobAsset(ref animalCatalog, out _);
                 AddBlobAsset(ref terrainCatalog, out _);
+                AddBlobAsset(ref materialCatalog, out _);
+                AddBlobAsset(ref blockPaletteCatalog, out _);
                 Entity entity = GetEntity(TransformUsageFlags.None);
                 AddComponent(entity, new DefinitionCatalog
                 {
@@ -349,6 +391,14 @@ namespace Farmware.Authoring
                 {
                     Value = terrainCatalog,
                     BuiltInRuntimeIds = terrainRuntimeIds
+                });
+                AddComponent(entity, new TerrainBlockMaterialCatalog
+                {
+                    Value = materialCatalog
+                });
+                AddComponent(entity, new TerrainBlockPaletteCatalog
+                {
+                    Value = blockPaletteCatalog
                 });
             }
 

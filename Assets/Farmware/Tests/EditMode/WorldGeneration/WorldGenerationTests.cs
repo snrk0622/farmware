@@ -510,6 +510,10 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(settings.RockWallWarpAmplitudeInTiles, Is.EqualTo(6));
             Assert.That(settings.RockWallNoiseThreshold, Is.EqualTo(41000));
             Assert.That(settings.RockWallCorridorHalfWidth, Is.EqualTo(1100));
+            Assert.That(
+                DeterministicTerrainBlockPaletteSelector.ValidateSettings(
+                    settings.TerrainBlockPaletteSelection),
+                Is.True);
         }
 
         /// <summary>

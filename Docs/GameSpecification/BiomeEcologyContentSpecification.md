@@ -1401,9 +1401,9 @@ BedrockExposurePotential = floor(
 - `BedrockExposurePotential < 39,321`では表層GroundBlockを使う。39,321以上では`ExposureRate = floor((BedrockExposurePotential - 39,321) × 65,535 ÷ 26,214)`を求める。`BedrockExposurePatch`専用ノイズは0〜65,535を取り、`ExposureRate = 0`では全て表層、`ExposureRate = 65,535`ではノイズ値にかかわらず全て露出基盤へ置換する。1〜65,534の中間値だけ、32・16タイルを2：1で合成したノイズが`ExposureRate`未満の連続パッチを地質GroundBlockへ置換する。最大値を通常の未満比較へ通してノイズ値65,535の表層セルを残さない。
 - 自然岩壁のWallBlockは常に地質パレットから選ぶ。壁直下のGroundBlock、壁を採掘した後に残るGroundBlock、下層の岩盤は別状態として保持し、WallBlock名から固定Biomeや`GeologyClass`を逆算しない。
 - 河川・湖・海岸・海底の底質、積雪、落葉、苔、灰、塩殻、浅い水たまりはGroundBlockを置換するBiomeではなく、条件に応じた底質またはSurfaceとして後段で重ねる。水文特殊Biomeの泥・泥炭は表層パレットとして保持できるが、現在の冠水で固定Biomeを変更しない。
-- `PeatSoil`は`NaturalSoilSaturationPotential >= 39,321`を追加条件とし、不成立なら同じBiome行の先頭GroundBlockへ置き換える。表層パレットの抽選結果だけで乾燥した泥炭地を作らない。
+- `PeatSoil`は`NaturalSoilSaturationPotential >= 39,321`を追加条件とし、不成立なら同じBiome行を表の先頭から走査して最初に見つかる非`PeatSoil` GroundBlockへ置き換える。したがって、先頭候補自体が`PeatSoil`である湿地林・沼沢林は`MarshMud`へ置き換える。全Biome表層行は非`PeatSoil`候補を1件以上持つことをDefinition読込時に検証し、表層パレットの抽選結果だけで乾燥した泥炭地を作らない。
 - パレット選択後に資源鉱床Overlayを生成する。黒曜石、硫黄、鉄鉱石などをGroundBlockやWallBlockの別名にせず、採掘済み状態をBlock再生成から復活させない。
-- Definition読込時に、18表層行と8地質行の存在、安定IDの解決、行内重複なし、各パレット合計256、Ground／Wall分類一致、全自然WallBlockの水密・移動遮断属性を検証する。
+- Definition読込時に、18表層行と8地質行の存在、安定IDの解決、行内重複なし、各パレット合計256、全Biome行の非`PeatSoil`候補、Ground／Wall分類一致、全自然WallBlockの水密・移動遮断属性を検証する。
 - ノイズ設定、Salt、露出式、境界39,321、パレット重みはGeneratorVersionとワールド生成設定の対象にする。開発者用表示ではBiome、地質、表層候補、露出度、最終GroundBlock、WallBlock、Surfaceを個別に確認できるようにする。
 
 ### 2.33 地形ブロックの回収・再配置（確定）

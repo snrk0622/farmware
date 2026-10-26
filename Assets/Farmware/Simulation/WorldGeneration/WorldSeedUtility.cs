@@ -68,6 +68,15 @@ namespace Farmware.WorldGeneration
         /// <summary>バイオーム用気候ノイズの垂直サンプリング座標を歪ませるソルトです。</summary>
         public const ulong BiomeWarpY = 0xEB44ACCAB455D165UL;
 
+        /// <summary>Biome Warp後の座標から表層Ground材質の連続パッチを選ぶソルトです。</summary>
+        public const ulong SurfaceBlockPatch = 0x4CF5AD432745937FUL;
+
+        /// <summary>絶対タイル座標から地質Ground・自然Wallの材質差分を選ぶソルトです。</summary>
+        public const ulong GeologyBlockVariant = 0x87C37B91114253D5UL;
+
+        /// <summary>絶対タイル座標から表層を露出基盤へ置換する連続パッチを選ぶソルトです。</summary>
+        public const ulong BedrockExposurePatch = 0x52DCE7296A3C8E5BUL;
+
         /// <summary>火山地帯のマグマ湾と流路を作る連続ノイズ専用のソルトです。</summary>
         public const ulong Magma = 0x9E3779B185EBCA87UL;
 
