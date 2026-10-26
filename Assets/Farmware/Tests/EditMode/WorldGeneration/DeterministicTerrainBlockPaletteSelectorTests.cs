@@ -1,5 +1,5 @@
-// このファイルは、Biome表層、地質材質差分、露出基盤、泥炭条件の純粋選択を検証します。
-// 本番Bakerと同じパレットBlobを使い、負座標、固定境界、登録順、Seed再現性をEditModeで保証します。
+// このファイルは、Biome表層、地質材質差分、露出基盤、泥炭条件と自然生成セルの純粋選択を検証します。
+// 本番Bakerと同じパレットBlobを使い、負座標、固定境界、登録順、Seed再現性、Block直結をEditModeで保証します。
 
 using System;
 using Farmware.Simulation;
@@ -24,6 +24,9 @@ namespace Farmware.WorldGeneration.Tests
 
         /// <summary>各テストの選択対象として構築し、終了時に破棄するBlockパレットBlobです。</summary>
         private BlobAssetReference<TerrainBlockPaletteCatalogBlob> paletteCatalog;
+
+        /// <summary>自然生成セルの淡水・海水・マグマを設定する、解決済み組み込みDefinition IDです。</summary>
+        private BuiltInTerrainBlockRuntimeIds runtimeIds;
 
         /// <summary>
         /// 各テストの前に、本番Bakerと同じ共通Definition・地形・材質・パレットカタログを構築します。
@@ -67,6 +70,11 @@ namespace Farmware.WorldGeneration.Tests
                     TerrainBlockPaletteDefinitions.CreateBiomeSurfaceDefaults(),
                     TerrainBlockPaletteDefinitions.CreateGeologyDefaults(),
                     out paletteCatalog),
+                Is.True);
+            Assert.That(
+                BuiltInTerrainBlockDefinitions.TryResolveRuntimeIds(
+                    definitionCatalog,
+                    out runtimeIds),
                 Is.True);
         }
 
@@ -384,6 +392,177 @@ namespace Farmware.WorldGeneration.Tests
             }
         }
 
+        /// <summary>
+        /// 陸上セルが旧GroundTypeを読まず、純粋パレット選択と同じGround IDおよび座標由来の自然Wall IDを直接保持することを保証します。
+        /// </summary>
+        [Test]
+        public void TerrainCellFinalizer_LandUsesPaletteBlockIdsDirectly()
+        {
+            WorldGenerationSettings settings = CreateSettings("terrain-cell-land");
+            GeneratedTile finalizedTile = FindBaseLandTile(
+                settings,
+                out int worldX,
+                out int worldY);
+            finalizedTile.Biome = BiomeId.TemperateGrassland;
+            GeneratedHydrologyTile hydrologyTile = new GeneratedHydrologyTile
+            {
+                NaturalSoilSaturationPotential = 45000
+            };
+
+            Assert.That(
+                DeterministicEnvironmentGenerator.TryGenerate(
+                    settings,
+                    worldX,
+                    worldY,
+                    out GeneratedEnvironmentData environment),
+                Is.True);
+            Assert.That(
+                DeterministicTerrainBlockPaletteSelector.TrySelect(
+                    settings,
+                    paletteCatalog,
+                    worldX,
+                    worldY,
+                    environment.WarpedSampleX,
+                    environment.WarpedSampleY,
+                    finalizedTile.Biome,
+                    finalizedTile.GeologyClass,
+                    environment.BaseMoisture,
+                    environment.TerrainRuggedness,
+                    finalizedTile.GeologyErosionResistance,
+                    hydrologyTile.NaturalSoilSaturationPotential,
+                    out TerrainBlockPaletteSelectionResult expectedSelection),
+                Is.True);
+
+            Assert.That(
+                DeterministicTerrainCellFinalizer.TryFinalizeSurfaceCell(
+                    settings,
+                    paletteCatalog,
+                    runtimeIds,
+                    worldX,
+                    worldY,
+                    finalizedTile,
+                    hydrologyTile,
+                    default,
+                    out GeneratedTerrainCell cell),
+                Is.True);
+            Assert.That(cell.Biome, Is.EqualTo(finalizedTile.Biome));
+            Assert.That(
+                cell.GroundBlockRuntimeId,
+                Is.EqualTo(expectedSelection.FinalGround.BlockRuntimeId));
+            Assert.That(cell.LiquidRuntimeId.IsValid, Is.False);
+
+            bool expectsWall = DeterministicRockWallGenerator.IsRockWallCandidate(
+                settings,
+                worldX,
+                worldY);
+            Assert.That(cell.WallBlockRuntimeId.IsValid, Is.EqualTo(expectsWall));
+            if (expectsWall)
+            {
+                Assert.That(
+                    cell.WallBlockRuntimeId,
+                    Is.EqualTo(expectedSelection.NaturalWall.BlockRuntimeId));
+            }
+        }
+
+        /// <summary>
+        /// 河道セルがBlockを残さず淡水Definitionだけを持ち、旧WaterBodyTypeのRiver変換を必要としないことを保証します。
+        /// </summary>
+        [Test]
+        public void TerrainCellFinalizer_StreamUsesFreshWaterLiquidWithoutBlocks()
+        {
+            WorldGenerationSettings settings = CreateSettings("terrain-cell-stream");
+            GeneratedTile finalizedTile = FindBaseLandTile(
+                settings,
+                out int worldX,
+                out int worldY);
+            finalizedTile.Biome = BiomeId.FreshwaterMarshFloodplain;
+            GeneratedSurfaceWaterTile surfaceWater = new GeneratedSurfaceWaterTile
+            {
+                Type = SurfaceWaterTileType.Stream,
+                Flags = SurfaceWaterTileFlags.NaturalSurfaceWater
+                    | SurfaceWaterTileFlags.FreshwaterConnected
+            };
+
+            Assert.That(
+                DeterministicTerrainCellFinalizer.TryFinalizeSurfaceCell(
+                    settings,
+                    paletteCatalog,
+                    runtimeIds,
+                    worldX,
+                    worldY,
+                    finalizedTile,
+                    default,
+                    surfaceWater,
+                    out GeneratedTerrainCell cell),
+                Is.True);
+            Assert.That(cell.LiquidRuntimeId, Is.EqualTo(runtimeIds.FreshWater));
+            Assert.That(cell.GroundBlockRuntimeId.IsValid, Is.False);
+            Assert.That(cell.WallBlockRuntimeId.IsValid, Is.False);
+        }
+
+        /// <summary>
+        /// 海面下セルが地上Biomeを偽装せずBiome.Noneと海水Definitionを直接保持することを保証します。
+        /// </summary>
+        [Test]
+        public void TerrainCellFinalizer_SeaUsesNoneBiomeAndSaltWaterLiquid()
+        {
+            WorldGenerationSettings settings = CreateSettings("terrain-cell-sea");
+            GeneratedTile finalizedTile = FindBaseSeaTile(
+                settings,
+                out int worldX,
+                out int worldY);
+            finalizedTile.Biome = BiomeId.None;
+
+            Assert.That(
+                DeterministicTerrainCellFinalizer.TryFinalizeSurfaceCell(
+                    settings,
+                    paletteCatalog,
+                    runtimeIds,
+                    worldX,
+                    worldY,
+                    finalizedTile,
+                    default,
+                    default,
+                    out GeneratedTerrainCell cell),
+                Is.True);
+            Assert.That(cell.Biome, Is.EqualTo(BiomeId.None));
+            Assert.That(cell.LiquidRuntimeId, Is.EqualTo(runtimeIds.SaltWater));
+            Assert.That(cell.GroundBlockRuntimeId.IsValid, Is.False);
+            Assert.That(cell.WallBlockRuntimeId.IsValid, Is.False);
+        }
+
+        /// <summary>
+        /// NaturalSurfaceWaterフラグと未確定LakeCandidateの矛盾を拒否し、候補湖を淡水へ暗黙昇格しないことを保証します。
+        /// </summary>
+        [Test]
+        public void TerrainCellFinalizer_UnfinalizedLakeCandidateIsRejected()
+        {
+            WorldGenerationSettings settings = CreateSettings("terrain-cell-lake-candidate");
+            GeneratedTile finalizedTile = FindBaseLandTile(
+                settings,
+                out int worldX,
+                out int worldY);
+            finalizedTile.Biome = BiomeId.TemperateGrassland;
+            GeneratedSurfaceWaterTile surfaceWater = new GeneratedSurfaceWaterTile
+            {
+                Type = SurfaceWaterTileType.LakeCandidate,
+                Flags = SurfaceWaterTileFlags.NaturalSurfaceWater
+            };
+
+            Assert.That(
+                DeterministicTerrainCellFinalizer.TryFinalizeSurfaceCell(
+                    settings,
+                    paletteCatalog,
+                    runtimeIds,
+                    worldX,
+                    worldY,
+                    finalizedTile,
+                    default,
+                    surfaceWater,
+                    out _),
+                Is.False);
+        }
+
         /// <summary>0〜255の指定区間値を16bitノイズへ戻し、期待材質が選ばれることを確認します。</summary>
         /// <param name="range">温帯草原の表層パレット範囲です。</param>
         /// <param name="selector">確認する0〜255の累積重み区間値です。</param>
@@ -412,6 +591,72 @@ namespace Farmware.WorldGeneration.Tests
             return WorldGenerationSettings.CreateDefault(
                 WorldSeedUtility.FromString(seedText),
                 WorldGenerationSettings.CurrentGeneratorVersion);
+        }
+
+        /// <summary>有限範囲から海面上の固定環境・地質タイルを探します。</summary>
+        /// <param name="settings">固定環境と地質を生成する現行設定です。</param>
+        /// <param name="worldX">見つけた水平絶対タイル座標を返します。</param>
+        /// <param name="worldY">見つけた垂直絶対タイル座標を返します。</param>
+        /// <returns>Block確定へ必要な固定環境・地質値を持つ海面上タイルです。</returns>
+        private static GeneratedTile FindBaseLandTile(
+            in WorldGenerationSettings settings,
+            out int worldX,
+            out int worldY)
+        {
+            for (int y = -64; y <= 64; y += 4)
+            {
+                for (int x = -64; x <= 64; x += 4)
+                {
+                    GeneratedTile candidate = DeterministicChunkGenerator.GenerateTile(
+                        settings,
+                        x,
+                        y);
+                    if (candidate.Elevation >= settings.SeaLevelThreshold)
+                    {
+                        worldX = x;
+                        worldY = y;
+                        return candidate;
+                    }
+                }
+            }
+
+            Assert.Fail("有限テスト範囲に海面上タイルが見つかりません。");
+            worldX = 0;
+            worldY = 0;
+            return default;
+        }
+
+        /// <summary>有限範囲から海面下の固定環境・地質タイルを探します。</summary>
+        /// <param name="settings">固定環境と地質を生成する現行設定です。</param>
+        /// <param name="worldX">見つけた水平絶対タイル座標を返します。</param>
+        /// <param name="worldY">見つけた垂直絶対タイル座標を返します。</param>
+        /// <returns>Block確定へ必要な固定環境・地質値を持つ海面下タイルです。</returns>
+        private static GeneratedTile FindBaseSeaTile(
+            in WorldGenerationSettings settings,
+            out int worldX,
+            out int worldY)
+        {
+            for (int y = -256; y <= 256; y += 8)
+            {
+                for (int x = -256; x <= 256; x += 8)
+                {
+                    GeneratedTile candidate = DeterministicChunkGenerator.GenerateTile(
+                        settings,
+                        x,
+                        y);
+                    if (candidate.Elevation < settings.SeaLevelThreshold)
+                    {
+                        worldX = x;
+                        worldY = y;
+                        return candidate;
+                    }
+                }
+            }
+
+            Assert.Fail("有限テスト範囲に海面下タイルが見つかりません。");
+            worldX = 0;
+            worldY = 0;
+            return default;
         }
 
         /// <summary>引数の並びを固定し、テストから本番の全選択入口を呼びます。</summary>

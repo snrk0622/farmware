@@ -218,7 +218,7 @@ MAP-02Aの純粋な座標変換について、表示原点が相対セル`(0, 0)
 
 #### `EffectiveTerrainCellTests`
 
-TERRAIN-01Aの通常地面、自然岩壁、淡水、海水、マグマに加え、C6-Bの41材質Definitionを共通Definition GUIDと地形固有Blobへ構築し、RuntimeIdから分類・属性を取得できることを確認する。現行Surface生成との互換変換では、岩壁を地面＋壁へ分け、壁の明示除去後もBiomeと地面を維持する。淡水は地面なし＋Liquidになり、地面と液体の重複は拒否する。
+C6-C1以降は行優先の`GeneratedTerrainCell`を自然生成結果として使い、自然Wallから壁だけを明示除去してもBiomeとGroundを維持すること、海域の`BiomeId.None`と海水Liquidを有効な組み合わせとして解決すること、GroundとLiquidの重複を拒否することを確認する。旧`GeneratedTile`からBlockへ変換する互換テストは削除し、C6-Bの41材質Definitionを共通Definition GUIDと地形固有Blobへ構築してRuntimeIdから分類・属性を取得できる検証は維持する。
 
 ECS Bufferでは差分をLocalTileIndex昇順に挿入し、自然状態へ戻したセルの要素を削除する。同じX/YでもSurface所有者の差分をUnderwaterへ適用せず、水域は泳げれば移動可能でも通常設備は配置不可になること、マグマの移動・橋が耐熱能力を要求することを保証する。地形状態ハッシュはEntity作成順を変えても一致し、同じチャンクX/YでもLayerが変われば異なる値になり、固定GUIDと組み込みRuntimeIdの対応、または`TerrainChunkDeltaOwner`と`TerrainCellDelta` Bufferの一対一対応が破損していれば拒否することを確認する。`DefinitionCatalogAuthoring`はTERRAIN-01CまでInspector由来の地形4分類を組み込み定義と併存させず、具体的なBake理由を返すこともEditModeで確認する。
 
@@ -232,7 +232,7 @@ C6-B2の18Biome表層Groundパレットと8地質の露出基盤Ground・自然W
 
 #### `DeterministicTerrainBlockPaletteSelectorTests`
 
-C6-B3の純粋Blockパレット選択について、表層64／32／16タイル・4：2：1、地質32／16タイル・2：1、露出32／16タイル・2：1の固定設定と用途別Saltを、負座標の明示ノイズ合成と照合する。0〜255へ変換した累積重み区間の全境界、露出式の64bit合成、境界39,320／39,321／39,322、露出率0／65,535の端点、中間値だけの厳密な未満比較を保証する。`SwampForest`で選ばれた`PeatSoil`は自然土壌飽和39,320で最初の非泥炭候補`MarshMud`へ置換し、39,321では維持する。同一入力の再実行とBiome・地質行の逆登録順で、途中ノイズ、候補材質、最終Ground、自然Wallがすべて一致することも確認する。
+C6-B3の純粋Blockパレット選択について、表層64／32／16タイル・4：2：1、地質32／16タイル・2：1、露出32／16タイル・2：1の固定設定と用途別Saltを、負座標の明示ノイズ合成と照合する。0〜255へ変換した累積重み区間の全境界、露出式の64bit合成、境界39,320／39,321／39,322、露出率0／65,535の端点、中間値だけの厳密な未満比較を保証する。`SwampForest`で選ばれた`PeatSoil`は自然土壌飽和39,320で最初の非泥炭候補`MarshMud`へ置換し、39,321では維持する。同一入力の再実行とBiome・地質行の逆登録順で、途中ノイズ、候補材質、最終Ground、自然Wallがすべて一致することも確認する。C6-C1では同じテストFixtureへ、陸上Ground・自然Wallの直接RuntimeId、河道の淡水Liquid、海域の`BiomeId.None`・海水Liquid、未確定湖候補の拒否を追加し、旧Ground／水域分類を経由せず自然生成セルを確定することを保証する。
 
 2026-10-26のC6-B3 AI確認では、Unity 6000.3.8f1 Editorで`DeterministicTerrainBlockPaletteSelectorTests` 7件、B2・B3の`TerrainBlockPalette`関連14件、共有既定設定1件がすべて成功し、対象実行後のConsoleはエラー0件・警告0件だった。生成済みプロジェクト参照を使うRuntime・World Generation Testsの静的ビルドも警告0件・エラー0件で成功した。World Generation EditMode Assembly 622件の一括実行は約52分31秒で完走し、620件成功・2件失敗だった。失敗のうち`WorldGenerationMapViewerTests.Sample_ReportsDiagnosticChunksAndCompletedRowsWithoutChangingPixels`は一括実行時に180秒でTimeoutとなったが、単独再実行では90.55秒で成功した。もう1件の`TerrainProductIsolationTests.LegacyBoundaryHighlightRemovalGate_RemovesAllImplementation`は、後続C6-Dで旧境界ハイライトを削除した後に成功させる明示実行用`Explicit`ゲートであり、現時点では仕様どおり旧表示が残るため失敗する。全体実行後のConsoleはエラー0件で、警告6件は既存ECS Systemの無効な更新順属性2種類が各3回出力されたもので、C6-B3の変更箇所からの新規警告はなかった。
 

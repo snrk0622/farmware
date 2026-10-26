@@ -1,5 +1,5 @@
-// このファイルは、組み込みBlock定義、自然生成からの変換、疎な差分、有効セル、移動・建築判定を検証します。
-// テストごとに最小のBlobとECS Bufferを準備し、表示やSceneに依存せずTERRAIN-01Aのデータ境界を保証します。
+// このファイルは、生成済みBlockセル、疎な差分、有効セル、移動・建築判定を検証します。
+// テストごとに最小のBlobとECS Bufferを準備し、表示やSceneに依存せず地形データ境界を保証します。
 
 using Farmware.Simulation;
 using NUnit.Framework;
@@ -107,20 +107,17 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 旧岩壁を「地面＋壁」へ分け、壁を除去しても歩ける地面が残ることを保証します。
+        /// 自然Wallセルから壁だけを除去し、生成済みGroundとBiomeが残ることを保証します。
         /// </summary>
         [Test]
         public void Resolve_RockWallRemoval_PreservesGroundAndBiome()
         {
-            GeneratedTile generatedTile = CreateGeneratedTile(
-                BiomeId.AlpineRockland,
-                GroundType.RockWall);
-            Assert.That(
-                EffectiveTerrainResolver.TryCreateBaseCell(
-                    generatedTile,
-                    runtimeIds,
-                    out BaseTerrainCell baseCell),
-                Is.EqualTo(EffectiveTerrainResolveResult.Success));
+            GeneratedTerrainCell baseCell = new GeneratedTerrainCell
+            {
+                Biome = BiomeId.AlpineRockland,
+                GroundBlockRuntimeId = runtimeIds.LandGround,
+                WallBlockRuntimeId = runtimeIds.NaturalRockWall
+            };
 
             TerrainCellDelta delta = new TerrainCellDelta
             {
@@ -143,24 +140,28 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 水種を液体定義へ変換し、GroundBlockとLiquidを同じ区画へ重ねないことを保証します。
+        /// 海域のBiome.Noneを有効な生成セルとして扱い、海水Liquidだけを有効セルへ引き継ぐことを保証します。
         /// </summary>
         [Test]
-        public void CreateBaseCell_FreshWater_UsesLiquidWithoutGround()
+        public void Resolve_SeaWithoutLandBiome_UsesLiquidWithoutGround()
         {
-            GeneratedTile generatedTile = CreateGeneratedTile(
-                BiomeId.FreshwaterMarshFloodplain,
-                GroundType.Water,
-                WaterSalinity.FreshWater);
+            GeneratedTerrainCell baseCell = new GeneratedTerrainCell
+            {
+                Biome = BiomeId.None,
+                LiquidRuntimeId = runtimeIds.SaltWater
+            };
 
             Assert.That(
-                EffectiveTerrainResolver.TryCreateBaseCell(
-                    generatedTile,
-                    runtimeIds,
-                    out BaseTerrainCell baseCell),
+                EffectiveTerrainResolver.TryResolve(
+                    baseCell,
+                    false,
+                    default,
+                    terrainCatalog,
+                    out EffectiveTerrainCell effectiveCell),
                 Is.EqualTo(EffectiveTerrainResolveResult.Success));
-            Assert.That(baseCell.GroundBlockRuntimeId.IsValid, Is.False);
-            Assert.That(baseCell.LiquidRuntimeId, Is.EqualTo(runtimeIds.FreshWater));
+            Assert.That(effectiveCell.Biome, Is.EqualTo(BiomeId.None));
+            Assert.That(effectiveCell.GroundBlockRuntimeId.IsValid, Is.False);
+            Assert.That(effectiveCell.LiquidRuntimeId, Is.EqualTo(runtimeIds.SaltWater));
         }
 
         /// <summary>
@@ -169,7 +170,7 @@ namespace Farmware.WorldGeneration.Tests
         [Test]
         public void Resolve_GroundAndLiquidOverlap_IsRejected()
         {
-            BaseTerrainCell baseCell = CreateLandBaseCell(BiomeId.TemperateGrassland);
+            GeneratedTerrainCell baseCell = CreateLandBaseCell(BiomeId.TemperateGrassland);
             TerrainCellDelta delta = new TerrainCellDelta
             {
                 LocalTileIndex = 0,
@@ -197,7 +198,7 @@ namespace Farmware.WorldGeneration.Tests
             Entity entity = world.EntityManager.CreateEntity();
             DynamicBuffer<TerrainCellDelta> deltas =
                 world.EntityManager.AddBuffer<TerrainCellDelta>(entity);
-            BaseTerrainCell baseCell = CreateLandBaseCell(BiomeId.TemperateGrassland);
+            GeneratedTerrainCell baseCell = CreateLandBaseCell(BiomeId.TemperateGrassland);
             EffectiveTerrainCell changed = CreateEffectiveCell(baseCell);
             changed.GroundBlockRuntimeId = default;
 
@@ -474,30 +475,12 @@ namespace Farmware.WorldGeneration.Tests
                 Is.EqualTo(TerrainStateHashErrorCode.TerrainDeltaDataIsInvalid));
         }
 
-        /// <summary>テスト用の最小GeneratedTileを作ります。</summary>
-        /// <param name="biome">編集されない基礎バイオームです。</param>
-        /// <param name="ground">互換変換へ入力する旧地形分類です。</param>
-        /// <param name="waterSalinity">Waterの場合に淡水・海水を選ぶ分類です。</param>
-        /// <returns>指定した3項目だけを持つ基礎生成タイルです。</returns>
-        private static GeneratedTile CreateGeneratedTile(
-            BiomeId biome,
-            GroundType ground,
-            WaterSalinity waterSalinity = WaterSalinity.None)
-        {
-            return new GeneratedTile
-            {
-                Biome = biome,
-                Ground = ground,
-                WaterSalinity = waterSalinity
-            };
-        }
-
         /// <summary>指定Biomeに通常地面だけがある自然セルを作ります。</summary>
         /// <param name="biome">セルへ固定する基礎バイオームです。</param>
         /// <returns>組み込み通常地面だけを持つ自然セルです。</returns>
-        private BaseTerrainCell CreateLandBaseCell(BiomeId biome)
+        private GeneratedTerrainCell CreateLandBaseCell(BiomeId biome)
         {
-            return new BaseTerrainCell
+            return new GeneratedTerrainCell
             {
                 Biome = biome,
                 GroundBlockRuntimeId = runtimeIds.LandGround
@@ -507,7 +490,7 @@ namespace Farmware.WorldGeneration.Tests
         /// <summary>自然セルと同じ区画を持つ変更後セルを作ります。</summary>
         /// <param name="baseCell">全区画をコピーする変更不可の自然セルです。</param>
         /// <returns>自然状態と完全に一致する有効セルです。</returns>
-        private static EffectiveTerrainCell CreateEffectiveCell(in BaseTerrainCell baseCell)
+        private static EffectiveTerrainCell CreateEffectiveCell(in GeneratedTerrainCell baseCell)
         {
             return new EffectiveTerrainCell
             {

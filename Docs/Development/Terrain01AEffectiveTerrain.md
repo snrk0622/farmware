@@ -35,7 +35,9 @@
 
 各定義は変更禁止GUID、共通RuntimeId、硬度、回収Item参照、ルール属性を持つ。硬度と回収ItemはGATHER-01、表示参照と追加パレットはTERRAIN-01C6まで未接続であり、現在の0／Invalidをゲームバランスへ流用しない。
 
-## 3. 現行生成からの互換変換
+## 3. 現行生成からの互換変換（C6-C1で廃止）
+
+以下はTERRAIN-01A実装時点の履歴である。C6-C1では、完成Biome・地質・固定水文から`GeneratedTerrainCell`のGroundBlock、WallBlock、Liquidを直接選ぶ純粋確定処理へ置換した。`BaseTerrainCell`と`EffectiveTerrainResolver.TryCreateBaseCell`は削除され、有効地形差分は新しい生成セルを直接基準にする。ECSチャンクBufferへの公開と全利用側の切替はC6-C2・C6-C3で完了させる。
 
 TERRAIN-01Aでは既存Surfaceの地形生成結果と署名を変えない。`EffectiveTerrainResolver.TryCreateBaseCell`が、`GeneratedTile`を次のようにBlock区画へ分ける。
 
