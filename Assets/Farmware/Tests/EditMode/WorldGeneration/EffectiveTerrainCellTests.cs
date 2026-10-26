@@ -24,6 +24,12 @@ namespace Farmware.WorldGeneration.Tests
         /// <summary>海水、淡水、マグマなど自然生成の固定用途へ解決済みのRuntime IDです。</summary>
         private BuiltInTerrainBlockRuntimeIds runtimeIds;
 
+        /// <summary>実カタログのGrassLoam Groundを使う有効地形テスト用Runtime IDです。</summary>
+        private DefinitionRuntimeId groundRuntimeId;
+
+        /// <summary>実カタログのGrassLoam Wallを使う差分合成テスト用Runtime IDです。</summary>
+        private DefinitionRuntimeId wallRuntimeId;
+
         /// <summary>
         /// 自然生成の固定用途と41材質を含む共通・地形・パレットカタログを構築します。
         /// </summary>
@@ -73,6 +79,15 @@ namespace Farmware.WorldGeneration.Tests
                     Is.True,
                     "41材質対応を構築できませんでした。");
                 Assert.That(
+                    TerrainBlockMaterialCatalogLookup.TryGetDefinition(
+                        materialCatalog,
+                        TerrainBlockMaterialId.GrassLoam,
+                        out TerrainBlockMaterialDefinitionBlob grassLoam),
+                    Is.True,
+                    "有効地形テスト用のGrassLoam材質を解決できませんでした。");
+                groundRuntimeId = grassLoam.GroundRuntimeId;
+                wallRuntimeId = grassLoam.WallRuntimeId;
+                Assert.That(
                     TerrainBlockPaletteCatalogBuilder.TryBuild(
                         terrainCatalog,
                         materialCatalog,
@@ -114,15 +129,15 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 組み込み定義が共通カタログの分類と地形固有属性を正しく結び付けることを保証します。
+        /// 材質Groundと固定Liquidが共通カタログの分類と地形固有属性へ正しく結び付くことを保証します。
         /// </summary>
         [Test]
-        public void TerrainCatalog_BuiltInDefinitions_ResolveExpectedKindsAndFlags()
+        public void TerrainCatalog_MaterialAndLiquidDefinitions_ResolveExpectedKindsAndFlags()
         {
             Assert.That(
                 TerrainBlockCatalogLookup.TryGetDefinition(
                     terrainCatalog,
-                    runtimeIds.LandGround,
+                    groundRuntimeId,
                     out TerrainBlockDefinitionBlob land),
                 Is.True);
             Assert.That(land.Kind, Is.EqualTo(DefinitionKind.GroundBlock));
@@ -151,8 +166,8 @@ namespace Farmware.WorldGeneration.Tests
             GeneratedTerrainCell baseCell = new GeneratedTerrainCell
             {
                 Biome = BiomeId.AlpineRockland,
-                GroundBlockRuntimeId = runtimeIds.LandGround,
-                WallBlockRuntimeId = runtimeIds.NaturalRockWall
+                GroundBlockRuntimeId = groundRuntimeId,
+                WallBlockRuntimeId = wallRuntimeId
             };
 
             TerrainCellDelta delta = new TerrainCellDelta
@@ -171,7 +186,7 @@ namespace Farmware.WorldGeneration.Tests
                 Is.EqualTo(EffectiveTerrainResolveResult.Success));
 
             Assert.That(effectiveCell.Biome, Is.EqualTo(BiomeId.AlpineRockland));
-            Assert.That(effectiveCell.GroundBlockRuntimeId, Is.EqualTo(runtimeIds.LandGround));
+            Assert.That(effectiveCell.GroundBlockRuntimeId, Is.EqualTo(groundRuntimeId));
             Assert.That(effectiveCell.WallBlockRuntimeId.IsValid, Is.False);
         }
 
@@ -207,8 +222,8 @@ namespace Farmware.WorldGeneration.Tests
             generated[localTileIndex] = new GeneratedTerrainCell
             {
                 Biome = BiomeId.AlpineRockland,
-                GroundBlockRuntimeId = runtimeIds.LandGround,
-                WallBlockRuntimeId = runtimeIds.NaturalRockWall
+                GroundBlockRuntimeId = groundRuntimeId,
+                WallBlockRuntimeId = wallRuntimeId
             };
 
             Entity deltaEntity = manager.CreateEntity();
@@ -237,7 +252,7 @@ namespace Farmware.WorldGeneration.Tests
                     out EffectiveTerrainCell effectiveCell),
                 Is.EqualTo(EffectiveTerrainResolveResult.Success));
             Assert.That(effectiveCell.Biome, Is.EqualTo(BiomeId.AlpineRockland));
-            Assert.That(effectiveCell.GroundBlockRuntimeId, Is.EqualTo(runtimeIds.LandGround));
+            Assert.That(effectiveCell.GroundBlockRuntimeId, Is.EqualTo(groundRuntimeId));
             Assert.That(effectiveCell.WallBlockRuntimeId.IsValid, Is.False);
         }
 
@@ -637,13 +652,13 @@ namespace Farmware.WorldGeneration.Tests
 
         /// <summary>指定Biomeに通常地面だけがある自然セルを作ります。</summary>
         /// <param name="biome">セルへ固定する基礎バイオームです。</param>
-        /// <returns>組み込み通常地面だけを持つ自然セルです。</returns>
+        /// <returns>41材質から解決した通常地面だけを持つ自然セルです。</returns>
         private GeneratedTerrainCell CreateLandBaseCell(BiomeId biome)
         {
             return new GeneratedTerrainCell
             {
                 Biome = biome,
-                GroundBlockRuntimeId = runtimeIds.LandGround
+                GroundBlockRuntimeId = groundRuntimeId
             };
         }
 

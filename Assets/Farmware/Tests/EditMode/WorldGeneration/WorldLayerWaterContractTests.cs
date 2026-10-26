@@ -137,14 +137,12 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(resolved, Is.False);
         }
 
-        /// <summary>自然水柱テストで共有する5つの有効な仮Runtime IDを作ります。</summary>
-        /// <returns>WorldLayerWaterContractが受理できる組み込みID一式です。</returns>
+        /// <summary>自然水柱テストで共有する3つの有効な仮Liquid Runtime IDを作ります。</summary>
+        /// <returns>WorldLayerWaterContractが受理できる固定液体ID一式です。</returns>
         private static BuiltInTerrainBlockRuntimeIds CreateRuntimeIds()
         {
             return new BuiltInTerrainBlockRuntimeIds
             {
-                LandGround = new DefinitionRuntimeId(1),
-                NaturalRockWall = new DefinitionRuntimeId(2),
                 FreshWater = new DefinitionRuntimeId(3),
                 SaltWater = new DefinitionRuntimeId(4),
                 Magma = new DefinitionRuntimeId(5)

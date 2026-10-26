@@ -22,6 +22,10 @@ namespace Farmware.WorldGeneration.Tests
         /// <summary>テスト用共通定義で鶏を識別する変更禁止GUIDです。</summary>
         private static readonly DefinitionGuid ChickenGuid = new DefinitionGuid(0, 0xC1);
 
+        /// <summary>純粋な動物適格判定で通常Groundを表す仮Runtime IDです。</summary>
+        private static readonly DefinitionRuntimeId TestGroundRuntimeId =
+            new DefinitionRuntimeId(1);
+
         /// <summary>
         /// 同じSeed・地域X/Yを異なるWorldLayerで初期化し、地域キーと乱数系列が互いに衝突しないことを保証します。
         /// </summary>
@@ -60,7 +64,7 @@ namespace Farmware.WorldGeneration.Tests
             BuiltInTerrainBlockRuntimeIds terrainRuntimeIds = CreateTerrainRuntimeIds();
             using NativeArray<GeneratedTerrainCell> tiles = CreateUniformTerrainCells(
                 BiomeId.TemperateGrassland,
-                terrainRuntimeIds.LandGround);
+                TestGroundRuntimeId);
             using NativeArray<GeneratedResourceTile> resources =
                 new NativeArray<GeneratedResourceTile>(tiles.Length, Allocator.Temp);
             using NativeList<AnimalSpawnCandidate> candidates =
@@ -365,7 +369,7 @@ namespace Farmware.WorldGeneration.Tests
             BuiltInTerrainBlockRuntimeIds terrainRuntimeIds = CreateTerrainRuntimeIds();
             using NativeArray<GeneratedTerrainCell> tiles = CreateUniformTerrainCells(
                 BiomeId.TemperateGrassland,
-                terrainRuntimeIds.LandGround);
+                TestGroundRuntimeId);
             using NativeArray<GeneratedResourceTile> resources =
                 new NativeArray<GeneratedResourceTile>(tiles.Length, Allocator.Temp);
             using NativeList<AnimalSpawnCandidate> first =
@@ -440,7 +444,7 @@ namespace Farmware.WorldGeneration.Tests
                     new GeneratedTerrainCell
                     {
                         Biome = BiomeId.TemperateGrassland,
-                        GroundBlockRuntimeId = terrainRuntimeIds.LandGround
+                        GroundBlockRuntimeId = TestGroundRuntimeId
                     },
                     terrainRuntimeIds,
                     chicken),
@@ -450,7 +454,7 @@ namespace Farmware.WorldGeneration.Tests
                     new GeneratedTerrainCell
                     {
                         Biome = BiomeId.TemperateDeciduousForest,
-                        GroundBlockRuntimeId = terrainRuntimeIds.LandGround
+                        GroundBlockRuntimeId = TestGroundRuntimeId
                     },
                     terrainRuntimeIds,
                     chicken),
@@ -1150,14 +1154,12 @@ namespace Farmware.WorldGeneration.Tests
             return tiles;
         }
 
-        /// <summary>純粋な動物候補テストで使う、有効な仮組み込みRuntime ID一式を作ります。</summary>
-        /// <returns>地面、壁、淡水、海水、マグマを一意に識別できるIDです。</returns>
+        /// <summary>純粋な動物候補テストで使う、有効な仮Liquid Runtime ID一式を作ります。</summary>
+        /// <returns>淡水、海水、マグマを一意に識別できるIDです。</returns>
         private static BuiltInTerrainBlockRuntimeIds CreateTerrainRuntimeIds()
         {
             return new BuiltInTerrainBlockRuntimeIds
             {
-                LandGround = new DefinitionRuntimeId(1),
-                NaturalRockWall = new DefinitionRuntimeId(2),
                 FreshWater = new DefinitionRuntimeId(3),
                 SaltWater = new DefinitionRuntimeId(4),
                 Magma = new DefinitionRuntimeId(5)
@@ -1349,7 +1351,7 @@ namespace Farmware.WorldGeneration.Tests
                 terrainCells[index] = new GeneratedTerrainCell
                 {
                     Biome = BiomeId.TemperateGrassland,
-                    GroundBlockRuntimeId = CreateTerrainRuntimeIds().LandGround
+                    GroundBlockRuntimeId = TestGroundRuntimeId
                 };
                 resources[index] = default;
             }

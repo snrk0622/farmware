@@ -756,7 +756,7 @@ namespace Farmware.WorldGeneration.Tests
             SetInitialSpawnCandidate(
                 entityManager,
                 chunkEntity,
-                catalogs.RuntimeIds.LandGround,
+                catalogs.GroundRuntimeId,
                 0,
                 0);
 
@@ -846,13 +846,13 @@ namespace Farmware.WorldGeneration.Tests
             SetInitialSpawnCandidate(
                 entityManager,
                 originChunk,
-                catalogs.RuntimeIds.LandGround,
+                catalogs.GroundRuntimeId,
                 originLocalX,
                 originLocalY);
             SetInitialSpawnCandidate(
                 entityManager,
                 negativeXChunk,
-                catalogs.RuntimeIds.LandGround,
+                catalogs.GroundRuntimeId,
                 63,
                 0);
 
@@ -2505,6 +2505,12 @@ namespace Farmware.WorldGeneration.Tests
         /// <summary>海水、淡水、マグマなど固定用途へ解決済みのRuntime IDです。</summary>
         public BuiltInTerrainBlockRuntimeIds RuntimeIds { get; private set; }
 
+        /// <summary>テスト入力で通常地面として使うGrassLoam GroundのRuntime IDです。</summary>
+        public DefinitionRuntimeId GroundRuntimeId { get; private set; }
+
+        /// <summary>テスト入力で自然岩壁として使うGrassLoam WallのRuntime IDです。</summary>
+        public DefinitionRuntimeId WallRuntimeId { get; private set; }
+
         /// <summary>Factoryだけが構築済みBlobを渡せるよう、空の直接生成を禁止します。</summary>
         private TerrainGenerationTestCatalogSet()
         {
@@ -2551,6 +2557,15 @@ namespace Farmware.WorldGeneration.Tests
                         TerrainBlockMaterialDefinitions.CreateDefault(),
                         out materialCatalog),
                     Is.True);
+                Assert.That(
+                    TerrainBlockMaterialCatalogLookup.TryGetDefinition(
+                        materialCatalog,
+                        TerrainBlockMaterialId.GrassLoam,
+                        out TerrainBlockMaterialDefinitionBlob grassLoam),
+                    Is.True,
+                    "テスト用のGrassLoam材質を解決できませんでした。");
+                result.GroundRuntimeId = grassLoam.GroundRuntimeId;
+                result.WallRuntimeId = grassLoam.WallRuntimeId;
                 Assert.That(
                     TerrainBlockPaletteCatalogBuilder.TryBuild(
                         result.TerrainCatalog,

@@ -1490,10 +1490,9 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 GeologyErosionResistance = ushort.MaxValue
             };
             GeneratedTile originalForestTransitionTile = forestTransitionTile;
+            DefinitionRuntimeId groundRuntimeId = new DefinitionRuntimeId(1);
             BuiltInTerrainBlockRuntimeIds terrainRuntimeIds = new BuiltInTerrainBlockRuntimeIds
             {
-                LandGround = new DefinitionRuntimeId(1),
-                NaturalRockWall = new DefinitionRuntimeId(2),
                 FreshWater = new DefinitionRuntimeId(3),
                 SaltWater = new DefinitionRuntimeId(4),
                 Magma = new DefinitionRuntimeId(5)
@@ -1501,7 +1500,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
             GeneratedTerrainCell forestTerrainCell = new GeneratedTerrainCell
             {
                 Biome = forestTransitionTile.Biome,
-                GroundBlockRuntimeId = terrainRuntimeIds.LandGround
+                GroundBlockRuntimeId = groundRuntimeId
             };
 
             Color coldColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
@@ -2795,20 +2794,9 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(chickenDefinition.MaximumWanderDistanceInTiles, Is.EqualTo(8));
             Assert.That(chickenDefinition.AppearanceVariantCount, Is.EqualTo(3));
 
-            // 自然生成で共有する5定義も同じSubSceneからBakeし、完成Blockセルを解決できることを確認します。
+            // 自然生成で共有する3液体も同じSubSceneからBakeし、用途固定IDを解決できることを確認します。
             Assert.That(runtimeTerrainCatalog.Value.IsCreated, Is.True);
             Assert.That(runtimeTerrainCatalog.BuiltInRuntimeIds.IsValid, Is.True);
-            Assert.That(
-                TerrainBlockCatalogLookup.TryGetDefinition(
-                    runtimeTerrainCatalog.Value,
-                    runtimeTerrainCatalog.BuiltInRuntimeIds.NaturalRockWall,
-                    out TerrainBlockDefinitionBlob runtimeRockWall),
-                Is.True,
-                "自然岩壁の組み込みBlock定義がBakeされていません。");
-            Assert.That(runtimeRockWall.Kind, Is.EqualTo(DefinitionKind.WallBlock));
-            Assert.That(
-                runtimeRockWall.Flags & TerrainBlockDefinitionFlags.BlocksMovement,
-                Is.Not.EqualTo(TerrainBlockDefinitionFlags.None));
 
             // C6-B1の41材質対応も同じBakerから公開し、代表材質のItem・Ground・Wallが欠けていないことを確認します。
             Assert.That(runtimeMaterialCatalog.Value.IsCreated, Is.True);
@@ -2822,6 +2810,17 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(runtimeGrassLoam.ItemRuntimeId.IsValid, Is.True);
             Assert.That(runtimeGrassLoam.GroundRuntimeId.IsValid, Is.True);
             Assert.That(runtimeGrassLoam.WallRuntimeId.IsValid, Is.True);
+            Assert.That(
+                TerrainBlockCatalogLookup.TryGetDefinition(
+                    runtimeTerrainCatalog.Value,
+                    runtimeGrassLoam.WallRuntimeId,
+                    out TerrainBlockDefinitionBlob runtimeRockWall),
+                Is.True,
+                "自然Wall候補の材質Block定義がBakeされていません。");
+            Assert.That(runtimeRockWall.Kind, Is.EqualTo(DefinitionKind.WallBlock));
+            Assert.That(
+                runtimeRockWall.Flags & TerrainBlockDefinitionFlags.BlocksMovement,
+                Is.Not.EqualTo(TerrainBlockDefinitionFlags.None));
 
             // 固定Blockパレットも同じBakerから公開し、Biome表層と地質Wallが材質対応へ接続されていることを確認します。
             Assert.That(runtimeBlockPaletteCatalog.Value.IsCreated, Is.True);
@@ -2922,7 +2921,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
             GeneratedTerrainCell candidateTerrain = new GeneratedTerrainCell
             {
                 Biome = BiomeId.TemperateGrassland,
-                GroundBlockRuntimeId = runtimeTerrainCatalog.BuiltInRuntimeIds.LandGround
+                GroundBlockRuntimeId = runtimeGrassLoam.GroundRuntimeId
             };
             Assert.That(animalCandidateMethod.Invoke(null, new object[]
                 {

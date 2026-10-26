@@ -15,11 +15,17 @@ namespace Farmware.WorldGeneration.Tests
     /// </summary>
     public sealed class TerrainLayerPresentationUtilityTests
     {
-        /// <summary>表示分類テストで共有する解決済み組み込みRuntime IDです。</summary>
+        /// <summary>表示分類テストで通常Groundを表す、液体IDと重ならない仮Runtime IDです。</summary>
+        private static readonly DefinitionRuntimeId GroundRuntimeId =
+            new DefinitionRuntimeId(1);
+
+        /// <summary>表示分類テストで自然Wallを表す、液体IDと重ならない仮Runtime IDです。</summary>
+        private static readonly DefinitionRuntimeId WallRuntimeId =
+            new DefinitionRuntimeId(2);
+
+        /// <summary>表示分類テストで共有する解決済み固定液体Runtime IDです。</summary>
         private static readonly BuiltInTerrainBlockRuntimeIds RuntimeIds = new BuiltInTerrainBlockRuntimeIds
         {
-            LandGround = new DefinitionRuntimeId(1),
-            NaturalRockWall = new DefinitionRuntimeId(2),
             FreshWater = new DefinitionRuntimeId(3),
             SaltWater = new DefinitionRuntimeId(4),
             Magma = new DefinitionRuntimeId(5)
@@ -169,7 +175,7 @@ namespace Farmware.WorldGeneration.Tests
             };
             GeneratedTerrainCell land = new GeneratedTerrainCell
             {
-                GroundBlockRuntimeId = RuntimeIds.LandGround
+                GroundBlockRuntimeId = GroundRuntimeId
             };
 
             Assert.That(
@@ -199,12 +205,12 @@ namespace Farmware.WorldGeneration.Tests
             GeneratedResourceTile noResource = default;
             GeneratedTerrainCell land = new GeneratedTerrainCell
             {
-                GroundBlockRuntimeId = RuntimeIds.LandGround
+                GroundBlockRuntimeId = GroundRuntimeId
             };
             GeneratedTerrainCell rockWall = new GeneratedTerrainCell
             {
-                GroundBlockRuntimeId = RuntimeIds.LandGround,
-                WallBlockRuntimeId = RuntimeIds.NaturalRockWall
+                GroundBlockRuntimeId = GroundRuntimeId,
+                WallBlockRuntimeId = WallRuntimeId
             };
 
             Assert.That(
@@ -249,9 +255,9 @@ namespace Farmware.WorldGeneration.Tests
             {
                 tiles[index] = new GeneratedTerrainCell
                 {
-                    GroundBlockRuntimeId = RuntimeIds.LandGround,
+                    GroundBlockRuntimeId = GroundRuntimeId,
                     WallBlockRuntimeId = hasWall
-                        ? RuntimeIds.NaturalRockWall
+                        ? WallRuntimeId
                         : default
                 };
             }

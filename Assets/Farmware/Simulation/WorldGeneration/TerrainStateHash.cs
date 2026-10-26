@@ -664,14 +664,12 @@ namespace Farmware.WorldGeneration
         /// <summary>自然Block生成用IDが固定GUIDから再解決した正しい対応と一致するか確認します。</summary>
         /// <param name="actual">TerrainBlockCatalog Componentに保存された現在値です。</param>
         /// <param name="expected">共通DefinitionCatalogの固定GUIDから再解決した期待値です。</param>
-        /// <returns>5種類の用途とRuntimeIdがすべて一致する場合はtrueです。</returns>
+        /// <returns>3種類の固定液体用途とRuntimeIdがすべて一致する場合はtrueです。</returns>
         private static bool HasSameBuiltInRuntimeIds(
             in BuiltInTerrainBlockRuntimeIds actual,
             in BuiltInTerrainBlockRuntimeIds expected)
         {
             return actual.IsValid
-                && actual.LandGround.Equals(expected.LandGround)
-                && actual.NaturalRockWall.Equals(expected.NaturalRockWall)
                 && actual.FreshWater.Equals(expected.FreshWater)
                 && actual.SaltWater.Equals(expected.SaltWater)
                 && actual.Magma.Equals(expected.Magma);

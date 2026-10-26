@@ -240,7 +240,7 @@ namespace Farmware.Authoring
                     };
                 }
 
-                // 自然生成で共有する5地形と41材質は、Sceneへ手作業のGUID追加を要求せず全Worldで同じ定義を登録します。
+                // 自然生成で共有する3液体と41材質は、Sceneへ手作業のGUID追加を要求せず全Worldで同じ定義を登録します。
                 DefinitionBuildEntry[] builtInTerrainDefinitions =
                     BuiltInTerrainBlockDefinitions.CreateCommonDefinitions(
                         buildReferences.Count,

@@ -54,7 +54,7 @@ namespace Farmware.WorldGeneration.Tests
         {
             using TerrainGenerationTestCatalogSet catalogs =
                 TerrainGenerationTestCatalogSet.Create();
-            EffectiveTerrainCell cell = CreateCell(scenario, catalogs.RuntimeIds);
+            EffectiveTerrainCell cell = CreateCell(scenario, catalogs);
 
             TerrainPlacementResult actualResult = TerrainPlacementRules.Evaluate(
                 cell,
@@ -71,7 +71,7 @@ namespace Farmware.WorldGeneration.Tests
         {
             using TerrainGenerationTestCatalogSet catalogs =
                 TerrainGenerationTestCatalogSet.Create();
-            EffectiveTerrainCell land = CreateCell(TerrainScenario.Land, catalogs.RuntimeIds);
+            EffectiveTerrainCell land = CreateCell(TerrainScenario.Land, catalogs);
 
             Assert.That(
                 TerrainPlacementRules.Evaluate(
@@ -89,11 +89,11 @@ namespace Farmware.WorldGeneration.Tests
 
         /// <summary>テスト用の地形シナリオを、実カタログのRuntime IDを持つ有効セルへ変換します。</summary>
         /// <param name="scenario">作成する地面、淡水、マグマ、岩壁の区別です。</param>
-        /// <param name="runtimeIds">実カタログから解決した組み込みIDです。</param>
+        /// <param name="catalogs">材質Ground・Wallと固定Liquidを解決済みの実カタログ一式です。</param>
         /// <returns>配置判定へ直接渡せる有効地形セルです。</returns>
         private static EffectiveTerrainCell CreateCell(
             TerrainScenario scenario,
-            in BuiltInTerrainBlockRuntimeIds runtimeIds)
+            TerrainGenerationTestCatalogSet catalogs)
         {
             switch (scenario)
             {
@@ -101,26 +101,26 @@ namespace Farmware.WorldGeneration.Tests
                     return new EffectiveTerrainCell
                     {
                         Biome = BiomeId.TemperateGrassland,
-                        GroundBlockRuntimeId = runtimeIds.LandGround
+                        GroundBlockRuntimeId = catalogs.GroundRuntimeId
                     };
                 case TerrainScenario.FreshWater:
                     return new EffectiveTerrainCell
                     {
                         Biome = BiomeId.TemperateGrassland,
-                        LiquidRuntimeId = runtimeIds.FreshWater
+                        LiquidRuntimeId = catalogs.RuntimeIds.FreshWater
                     };
                 case TerrainScenario.Magma:
                     return new EffectiveTerrainCell
                     {
                         Biome = BiomeId.VolcanicGeothermal,
-                        LiquidRuntimeId = runtimeIds.Magma
+                        LiquidRuntimeId = catalogs.RuntimeIds.Magma
                     };
                 case TerrainScenario.RockWall:
                     return new EffectiveTerrainCell
                     {
                         Biome = BiomeId.AlpineRockland,
-                        GroundBlockRuntimeId = runtimeIds.LandGround,
-                        WallBlockRuntimeId = runtimeIds.NaturalRockWall
+                        GroundBlockRuntimeId = catalogs.GroundRuntimeId,
+                        WallBlockRuntimeId = catalogs.WallRuntimeId
                     };
                 default:
                     return default;
