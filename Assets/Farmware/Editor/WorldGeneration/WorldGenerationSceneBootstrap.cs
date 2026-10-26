@@ -246,7 +246,7 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>
         /// Unityメニューから、現在のScene作業状態を保護しながらフォールバック表示付きマップ生成Sceneを構築します。
         /// </summary>
-        [MenuItem("Farmware/World Generation/Build Fallback Map Prototype")]
+        [MenuItem("Farmware/World Generation/Generation/Build Fallback Map Prototype")]
         public static void BuildFromMenu()
         {
             RunInteractiveBuild(

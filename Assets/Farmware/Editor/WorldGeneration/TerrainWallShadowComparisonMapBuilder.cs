@@ -389,7 +389,7 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>未保存Sceneを保護してから、Wall動的影比較Sceneを再構築して開きます。</summary>
-        [MenuItem("Farmware/World Generation/Open Wall Shadow Comparison")]
+        [MenuItem("Farmware/World Generation/Inspection Scenes/Open Wall Shadow Comparison")]
         public static void BuildAndOpenFromMenu()
         {
             InspectionAssets assets;
@@ -438,7 +438,7 @@ namespace Farmware.WorldGeneration.Editor
         /// 未保存Sceneを保護してから、折れ目影と境界ハイライトの専用比較Sceneを再構築して開きます。
         /// Ground、Wall暗化、Face、固定接地影、動的影、照明は両パネルで共通にします。
         /// </summary>
-        [MenuItem("Farmware/World Generation/Open Wall Edge Cue Comparison")]
+        [MenuItem("Farmware/World Generation/Inspection Scenes/Open Wall Edge Cue Comparison")]
         public static void BuildAndOpenEdgeCueComparisonFromMenu()
         {
             InspectionAssets[] assets;

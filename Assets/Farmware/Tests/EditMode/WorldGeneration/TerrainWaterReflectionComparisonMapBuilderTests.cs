@@ -1,6 +1,7 @@
 // このファイルは、水面反射の比較Sceneが垂直面だけを反射するProxy方式、反射Material、固定検証値を満たすことを確認します。
 // Sceneを再構築する処理自体は実行せず、生成後のAssetと座標計算を検査してUnity Editorの作業Sceneを変更しません。
 
+using System.IO;
 using Farmware.WorldGeneration.Editor;
 using NUnit.Framework;
 using UnityEditor;
@@ -104,6 +105,33 @@ namespace Farmware.WorldGeneration.Tests
                 AssetDatabase.LoadAssetAtPath<SceneAsset>(
                     TerrainWaterReflectionComparisonMapBuilder.ScenePath),
                 Is.Not.Null);
+        }
+
+        /// <summary>
+        /// 反射ShaderがSpriteRendererの上下反転値を頂点へ適用し、非対称な模様も鏡像になることを保証します。
+        /// </summary>
+        [Test]
+        public void ReflectionShader_AppliesSpriteRendererFlipBeforeWorldTransform()
+        {
+            string projectRoot = Directory.GetParent(Application.dataPath)?.FullName;
+            Assert.That(projectRoot, Is.Not.Null);
+            string shaderFilePath = Path.Combine(
+                projectRoot,
+                TerrainWaterReflectionComparisonMapBuilder.ReflectionShaderPath);
+            string shaderSource = File.ReadAllText(shaderFilePath);
+
+            // Shaderコンパイル成功だけではflipYの適用漏れを検出できないため、公式2D Sprite Shaderと同じ反転関数の使用を確認します。
+            Assert.That(
+                shaderSource,
+                Does.Contain("SetUpSpriteInstanceProperties();"));
+            Assert.That(
+                shaderSource,
+                Does.Contain("UnityFlipSprite("));
+            Assert.That(
+                shaderSource.IndexOf("UnityFlipSprite(", System.StringComparison.Ordinal),
+                Is.LessThan(shaderSource.IndexOf(
+                    "TransformObjectToWorld(",
+                    System.StringComparison.Ordinal)));
         }
     }
 }

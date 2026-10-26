@@ -42,7 +42,7 @@ namespace Farmware.WorldGeneration.Editor
         /// メニューからPNG・Sprite分割・Atlasをまとめて更新します。
         /// </summary>
         /// <remarks>Project内の境界ハイライト画像とAtlasを更新し、Runtimeの地形データは変更しません。</remarks>
-        [MenuItem("Farmware/World Generation/Generate Boundary Highlight Art")]
+        [MenuItem("Farmware/World Generation/Generation/Generate Boundary Highlight Art")]
         public static void GenerateFromMenu()
         {
             try

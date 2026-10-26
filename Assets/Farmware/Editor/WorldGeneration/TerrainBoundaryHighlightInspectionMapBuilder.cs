@@ -131,7 +131,7 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>未保存Sceneを保護してから、47状態の固定検品Sceneを再構築して開きます。</summary>
-        [MenuItem("Farmware/World Generation/Open Boundary Highlight Inspection Map")]
+        [MenuItem("Farmware/World Generation/Inspection Scenes/Open Boundary Highlight Inspection Map")]
         public static void BuildAndOpenFromMenu()
         {
             InspectionAssets assets;

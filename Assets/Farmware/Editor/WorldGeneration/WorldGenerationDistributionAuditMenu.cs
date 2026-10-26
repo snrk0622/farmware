@@ -17,7 +17,7 @@ namespace Farmware.WorldGeneration.Editor
     public static class WorldGenerationDistributionAuditMenu
     {
         /// <summary>分布監査を開始するUnity Editorメニューパスです。</summary>
-        private const string MenuPath = "Farmware/World Generation/Analyze Distribution";
+        private const string MenuPath = "Farmware/World Generation/Analysis/Analyze Distribution";
 
         /// <summary>同時に複数監査を開始してCPU負荷とログを重複させないための実行中フラグです。</summary>
         private static bool isRunning;

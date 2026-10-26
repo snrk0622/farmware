@@ -12,11 +12,12 @@ namespace Farmware.WorldGeneration.Editor
     public static class HydrologyDistributionAuditMenu
     {
         /// <summary>水文分布監査を開始するUnity Editorメニューパスです。</summary>
-        private const string MenuPath = "Farmware/World Generation/Analyze Hydrology Distribution";
+        private const string MenuPath =
+            "Farmware/World Generation/Analysis/Analyze Hydrology Distribution";
 
         /// <summary>C4の地下水・湖区分・泉・自然冠水・湿原分布監査を開始するEditorメニューパスです。</summary>
         private const string DerivedMenuPath =
-            "Farmware/World Generation/Analyze Derived Hydrology Distribution";
+            "Farmware/World Generation/Analysis/Analyze Derived Hydrology Distribution";
 
         /// <summary>同じ有限探索を二重起動しないため、監査実行中だけtrueにするEditorプロセス内フラグです。</summary>
         private static bool isRunning;

@@ -62,7 +62,7 @@ Sceneを使わない最小ECS Worldで、受付番号が1から単調増加し�
 
 通常実行の`EnabledBuildScenes_DoNotDependOnDevelopmentOnlyAssets`は、Build Settingsで有効な全Sceneの再帰依存を`AssetDatabase.GetDependencies`で検査する。`Assets/Scenes/Development/`、`Assets/Farmware/Editor/`、`Assets/Farmware/Tests/`、`Assets/Farmware/Shaders/Development/`、`Assets/Farmware/Art/WorldGeneration/Generated/Inspection/`、手描き制作入力、`TerrainTileArtGenerationSettings.asset`のいずれかを製品Sceneが直接・間接に参照した場合は失敗する。検証SceneをBuild Settingsへ誤登録した場合も、そのScene自身のパスから検出する。地形タイル生成設定の型が`Farmware.WorldGeneration.Editor`へ所属することは`TerrainTileArtGeneratorTests`でも保証し、Player対応Authoring Assemblyへ戻さない。
 
-`C6DCompletionGate_RemovesLegacyBoundaryHighlightImplementation`は、C6-Dの表示置換が終わるまでは失敗するため`Explicit`とする。C6-D完了確認ではこのテストを明示実行し、旧14形状境界ハイライトのPNG、Atlas、比較Scene、Runtime選択Utility、Editor生成・検品コード、専用テストが存在しないことに加え、Assets配下のC#・Scene・Prefab・Material・Shader・Atlasなどに旧型名、SerializedProperty名、旧PNG／Atlas GUIDの参照が残っていないことを一括確認する。通常テストから除外されていることを削除延期の根拠にはせず、C6-Dの完了条件として成功させる。
+`LegacyBoundaryHighlightRemovalGate_RemovesAllImplementation`は、C6-Dの表示置換が終わるまでは失敗するため`Explicit`とする。C6-D完了確認ではこのテストを明示実行し、旧14形状境界ハイライトのPNG、Atlas、比較Scene、Runtime選択Utility、Editor生成・検品コード、専用テストが存在しないことに加え、Assets配下のC#・Scene・Prefab・Material・Shader・Atlasなどに旧型名、SerializedProperty名、旧PNG／Atlas GUIDの参照が残っていないことを一括確認する。通常テストから除外されていることを削除延期の根拠にはせず、C6-Dの完了条件として成功させる。
 
 #### `WorldLayerWaterContractTests`
 
@@ -225,13 +225,13 @@ ECS Bufferでは差分をLocalTileIndex昇順に挿入し、自然状態へ戻�
 #### `WorldGenerationDistributionAuditTests`
 
 Editorの分布監査と同じAnalyzerを小さな固定サンプルで2回実行し、バイオーム・基礎地形・土壌・水域の集計漏れがないことと、署名・レポートが決定論的に一致することを保証する。
-広域のバランス確認はテストへ組み込まず、`Farmware > World Generation > Analyze Distribution`から実行する。
+広域のバランス確認はテストへ組み込まず、`Farmware > World Generation > Analysis > Analyze Distribution`から実行する。
 
 #### `GeologyDistributionAuditTests`
 
 Editorの地質分布監査と同じAnalyzerを、負座標を含む2シード・13×13代表格子で2回実行する。全サンプル数、東・北へ一度ずつ比較した全隣接辺数、8分類の件数合計、地質別境界参加数、標高区分・現行Biome・火山活動度5段階のクロス件数が一致することを保証する。4近傍領域数、1サンプル孤立領域、最大概算面積・直径が有効範囲にあり、署名と日本語レポートが決定論的に一致することも確認する。
 
-既定3シード・129×129格子は通常テストへ組み込まず、`Farmware > World Generation > Analyze Geology Distribution`から明示実行する。面積、直径、境界長は代表格子による比較用概算であり、自動合否閾値にはしない。
+既定3シード・129×129格子は通常テストへ組み込まず、`Farmware > World Generation > Analysis > Analyze Geology Distribution`から明示実行する。面積、直径、境界長は代表格子による比較用概算であり、自動合否閾値にはしない。
 
 #### `AnimalPopulationGenerationTests`
 
@@ -265,7 +265,7 @@ C3-C1の水文生成は、8水文行と地形・資源を9つの`IJobParallelFor
 
 #### `AnimalPopulationDistributionAuditTests`
 
-Runtimeと同じ資源予約を生成して候補から除外するEditorのAnalyzerを、負座標を含む2組のSeed・18地域で2回実行し、適格タイル・目標数・生成候補が存在すること、群れ契約違反と位置重複が0件であること、署名と集計値が一致することを保証する。約100万タイルの既定監査は通常テストへ含めず、`Farmware > World Generation > Analyze Animal Population`から明示実行する。
+Runtimeと同じ資源予約を生成して候補から除外するEditorのAnalyzerを、負座標を含む2組のSeed・18地域で2回実行し、適格タイル・目標数・生成候補が存在すること、群れ契約違反と位置重複が0件であること、署名と集計値が一致することを保証する。約100万タイルの既定監査は通常テストへ含めず、`Farmware > World Generation > Analysis > Analyze Animal Population`から明示実行する。
 
 #### `WorldGenerationMapViewerTests`
 
@@ -313,7 +313,7 @@ Sprite Packer ModeがV2であること、土地Atlasが現行Biome仮色Texture�
 
 専用`WallTop`、材質別7外周部品、共通暗色内部、47枚のWall完成Spriteを対象とした旧試作テストは削除済みである。現行テストは、sRGB 8bit RGBの0.85暗色化と最近傍丸め、Alpha維持、`Face`を変えず不透明な`FaceBoundaryOverlay`だけを暗色化するGround／Wall合成、半透明Overlay拒否を検証する。
 
-可変長配列については、手描き入力`G + F + B`、生成結果`F×B×(1 + D)`、Runtime候補数の計算を確認する。設定検証では16×16 px、Read/Write、Point、16 PPU、非圧縮、Mip Mapなし、sRGB、`Full Rect`、Alpha 0／255、材質ID、暗色化係数を対象とする。差分配列が個別Weightを持たず全候補を均等に扱うこと、暗色化ON・0.85、専用WallTop設定が存在しないことを専用テストとInspector確認で保証する。生成PNGの実Import、再生成時のGUID維持、Fingerprintによる要再生成、旧出力整理はGeneratorの実操作で確認する。代表材質のInspector操作では、Ground／Wall境界の全`F×B`組合せが用途別に64×64の整数4倍で表示されることを確認する。
+可変長配列については、手描き入力`G + F + B`、生成結果`F×B×(1 + D)`、Runtime候補数の計算を確認する。設定検証では16×16 px、Read/Write、Point、16 PPU、非圧縮、Mip Mapなし、sRGB、`Full Rect`、Alpha 0／255、材質ID、暗色化係数を対象とする。差分配列が個別Weightを持たず全候補を均等に扱うこと、暗色化ON・0.85、専用WallTop設定が存在しないことを専用テストとInspector確認で保証する。生成PNGの実Import、再生成時のGUID維持、Fingerprintによる要再生成、旧出力整理はGeneratorの実操作で確認する。固定検品Sceneの構築前検証では、境界生成物を持つ材質だけ現在Fingerprintと最終正常生成Fingerprintを比較し、画像や設定が変わったままなら同数の旧生成物を受理しない。境界なし材質は現在の入力Spriteを直接使うため、生成物がないことを理由に拒否しない。代表材質のInspector操作では、Ground／Wall境界の全`F×B`組合せが用途別に64×64の整数4倍で表示されることを確認する。
 
 #### `TerrainTileArtInspectionMapBuilderTests`
 
@@ -327,7 +327,7 @@ Sprite Packer ModeがV2であること、土地Atlasが現行Biome仮色Texture�
 
 自動テストは水平な`GroundTop`／`WallTop`が映っていない見た目、鏡像の向き、反射の強さ、波線との重なり、ドットの読みやすさを合格判定しない。これらは`Open Water Reflection Comparison`を実行し、Edit Modeで左右差、Play Modeで0／+1／0／-1 pxの段階移動を人間が確認する。採用前の検証値なので、本番Runtimeの描画契約や性能合格値には含めない。
 
-`Open Wall Surface Darken Comparison`では0.85、0.70、0.55を比較し、0.85を採用した。`Open Wall Shadow Comparison`では同じ13セル形状を3区画へ置き、「旧ハイライト＋動的影」「動的影のみ」「左右各1px・手前3px・各レイヤーAlpha 22%の固定接地影＋動的影」を同じ照明条件で比較し、2026-10-25の人間確認で固定接地影と動的影を組み合わせるCを採用した。追加の`Open Wall Edge Cue Comparison`では、代表5材質を5列、8px折れ目影、16px折れ目影、32px折れ目影、1px境界ハイライトを4行へ並べる。全20パネルは最大横5セルを含む同じ13セルWall形状を使い、CのGround、Wall暗化、Face 2段、固定接地影、動的影、照明を共通配置する。8px／16px行では各露出列の1段目へ折れ目影を各1枚、32px行では1段目と2段目へ各1枚、境界ハイライト行ではハイライトを各12枚置く。32pxのShader値は2段目で開始行を16px進め、段境界でAlphaが濃く戻らないことを保証する。自動テストは20パネル、各13 Wallセル、露出Face 5列、Face 10枚、固定接地影36枚、Caster 13個、Composite 1個、Point Light 2個が方式間で一致し、補助表現だけが異なることを保証する。2026-10-26の初回確認では16pxを最有力としたが、32pxが全体暗化に見えた現象には比較用動的影の不安定な挙動が混在していた。折れ目影自体を再評価して32pxを正式採用し、8px、16px、1px境界ハイライトを不採用とした。比較SceneのPoint Light配置とセル別Casterは製品照明の正ではなく、方式を同条件で比較するための仮構成である。動的影用CasterはWall上面からFace段数だけ手前の設置面へ移し、影が最下段Faceの根元から伸びて上面から始まらないことを確認する。本番の固定接地影と`Shadow Caster 2D`は材質境界で分割せず、Dirtyな16×16サブチャンクのWall設置面輪郭から結合形状を更新すること、移動する`Light 2D`へ動的影だけが追従すること、アンロード・再利用後に旧影が残らないことをEditMode／PlayMode／Gameビューで検証する。不採用となった8px／16px折れ目影と境界ハイライトの素材、Material／Shader、Atlas、Scene参照、選択処理、専用テストがC6-D後に残っていないことも検索と参照確認で保証する。
+`Open Wall Surface Darken Comparison`では0.85、0.70、0.55を比較し、0.85を採用した。`Open Wall Shadow Comparison`では同じ13セル形状を3区画へ置き、「旧ハイライト＋動的影」「動的影のみ」「左右各1px・手前3px・各レイヤーAlpha 22%の固定接地影＋動的影」を同じ照明条件で比較し、2026-10-25の人間確認で固定接地影と動的影を組み合わせるCを採用した。追加の`Open Wall Edge Cue Comparison`では、代表5材質を5列、8px折れ目影、16px折れ目影、32px折れ目影、1px境界ハイライトを4行へ並べる。全20パネルは最大横5セルを含む同じ13セルWall形状を使い、CのGround、Wall暗化、Face 2段、固定接地影、動的影、照明を共通配置する。8px／16px行では各露出列の1段目へ折れ目影を各1枚、32px行では1段目と2段目へ各1枚、境界ハイライト行ではハイライトを各12枚置く。32pxのShader値は2段目で開始行を16px進め、段境界でAlphaが濃く戻らないことを保証する。自動テストは20パネル、各13 Wallセル、露出Face 5列、Face 10枚、固定接地影36枚、Caster 13個、Composite 1個、Point Light 2個が方式間で一致し、補助表現だけが異なることを保証する。2026-10-26の初回確認では16pxを最有力としたが、32pxが全体暗化に見えた現象には比較用動的影の不安定な挙動が混在していた。折れ目影自体を再評価して32pxを正式採用し、8px、16px、1px境界ハイライトを不採用とした。比較SceneのPoint Light配置とセル別Casterは製品照明の正ではなく、方式を同条件で比較するための仮構成である。動的影用CasterはWall上面からFace段数だけ手前の設置面へ移し、影が最下段Faceの根元から伸びて上面から始まらないことを確認する。本番の固定接地影と`Shadow Caster 2D`は材質境界で分割せず、Dirtyな16×16サブチャンクのWall設置面輪郭から結合形状を更新すること、移動する`Light 2D`へ動的影だけが追従すること、アンロード・再利用後に旧影が残らないことをEditMode／PlayMode／Gameビューで検証する。不採用となった8px／16px折れ目影と境界ハイライトの素材、Material／Shader、Atlas、Scene参照、選択処理、専用テストがC6-D後に残っていないことも検索と参照確認で保証する。水面反射の回帰では、反射Shaderが`SpriteRenderer.flipY`をWorld座標変換前に適用し、上下非対称なFaceも鏡像になる契約をShaderソースとGameビューで確認する。
 
 #### `WorldGenerationSceneBootstrapTests`
 
@@ -388,7 +388,7 @@ TERRAIN-01C1のAuthoring回帰では、既存の高地閾値を43,000以外へ�
 | TERRAIN-01C5-B2／通常候補の安定順位 | Score降順、完全同点だけVariation降順、最終同点の安定ID昇順、Score差1の順位不変、最高Score 3候補の完全同点、異なる挿入順、実Definition 3候補の登録逆順、首位・診断用次点・候補総数、海面下の候補なしと部分結果非公開、管理確保と全件ソートなし | 製品生成・Scene・Prefab・表示は変更しない。Consoleの新規エラー・警告がなく、旧7Biome表示へ意図しない変化がないことを人間確認する。活動的火山中核、水文特殊昇格、最終選択はC5-B3で確認する |
 | TERRAIN-01C5-B3／特殊優先と最終選択 | 火山Definitionの地質適合・`SupportsActiveVolcanism`・活動度段階5の3条件と水文特殊より高い優先度、淡水接続・湿原タイル資格・広域湿原規模の全成立、木本植生39,320／39,321境界、対象Definitionの地形気温・基礎湿度・標高・木本植生許容範囲、通常首位の専用Host許可・不許可、局所水場の通常Biome維持、特殊不成立時の通常首位、特殊選択後の通常順位保持、通常候補なしの明示失敗と既定結果、Definition登録逆順での最終ID・理由・通常順位不変 | 製品生成・Scene・Prefab・表示は変更しない。Consoleの新規エラー・警告がなく、旧7Biome表示へ意図しない変化がないことを人間確認する。ECS生成への接続と旧7Biome経路削除はC5-Cで確認する |
 | TERRAIN-01C5-C／ECS生成切替 | 基礎環境・地質・陸海の後にC3／C4水文を完成し、最終Jobで新18Biomeと地面を4096件へ一括公開すること。海だけが`BiomeId.None`となり、地上は1〜18の有効IDであること。火山中核・水文特殊・通常候補の優先、露出マグマが活動度段階5・追加活動度下限・形状密度をすべて要求すること、マグマ＞固定表流水＞岩壁＞陸地の暫定Ground優先、候補なしのチャンク全体失敗とBuffer部分非公開、状態ハッシュ、チャンク順・Job完了順の不変、GeneratorVersion 2の受理とC5前の明示拒否、旧7Biome分類・橋遷移・`Weirdness`・旧淡水・旧岩地マグマ・12×8開始平地探索が実行可能でないこと。初期スポーンが完成ECSチャンクの許可Biome・乾燥・通行可・資源なしセルだけを有限探索し、原点チャンクの遠い候補より負側隣接チャンクの近い候補を選ぶこと。同距離の未探索候補があり得る間も座標順確定のため探索を継続すること。SampleScene統合は初期スポーン付近の資源や`TemperateGrassland`を保証せず、存在する資源・動物だけを検証すること | SampleSceneで18色が欠落・代替Tileなしで表示され、淡水・海水・マグマ・岩壁の優先が保たれること。`Magma`診断の候補色、中央HUD、凡例が製品と同じ段階5・追加下限・形状密度条件で一致すること。初期カメラが有効スポーンへ移動し、通常移動・チャンク境界往復で空白や旧色が残らないこと。Map Viewerの`Terrain`／`Biome`がGameビューと一致すること。C5-E前の旧分布監査が無効で、基礎`None`を成功値として集計しないこと |
-| TERRAIN-01C5-E／分布・境界監査 | `BiomeDistributionAuditSettings`の空Seed・半径範囲、完成1チャンクの全4,096タイル保存則、陸地面積合計、通常首位が候補資格件数を超えないこと、自身隣接18件を含む陸地隣接辺保存則、全153異種ペア台帳、同条件2回の署名・レポート一致、候補なし・完成Buffer不一致・火山中核条件・水文Host不整合の明示失敗。旧単一タイル監査型、旧enum名、旧7bit Mask、旧分類・表示・橋遷移・実行可能な`Weirdness`・旧挙動専用テストの不存在 | `Farmware > World Generation > Analyze Distribution`が既定3 Seed×3×3完成チャンクをバックグラウンドで完走し、全153ペアをゼロ件も含めて表示すること。火山中核／周縁、水文Host昇格、候補なし0件、実行時間、比較署名を記録する。景観合否の数値閾値はC6後のC7で合意する |
+| TERRAIN-01C5-E／分布・境界監査 | `BiomeDistributionAuditSettings`の空Seed・半径範囲、完成1チャンクの全4,096タイル保存則、陸地面積合計、通常首位が候補資格件数を超えないこと、自身隣接18件を含む陸地隣接辺保存則、全153異種ペア台帳、同条件2回の署名・レポート一致、候補なし・完成Buffer不一致・火山中核条件・水文Host不整合の明示失敗。旧単一タイル監査型、旧enum名、旧7bit Mask、旧分類・表示・橋遷移・実行可能な`Weirdness`・旧挙動専用テストの不存在 | `Farmware > World Generation > Analysis > Analyze Distribution`が既定3 Seed×3×3完成チャンクをバックグラウンドで完走し、全153ペアをゼロ件も含めて表示すること。火山中核／周縁、水文Host昇格、候補なし0件、実行時間、比較署名を記録する。景観合否の数値閾値はC6後のC7で合意する |
 | TERRAIN-01C6／旧地形表示の置換 | 最終Block・Liquid・固定水文を正とする表示と状態ハッシュ、旧`GeneratedTile.WaterBodyType`・旧River／Pond生成・旧Biome直結配色・互換変換・旧専用Wall上面生成に加え、補助表現比較で不採用となった折れ目影または旧14形状境界ハイライトの素材・Material／Shader・Atlas・Scene参照・選択処理・専用テストが残っていないこと、差分適用後も元生成を変更しないこと | GameビューとMap Viewerが新しい有効地形で一致し、材質ごとの16×16 `GroundTop`をGround／Wallで共有し、Wall表示だけが係数0.85で暗くなること。任意の16×16 `FaceBoundaryOverlay`、16×16 `Face`、淡水・海水で通常断面へ重なる半透明の`Liquid深度Overlay`、背後の断面を最初の段から隠す不透明なマグマを確認できること。Ground崖面とWall前面は同じ境界入力・断面素材を使うこと。すべての材質で断面1段目から`Face`を使い、境界ありではEditorがGround用の元色Overlay版とWall用の暗色化Overlay版を事前合成し、用途に対応する完成Spriteを1枚描画すること。`Face`自体は暗色化しないこと。表示高が論理的な水深、Liquid量、通行、採掘結果を変えず、液体専用断面を持たないこと。Wall接続では材質IDを比較せず、異材質Wall間にFace・固定接地影・動的影の切れ目を出さないこと。固定接地影を左右各1px・手前3px・各レイヤーAlpha 22%でサブチャンク単位に結合し、Wall領域をWall前面段数だけ手前へ投影した設置面の結合輪郭からDirtyサブチャンク単位で`Shadow Caster 2D`を更新すること。動的影が最下段Faceの根元から伸びること。補助表現は専用比較で採用した1種類だけを使うこと。F4のチャンク境界診断を維持すること |
 | TERRAIN-01C6／地形の固定明暗と照明境界 | `GroundTop`・`Face`・透明な`FaceBoundaryOverlay`と、そのEditor合成結果だけで材質を識別できること。固定光が左右へ偏らない弱い上方光を基本とし、部位・差分間で方向と強さが揃うこと。Ground／Wallで共有する`GroundTop`は、Wall表示の0.85暗色化後も固定光の向きと模様を保つこと。左右へ偏った強いハイライト、硬い方向影、特定光源の色、隣接セルへ伸びる投影影、時間帯の明暗をBase Spriteへ含めないこと。Normal Mapが41材質の必須参照・必須Import要件になっていないこと | 動的照明なしでも立体構造を読め、`Light 2D`と`Shadow Caster 2D`による明るさ・色・投影影の変更が焼き込みと不自然に競合しないこと。採用した固定接地影は、2段Wall向けの手前3px・左右対称の接地感を保ちながら光源移動へ追従しない影として動的影と区別でき、明るい環境でも濃すぎないこと。Normal MapはTIME-01Bで代表材質を比較し、Pixel Perfect、Atlas、メモリ、GPU時間、Light 2D数を記録してから採否を決める |
 | 地形タイル試作工程／代表5材質試作 | `GrassLoam`、`DesertSand`、`Sandstone`、`Granite`、`Basalt`について、16×16 `GroundTop`、材質ごとに任意の透明な16×16 `FaceBoundaryOverlay`、Ground崖面とWall前面で共用する16×16 `Face`をAsepriteまたはPixeloramaで手制作すること。専用`WallTop`は作らず、Wall上面でも同じ`GroundTop`を使う。断面は1段目から`Face`を使い、境界ありではEditorがGround用の元色Overlay版とWall用の暗色化Overlay版を事前合成し、Runtimeでは用途に対応する完成Spriteを1枚だけ描画すること。PixelLabは材質タイルの制作、ラフ生成、Prompt、配色決定に使用しないこと。各部位が少数色・低コントラスト・単純なブロック状模様で材質を読め、写真調の細密描写、強い明暗ノイズ、セル単位の枠を含まないこと。`GrassLoam`の`GroundTop`は草だけとし、Wall表示では同じSpriteを0.85で暗色化する。`FaceBoundaryOverlay`は暗めの緑の草層から暗めの茶色い土層へ切り替え、`Face`は上面より全体的に暗く、内部コントラストを抑えた茶色5色の土層と小石で構成する。根は使わないこと。`GrassLoam`・`Sandstone`は境界あり、`DesertSand`・`Granite`・`Basalt`は境界なしの仕様とすること | 同一材質Ground上のWall上面・Face 2段・固定接地影の重なり、採用差分の全左右・上下組合せ、境界あり／なしの1段目、3段以上の縦反復、淡水・海水越しの断面、マグマ背後の断面が透けないことを固定検品マップで比較すること。`GrassLoam`では`GroundTop`、境界、断面の順に全体が暗くなり、`Face`の5色内の明暗差が小さいことを確認すること。上面、境界、断面で色相を統一せず、材質構造を読めることを確認する。良好なら、同じ明度関係を材質固有の色相と模様を保ったまま残り40材質へ適用すること。Wall暗色化係数0.85、採用した固定接地影と動的影、均等選択する可変長配列の内容、Ground崖面段数、Wall前面段数、41材質表の確定済み境界あり17材質・なし24材質、Ground崖面・Wall前面でのOverlay入力共有、Ground用元色合成結果・Wall用暗色化合成結果の使い分けが一致することを確認すること。`GroundTop`・`FaceBoundaryOverlay`・`Face`は地形タイル表現仕様第7章の採用パレット・使用比率・模様方針に一致させること。各部位の使用比率合計が100%であること、実Spriteが通常±5ポイント、透明な境界Overlayが±10ポイントの許容範囲内であることを確認すること |

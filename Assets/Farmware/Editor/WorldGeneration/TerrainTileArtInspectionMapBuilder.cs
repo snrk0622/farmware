@@ -503,14 +503,14 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>未保存Sceneを保護したうえで、代表5材質の固定検品Sceneを再構築して開きます。</summary>
-        [MenuItem("Farmware/World Generation/Open Terrain Tile Inspection Map")]
+        [MenuItem("Farmware/World Generation/Inspection Scenes/Open Terrain Tile Inspection Map")]
         public static void BuildAndOpenFromMenu()
         {
             BuildFromMenu(false);
         }
 
         /// <summary>未保存Sceneを保護したうえで、壁暗化係数の比較Sceneを再構築して開きます。</summary>
-        [MenuItem("Farmware/World Generation/Open Wall Surface Darken Comparison")]
+        [MenuItem("Farmware/World Generation/Inspection Scenes/Open Wall Surface Darken Comparison")]
         public static void BuildWallSurfaceDarkenComparisonFromMenu()
         {
             BuildFromMenu(true);
@@ -778,6 +778,16 @@ namespace Farmware.WorldGeneration.Editor
                 throw new InvalidOperationException(
                     $"{materialId}の生成入力が不正です。先に生成設定Inspectorで検証してください。\n- "
                     + string.Join("\n- ", report.Errors));
+            }
+
+            // 境界Overlayがある材質は、枚数が同じでも入力画像や暗化係数の変更で合成PNGが古くなります。
+            // 境界Overlayがない材質は生成物を持たず、現在のGroundTopとFaceを直接使うためFingerprint判定の対象外です。
+            bool hasGeneratedBoundarySprites = material.FaceBoundaryOverlays.Length > 0;
+            if (hasGeneratedBoundarySprites
+                && TerrainTileArtGenerator.RequiresRegeneration(settings, material))
+            {
+                throw new InvalidOperationException(
+                    $"{materialId}の生成物が現在の入力と一致しません。対象材質を再生成してください。");
             }
 
             List<Sprite> groundBoundary = new List<Sprite>();

@@ -1,5 +1,5 @@
 // このファイルは、検証専用のScene・Shader・Material・生成設定が製品Build Sceneへ混入しないことを検査します。
-// また、立体地形表示へ置換する工程で旧境界ハイライト一式を取り残さないための明示的な完了ゲートを提供します。
+// また、立体地形表示へ置換するときに旧境界ハイライト一式を取り残さないための明示的な完了ゲートを提供します。
 
 using System;
 using System.Collections.Generic;
@@ -13,7 +13,7 @@ namespace Farmware.WorldGeneration.Tests
 {
     /// <summary>
     /// 製品Build Sceneと検証専用アセットの境界、および旧境界ハイライト削除の完了条件を保証します。
-    /// 通常のEditMode実行ではBuild Scene依存関係を検査し、C6-D完了時だけExplicitゲートを明示実行します。
+    /// 通常のEditMode実行ではBuild Scene依存関係を検査し、旧表示の削除時だけExplicitゲートを明示実行します。
     /// </summary>
     public sealed class TerrainProductIsolationTests
     {
@@ -29,7 +29,7 @@ namespace Farmware.WorldGeneration.Tests
             "Assets/Farmware/Art/WorldGeneration/Terrain/Settings/TerrainTileArtGenerationSettings.asset",
         };
 
-        // C6-Dの製品表示置換で削除する、旧14形状境界ハイライト固有のアセットと実装です。
+        // 製品表示の置換時に削除する、旧14形状境界ハイライト固有のアセットと実装です。
         private static readonly string[] LegacyBoundaryHighlightAssetPaths =
         {
             "Assets/Farmware/Art/WorldGeneration/Terrain/Highlights",
@@ -128,12 +128,12 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// C6-D完了時に旧14形状境界ハイライトの素材、生成コード、選択処理、Scene参照、専用テストがすべて消えたことを検査します。
-        /// 現在は旧製品表示が残るためExplicitとし、C6-Dの置換後にこのテストを明示実行して成功させます。
+        /// 立体地形表示への置換時に、旧14形状境界ハイライトの素材、生成コード、選択処理、Scene参照、専用テストがすべて消えたことを検査します。
+        /// 現在は旧製品表示が残るためExplicitとし、置換後にこのテストを明示実行して成功させます。
         /// </summary>
         [Test]
-        [Explicit("C6-Dで新しい立体地形表示へ置換した後に実行する削除完了ゲートです。")]
-        public void C6DCompletionGate_RemovesLegacyBoundaryHighlightImplementation()
+        [Explicit("新しい立体地形表示へ置換した後に実行する、旧境界ハイライトの削除完了ゲートです。")]
+        public void LegacyBoundaryHighlightRemovalGate_RemovesAllImplementation()
         {
             List<string> remainingItems = new List<string>();
 
@@ -154,7 +154,7 @@ namespace Farmware.WorldGeneration.Tests
                 remainingItems,
                 Is.Empty,
                 BuildFailureMessage(
-                    "旧14形状境界ハイライトが残っています。C6-Dを完了扱いにできません。",
+                    "新しい立体地形表示への置換後も、旧14形状境界ハイライトが残っています。",
                     remainingItems));
         }
 

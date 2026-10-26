@@ -70,7 +70,7 @@ namespace Farmware.WorldGeneration.Editor
         private const float WithReflectionCenterX = 4f;
 
         /// <summary>未保存Sceneを保護したうえで、水面反射の比較Sceneを再構築して開きます。</summary>
-        [MenuItem("Farmware/World Generation/Open Water Reflection Comparison")]
+        [MenuItem("Farmware/World Generation/Inspection Scenes/Open Water Reflection Comparison")]
         public static void BuildAndOpenFromMenu()
         {
             if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())

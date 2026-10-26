@@ -15,9 +15,11 @@
 
 ## 2. ツール一覧
 
+`Farmware > World Generation`直下は、広域確認用の`Map Viewer`と、用途別の`Analysis`、`Debug Visualization`、`Generation`、`Inspection Scenes`へ分ける。分布集計は`Analysis`、素材・Scene生成は`Generation`、固定検品・比較Sceneは`Inspection Scenes`から実行する。
+
 ### 2.1 Build Fallback Map Prototype
 
-- メニュー: `Farmware > World Generation > Build Fallback Map Prototype`
+- メニュー: `Farmware > World Generation > Generation > Build Fallback Map Prototype`
 - 実装: `WorldGenerationSceneBootstrap`
 - PlayMode: 不要。EditModeで実行する。
 
@@ -184,7 +186,7 @@ TERRAIN-01C2-Aでは地質DefinitionとSimulation生成結果だけを先に接�
 
 ### 2.4 Analyze Distribution
 
-- メニュー: `Farmware > World Generation > Analyze Distribution`
+- メニュー: `Farmware > World Generation > Analysis > Analyze Distribution`
 - 実装: `WorldGenerationDistributionAuditMenu`、`BiomeDistributionAnalyzer`
 - PlayMode: 不要。EditModeとPlayModeのどちらからでも開始できるが、比較条件を揃えるためEditModeを推奨する。
 
@@ -222,7 +224,7 @@ Consoleレポートには、次の比較材料を出力する。
 
 ### 2.5 Analyze Geology Distribution
 
-- メニュー: `Farmware > World Generation > Analyze Geology Distribution`
+- メニュー: `Farmware > World Generation > Analysis > Analyze Geology Distribution`
 - 実装: `GeologyDistributionAuditMenu`、`GeologyDistributionAnalyzer`
 - PlayMode: 不要。既定ではバックグラウンドで実行する。
 
@@ -241,7 +243,7 @@ Consoleレポートには、次の比較材料を出力する。
 
 ### 2.6 Analyze Animal Population
 
-- メニュー: `Farmware > World Generation > Analyze Animal Population`
+- メニュー: `Farmware > World Generation > Analysis > Analyze Animal Population`
 - 実装: `AnimalPopulationDistributionAuditMenu`、`AnimalPopulationDistributionAnalyzer`
 - PlayMode: 不要。既定ではバックグラウンドで実行する。
 
@@ -262,7 +264,7 @@ Consoleレポートには、次の比較材料を出力する。
 
 ### 2.7 Analyze Hydrology Distribution
 
-- メニュー: `Farmware > World Generation > Analyze Hydrology Distribution`
+- メニュー: `Farmware > World Generation > Analysis > Analyze Hydrology Distribution`
 - 実装: `HydrologyDistributionAuditMenu`、`HydrologyDistributionAnalyzer`
 - PlayMode: 不要。既定ではバックグラウンドで実行する。
 
@@ -279,7 +281,7 @@ Consoleレポートには、次の比較材料を出力する。
 
 ### 2.8 Analyze Derived Hydrology Distribution
 
-- メニュー: `Farmware > World Generation > Analyze Derived Hydrology Distribution`
+- メニュー: `Farmware > World Generation > Analysis > Analyze Derived Hydrology Distribution`
 - 実装: `HydrologyDistributionAuditMenu`、`DerivedHydrologyDistributionAnalyzer`、`HydrologyDiagnosticChunk`
 - PlayMode: 不要。既定ではバックグラウンドで実行する。
 
@@ -400,7 +402,7 @@ Projectビューの`Create > Farmware > Terrain Tile Art Generation Settings`か
 
 ### 2.11 Open Terrain Tile Inspection Map
 
-- メニュー: `Farmware > World Generation > Open Terrain Tile Inspection Map`
+- メニュー: `Farmware > World Generation > Inspection Scenes > Open Terrain Tile Inspection Map`
 - 実装: `TerrainTileArtInspectionMapBuilder`
 - PlayMode: 不要。EditModeでSceneを構築し、Gameビューで確認する。
 - 出力: `Assets/Scenes/Development/TerrainTileArtInspection.unity`
@@ -417,7 +419,7 @@ Projectビューの`Create > Farmware > Terrain Tile Art Generation Settings`か
 - 淡水・海水は穴全体を覆う1枚のShader描画面を使い、上端3 pxだけをクリップして`GroundTop`より低い水面を表す。Underwater床ありでは4段目から元色の仮`GroundTop`と代表物を水越しに表示し、青Overlayを実表示深度45 pxでAlpha 50%まで連続変化させる。床なしではDeepSeaの内容を描画せず、現在材質の`Face`を6段目まで下地として続け、青Overlayを実表示深度93 pxでAlpha 100%まで連続変化させる。水域へ黒OverlayやRGB暗化は重ねない。マグマ穴は全段Alpha 100%で重ね、1段目から背後を隠す。
 - 水際は画面手前辺を除き、奥・左・右のGround接触位置へ太さ1 pxの仮波線をU字状に配置する。専用Shaderが2色の2px帯を毎秒8px、整数Pixel単位で流す。Play Modeで流れ、3 px低い水面への追従、手前辺に線がないことを確認する。仮配色の品質は完成素材の合否判定に含めない。
 
-メニュー実行前に、設定アセット、代表5材質の全入力と可変配列、各材質の必要な境界生成物、全入力の16×16 px・Import設定、淡水・海水・マグマの仮Fallback Sprite、連続深度Shader、水際波線Shader、Wall折れ目影Shaderを検証する。境界なし材質は生成PNG 0枚を正常として扱い、`GrassLoam`はGround用境界16枚と暗化有効時のWall用境界16枚を要求する。実行時に乾燥崖用1種類、水深用3種類、水際波線用4種類、Wall折れ目影用1種類の計9 Materialを`Assets/Farmware/Art/WorldGeneration/Generated/Inspection/`へ再現可能に生成する。不足があればSceneを閉じず、先にInspectorから対象材質を再生成または不足Assetを復元するよう案内する。
+メニュー実行前に、設定アセット、代表5材質の全入力と可変配列、各材質の必要な境界生成物、境界生成物を持つ材質の現在入力と最終正常生成のFingerprint一致、全入力の16×16 px・Import設定、淡水・海水・マグマの仮Fallback Sprite、連続深度Shader、水際波線Shader、Wall折れ目影Shaderを検証する。境界なし材質は生成PNG 0枚を正常として扱い、現在の`GroundTop`と`Face`を直接読むためFingerprint不一致だけでは拒否しない。`GrassLoam`はGround用境界16枚と暗化有効時のWall用境界16枚を要求する。境界あり材質の画像内容、配列順、暗化設定などが生成後に変わってFingerprintが一致しない場合は、枚数が同じでも古い合成結果を受理せず再生成を要求する。実行時に乾燥崖用1種類、水深用3種類、水際波線用4種類、Wall折れ目影用1種類の計9 Materialを`Assets/Farmware/Art/WorldGeneration/Generated/Inspection/`へ再現可能に生成する。不足があればSceneを閉じず、先にInspectorから対象材質を再生成または不足Assetを復元するよう案内する。
 
 未保存Sceneがある場合は保存確認を表示し、キャンセル時は何も変更しない。続行時は固定検品Sceneを新規構築して同じパスへ保存し、そのSceneを開いたままにする。これは生成物なのでSceneへ手修正を加えず、素材または配置規則を変えた場合はメニューを再実行する。
 
@@ -440,7 +442,7 @@ Projectビューの`Create > Farmware > Terrain Tile Art Generation Settings`か
 
 ### 2.12 Open Water Reflection Comparison
 
-- メニュー: `Farmware > World Generation > Open Water Reflection Comparison`
+- メニュー: `Farmware > World Generation > Inspection Scenes > Open Water Reflection Comparison`
 - 実装: `TerrainWaterReflectionComparisonMapBuilder`
 - PlayMode: 反射像と1 px波線の整数Pixelアニメーション確認時に使用する。
 - 出力: `Assets/Scenes/Development/TerrainWaterReflectionComparison.unity`
@@ -449,7 +451,7 @@ Projectビューの`Create > Farmware > Terrain Tile Art Generation Settings`か
 
 同じGrassLoam岸、2段Wall、横5×手前方向4セルの淡水を左右へ並べ、左を反射なし、右を反射ありとして垂直面反射Proxy方式を比較する。右区画ではWallの各`Face`と同じSpriteを水際の手前へ上下反転して置き、縦0.75倍、最大深度32 px、最大Alpha 0.22、左右0／+1／0／-1 pxを毎秒4 pxで切り替える。水平な`GroundTop`／`WallTop`、水中床、固定接地影、動的影、UIにはProxyを作らない。反射Proxyと両区画の1 px波線は`WaterSurface` Sorting Layerへ置き、波線を反射より後に描く。
 
-メニュー実行時に`WaterSurface` Sorting Layerが`Default`より後にあること、GrassLoam、淡水仮Sprite、既存波線Material、反射Shaderを検証する。反射Materialは`Assets/Farmware/Art/WorldGeneration/Generated/Inspection/WaterSurfaceReflection.mat`へ再現可能に生成する。不足やShaderエラーがある場合は、現在Sceneを比較Sceneへ置き換えずに停止する。Camera Sorting Layer Textureや追加の画面コピーは使用しない。
+メニュー実行時に`WaterSurface` Sorting Layerが`Default`より後にあること、GrassLoam、淡水仮Sprite、既存波線Material、反射Shaderを検証する。反射ShaderはURP 2D Spriteと同じ頂点反転処理で`SpriteRenderer.flipY`をObject座標へ適用してからWorld座標へ変換する。反射Materialは`Assets/Farmware/Art/WorldGeneration/Generated/Inspection/WaterSurfaceReflection.mat`へ再現可能に生成する。不足やShaderエラーがある場合は、現在Sceneを比較Sceneへ置き換えずに停止する。Camera Sorting Layer Textureや追加の画面コピーは使用しない。
 
 #### 確認手順
 
@@ -463,7 +465,7 @@ Projectビューの`Create > Farmware > Terrain Tile Art Generation Settings`か
 
 ### 2.13 Open Wall Surface Darken Comparison
 
-- メニュー: `Farmware > World Generation > Open Wall Surface Darken Comparison`
+- メニュー: `Farmware > World Generation > Inspection Scenes > Open Wall Surface Darken Comparison`
 - 実装: `TerrainTileArtInspectionMapBuilder`
 - PlayMode: 不要。EditModeで比較Sceneを構築し、Gameビューで確認する。
 - 出力: `Assets/Scenes/Development/TerrainWallSurfaceDarkenComparison.unity`
@@ -483,8 +485,8 @@ Projectビューの`Create > Farmware > Terrain Tile Art Generation Settings`か
 
 ### 2.14 Generate／Open Boundary Highlight Art
 
-- 生成メニュー: `Farmware > World Generation > Generate Boundary Highlight Art`
-- 検品メニュー: `Farmware > World Generation > Open Boundary Highlight Inspection Map`
+- 生成メニュー: `Farmware > World Generation > Generation > Generate Boundary Highlight Art`
+- 検品メニュー: `Farmware > World Generation > Inspection Scenes > Open Boundary Highlight Inspection Map`
 - 実装: `TerrainBoundaryHighlightArtGenerator`、`TerrainBoundaryHighlightInspectionMapBuilder`
 - 出力PNG: `Assets/Farmware/Art/WorldGeneration/Terrain/Highlights/terrain_boundary_highlights.png`
 - 出力Atlas: `Assets/Farmware/Art/WorldGeneration/Atlases/BoundaryHighlightAtlas.spriteatlasv2`
@@ -506,7 +508,7 @@ Runtimeの8近傍47状態と同じ特徴マスクから、旧方式の全材質�
 
 ### 2.15 Open Wall Shadow Comparison
 
-- メニュー: `Farmware > World Generation > Open Wall Shadow Comparison`
+- メニュー: `Farmware > World Generation > Inspection Scenes > Open Wall Shadow Comparison`
 - 実装: `TerrainWallShadowComparisonMapBuilder`
 - PlayMode: 必要。EditModeで比較Sceneを構築した後、PlayModeのGameビューでLight 2Dに追従する影を確認する。
 - 出力: `Assets/Scenes/Development/TerrainWallShadowComparison.unity`
@@ -529,7 +531,7 @@ Runtimeの8近傍47状態と同じ特徴マスクから、旧方式の全材質�
 
 ### 2.16 Open Wall Edge Cue Comparison
 
-- メニュー: `Farmware > World Generation > Open Wall Edge Cue Comparison`
+- メニュー: `Farmware > World Generation > Inspection Scenes > Open Wall Edge Cue Comparison`
 - 実装: `TerrainWallShadowComparisonMapBuilder`
 - PlayMode: 必要。EditModeで比較Sceneを構築した後、PlayModeのGameビューで共通の動的影も確認する。
 - 出力: `Assets/Scenes/Development/TerrainWallEdgeCueComparison.unity`

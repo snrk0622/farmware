@@ -39,7 +39,10 @@ Shader "Farmware/Development/Water Surface Reflection Proxy"
             #pragma vertex Vert
             #pragma fragment Frag
 
-            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Shaders/2D/Include/Core2D.hlsl"
+
+            // SpriteRenderer.flipX／flipYがInstancing有効時にも各Rendererの値を使えるようにします。
+            #pragma multi_compile_instancing
 
             /// SpriteRendererから受け取る頂点位置、Sprite Atlas UV、頂点色です。
             struct Attributes
@@ -47,6 +50,7 @@ Shader "Farmware/Development/Water Surface Reflection Proxy"
                 float4 positionOS : POSITION;
                 float2 uv : TEXCOORD0;
                 half4 color : COLOR;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
             /// Fragment処理へ渡す画面位置、World位置、Sprite UV、乗算色です。
@@ -56,6 +60,7 @@ Shader "Farmware/Development/Water Surface Reflection Proxy"
                 float3 positionWS : TEXCOORD0;
                 float2 uv : TEXCOORD1;
                 half4 color : COLOR;
+                UNITY_VERTEX_OUTPUT_STEREO
             };
 
             TEXTURE2D(_MainTex);
@@ -74,7 +79,16 @@ Shader "Farmware/Development/Water Surface Reflection Proxy"
             /// 反射ProxyをWorld空間へ変換し、左右だけを整数Pixel単位で揺らします。
             Varyings Vert(Attributes input)
             {
-                Varyings output;
+                Varyings output = (Varyings)0;
+                UNITY_SETUP_INSTANCE_ID(input);
+                UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
+                SetUpSpriteInstanceProperties();
+
+                // SpriteRenderer.flipYをObject座標へ適用してからWorld座標へ変換します。
+                // 反射Proxyは正のTransform Scaleを保ったままflipYを使うため、この処理がないと模様だけが上下反転しません。
+                input.positionOS.xyz = UnityFlipSprite(
+                    input.positionOS.xyz,
+                    unity_SpriteProps.xy);
                 float3 positionWS = TransformObjectToWorld(input.positionOS.xyz);
 
                 // 0、+1、0、-1pxを段階的に繰り返し、サブPixel補間によるドットのぼけを避けます。
