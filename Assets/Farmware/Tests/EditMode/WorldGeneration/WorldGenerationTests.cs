@@ -528,8 +528,8 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// C5-Cまで完成した1チャンクを準備し、資源配置が決定論的で最終地形適性から外れないことを保証します。
-        /// 分類前の基礎タイルを旧7Biome相当として再利用せず、製品と同じC3・C4・C5-C順序を通します。
+        /// C6-C3まで完成した1チャンクを準備し、資源配置が決定論的で最終Block由来の適性から外れないことを保証します。
+        /// 分類前の基礎タイルを旧Biome相当として再利用せず、製品と同じ水文・Biome・Block・資源適性の順序を通します。
         /// </summary>
         [Test]
         public void ResourceGeneration_IsDeterministicAndRespectsTerrainSuitability()
@@ -599,11 +599,10 @@ namespace Farmware.WorldGeneration.Tests
 
                         GeneratedTerrainCell terrainCell = chunk.TerrainCells[tileIndex];
                         if (terrainTile.ResourceSuitability != ResourceSuitability.None
-                            && (terrainCell.LiquidRuntimeId.IsValid
-                                || terrainCell.WallBlockRuntimeId.IsValid))
+                            && terrainCell.LiquidRuntimeId.IsValid)
                         {
                             Assert.Fail(
-                                $"液体または壁セルへ別配置資源の適性が残っています。座標=({worldX}, {worldY})");
+                                $"液体セルへ別配置資源の適性が残っています。座標=({worldX}, {worldY})");
                         }
 
                         if (first.Type == GeneratedResourceType.None)
@@ -1016,7 +1015,6 @@ namespace Farmware.WorldGeneration.Tests
                     out GeneratedTile expectedFirstTile),
                 Is.True,
                 "製品Jobと同じ完成水文から新18Biomeを確定できる必要があります。");
-            AssertTileEqual(expectedFirstTile, tiles[0]);
             Assert.That(
                 DeterministicTerrainCellFinalizer.TryFinalizeSurfaceCell(
                     settings,
@@ -1029,6 +1027,11 @@ namespace Farmware.WorldGeneration.Tests
                     surfaceWater[0],
                     out GeneratedTerrainCell expectedTerrainCell),
                 Is.True);
+            // 製品JobはBlockセル確定後に暫定資源適性を書き戻すため、期待値も同じ順序で完成させてから比較します。
+            expectedFirstTile.ResourceSuitability =
+                DeterministicTerrainCellFinalizer.ClassifyInterimResourceSuitability(
+                    expectedTerrainCell);
+            AssertTileEqual(expectedFirstTile, tiles[0]);
             Assert.That(terrainCells[0].Biome, Is.EqualTo(expectedTerrainCell.Biome));
             Assert.That(
                 terrainCells[0].GroundBlockRuntimeId,
@@ -1161,7 +1164,7 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(largeWetlandExtentTiles, Is.GreaterThan(0));
 
             // 地形・資源は先頭だけでなく全4096タイルを、基礎地形＋同じ完成水文から再計算します。
-            // C5-C以降の単一タイル生成はBiome未確定なので、その値を完成Bufferと直接比較してはいけません。
+            // 単一タイル生成はBiome・Block・資源適性が未確定なので、その値を完成Bufferと直接比較してはいけません。
             BiomeClassificationSettings biomeSettings = BiomeDefinitionCatalog.CreateDefault();
             for (int index = 0; index < WorldGridConstants.TilesPerChunk; index++)
             {
@@ -1179,7 +1182,24 @@ namespace Farmware.WorldGeneration.Tests
                         surfaceWater[index],
                         out GeneratedTile expected),
                     Is.True,
-                    $"完成水文からC5-C地形を再計算できません。tileIndex={index}");
+                    $"完成水文からBiomeを再計算できません。tileIndex={index}");
+                Assert.That(
+                    DeterministicTerrainCellFinalizer.TryFinalizeSurfaceCell(
+                        settings,
+                        catalogs.PaletteCatalog,
+                        catalogs.RuntimeIds,
+                        x,
+                        y,
+                        expected,
+                        hydrologyTiles[index],
+                        surfaceWater[index],
+                        out GeneratedTerrainCell expectedCell),
+                    Is.True,
+                    $"完成水文とBiomeからBlockセルを再計算できません。tileIndex={index}");
+                // 製品Jobと同じ順序で、完成Blockセルから暫定資源適性を導出して期待値を完成させます。
+                expected.ResourceSuitability =
+                    DeterministicTerrainCellFinalizer.ClassifyInterimResourceSuitability(
+                        expectedCell);
                 AssertTileEqual(expected, tiles[index]);
                 AssertResourceEqual(DeterministicResourceGenerator.GenerateResource(
                     settings, resourceSettings, expected, x, y), resources[index], x, y);

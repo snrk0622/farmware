@@ -624,6 +624,7 @@ namespace Farmware.WorldGeneration.Tests
                 manager.SetComponentData(chunk, new ChunkGenerationStatus { Phase = ChunkGenerationPhase.Queued });
                 manager.AddComponent<ChunkGenerationRequest>(chunk);
                 manager.GetBuffer<GeneratedTile>(chunk).Clear();
+                manager.GetBuffer<GeneratedTerrainCell>(chunk).Clear();
                 manager.GetBuffer<GeneratedResourceTile>(chunk).Clear();
 
                 SystemHandle generation = world.GetOrCreateSystem<ChunkGenerationSystem>();
