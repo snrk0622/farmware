@@ -477,10 +477,10 @@ Camera:
   m_LensShift: {x: 0, y: 0}
   m_NormalizedViewPortRect:
     serializedVersion: 2
-    x: 0
-    y: 0
-    width: 1
-    height: 1
+    x: 0.06448683
+    y: 0.03047619
+    width: 0.87193465
+    height: 1.0285714
   near clip plane: 0.3
   far clip plane: 1000
   field of view: 34
@@ -1175,7 +1175,7 @@ Tilemap:
   m_TileColorArray: []
   m_TileObjectToInstantiateArray: []
   m_AnimationFrameRate: 1
-  m_Color: {r: 1, g: 1, b: 1, a: 1}
+  m_Color: {r: 0.85, g: 0.85, b: 0.85, a: 1}
   m_Origin: {x: 0, y: 0, z: 0}
   m_Size: {x: 0, y: 0, z: 1}
   m_TileAnchor: {x: 0.5, y: 0.5, z: 0}
@@ -1536,20 +1536,20 @@ MonoBehaviour:
   saltWaterAnimationTile: {fileID: 11400000, guid: 4c4ec2429210742598bd813c711dfa95, type: 2}
   magmaAnimationTile: {fileID: 11400000, guid: 9180a084fe52e4ce88e81809363adeb4, type: 2}
   boundaryHighlightSprites:
-  - {fileID: -1204691129, guid: 2ae884cf4c0924fabbec0498ef250e81, type: 3}
-  - {fileID: -1022751542, guid: 2ae884cf4c0924fabbec0498ef250e81, type: 3}
-  - {fileID: 1323801909, guid: 2ae884cf4c0924fabbec0498ef250e81, type: 3}
-  - {fileID: -416044112, guid: 2ae884cf4c0924fabbec0498ef250e81, type: 3}
-  - {fileID: -1532949657, guid: 2ae884cf4c0924fabbec0498ef250e81, type: 3}
-  - {fileID: -9220497, guid: 2ae884cf4c0924fabbec0498ef250e81, type: 3}
-  - {fileID: 1150855527, guid: 2ae884cf4c0924fabbec0498ef250e81, type: 3}
-  - {fileID: 1439801550, guid: 2ae884cf4c0924fabbec0498ef250e81, type: 3}
-  - {fileID: -1415454787, guid: 2ae884cf4c0924fabbec0498ef250e81, type: 3}
-  - {fileID: 1657549010, guid: 2ae884cf4c0924fabbec0498ef250e81, type: 3}
-  - {fileID: 914847261, guid: 2ae884cf4c0924fabbec0498ef250e81, type: 3}
-  - {fileID: 1058550204, guid: 2ae884cf4c0924fabbec0498ef250e81, type: 3}
-  - {fileID: 1736407998, guid: 2ae884cf4c0924fabbec0498ef250e81, type: 3}
-  - {fileID: 1149981134, guid: 2ae884cf4c0924fabbec0498ef250e81, type: 3}
+  - {fileID: -1676076990, guid: 2ae884cf4c0924fabbec0498ef250e81, type: 3}
+  - {fileID: -1516053625, guid: 2ae884cf4c0924fabbec0498ef250e81, type: 3}
+  - {fileID: 576740538, guid: 2ae884cf4c0924fabbec0498ef250e81, type: 3}
+  - {fileID: -17753885, guid: 2ae884cf4c0924fabbec0498ef250e81, type: 3}
+  - {fileID: 147848088, guid: 2ae884cf4c0924fabbec0498ef250e81, type: 3}
+  - {fileID: 1617769816, guid: 2ae884cf4c0924fabbec0498ef250e81, type: 3}
+  - {fileID: -121386817, guid: 2ae884cf4c0924fabbec0498ef250e81, type: 3}
+  - {fileID: -2110902757, guid: 2ae884cf4c0924fabbec0498ef250e81, type: 3}
+  - {fileID: 1435859952, guid: 2ae884cf4c0924fabbec0498ef250e81, type: 3}
+  - {fileID: -1957173710, guid: 2ae884cf4c0924fabbec0498ef250e81, type: 3}
+  - {fileID: -19647923, guid: 2ae884cf4c0924fabbec0498ef250e81, type: 3}
+  - {fileID: 1556110917, guid: 2ae884cf4c0924fabbec0498ef250e81, type: 3}
+  - {fileID: -715843991, guid: 2ae884cf4c0924fabbec0498ef250e81, type: 3}
+  - {fileID: 392472039, guid: 2ae884cf4c0924fabbec0498ef250e81, type: 3}
   boundaryHighlightOpacity: 0.2
   treeResourceTile: {fileID: 11400000, guid: d0ed51681421f401c8cbd24b40cc37aa, type: 2}
   stoneResourceTile: {fileID: 11400000, guid: dd83e286027f74f4587d09fe3dc7e45d, type: 2}

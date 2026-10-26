@@ -246,7 +246,7 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>
         /// Unityメニューから、現在のScene作業状態を保護しながらフォールバック表示付きマップ生成Sceneを構築します。
         /// </summary>
-        [MenuItem("Farmware/World Generation/Build Fallback Map Prototype")]
+        [MenuItem("Farmware/World Generation/Generation/Build Fallback Map Prototype")]
         public static void BuildFromMenu()
         {
             RunInteractiveBuild(
@@ -373,8 +373,8 @@ namespace Farmware.WorldGeneration.Editor
                 DeleteObsoleteFallbackTile(legacyName + "Sandy");
             }
 
-            // ユーザー制作の224×16画像を、Sprite Editorの公式Data Providerで14枚へ安全に分割します。
-            ConfigureBoundaryHighlightSpriteSheet();
+            // 14基本形は論理マスクから再現可能に生成し、画像順と47接続選択の対応を常に一致させます。
+            TerrainBoundaryHighlightArtGenerator.GenerateOrUpdateSpriteSheet();
 
             // 本番PNG自体は書き換えず、Importerと専用Tileだけを冪等に設定します。
             // これを毎回行うことで、構築ツールの再実行後もFallback岩壁へ参照が戻りません。
@@ -408,7 +408,8 @@ namespace Farmware.WorldGeneration.Editor
                 LoadRequiredFallbackAnimatedTile("SaltWaterAnimation");
             AnimatedTile magmaAnimationTile =
                 LoadRequiredFallbackAnimatedTile("MagmaAnimation");
-            Sprite[] boundaryHighlightSprites = LoadRequiredBoundaryHighlightSprites();
+            Sprite[] boundaryHighlightSprites =
+                TerrainBoundaryHighlightArtGenerator.LoadRequiredSprites();
 
             SceneAsset settingsSubSceneAsset = CreateOrUpdateSettingsSubScene();
             ConfigureMainScene(
@@ -1117,150 +1118,6 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>
-        /// 境界ハイライト画像をPoint・PPU 16のMultiple Spriteへ設定し、左から右へ14区画を作ります。
-        /// 既に正しい区画がある場合はSprite IDを維持し、Scene参照やAtlas参照の不要な変更を防ぎます。
-        /// </summary>
-        /// <exception cref="InvalidOperationException">画像寸法、Importer、編集能力のいずれかが不正な場合に送出します。</exception>
-        private static void ConfigureBoundaryHighlightSpriteSheet()
-        {
-            string texturePath = WorldGenerationSpriteAtlasBuilder.BoundaryHighlightTexturePath;
-            AssetDatabase.ImportAsset(texturePath, ImportAssetOptions.ForceSynchronousImport);
-            Texture2D texture = AssetDatabase.LoadAssetAtPath<Texture2D>(texturePath);
-            if (texture == null || texture.width != 224 || texture.height != 16)
-            {
-                throw new InvalidOperationException(
-                    $"境界ハイライト画像は224×16ピクセルで配置してください: {texturePath}");
-            }
-
-            TextureImporter importer = AssetImporter.GetAtPath(texturePath) as TextureImporter;
-            if (importer == null)
-            {
-                throw new InvalidOperationException(
-                    $"境界ハイライト画像のTextureImporterを取得できません: {texturePath}");
-            }
-
-            importer.textureType = TextureImporterType.Sprite;
-            importer.spriteImportMode = SpriteImportMode.Multiple;
-            importer.spritePixelsPerUnit = AssetsPixelsPerUnit;
-            importer.filterMode = FilterMode.Point;
-            importer.mipmapEnabled = false;
-            importer.textureCompression = TextureImporterCompression.Uncompressed;
-            importer.alphaIsTransparency = true;
-            importer.wrapMode = TextureWrapMode.Clamp;
-            importer.isReadable = false;
-            importer.npotScale = TextureImporterNPOTScale.None;
-            TextureImporterSettings importerSettings = new TextureImporterSettings();
-            importer.ReadTextureSettings(importerSettings);
-            importerSettings.spriteMeshType = SpriteMeshType.FullRect;
-            importerSettings.spriteGenerateFallbackPhysicsShape = false;
-            importer.SetTextureSettings(importerSettings);
-
-            // Texture全体の設定を先に確定し、Multiple Sprite編集に対応するData Providerを再取得します。
-            importer.SaveAndReimport();
-            SpriteDataProviderFactories factories = new SpriteDataProviderFactories();
-            factories.Init();
-            ISpriteEditorDataProvider dataProvider =
-                factories.GetSpriteEditorDataProviderFromObject(importer);
-            if (dataProvider == null)
-            {
-                throw new InvalidOperationException(
-                    $"境界ハイライト画像のSprite Editor Data Providerを取得できません: {texturePath}");
-            }
-
-            dataProvider.InitSpriteEditorDataProvider();
-            ISpriteFrameEditCapability editCapability =
-                dataProvider.GetDataProvider<ISpriteFrameEditCapability>();
-            if (editCapability == null)
-            {
-                throw new InvalidOperationException(
-                    $"境界ハイライト画像のSprite編集能力を確認できません: {texturePath}");
-            }
-
-            var capability = editCapability.GetEditCapability();
-            bool supportsRequiredEdits =
-                capability.HasCapability(EEditCapability.CreateAndDeleteSprite)
-                && capability.HasCapability(EEditCapability.EditSpriteName)
-                && capability.HasCapability(EEditCapability.EditSpriteRect)
-                && capability.HasCapability(EEditCapability.EditPivot);
-            if (!supportsRequiredEdits)
-            {
-                // 編集能力を満たさないImporterへ書き込むとSprite IDを破損する可能性があるため、変更せず中断します。
-                throw new InvalidOperationException(
-                    $"境界ハイライト画像の分割に必要なSprite編集能力がありません: {texturePath}");
-            }
-
-            string[] expectedNames =
-                WorldGenerationSpriteAtlasBuilder.GetExpectedBoundaryHighlightSpriteNames();
-            SpriteRect[] existingRects = dataProvider.GetSpriteRects();
-            var configuredRects = new SpriteRect[expectedNames.Length];
-            var nameFileIdPairs = new List<SpriteNameFileIdPair>(expectedNames.Length);
-            for (int index = 0; index < configuredRects.Length; index++)
-            {
-                Rect expectedRect = new Rect(index * 16f, 0f, 16f, 16f);
-                GUID spriteId = FindExistingSpriteId(existingRects, expectedRect);
-                if (spriteId.Empty())
-                {
-                    spriteId = GUID.Generate();
-                }
-
-                configuredRects[index] = new SpriteRect
-                {
-                    name = expectedNames[index],
-                    rect = expectedRect,
-                    alignment = SpriteAlignment.Center,
-                    pivot = new Vector2(0.5f, 0.5f),
-                    border = Vector4.zero,
-                    spriteID = spriteId
-                };
-                nameFileIdPairs.Add(new SpriteNameFileIdPair(expectedNames[index], spriteId));
-            }
-
-            ISpriteNameFileIdDataProvider nameFileIdProvider =
-                dataProvider.GetDataProvider<ISpriteNameFileIdDataProvider>();
-            if (nameFileIdProvider == null)
-            {
-                throw new InvalidOperationException(
-                    $"境界ハイライト画像のSprite名とIDを保存できません: {texturePath}");
-            }
-
-            dataProvider.SetSpriteRects(configuredRects);
-            nameFileIdProvider.SetNameFileIdPairs(nameFileIdPairs);
-            dataProvider.Apply();
-            importer.SaveAndReimport();
-        }
-
-        /// <summary>
-        /// 既存のSprite区画から同じ位置・寸法のIDを探し、再構築時にも参照を維持します。
-        /// </summary>
-        /// <param name="existingRects">Importerへ現在保存されているSprite区画です。</param>
-        /// <param name="expectedRect">今回作成する16×16区画です。</param>
-        /// <returns>同じ区画があれば既存ID、なければ空IDです。</returns>
-        private static GUID FindExistingSpriteId(
-            SpriteRect[] existingRects,
-            Rect expectedRect)
-        {
-            if (existingRects == null)
-            {
-                return default;
-            }
-
-            for (int index = 0; index < existingRects.Length; index++)
-            {
-                Rect existingRect = existingRects[index].rect;
-                bool isSameRect = Mathf.Approximately(existingRect.x, expectedRect.x)
-                    && Mathf.Approximately(existingRect.y, expectedRect.y)
-                    && Mathf.Approximately(existingRect.width, expectedRect.width)
-                    && Mathf.Approximately(existingRect.height, expectedRect.height);
-                if (isSameRect)
-                {
-                    return existingRects[index].spriteID;
-                }
-            }
-
-            return default;
-        }
-
-        /// <summary>
         /// 全Textureの再インポート後に、指定名のフォールバックTileをAssetDatabaseから読み直します。
         /// </summary>
         /// <param name="assetName">読み込むTileアセットの拡張子を除いた名前です。</param>
@@ -1304,69 +1161,6 @@ namespace Farmware.WorldGeneration.Editor
             }
 
             return tile;
-        }
-
-        /// <summary>
-        /// 分割済みの境界ハイライトSpriteを、画像の左から右への14基本形順で読み込みます。
-        /// </summary>
-        /// <returns>Shape01〜Shape14に対応する14枚のSprite配列です。</returns>
-        /// <exception cref="InvalidOperationException">Spriteの欠落、重複、別Texture参照がある場合に送出します。</exception>
-        private static Sprite[] LoadRequiredBoundaryHighlightSprites()
-        {
-            string texturePath = WorldGenerationSpriteAtlasBuilder.BoundaryHighlightTexturePath;
-            string[] expectedNames =
-                WorldGenerationSpriteAtlasBuilder.GetExpectedBoundaryHighlightSpriteNames();
-            UnityEngine.Object[] allAssets = AssetDatabase.LoadAllAssetsAtPath(texturePath);
-            var sprites = new Sprite[expectedNames.Length];
-            int loadedSpriteCount = 0;
-
-            for (int assetIndex = 0; assetIndex < allAssets.Length; assetIndex++)
-            {
-                if (allAssets[assetIndex] is Sprite sprite)
-                {
-                    loadedSpriteCount++;
-                    for (int expectedIndex = 0; expectedIndex < expectedNames.Length; expectedIndex++)
-                    {
-                        if (string.Equals(
-                            sprite.name,
-                            expectedNames[expectedIndex],
-                            StringComparison.Ordinal))
-                        {
-                            if (sprites[expectedIndex] != null)
-                            {
-                                throw new InvalidOperationException(
-                                    $"境界ハイライトSprite名が重複しています: {sprite.name}");
-                            }
-
-                            sprites[expectedIndex] = sprite;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            if (loadedSpriteCount != expectedNames.Length)
-            {
-                throw new InvalidOperationException(
-                    $"境界ハイライトSpriteは{expectedNames.Length}枚必要です: "
-                    + $"{texturePath}, actual={loadedSpriteCount}");
-            }
-
-            for (int index = 0; index < sprites.Length; index++)
-            {
-                if (sprites[index] == null
-                    || !string.Equals(
-                        AssetDatabase.GetAssetPath(sprites[index]),
-                        texturePath,
-                        StringComparison.Ordinal))
-                {
-                    throw new InvalidOperationException(
-                        $"境界ハイライトSpriteを順番どおり読み込めません: "
-                        + $"index={index}, expected={expectedNames[index]}");
-                }
-            }
-
-            return sprites;
         }
 
         /// <summary>
@@ -1689,6 +1483,15 @@ namespace Farmware.WorldGeneration.Editor
                 0f,
                 TerrainLayerPresentationUtility.RockWallElevationInCells,
                 0f);
+            // ハイライトを白のまま暗いWallへ重ねると輪郭だけが浮くため、Wall上面と同じ既定係数をRGBへ掛けます。
+            // Tile自身の20% Alphaは維持するので、合成済みのWall全体を0.85倍した場合と同じ色関係になります。
+            float wallBoundaryHighlightDarkenFactor =
+                TerrainMaterialArtSource.DefaultWallDarkenFactor;
+            rockWallBoundaryHighlightTilemap.color = new Color(
+                wallBoundaryHighlightDarkenFactor,
+                wallBoundaryHighlightDarkenFactor,
+                wallBoundaryHighlightDarkenFactor,
+                1f);
             ConfigureTilemapRenderer(
                 rockWallBoundaryHighlightTilemapObject,
                 sortingOrder: 4);
@@ -2253,6 +2056,18 @@ namespace Farmware.WorldGeneration.Editor
                 || !Mathf.Approximately(
                     rockWallBoundaryHighlightTilemapTransform.localPosition.y,
                     TerrainLayerPresentationUtility.RockWallElevationInCells)
+                || !Mathf.Approximately(
+                    rockWallBoundaryHighlightTilemapTransform.GetComponent<Tilemap>().color.r,
+                    TerrainMaterialArtSource.DefaultWallDarkenFactor)
+                || !Mathf.Approximately(
+                    rockWallBoundaryHighlightTilemapTransform.GetComponent<Tilemap>().color.g,
+                    TerrainMaterialArtSource.DefaultWallDarkenFactor)
+                || !Mathf.Approximately(
+                    rockWallBoundaryHighlightTilemapTransform.GetComponent<Tilemap>().color.b,
+                    TerrainMaterialArtSource.DefaultWallDarkenFactor)
+                || !Mathf.Approximately(
+                    rockWallBoundaryHighlightTilemapTransform.GetComponent<Tilemap>().color.a,
+                    1f)
                 || rockWallResourceTilemapTransform == null
                 || rockWallResourceTilemapTransform.GetComponent<Tilemap>() == null
                 || rockWallResourceTilemapTransform.GetComponent<TilemapRenderer>() == null

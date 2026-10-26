@@ -12,7 +12,8 @@ namespace Farmware.WorldGeneration.Editor
     public static class AnimalPopulationDistributionAuditMenu
     {
         /// <summary>動物個体群分布監査を開始するUnity Editorメニューパスです。</summary>
-        private const string MenuPath = "Farmware/World Generation/Analyze Animal Population";
+        private const string MenuPath =
+            "Farmware/World Generation/Analysis/Analyze Animal Population";
 
         /// <summary>同じ約100万タイル監査を二重起動しないための実行中フラグです。</summary>
         private static bool isRunning;

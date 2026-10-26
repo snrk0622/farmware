@@ -2358,6 +2358,25 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Is.EqualTo(TerrainLayerPresentationUtility.RockWallElevationInCells)
                     .Within(0.0001f),
                 "岩壁境界ハイライトは岩壁上面と同じ12px上へ移動する必要があります。");
+            // 白いハイライトだけが暗いWallから浮かないよう、専用TilemapのRGBにもWall既定係数を掛けます。
+            // 各Tileが持つ20% Alphaとは役割が異なるため、Tilemap側のAlphaは1のまま維持します。
+            Color rockWallBoundaryHighlightTint = rockWallBoundaryHighlightTilemap.color;
+            Assert.That(
+                rockWallBoundaryHighlightTint.r,
+                Is.EqualTo(0.85f).Within(0.0001f),
+                "Wall境界ハイライトの赤成分へWall既定暗化係数を適用してください。");
+            Assert.That(
+                rockWallBoundaryHighlightTint.g,
+                Is.EqualTo(0.85f).Within(0.0001f),
+                "Wall境界ハイライトの緑成分へWall既定暗化係数を適用してください。");
+            Assert.That(
+                rockWallBoundaryHighlightTint.b,
+                Is.EqualTo(0.85f).Within(0.0001f),
+                "Wall境界ハイライトの青成分へWall既定暗化係数を適用してください。");
+            Assert.That(
+                rockWallBoundaryHighlightTint.a,
+                Is.EqualTo(1f).Within(0.0001f),
+                "Wall境界TilemapのAlphaで、Tile側の20% Alphaを二重に弱めてはいけません。");
 
             FieldInfo boundarySpritesField = typeof(ChunkTilemapPresenter).GetField(
                 "boundaryHighlightSprites",

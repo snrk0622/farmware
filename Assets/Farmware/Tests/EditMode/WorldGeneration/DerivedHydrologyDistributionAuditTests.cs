@@ -45,7 +45,7 @@ namespace Farmware.WorldGeneration.Tests
 
             Assert.That(second.Signature, Is.EqualTo(first.Signature));
             Assert.That(second.Report, Is.EqualTo(first.Report));
-            Assert.That(first.Report, Does.Contain("TERRAIN-01C4-E1b 派生水文分布監査"));
+            Assert.That(first.Report, Does.Contain("派生水文分布監査"));
             Assert.That(first.Report, Does.Contain("SpringStreamTiles="));
             Assert.That(first.Report, Does.Contain("0件を失敗にする固定の合否閾値は設定していません"));
         }

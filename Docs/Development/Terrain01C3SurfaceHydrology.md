@@ -140,7 +140,7 @@ C3-D1の明示負荷テストは415.097秒で成功した。同じ100×100セル
 
 ## 11. C3-D2の複数Seed監査と診断表示
 
-Editorメニュー`Farmware > World Generation > Analyze Hydrology Distribution`は、既定3 Seedの原点周囲5×5チャンクを実ゲームと同じ固定Generatorで生成し、4,800水文セルの流向、終端、集水打切り、渓流・河川、閉鎖流域、固定湖候補、実湖面、越流を集計する。解決済み・打切り・固定湖候補の流域数はSeedと下流終端座標で重複除去し、全固定分類から再実行比較用の64bit署名を作る。Editor停止を避けるためバックグラウンドで実行し、同じ監査の二重起動を拒否する。分布値は調整前後の比較材料であり、件数や面積率の合否閾値は設定しない。
+Editorメニュー`Farmware > World Generation > Analysis > Analyze Hydrology Distribution`は、既定3 Seedの原点周囲5×5チャンクを実ゲームと同じ固定Generatorで生成し、4,800水文セルの流向、終端、集水打切り、渓流・河川、閉鎖流域、固定湖候補、実湖面、越流を集計する。解決済み・打切り・固定湖候補の流域数はSeedと下流終端座標で重複除去し、全固定分類から再実行比較用の64bit署名を作る。Editor停止を避けるためバックグラウンドで実行し、同じ監査の二重起動を拒否する。分布値は調整前後の比較材料であり、件数や面積率の合否閾値は設定しない。
 
 Gameビューの`Debug Visualization > Hydrology`とMap Viewerへ、`Flow Direction`、`Terminal`、`Catchment`、`Surface Water`、`Lake`の5モードを追加した。流向は8方向と終端、終端は`Marine`・`ClosedBasin`・`LongDrainage`、集水は1〜4,096セルの対数色と打切り、表流水は流れなし・`Stream`・`River`、湖は閉鎖流域外・解決済み乾燥流域・打切り流域・固定湖候補・実湖面・越流を個別表示する。打切り流域は固定湖候補ではないことを明示するマゼンタとし、固定湖候補の濃青、実湖面の青、越流のシアンと重ならない。
 

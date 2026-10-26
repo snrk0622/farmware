@@ -112,7 +112,7 @@ namespace Farmware.WorldGeneration.Editor
         private string BuildReport()
         {
             StringBuilder builder = new StringBuilder(1024);
-            builder.AppendLine("[Farmware] TERRAIN-01C4-E1b 派生水文分布監査");
+            builder.AppendLine("[Farmware] 派生水文分布監査");
             builder.Append("Seeds=").Append(SeedCount)
                 .Append(", ChunkRadius=").Append(ChunkRadius)
                 .Append(", Chunks=").AppendLine(TotalChunks.ToString(CultureInfo.InvariantCulture));

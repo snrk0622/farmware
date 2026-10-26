@@ -122,7 +122,7 @@ C4-Cは既存ECS Buffer要素を拡張せず、Persistent生成枠へ21×21の`G
 
 `DerivedHydrologyDistributionAnalyzer`は既存の有限`HydrologyDistributionAuditSettings`を受け取り、Seed、チャンクY、チャンクXの固定順で`HydrologyDiagnosticChunk`を生成・破棄する。水文セルでは地下水接続、地下水最大値、最終湖4区分を、タイルでは自然土壌飽和、泉流、自然冠水、湿原資格、広域湿原規模、2ポテンシャルの最大値を集計する。比較署名には水文セルの絶対座標・地下水・接続bit・最終湖区分と、製品状態ハッシュと同じ関数による表流水・自然水文の全固定値を含める。
 
-Editorメニュー`Farmware > World Generation > Analyze Derived Hydrology Distribution`は既定3 Seedの各原点1チャンクをThreadPoolで生成し、Editor操作を止めずにConsoleへ結果を返す。同じ監査の二重起動だけを無効化し、Scene、Prefab、ECS World、製品生成結果、生成設定、アセットは変更しない。有限試料で分類が0件でも異常終了させず、0件を明示したレポート、境界値テスト、後続C4-E2／E3の可視化を合わせて判断する。
+Editorメニュー`Farmware > World Generation > Analysis > Analyze Derived Hydrology Distribution`は既定3 Seedの各原点1チャンクをThreadPoolで生成し、Editor操作を止めずにConsoleへ結果を返す。同じ監査の二重起動だけを無効化し、Scene、Prefab、ECS World、製品生成結果、生成設定、アセットは変更しない。有限試料で分類が0件でも異常終了させず、0件を明示したレポート、境界値テスト、後続C4-E2／E3の可視化を合わせて判断する。
 
 既定条件では3チャンク、192水文セル、12,288タイルを15.91秒で完走した。地下水接続6セル、自然飽和56タイル、越流淡水湖4セル、自然冠水3,570タイル、湿原資格2,211タイル、広域湿原規模2,688タイルを観測し、最大地下水48,737、最大自然飽和40,236、最大自然冠水64,281、比較署名`28C93E4ACD468FBD`となった。一時湖、恒久塩湖、閉鎖淡水湖、泉流はこの既定試料で0件だが、各分類の生成可能性はC4-Cの境界テストで別に固定している。
 

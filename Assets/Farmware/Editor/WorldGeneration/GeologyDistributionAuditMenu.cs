@@ -15,7 +15,8 @@ namespace Farmware.WorldGeneration.Editor
     public static class GeologyDistributionAuditMenu
     {
         /// <summary>地質分布監査を開始するUnity Editorメニューパスです。</summary>
-        private const string MenuPath = "Farmware/World Generation/Analyze Geology Distribution";
+        private const string MenuPath =
+            "Farmware/World Generation/Analysis/Analyze Geology Distribution";
 
         /// <summary>同じ重い監査を二重起動しないため、実行中だけtrueにするEditorプロセス内フラグです。</summary>
         private static bool isRunning;
@@ -34,7 +35,7 @@ namespace Farmware.WorldGeneration.Editor
             }
 
             isRunning = true;
-            Debug.Log("[Farmware] TERRAIN-01C2 地質分布監査を開始しました。Editor操作は継続できます。");
+            Debug.Log("[Farmware] 地質分布監査を開始しました。Editor操作は継続できます。");
             try
             {
                 WorldGenerationDistributionAuditSettings settings =

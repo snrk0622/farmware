@@ -229,7 +229,7 @@ namespace Farmware.WorldGeneration.Editor
         private string BuildReport()
         {
             StringBuilder builder = new StringBuilder(2048);
-            builder.AppendLine("[Farmware] TERRAIN-01C3-D2 水文分布監査");
+            builder.AppendLine("[Farmware] 水文分布監査");
             builder.Append("Seeds=").Append(SeedCount)
                 .Append(", ChunkRadius=").Append(ChunkRadius)
                 .Append(", Cells=").Append(TotalCells)

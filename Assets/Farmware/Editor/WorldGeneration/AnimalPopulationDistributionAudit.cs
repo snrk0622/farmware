@@ -287,7 +287,7 @@ namespace Farmware.WorldGeneration.Editor
             {
                 // 基礎生成のBiome=Noneを動物適性へ渡すと全候補が消えるため、部分結果へ退行せず監査を失敗させます。
                 throw new InvalidOperationException(
-                    $"動物分布監査のC5-C完成地形を生成できません。region=({regionX},{regionY}), stage={generationStage}");
+                    $"動物分布監査に必要な完成地形を生成できません。region=({regionX},{regionY}), stage={generationStage}");
             }
 
             // 1地域は1論理チャンクと同寸法です。監査終了時に4つのPersistent配列を必ず破棄します。

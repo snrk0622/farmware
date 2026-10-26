@@ -41,7 +41,7 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(first.EstimatedBoundaryLengthInTiles, Is.EqualTo(first.BoundaryEdgeCount * 64L));
             Assert.That(second.Signature, Is.EqualTo(first.Signature));
             Assert.That(second.Report, Is.EqualTo(first.Report));
-            Assert.That(first.Report, Does.Contain("TERRAIN-01C2 地質分布監査"));
+            Assert.That(first.Report, Does.Contain("地質分布監査"));
             Assert.That(first.Report, Does.Contain("合否閾値は設定していません"));
 
             for (GeologyClass geologyClass = GeologyClass.UnconsolidatedSediment;
