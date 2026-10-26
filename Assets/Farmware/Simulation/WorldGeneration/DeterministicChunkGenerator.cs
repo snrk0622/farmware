@@ -1,5 +1,8 @@
 // このファイルは、新Biome分類より前に必要な連続環境・地質・陸海・岩壁候補を決定論的に生成します。
-// ECS Job、C3/C4水文、テストが同じ基礎タイル生成を共有し、最終BiomeはDeterministicBiomeChunkFinalizerが水文完成後に確定します。
+// ECS Job、C3/C4水文、テストが同じ基礎タイル生成を共有し、最終BiomeとBlockセルは水文完成後に確定します。
+
+using Farmware.Simulation;
+using Unity.Entities;
 
 namespace Farmware.WorldGeneration
 {
@@ -126,32 +129,13 @@ namespace Farmware.WorldGeneration
             }
 
             ushort elevation = environment.Elevation;
-            GroundType ground = elevation < settings.SeaLevelThreshold
-                ? GroundType.Water
-                : DeterministicRockWallGenerator.IsRockWallCandidate(
-                    settings,
-                    worldTileX,
-                    worldTileY)
-                    ? GroundType.RockWall
-                    : GroundType.Land;
-            WaterBodyType waterBodyType = ground == GroundType.Water
-                ? WaterBodyType.Sea
-                : WaterBodyType.None;
 
             tile = new GeneratedTile
             {
                 // BiomeはC3/C4の固定水文が完成するまで確定できないため、中間BufferではNoneを明示します。
                 Biome = BiomeId.None,
-                Ground = ground,
-                Soil = SoilType.None,
-                WaterSalinity = waterBodyType == WaterBodyType.Sea
-                    ? WaterSalinity.SaltWater
-                    : WaterSalinity.None,
-                WaterBodyType = waterBodyType,
                 ElevationClass = DeterministicEnvironmentGenerator.ClassifyElevation(elevation, settings),
-                GameplayFlags = ClassifyGameplayFlags(ground),
                 ResourceSuitability = ResourceSuitability.None,
-                MovementCost = ground == GroundType.Land ? (byte)1 : (byte)0,
                 Elevation = elevation,
                 Temperature = environment.BaseTemperature,
                 Moisture = environment.BaseMoisture,
@@ -170,16 +154,20 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>
-        /// 指定チャンクの4096地形、地下水反映済み64水文セル、4096表流水、4096自然水文の安定64bitハッシュを求めます。
+        /// 指定チャンクの4096地形・Blockセル、地下水反映済み64水文セル、4096表流水、4096自然水文の安定64bitハッシュを求めます。
         /// 水文と表流水の有限探索用一時配列を確保し、決定性テストと開発用比較表示に使用します。
         /// </summary>
         /// <param name="settings">ワールド生成設定です。</param>
         /// <param name="biomeSettings">C5の新18Biome Definitionです。</param>
+        /// <param name="paletteCatalog">自然Ground・Wallを選ぶ固定Blockパレットです。</param>
+        /// <param name="terrainRuntimeIds">海水・淡水・マグマを直接設定する解決済みIDです。</param>
         /// <param name="chunkCoordinate">生成結果を比較する論理チャンク座標です。</param>
-        /// <returns>地形、水文セル、表流水、自然土壌飽和の順序と全固定値を反映した64bitハッシュです。</returns>
+        /// <returns>地形、Blockセル、水文セル、表流水、自然土壌飽和の順序と全固定値を反映した64bitハッシュです。</returns>
         public static ulong ComputeChunkHash(
             in WorldGenerationSettings settings,
             in BiomeClassificationSettings biomeSettings,
+            BlobAssetReference<TerrainBlockPaletteCatalogBlob> paletteCatalog,
+            in BuiltInTerrainBlockRuntimeIds terrainRuntimeIds,
             ChunkCoordinate chunkCoordinate)
         {
             ulong hash = 0xCBF29CE484222325UL;
@@ -187,36 +175,10 @@ namespace Farmware.WorldGeneration
             return DeterministicHydrologyGenerator.AppendChunkHash(
                 settings,
                 biomeSettings,
+                paletteCatalog,
+                terrainRuntimeIds,
                 chunkCoordinate,
                 hash);
-        }
-
-        /// <summary>
-        /// 地面種別から通常設備、通常ベルト、橋の配置可否と、橋の耐熱要件を決めます。
-        /// 後続の建築処理がGroundTypeを独自解釈せず、生成済み属性だけを参照できるようにします。
-        /// </summary>
-        /// <param name="ground">分類済みの地面種別です。</param>
-        /// <returns>各配置可否と橋の耐熱要件を表すビットフラグです。</returns>
-        public static TileGameplayFlags ClassifyGameplayFlags(GroundType ground)
-        {
-            switch (ground)
-            {
-                case GroundType.Land:
-                    return TileGameplayFlags.AllowsNormalEquipment
-                        | TileGameplayFlags.AllowsNormalBelt;
-                case GroundType.Water:
-                    // 水上では橋の素材を耐熱性で制限しないため、橋可だけを設定します。
-                    return TileGameplayFlags.AllowsBridge;
-                case GroundType.Magma:
-                    // マグマ上の橋は耐熱性を持つ定義だけに限定できるよう、要件を独立したbitで記録します。
-                    return TileGameplayFlags.AllowsBridge
-                        | TileGameplayFlags.RequiresHeatResistance;
-                case GroundType.RockWall:
-                    return TileGameplayFlags.None;
-                default:
-                    // 予約済みIDや破損データを配置可能地として扱わず、すべて不許可の安全側へ倒します。
-                    return TileGameplayFlags.None;
-            }
         }
 
         /// <summary>
@@ -230,13 +192,8 @@ namespace Farmware.WorldGeneration
             unchecked
             {
                 ulong packedClassifications = (byte)tile.Biome;
-                packedClassifications |= (ulong)(byte)tile.Ground << 8;
-                packedClassifications |= (ulong)(byte)tile.ElevationClass << 16;
-                packedClassifications |= (ulong)(byte)tile.GameplayFlags << 24;
-                packedClassifications |= (ulong)(byte)tile.ResourceSuitability << 32;
-                packedClassifications |= (ulong)tile.MovementCost << 40;
-                packedClassifications |= (ulong)(byte)tile.WaterSalinity << 48;
-                packedClassifications |= (ulong)(byte)tile.WaterBodyType << 56;
+                packedClassifications |= (ulong)(byte)tile.ElevationClass << 8;
+                packedClassifications |= (ulong)(byte)tile.ResourceSuitability << 16;
 
                 ulong packedClimate = tile.Elevation;
                 packedClimate |= (ulong)tile.Temperature << 16;
@@ -249,9 +206,7 @@ namespace Farmware.WorldGeneration
                 packedEnvironment |= (ulong)tile.CoastalInfluence << 48;
 
                 ulong classificationsHash = WorldSeedUtility.Mix64(currentHash ^ packedClassifications);
-                // 既存8分類で64bitを使い切っているため、土壌は独立した混合段階へ加えて配置差分も検出します。
-                ulong soilHash = WorldSeedUtility.Mix64(classificationsHash ^ (byte)tile.Soil);
-                ulong climateHash = WorldSeedUtility.Mix64(soilHash ^ packedClimate);
+                ulong climateHash = WorldSeedUtility.Mix64(classificationsHash ^ packedClimate);
                 ulong environmentHash = WorldSeedUtility.Mix64(climateHash ^ packedEnvironment);
                 ulong volcanicHash = WorldSeedUtility.Mix64(
                     environmentHash ^ tile.VolcanicActivityPotential);

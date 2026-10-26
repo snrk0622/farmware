@@ -72,80 +72,6 @@ namespace Farmware.WorldGeneration
     }
 
     /// <summary>
-    /// 設備・ベルト・橋の配置可否と通行可否へ直接影響する基礎地形種別です。
-    /// 資源候補や地表の見た目を表すSoilTypeとは分離し、物理的な地形ルールだけに使用します。
-    /// </summary>
-    public enum GroundType : byte
-    {
-        /// <summary>通常の建築可能な陸地です。</summary>
-        Land = 0,
-
-        /// <summary>通常設備と通常ベルトは配置不可ですが、橋を配置できる水域です。</summary>
-        Water = 1,
-
-        /// <summary>通常設備、通常ベルト、橋を配置できない岩壁です。</summary>
-        RockWall = 2,
-
-        // ID 3と4は旧Vegetation、旧Sandが使用していたため、既存データの誤読を防ぐ目的で再利用しません。
-        /// <summary>通常設備・通常ベルト・通常移動を拒否し、耐熱橋だけを許可する高温のマグマ地形です。</summary>
-        Magma = 5
-    }
-
-    /// <summary>
-    /// 陸地表面の土壌傾向を表す安定IDです。
-    /// Biomeと組み合わせて資源候補を絞り、Presentationではバイオーム用Base Tileへ色調や模様を重ねるために使用します。
-    /// </summary>
-    public enum SoilType : byte
-    {
-        /// <summary>水域、岩壁、マグマなど、土壌を持たない地形です。</summary>
-        None = 0,
-
-        /// <summary>特定資源へ強く偏らない標準的な土壌です。</summary>
-        Normal = 1,
-
-        /// <summary>樹木や植物系資源の候補になりやすい、湿潤で肥沃な土壌です。</summary>
-        Fertile = 2,
-
-        /// <summary>砂や乾燥地向け資源の候補になりやすい砂質土壌です。</summary>
-        Sandy = 3
-    }
-
-    /// <summary>
-    /// 水域が淡水か海水かを表す安定IDです。
-    /// 採水設備や水生生物はGroundTypeだけでなく、この値を参照して利用可能な水を判定します。
-    /// </summary>
-    public enum WaterSalinity : byte
-    {
-        /// <summary>水域ではない陸地または岩壁です。</summary>
-        None = 0,
-
-        /// <summary>川または池として生成された淡水です。</summary>
-        FreshWater = 1,
-
-        /// <summary>広域の低標高地として生成された海水です。</summary>
-        SaltWater = 2
-    }
-
-    /// <summary>
-    /// 水域の生成由来を表す安定IDです。
-    /// 同じ淡水でも川と池を区別し、将来の魚・設備・見た目の条件へ利用できるようにします。
-    /// </summary>
-    public enum WaterBodyType : byte
-    {
-        /// <summary>水域ではありません。</summary>
-        None = 0,
-
-        /// <summary>連続ノイズの等高線に沿って陸上を横断する川です。</summary>
-        River = 1,
-
-        /// <summary>内陸の低地へまとまって生成される池です。</summary>
-        Pond = 2,
-
-        /// <summary>海面より低い広域地形として生成される海です。</summary>
-        Sea = 3
-    }
-
-    /// <summary>
     /// 連続した標高値を、地面・水域・岩壁の表示状態とは独立して分類した安定値です。
     /// デバッグ表示とBiome候補条件で使用し、河川や岩壁でも元の標高区分を保持します。
     /// </summary>
@@ -165,29 +91,6 @@ namespace Farmware.WorldGeneration
 
         /// <summary>標高54,000以上の高山です。</summary>
         Alpine = 4
-    }
-
-    /// <summary>
-    /// 1タイルに対するゲームルール上の真偽値をビット単位で保持します。
-    /// boolを個別フィールドに並べず、チャンクバッファのメモリ量を抑えるために使用します。
-    /// </summary>
-    [Flags]
-    public enum TileGameplayFlags : byte
-    {
-        /// <summary>特別なフラグを持ちません。</summary>
-        None = 0,
-
-        /// <summary>中央コアを含む通常設備を配置できる地形です。</summary>
-        AllowsNormalEquipment = 1 << 0,
-
-        /// <summary>橋を介さない通常ベルトを配置できる地形です。</summary>
-        AllowsNormalBelt = 1 << 1,
-
-        /// <summary>ベルトなどの上部構造を支える橋を配置できる地形です。</summary>
-        AllowsBridge = 1 << 2,
-
-        /// <summary>橋を配置するとき、橋定義に耐熱性が必要な地形です。AllowsBridgeを持つ場合だけ参照します。</summary>
-        RequiresHeatResistance = 1 << 3
     }
 
     /// <summary>
@@ -751,29 +654,11 @@ namespace Farmware.WorldGeneration
         /// <summary>このタイルが属する初期バイオームの安定IDです。</summary>
         public BiomeId Biome;
 
-        /// <summary>建築やリンク判定に使う基礎地面種別です。</summary>
-        public GroundType Ground;
-
-        /// <summary>陸地の資源適性と表示差分に使う土壌種別です。陸地以外ではNoneです。</summary>
-        public SoilType Soil;
-
-        /// <summary>水域なら淡水または海水、陸地ならNoneです。</summary>
-        public WaterSalinity WaterSalinity;
-
-        /// <summary>水域なら川・池・海の生成由来、陸地ならNoneです。</summary>
-        public WaterBodyType WaterBodyType;
-
         /// <summary>水域や岩壁でも上書きしない、連続標高由来の5段階区分です。</summary>
         public ElevationClass ElevationClass;
 
-        /// <summary>通常設備、通常ベルト、橋の配置可否と、橋の耐熱要件をまとめたビットフラグです。</summary>
-        public TileGameplayFlags GameplayFlags;
-
         /// <summary>Phase 3の資源配置が参照する候補種別のビットフラグです。</summary>
         public ResourceSuitability ResourceSuitability;
-
-        /// <summary>経路探索用の相対移動コストです。0は通常移動不可を表します。</summary>
-        public byte MovementCost;
 
         /// <summary>0〜65535へ正規化した連続標高値です。</summary>
         public ushort Elevation;

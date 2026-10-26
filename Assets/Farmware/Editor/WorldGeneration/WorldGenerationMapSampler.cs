@@ -146,6 +146,27 @@ namespace Farmware.WorldGeneration.Editor
         }
     }
 
+    /// <summary>Map ViewerのHoverへ渡す、同じ代表座標の環境タイルと自然生成Blockセルの値コピーです。</summary>
+    public readonly struct FinalizedTerrainMapSample
+    {
+        /// <summary>Biome、連続環境、地質、暫定資源適性を保持する完成環境タイルです。</summary>
+        public readonly GeneratedTile Tile;
+
+        /// <summary>BiomeとGround、Wall、Liquid、SurfaceのRuntime IDを保持する完成Blockセルです。</summary>
+        public readonly GeneratedTerrainCell TerrainCell;
+
+        /// <summary>完成診断チャンクの同じ添字から、破棄後も利用できる値コピーを作ります。</summary>
+        /// <param name="tile">完成済み環境・地質タイルです。</param>
+        /// <param name="terrainCell">完成済み自然生成Blockセルです。</param>
+        public FinalizedTerrainMapSample(
+            in GeneratedTile tile,
+            in GeneratedTerrainCell terrainCell)
+        {
+            Tile = tile;
+            TerrainCell = terrainCell;
+        }
+    }
+
     /// <summary>
     /// 1回の広域サンプリング結果を保持します。
     /// PixelColorsの行0はTexture2Dと同じ下端で、ワールドYが小さい側に対応します。
@@ -189,7 +210,7 @@ namespace Farmware.WorldGeneration.Editor
         /// 完成診断チャンクを使うモードのHover表示へ渡す、代表タイル別のC5-C確定地形です。
         /// 元のPersistent NativeArrayはサンプリング終了時に破棄するため、値型のコピーだけを保持します。
         /// </summary>
-        private readonly Dictionary<long, GeneratedTile> finalizedTerrainSamples;
+        private readonly Dictionary<long, FinalizedTerrainMapSample> finalizedTerrainSamples;
 
         /// <summary>
         /// 派生水文モードのHover表示へ渡す代表タイル別の値コピーです。
@@ -231,7 +252,7 @@ namespace Farmware.WorldGeneration.Editor
             WorldGenerationMapViewMode viewMode,
             Color32[] pixelColors,
             int diagnosticChunkCount,
-            Dictionary<long, GeneratedTile> finalizedTerrainSamples,
+            Dictionary<long, FinalizedTerrainMapSample> finalizedTerrainSamples,
             Dictionary<long, DerivedHydrologyMapSample> derivedHydrologySamples,
             Dictionary<long, BiomeClassificationMapSample> biomeClassificationSamples)
         {
@@ -253,22 +274,22 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>C5-C完成チャンクから画像と同時にコピーした代表タイルを取得します。</summary>
         /// <param name="worldTileX">画像がサンプリングした絶対タイルX座標です。</param>
         /// <param name="worldTileY">画像がサンプリングした絶対タイルY座標です。</param>
-        /// <param name="tile">成功時に新18Biomeと最終Groundを反映した値コピーを返します。</param>
+        /// <param name="sample">成功時に新18Biome、環境値、完成Blockセルの値コピーを返します。</param>
         /// <returns>現在結果が指定代表タイルの完成地形を保持する場合はtrueです。</returns>
         public bool TryGetFinalizedTerrainSample(
             int worldTileX,
             int worldTileY,
-            out GeneratedTile tile)
+            out FinalizedTerrainMapSample sample)
         {
             if (finalizedTerrainSamples == null)
             {
-                tile = default;
+                sample = default;
                 return false;
             }
 
             return finalizedTerrainSamples.TryGetValue(
                 CreateCoordinateKey(worldTileX, worldTileY),
-                out tile);
+                out sample);
         }
 
         /// <summary>
@@ -548,7 +569,7 @@ namespace Farmware.WorldGeneration.Editor
 
         /// <summary>
         /// 指定範囲を1ピクセル1代表タイルで走査し、表示用の色配列を作ります。
-        /// 呼び出し元はこの純粋計算をTask.Runへ渡せますが、返却後のTexture2D生成はEditorメインスレッドで行います。
+        /// 完成チャンクを使わない軽量モード向けの入口であり、Terrain、Biome、派生水文にはカタログ付きOverloadを使用します。
         /// </summary>
         /// <param name="settings">実際のBakerと同じ変換から得た地形生成設定です。</param>
         /// <param name="centerTileX">画像中央の水平タイル座標です。</param>
@@ -556,7 +577,7 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="width">画像の横ピクセル数です。</param>
         /// <param name="height">画像の縦ピクセル数です。</param>
         /// <param name="tilesPerPixel">1ピクセルごとに進めるワールドタイル数です。</param>
-        /// <param name="viewMode">最終地形、環境、地質、基礎水文、派生水文の表示モードです。</param>
+        /// <param name="viewMode">単一タイルまたは基礎水文セルから作れる表示モードです。</param>
         /// <param name="cancellationToken">新しい操作で不要になった走査を中止するためのTokenです。</param>
         /// <returns>Texture2Dへ適用できる色配列と座標情報です。</returns>
         public static WorldGenerationMapSampleResult Sample(
@@ -571,6 +592,44 @@ namespace Farmware.WorldGeneration.Editor
         {
             return Sample(
                 settings,
+                null,
+                centerTileX,
+                centerTileY,
+                width,
+                height,
+                tilesPerPixel,
+                viewMode,
+                cancellationToken);
+        }
+
+        /// <summary>
+        /// 指定範囲を1ピクセル1代表タイルで走査し、表示用の色配列を作ります。
+        /// 呼び出し元はこの純粋計算をTask.Runへ渡せますが、返却後のTexture2D生成はEditorメインスレッドで行います。
+        /// </summary>
+        /// <param name="settings">実際のBakerと同じ変換から得た地形生成設定です。</param>
+        /// <param name="terrainCatalogs">完成チャンク表示時に使う、Main Threadで構築済みの地形カタログです。</param>
+        /// <param name="centerTileX">画像中央の水平タイル座標です。</param>
+        /// <param name="centerTileY">画像中央の垂直タイル座標です。</param>
+        /// <param name="width">画像の横ピクセル数です。</param>
+        /// <param name="height">画像の縦ピクセル数です。</param>
+        /// <param name="tilesPerPixel">1ピクセルごとに進めるワールドタイル数です。</param>
+        /// <param name="viewMode">最終地形、環境、地質、基礎水文、派生水文の表示モードです。</param>
+        /// <param name="cancellationToken">新しい操作で不要になった走査を中止するためのTokenです。</param>
+        /// <returns>Texture2Dへ適用できる色配列と座標情報です。</returns>
+        public static WorldGenerationMapSampleResult Sample(
+            in WorldGenerationSettings settings,
+            HydrologyDiagnosticTerrainCatalogs terrainCatalogs,
+            int centerTileX,
+            int centerTileY,
+            int width,
+            int height,
+            int tilesPerPixel,
+            WorldGenerationMapViewMode viewMode,
+            CancellationToken cancellationToken)
+        {
+            return Sample(
+                settings,
+                terrainCatalogs,
                 WorldLayer.Surface,
                 centerTileX,
                 centerTileY,
@@ -582,10 +641,51 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>
+        /// 指定レイヤーの軽量モードを走査します。完成チャンクを使う地上モードにはカタログ付きOverloadを使用します。
+        /// </summary>
+        /// <param name="settings">実際のBakerと同じ変換から得た地形生成設定です。</param>
+        /// <param name="layer">サンプリング対象の固定ワールドレイヤーです。</param>
+        /// <param name="centerTileX">画像中央の水平タイル座標です。</param>
+        /// <param name="centerTileY">画像中央の垂直タイル座標です。</param>
+        /// <param name="width">画像の横ピクセル数です。</param>
+        /// <param name="height">画像の縦ピクセル数です。</param>
+        /// <param name="tilesPerPixel">1ピクセルごとに進めるワールドタイル数です。</param>
+        /// <param name="viewMode">単一タイル、基礎水文セル、または未接続Layerの表示モードです。</param>
+        /// <param name="cancellationToken">新しい操作で不要になった走査を中止するためのTokenです。</param>
+        /// <param name="progress">完了割合0〜1の任意通知先です。</param>
+        /// <returns>Texture2Dへ適用できる色配列、レイヤー、座標情報です。</returns>
+        public static WorldGenerationMapSampleResult Sample(
+            in WorldGenerationSettings settings,
+            WorldLayer layer,
+            int centerTileX,
+            int centerTileY,
+            int width,
+            int height,
+            int tilesPerPixel,
+            WorldGenerationMapViewMode viewMode,
+            CancellationToken cancellationToken,
+            IProgress<float> progress = null)
+        {
+            return Sample(
+                settings,
+                null,
+                layer,
+                centerTileX,
+                centerTileY,
+                width,
+                height,
+                tilesPerPixel,
+                viewMode,
+                cancellationToken,
+                progress);
+        }
+
+        /// <summary>
         /// 指定レイヤーの広域代表座標を走査します。WORLD-01CではSurfaceだけを実Generatorへ渡し、
         /// UnderwaterとDeepSeaはTERRAIN-01C前に地上を複製しないよう未接続色を返します。
         /// </summary>
         /// <param name="settings">実際のBakerと同じ変換から得た地形生成設定です。</param>
+        /// <param name="terrainCatalogs">完成チャンク表示時に使う、Main Threadで構築済みの地形カタログです。軽量モードと未接続Layerではnullを許可します。</param>
         /// <param name="layer">サンプリング対象の固定ワールドレイヤーです。</param>
         /// <param name="centerTileX">画像中央の水平タイル座標です。</param>
         /// <param name="centerTileY">画像中央の垂直タイル座標です。</param>
@@ -601,6 +701,7 @@ namespace Farmware.WorldGeneration.Editor
         /// </exception>
         public static WorldGenerationMapSampleResult Sample(
             in WorldGenerationSettings settings,
+            HydrologyDiagnosticTerrainCatalogs terrainCatalogs,
             WorldLayer layer,
             int centerTileX,
             int centerTileY,
@@ -660,6 +761,16 @@ namespace Farmware.WorldGeneration.Editor
                 }
             }
 
+            if (requiresDiagnosticChunk
+                && layer == WorldLayer.Surface
+                && (terrainCatalogs == null || !terrainCatalogs.IsCreated))
+            {
+                // Blobの完成処理は内部でMain Thread限定のTemp領域を使うため、
+                // ThreadPoolへ入った後に暗黙構築せず、呼出し側の寿命管理漏れを明示します。
+                throw new InvalidOperationException(
+                    "完成チャンク表示には、Editorメインスレッドで構築済みの地形カタログが必要です。");
+            }
+
             Color32[] pixelColors = new Color32[width * height];
             bool hasGeneratedData = layer == WorldLayer.Surface;
             Dictionary<long, GeneratedHydrologyCell> hydrologyCellCache =
@@ -670,9 +781,9 @@ namespace Farmware.WorldGeneration.Editor
                 requiresDiagnosticChunk
                     ? new Dictionary<long, HydrologyDiagnosticChunk>()
                     : null;
-            Dictionary<long, GeneratedTile> finalizedTerrainSamples =
+            Dictionary<long, FinalizedTerrainMapSample> finalizedTerrainSamples =
                 requiresDiagnosticChunk
-                    ? new Dictionary<long, GeneratedTile>(pixelColors.Length)
+                    ? new Dictionary<long, FinalizedTerrainMapSample>(pixelColors.Length)
                     : null;
             Dictionary<long, DerivedHydrologyMapSample> derivedHydrologySamples =
                 isDerivedHydrologyViewMode
@@ -742,6 +853,7 @@ namespace Farmware.WorldGeneration.Editor
                     {
                         GetOrCreateDiagnosticChunk(
                             settings,
+                            terrainCatalogs,
                             requiredDiagnosticChunks[chunkIndex],
                             diagnosticChunkCache,
                             cancellationToken);
@@ -781,18 +893,33 @@ namespace Farmware.WorldGeneration.Editor
                             {
                                 GeneratedTile finalizedTile = GetFinalizedTerrainTile(
                                     settings,
+                                    terrainCatalogs,
                                     layer,
                                     worldTileX,
                                     worldTileY,
                                     diagnosticChunkCache,
                                     cancellationToken);
+                                GeneratedTerrainCell finalizedTerrainCell =
+                                    GetFinalizedTerrainCell(
+                                        settings,
+                                        terrainCatalogs,
+                                        layer,
+                                        worldTileX,
+                                        worldTileY,
+                                        diagnosticChunkCache,
+                                        cancellationToken,
+                                        out BuiltInTerrainBlockRuntimeIds terrainRuntimeIds);
                                 finalizedTerrainSamples[
-                                    CreateCoordinateKey(worldTileX, worldTileY)] = finalizedTile;
+                                    CreateCoordinateKey(worldTileX, worldTileY)] =
+                                    new FinalizedTerrainMapSample(
+                                        finalizedTile,
+                                        finalizedTerrainCell);
                                 if (isFinalTerrainViewMode)
                                 {
                                     GeneratedHydrologyTile finalizedHydrologyTile =
                                         GetFinalizedHydrologyTile(
                                             settings,
+                                            terrainCatalogs,
                                             layer,
                                             worldTileX,
                                             worldTileY,
@@ -819,9 +946,12 @@ namespace Farmware.WorldGeneration.Editor
                                     }
 
                                     // Terrain/BiomeはC4水文確定後のC5-C結果を表示し、Biome=Noneの基礎生成を見せません。
-                                    pixelColors[(pixelY * width) + pixelX] = GetDisplayColor(
-                                        viewMode,
-                                        finalizedTile);
+                                    pixelColors[(pixelY * width) + pixelX] =
+                                        viewMode == WorldGenerationMapViewMode.Terrain
+                                            ? GetTerrainDisplayColor(
+                                                finalizedTerrainCell,
+                                                terrainRuntimeIds)
+                                            : GetDisplayColor(viewMode, finalizedTile);
                                     continue;
                                 }
                             }
@@ -831,6 +961,7 @@ namespace Farmware.WorldGeneration.Editor
                                 DerivedHydrologyMapSample derivedSample =
                                     GetDerivedHydrologySample(
                                         settings,
+                                        terrainCatalogs,
                                         layer,
                                         worldTileX,
                                         worldTileY,
@@ -1091,6 +1222,7 @@ namespace Farmware.WorldGeneration.Editor
         /// 指定タイルを所有する完成診断チャンクから、C5-Cで確定した地形値をコピーします。
         /// </summary>
         /// <param name="settings">C3〜C5-Cを再構築する固定設定です。</param>
+        /// <param name="terrainCatalogs">Main Threadで完成済みの共有地形カタログです。</param>
         /// <param name="layer">対象タイルが属する固定ワールドレイヤーです。</param>
         /// <param name="worldTileX">対象の絶対X座標です。</param>
         /// <param name="worldTileY">対象の絶対Y座標です。</param>
@@ -1099,6 +1231,7 @@ namespace Farmware.WorldGeneration.Editor
         /// <returns>新18Biomeと最終Groundを持つ値型のコピーです。</returns>
         private static GeneratedTile GetFinalizedTerrainTile(
             in WorldGenerationSettings settings,
+            HydrologyDiagnosticTerrainCatalogs terrainCatalogs,
             WorldLayer layer,
             int worldTileX,
             int worldTileY,
@@ -1111,6 +1244,7 @@ namespace Farmware.WorldGeneration.Editor
                 worldTileY);
             HydrologyDiagnosticChunk chunk = GetOrCreateDiagnosticChunk(
                 settings,
+                terrainCatalogs,
                 coordinate,
                 diagnosticChunkCache,
                 cancellationToken);
@@ -1121,11 +1255,49 @@ namespace Farmware.WorldGeneration.Editor
             return chunk.TerrainTiles[tileIndex];
         }
 
+        /// <summary>指定タイルを所有する完成診断チャンクから、自然生成Blockセルと組み込みIDをコピーします。</summary>
+        /// <param name="settings">BiomeとBlockセルを再構築する固定設定です。</param>
+        /// <param name="terrainCatalogs">Main Threadで完成済みの共有地形カタログです。</param>
+        /// <param name="layer">対象タイルが属する固定ワールドレイヤーです。</param>
+        /// <param name="worldTileX">対象の絶対X座標です。</param>
+        /// <param name="worldTileY">対象の絶対Y座標です。</param>
+        /// <param name="diagnosticChunkCache">Sample終了時に破棄する完成チャンクキャッシュです。</param>
+        /// <param name="cancellationToken">未生成チャンクへ進む前に中止を検出するTokenです。</param>
+        /// <param name="runtimeIds">成功時にLiquid種別を識別する組み込みIDを返します。</param>
+        /// <returns>Ground、Wall、Liquid、Surfaceの参照を持つ自然生成セルです。</returns>
+        private static GeneratedTerrainCell GetFinalizedTerrainCell(
+            in WorldGenerationSettings settings,
+            HydrologyDiagnosticTerrainCatalogs terrainCatalogs,
+            WorldLayer layer,
+            int worldTileX,
+            int worldTileY,
+            Dictionary<long, HydrologyDiagnosticChunk> diagnosticChunkCache,
+            CancellationToken cancellationToken,
+            out BuiltInTerrainBlockRuntimeIds runtimeIds)
+        {
+            ChunkCoordinate coordinate = WorldGrid.ToChunkCoordinate(
+                layer,
+                worldTileX,
+                worldTileY);
+            HydrologyDiagnosticChunk chunk = GetOrCreateDiagnosticChunk(
+                settings,
+                terrainCatalogs,
+                coordinate,
+                diagnosticChunkCache,
+                cancellationToken);
+            ChunkLocalTileCoordinate localTile = WorldGrid.ToLocalTileCoordinate(
+                worldTileX,
+                worldTileY);
+            runtimeIds = chunk.TerrainRuntimeIds;
+            return chunk.TerrainCells[WorldGrid.ToTileIndex(localTile.X, localTile.Y)];
+        }
+
         /// <summary>
         /// 指定タイルを所有する完成診断チャンクから、Biome特殊優先へ使ったC4自然水文値をコピーします。
         /// Terrain・Biome Hoverが最終IDだけでなく選択理由を再取得するとき、製品最終化と同じ入力を渡すために使用します。
         /// </summary>
         /// <param name="settings">C3〜C5-Cを再構築する固定設定です。</param>
+        /// <param name="terrainCatalogs">Main Threadで完成済みの共有地形カタログです。</param>
         /// <param name="layer">対象タイルが属する固定ワールドレイヤーです。</param>
         /// <param name="worldTileX">対象の絶対X座標です。</param>
         /// <param name="worldTileY">対象の絶対Y座標です。</param>
@@ -1134,6 +1306,7 @@ namespace Farmware.WorldGeneration.Editor
         /// <returns>自然冠水・自然飽和・湿原規模を含む値型コピーです。</returns>
         private static GeneratedHydrologyTile GetFinalizedHydrologyTile(
             in WorldGenerationSettings settings,
+            HydrologyDiagnosticTerrainCatalogs terrainCatalogs,
             WorldLayer layer,
             int worldTileX,
             int worldTileY,
@@ -1146,6 +1319,7 @@ namespace Farmware.WorldGeneration.Editor
                 worldTileY);
             HydrologyDiagnosticChunk chunk = GetOrCreateDiagnosticChunk(
                 settings,
+                terrainCatalogs,
                 coordinate,
                 diagnosticChunkCache,
                 cancellationToken);
@@ -1161,6 +1335,7 @@ namespace Farmware.WorldGeneration.Editor
         /// 水文セルは中心基準のためチャンク正側4タイルで隣接チャンク所有となり、地形チャンクだけでは取得できません。
         /// </summary>
         /// <param name="settings">C3とC4-A〜Dを製品順に再構築する固定設定です。</param>
+        /// <param name="terrainCatalogs">Main Threadで完成済みの共有地形カタログです。</param>
         /// <param name="layer">代表タイルが属する固定ワールドレイヤーです。</param>
         /// <param name="worldTileX">代表タイルの絶対X座標です。</param>
         /// <param name="worldTileY">代表タイルの絶対Y座標です。</param>
@@ -1169,6 +1344,7 @@ namespace Farmware.WorldGeneration.Editor
         /// <returns>元NativeArrayからManaged値へコピーした派生水文サンプルです。</returns>
         private static DerivedHydrologyMapSample GetDerivedHydrologySample(
             in WorldGenerationSettings settings,
+            HydrologyDiagnosticTerrainCatalogs terrainCatalogs,
             WorldLayer layer,
             int worldTileX,
             int worldTileY,
@@ -1181,6 +1357,7 @@ namespace Farmware.WorldGeneration.Editor
                 worldTileY);
             HydrologyDiagnosticChunk tileChunk = GetOrCreateDiagnosticChunk(
                 settings,
+                terrainCatalogs,
                 tileChunkCoordinate,
                 diagnosticChunkCache,
                 cancellationToken);
@@ -1214,6 +1391,7 @@ namespace Farmware.WorldGeneration.Editor
                 cellOwnerChunkY);
             HydrologyDiagnosticChunk cellOwnerChunk = GetOrCreateDiagnosticChunk(
                 settings,
+                terrainCatalogs,
                 cellOwnerCoordinate,
                 diagnosticChunkCache,
                 cancellationToken);
@@ -1243,12 +1421,14 @@ namespace Farmware.WorldGeneration.Editor
         /// 生成途中の失敗段階を例外へ含め、乾燥結果と生成失敗を同じ色として扱いません。
         /// </summary>
         /// <param name="settings">完成チャンク生成に使う固定設定です。</param>
+        /// <param name="terrainCatalogs">Main Threadで完成済みの共有地形カタログです。</param>
         /// <param name="coordinate">生成または再利用するSurface論理チャンク座標です。</param>
         /// <param name="diagnosticChunkCache">Sample終了時に全要素を破棄する所有キャッシュです。</param>
         /// <param name="cancellationToken">未生成チャンクへ進む前に中止を検出するTokenです。</param>
-        /// <returns>全4配列を完成済みの診断チャンクです。</returns>
+        /// <returns>環境・Block・水文の全5配列を完成済みの診断チャンクです。</returns>
         private static HydrologyDiagnosticChunk GetOrCreateDiagnosticChunk(
             in WorldGenerationSettings settings,
+            HydrologyDiagnosticTerrainCatalogs terrainCatalogs,
             ChunkCoordinate coordinate,
             Dictionary<long, HydrologyDiagnosticChunk> diagnosticChunkCache,
             CancellationToken cancellationToken)
@@ -1266,6 +1446,7 @@ namespace Farmware.WorldGeneration.Editor
                     settings,
                     biomeSettings,
                     coordinate,
+                    terrainCatalogs,
                     out HydrologyDiagnosticChunk generated,
                     out HydrologyDiagnosticGenerationStage stage))
             {
@@ -1872,21 +2053,44 @@ namespace Farmware.WorldGeneration.Editor
                         isGeologySiteBoundary);
             }
 
-            // 最終地形の優先順位を反映し、水域や障害物が論理バイオーム色に埋もれないようにします。
-            switch (tile.Ground)
+            // TerrainモードはBlockセルが必須です。環境タイルだけの互換入口では未取得色を返し、旧分類を再構築しません。
+            return new Color32(30, 30, 36, 255);
+        }
+
+        /// <summary>完成済み自然生成BlockセルをMap Viewerの最終地形色へ変換します。</summary>
+        /// <param name="terrainCell">Biomeと4区画のRuntime IDを持つ自然生成セルです。</param>
+        /// <param name="runtimeIds">淡水、海水、マグマを識別する組み込みIDです。</param>
+        /// <returns>液体、壁、地面の優先順を反映した不透明色です。</returns>
+        public static Color32 GetTerrainDisplayColor(
+            in GeneratedTerrainCell terrainCell,
+            in BuiltInTerrainBlockRuntimeIds runtimeIds)
+        {
+            if (terrainCell.LiquidRuntimeId.IsValid
+                && terrainCell.LiquidRuntimeId.Value == runtimeIds.Magma.Value)
             {
-                case GroundType.Water:
-                    return tile.WaterSalinity == WaterSalinity.SaltWater
-                        ? new Color32(42, 101, 176, 255)
-                        : new Color32(76, 157, 211, 255);
-                case GroundType.Magma:
-                    return new Color32(238, 82, 24, 255);
-                case GroundType.RockWall:
-                    return new Color32(52, 52, 60, 255);
-                default:
-                    // Gameビューと同様に、SoilTypeは内部情報として保持しつつ土地の見た目はBiomeだけで決めます。
-                    return GetBiomeColor(tile.Biome);
+                return new Color32(238, 82, 24, 255);
             }
+
+            if (terrainCell.LiquidRuntimeId.IsValid
+                && terrainCell.LiquidRuntimeId.Value == runtimeIds.SaltWater.Value)
+            {
+                return new Color32(42, 101, 176, 255);
+            }
+
+            if (terrainCell.LiquidRuntimeId.IsValid
+                && terrainCell.LiquidRuntimeId.Value == runtimeIds.FreshWater.Value)
+            {
+                return new Color32(76, 157, 211, 255);
+            }
+
+            if (terrainCell.WallBlockRuntimeId.IsValid)
+            {
+                return new Color32(52, 52, 60, 255);
+            }
+
+            return terrainCell.GroundBlockRuntimeId.IsValid
+                ? GetBiomeColor(terrainCell.Biome)
+                : new Color32(30, 30, 36, 255);
         }
 
         /// <summary>

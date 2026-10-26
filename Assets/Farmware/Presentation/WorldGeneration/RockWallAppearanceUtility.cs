@@ -100,8 +100,8 @@ namespace Farmware.WorldGeneration.Presentation
                         bool isRockWall = Neighborhood.TryGetTile(
                                 localX,
                                 localY,
-                                out GeneratedTile tile)
-                            && tile.Ground == GroundType.RockWall;
+                                out GeneratedTerrainCell tile)
+                            && tile.WallBlockRuntimeId.IsValid;
 
                         Mask[(y * ShadowMaskSizeInTiles) + x] = isRockWall;
                     }
@@ -199,8 +199,8 @@ namespace Farmware.WorldGeneration.Presentation
             int localX,
             int localY)
         {
-            return neighborhood.TryGetTile(localX, localY, out GeneratedTile tile)
-                && tile.Ground == GroundType.RockWall;
+            return neighborhood.TryGetTile(localX, localY, out GeneratedTerrainCell tile)
+                && tile.WallBlockRuntimeId.IsValid;
         }
 
         /// <summary>

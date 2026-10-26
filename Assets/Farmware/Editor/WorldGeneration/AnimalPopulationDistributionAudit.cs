@@ -189,9 +189,11 @@ namespace Farmware.WorldGeneration.Editor
 
         /// <summary>設定範囲の全地域を生成し、面積比例、群れ、重複、再現性を集計します。</summary>
         /// <param name="settings">固定した複数Seedと地域半径です。</param>
+        /// <param name="terrainCatalogs">Main Threadで完成し、監査中は破棄されない地形カタログです。</param>
         /// <returns>個体数、契約違反件数、比較署名を含む監査結果です。</returns>
         public static AnimalPopulationDistributionAuditResult Analyze(
-            AnimalPopulationDistributionAuditSettings settings)
+            AnimalPopulationDistributionAuditSettings settings,
+            HydrologyDiagnosticTerrainCatalogs terrainCatalogs)
         {
             if (settings == null)
             {
@@ -225,6 +227,7 @@ namespace Farmware.WorldGeneration.Editor
                     {
                         AnalyzeRegion(
                             terrainSettings,
+                            terrainCatalogs,
                             populationSeed,
                             chicken,
                             regionX,
@@ -253,8 +256,22 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>1地域の4096タイルを生成し、共通候補生成結果を全体集計へ加算します。</summary>
+        /// <param name="terrainSettings">対象地域の地形を決める固定Seedと生成設定です。</param>
+        /// <param name="terrainCatalogs">Main Threadで完成済みの共有地形カタログです。</param>
+        /// <param name="populationSeed">地形Seedから独立した個体群Seedです。</param>
+        /// <param name="species">候補抽出と群れ構成に使う動物種定義です。</param>
+        /// <param name="regionX">監査する地域の論理X座標です。</param>
+        /// <param name="regionY">監査する地域の論理Y座標です。</param>
+        /// <param name="totalEligibleTileCount">適格タイル総数へこの地域の件数を加算します。</param>
+        /// <param name="totalTargetPopulation">目標個体数総計へこの地域の値を加算します。</param>
+        /// <param name="totalSpawnedPopulation">生成候補総数へこの地域の値を加算します。</param>
+        /// <param name="underfilledRegionCount">目標未達地域数へこの地域の判定を加算します。</param>
+        /// <param name="invalidHerdCount">群れ契約違反数へこの地域の判定を加算します。</param>
+        /// <param name="duplicatePositionCount">位置重複数へこの地域の判定を加算します。</param>
+        /// <param name="signature">固定順の地形・候補値を混ぜる比較署名です。</param>
         private static void AnalyzeRegion(
             WorldGenerationSettings terrainSettings,
+            HydrologyDiagnosticTerrainCatalogs terrainCatalogs,
             AnimalPopulationSeed populationSeed,
             AnimalSpeciesDefinitionBlob species,
             int regionX,
@@ -282,6 +299,7 @@ namespace Farmware.WorldGeneration.Editor
                     terrainSettings,
                     biomeSettings,
                     new ChunkCoordinate(WorldLayer.Surface, regionX, regionY),
+                    terrainCatalogs,
                     out HydrologyDiagnosticChunk generatedTerrainChunk,
                     out HydrologyDiagnosticGenerationStage generationStage))
             {
@@ -290,7 +308,7 @@ namespace Farmware.WorldGeneration.Editor
                     $"動物分布監査に必要な完成地形を生成できません。region=({regionX},{regionY}), stage={generationStage}");
             }
 
-            // 1地域は1論理チャンクと同寸法です。監査終了時に4つのPersistent配列を必ず破棄します。
+            // 1地域は1論理チャンクと同寸法です。監査終了時に環境・Block・水文の5つのPersistent配列を必ず破棄します。
             using HydrologyDiagnosticChunk terrainChunk = generatedTerrainChunk;
             int eligibleTerrainTileCount = 0;
             for (int localY = 0; localY < WorldGridConstants.LogicalChunkSize; localY++)
@@ -299,14 +317,22 @@ namespace Farmware.WorldGeneration.Editor
                 {
                     int tileIndex = (localY * WorldGridConstants.LogicalChunkSize) + localX;
                     GeneratedTile tile = terrainChunk.TerrainTiles[tileIndex];
-                    if (AnimalPopulationGenerator.IsTileEligible(tile, species))
+                    GeneratedTerrainCell terrainCell = terrainChunk.TerrainCells[tileIndex];
+                    if (AnimalPopulationGenerator.IsTileEligible(
+                        terrainCell,
+                        terrainChunk.TerrainRuntimeIds,
+                        species))
                     {
                         eligibleTerrainTileCount++;
                         // Runtimeと同じ資源予約を生成してから動物候補を抽出し、監査だけが木や石へ重なる配置を許さないようにします。
                         GeneratedResourceTile resource = DeterministicResourceGenerator.GenerateResource(
                             terrainSettings, resourceSettings, tile,
                             minimumTileX + localX, minimumTileY + localY);
-                        if (AnimalPopulationGenerator.IsSpawnTileEligible(tile, resource, species))
+                        if (AnimalPopulationGenerator.IsSpawnTileEligible(
+                            terrainCell,
+                            resource,
+                            terrainChunk.TerrainRuntimeIds,
+                            species))
                         {
                             eligibleTiles.Add(tileIndex);
                         }

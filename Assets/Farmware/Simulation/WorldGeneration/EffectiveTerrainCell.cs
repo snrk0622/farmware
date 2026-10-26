@@ -34,10 +34,11 @@ namespace Farmware.WorldGeneration
     }
 
     /// <summary>
-    /// 既存GeneratedTileをBlock参照へ変換した、変更不可の自然地形セルです。
-    /// TERRAIN-01Cで生成器がBlockを直接出力するまで互換境界として使用します。
+    /// ワールド生成器が直接出力する、変更不可の自然地形セルです。
+    /// 1チャンクEntityのDynamic Bufferへ行優先4096件を保持し、疎な変更差分の基準にします。
     /// </summary>
-    public struct BaseTerrainCell
+    [InternalBufferCapacity(0)]
+    public struct GeneratedTerrainCell : IBufferElementData
     {
         /// <summary>座標由来で固定され、プレイヤー編集では変更しないバイオームです。</summary>
         public BiomeId Biome;
@@ -51,7 +52,7 @@ namespace Farmware.WorldGeneration
         /// <summary>自然生成された液体定義です。液体がなければInvalidです。</summary>
         public DefinitionRuntimeId LiquidRuntimeId;
 
-        /// <summary>自然生成された地表定義です。TERRAIN-01Aの互換生成ではInvalidです。</summary>
+        /// <summary>自然生成された地表定義です。現行の自然生成では未使用のためInvalidです。</summary>
         public DefinitionRuntimeId TerrainSurfaceRuntimeId;
     }
 
@@ -139,68 +140,11 @@ namespace Farmware.WorldGeneration
     }
 
     /// <summary>
-    /// 既存生成結果のBlock変換と、地形差分の固定順適用を行います。
+    /// 生成済みBlockセルへ地形差分を固定順で適用します。
     /// 管理参照やUnityEngine APIを使わないため、Simulation、Burst Job、EditModeテストで共有できます。
     /// </summary>
     public static class EffectiveTerrainResolver
     {
-        /// <summary>
-        /// 現行GeneratedTileを、TERRAIN-01Aの組み込みBlock参照へ変換します。
-        /// </summary>
-        /// <param name="tile">Surface生成器が出力した変更不可の基礎タイルです。</param>
-        /// <param name="runtimeIds">共通定義カタログから解決済みの組み込みIDです。</param>
-        /// <param name="baseCell">成功時にBlock区画へ分解した自然地形を受け取ります。</param>
-        /// <returns>既知のGroundTypeと水種を矛盾なく変換できた場合はSuccessです。</returns>
-        public static EffectiveTerrainResolveResult TryCreateBaseCell(
-            in GeneratedTile tile,
-            in BuiltInTerrainBlockRuntimeIds runtimeIds,
-            out BaseTerrainCell baseCell)
-        {
-            baseCell = new BaseTerrainCell
-            {
-                Biome = tile.Biome
-            };
-            if (tile.Biome == BiomeId.None || !runtimeIds.IsValid)
-            {
-                return EffectiveTerrainResolveResult.InvalidBaseTerrain;
-            }
-
-            // 互換変換だけが旧GroundTypeを解釈し、後続の移動・建築APIへ旧分類を漏らしません。
-            switch (tile.Ground)
-            {
-                case GroundType.Land:
-                    baseCell.GroundBlockRuntimeId = runtimeIds.LandGround;
-                    break;
-                case GroundType.Water:
-                    if (tile.WaterSalinity == WaterSalinity.FreshWater)
-                    {
-                        baseCell.LiquidRuntimeId = runtimeIds.FreshWater;
-                    }
-                    else if (tile.WaterSalinity == WaterSalinity.SaltWater)
-                    {
-                        baseCell.LiquidRuntimeId = runtimeIds.SaltWater;
-                    }
-                    else
-                    {
-                        return EffectiveTerrainResolveResult.InvalidBaseTerrain;
-                    }
-
-                    break;
-                case GroundType.RockWall:
-                    // 壁を採掘した後にも歩ける地面を残せるよう、旧岩壁を地面と壁の2区画へ分けます。
-                    baseCell.GroundBlockRuntimeId = runtimeIds.LandGround;
-                    baseCell.WallBlockRuntimeId = runtimeIds.NaturalRockWall;
-                    break;
-                case GroundType.Magma:
-                    baseCell.LiquidRuntimeId = runtimeIds.Magma;
-                    break;
-                default:
-                    return EffectiveTerrainResolveResult.InvalidBaseTerrain;
-            }
-
-            return EffectiveTerrainResolveResult.Success;
-        }
-
         /// <summary>
         /// 自然地形へ任意の1差分を適用し、現在の有効セルを作ります。
         /// </summary>
@@ -211,7 +155,7 @@ namespace Farmware.WorldGeneration
         /// <param name="effectiveCell">成功時に差分適用後の現在地形を受け取ります。</param>
         /// <returns>入力と合成結果が有効ならSuccessです。</returns>
         public static EffectiveTerrainResolveResult TryResolve(
-            in BaseTerrainCell baseCell,
+            in GeneratedTerrainCell baseCell,
             bool hasDelta,
             in TerrainCellDelta delta,
             BlobAssetReference<TerrainBlockCatalogBlob> catalog,
@@ -225,7 +169,7 @@ namespace Farmware.WorldGeneration
                 LiquidRuntimeId = baseCell.LiquidRuntimeId,
                 TerrainSurfaceRuntimeId = baseCell.TerrainSurfaceRuntimeId
             };
-            if (baseCell.Biome == BiomeId.None
+            if (!IsKnownBiome(baseCell.Biome)
                 || !ValidateSlot(
                     catalog,
                     baseCell.GroundBlockRuntimeId,
@@ -363,6 +307,16 @@ namespace Farmware.WorldGeneration
                     out TerrainBlockDefinitionBlob definition)
                 && definition.Kind == expectedKind;
         }
+
+        /// <summary>海域のNoneと、地上用に固定された18Biomeだけを自然生成値として許可します。</summary>
+        /// <param name="biome">生成セルが保持する変更不可のBiome IDです。</param>
+        /// <returns>Noneまたは現行18Biomeの安定ID範囲ならtrueです。</returns>
+        private static bool IsKnownBiome(BiomeId biome)
+        {
+            int stableId = (int)biome;
+            return biome == BiomeId.None
+                || (stableId >= BiomeStableIds.First && stableId <= BiomeStableIds.Last);
+        }
     }
 
     /// <summary>
@@ -371,6 +325,80 @@ namespace Farmware.WorldGeneration
     /// </summary>
     public static class EffectiveTerrainCellQuery
     {
+        /// <summary>
+        /// 生成チャンクEntityの行優先Block Bufferから対象セルを読み、任意の永続差分を適用します。
+        /// </summary>
+        /// <param name="entityManager">生成チャンクと任意差分所有者を保持する同じECS Worldです。</param>
+        /// <param name="chunkEntity">ChunkCoordinateComponentと4096件のGeneratedTerrainCellを持つ生成済みEntityです。</param>
+        /// <param name="deltaOwnerEntity">対応差分を持つEntityです。差分がない場合はEntity.Nullを指定します。</param>
+        /// <param name="coordinate">問い合わせるレイヤー付き絶対セル座標です。</param>
+        /// <param name="catalog">RuntimeIdの分類を検証する地形定義カタログです。</param>
+        /// <param name="effectiveCell">成功時に自然生成Bufferと差分を合成した現在地形を受け取ります。</param>
+        /// <returns>生成Buffer、座標、任意差分を検証して合成できた場合はSuccessです。</returns>
+        public static EffectiveTerrainResolveResult TryResolveFromChunk(
+            EntityManager entityManager,
+            Entity chunkEntity,
+            Entity deltaOwnerEntity,
+            in WorldTileCoordinate coordinate,
+            BlobAssetReference<TerrainBlockCatalogBlob> catalog,
+            out EffectiveTerrainCell effectiveCell)
+        {
+            effectiveCell = default;
+            if (!entityManager.Exists(chunkEntity)
+                || !entityManager.HasComponent<ChunkCoordinateComponent>(chunkEntity)
+                || !entityManager.HasBuffer<GeneratedTerrainCell>(chunkEntity))
+            {
+                return EffectiveTerrainResolveResult.InvalidBaseTerrain;
+            }
+
+            ChunkCoordinate expectedChunk = WorldGrid.ToChunkCoordinate(coordinate);
+            ChunkCoordinateComponent actualChunk =
+                entityManager.GetComponentData<ChunkCoordinateComponent>(chunkEntity);
+            DynamicBuffer<GeneratedTerrainCell> generatedCells =
+                entityManager.GetBuffer<GeneratedTerrainCell>(chunkEntity, true);
+            if (actualChunk.Layer != expectedChunk.Layer
+                || actualChunk.X != expectedChunk.X
+                || actualChunk.Y != expectedChunk.Y
+                || generatedCells.Length != WorldGridConstants.TilesPerChunk)
+            {
+                return EffectiveTerrainResolveResult.InvalidBaseTerrain;
+            }
+
+            ChunkLocalTileCoordinate local = WorldGrid.ToLocalTileCoordinate(
+                coordinate.X,
+                coordinate.Y);
+            int localTileIndex = WorldGrid.ToTileIndex(local.X, local.Y);
+            GeneratedTerrainCell baseCell = generatedCells[localTileIndex];
+            if (deltaOwnerEntity == Entity.Null)
+            {
+                return EffectiveTerrainResolver.TryResolve(
+                    baseCell,
+                    false,
+                    default,
+                    catalog,
+                    out effectiveCell);
+            }
+
+            if (!entityManager.Exists(deltaOwnerEntity)
+                || !entityManager.HasComponent<TerrainChunkDeltaOwner>(deltaOwnerEntity)
+                || !entityManager.HasBuffer<TerrainCellDelta>(deltaOwnerEntity))
+            {
+                return EffectiveTerrainResolveResult.InvalidDelta;
+            }
+
+            TerrainChunkDeltaOwner owner =
+                entityManager.GetComponentData<TerrainChunkDeltaOwner>(deltaOwnerEntity);
+            DynamicBuffer<TerrainCellDelta> deltas =
+                entityManager.GetBuffer<TerrainCellDelta>(deltaOwnerEntity, true);
+            return TryResolve(
+                coordinate,
+                owner,
+                deltas,
+                baseCell,
+                catalog,
+                out effectiveCell);
+        }
+
         /// <summary>
         /// 指定座標が所有者チャンクに属する場合だけ対応差分を検索し、有効セルを構築します。
         /// </summary>
@@ -385,7 +413,7 @@ namespace Farmware.WorldGeneration
             in WorldTileCoordinate coordinate,
             in TerrainChunkDeltaOwner owner,
             DynamicBuffer<TerrainCellDelta> deltas,
-            in BaseTerrainCell baseCell,
+            in GeneratedTerrainCell baseCell,
             BlobAssetReference<TerrainBlockCatalogBlob> catalog,
             out EffectiveTerrainCell effectiveCell)
         {
@@ -450,7 +478,7 @@ namespace Farmware.WorldGeneration
         public static bool SetOrRemove(
             DynamicBuffer<TerrainCellDelta> deltas,
             ushort localTileIndex,
-            in BaseTerrainCell baseCell,
+            in GeneratedTerrainCell baseCell,
             in EffectiveTerrainCell desiredCell,
             BlobAssetReference<TerrainBlockCatalogBlob> catalog)
         {

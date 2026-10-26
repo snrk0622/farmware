@@ -1,4 +1,4 @@
-// このファイルは、地形・資源・固定水文・表流水・地下水・湖水収支・泉・自然冠水をECS外の作業領域で生成し、完成結果だけをECSへ公開します。
+// このファイルは、地形・Blockセル・資源・固定水文・表流水・地下水・湖水収支・泉・自然冠水をECS外の作業領域で生成し、完成結果だけをECSへ公開します。
 // ChunkStreamingSystemが要求と寿命、Presentationが確定済みBufferの表示、固定Tick公開Systemが個体群の決定論境界を担当します。
 
 using System;
@@ -85,8 +85,8 @@ namespace Farmware.WorldGeneration
         {
             requestQuery = new EntityQueryBuilder(Allocator.Temp)
                 .WithAll<ChunkCoordinateComponent, ChunkGenerationStatus, ChunkGenerationRequest>()
-                .WithAll<GeneratedTile, GeneratedResourceTile, GeneratedHydrologyCell,
-                    GeneratedSurfaceWaterTile, GeneratedHydrologyTile>()
+                .WithAll<GeneratedTile, GeneratedTerrainCell, GeneratedResourceTile,
+                    GeneratedHydrologyCell, GeneratedSurfaceWaterTile, GeneratedHydrologyTile>()
                 .Build(ref state);
             fixedTickReadinessQuery = new EntityQueryBuilder(Allocator.Temp)
                 .WithAllRW<FixedTickReadinessState>()
@@ -96,6 +96,8 @@ namespace Farmware.WorldGeneration
             state.RequireForUpdate<WorldGenerationSettings>();
             state.RequireForUpdate<BiomeClassificationSettings>();
             state.RequireForUpdate<ResourceGenerationSettings>();
+            state.RequireForUpdate<TerrainBlockCatalog>();
+            state.RequireForUpdate<TerrainBlockPaletteCatalog>();
         }
 
         /// <summary>
@@ -133,6 +135,8 @@ namespace Farmware.WorldGeneration
                 SystemAPI.GetSingleton<WorldGenerationSettings>(),
                 SystemAPI.GetSingleton<BiomeClassificationSettings>(),
                 SystemAPI.GetSingleton<ResourceGenerationSettings>(),
+                SystemAPI.GetSingleton<TerrainBlockPaletteCatalog>().Value,
+                SystemAPI.GetSingleton<TerrainBlockCatalog>().BuiltInRuntimeIds,
                 limit);
             RefreshFixedTickReadiness(state.EntityManager, fixedTickPublication && !isPaused, scheduled);
         }
@@ -144,6 +148,8 @@ namespace Farmware.WorldGeneration
         /// <param name="settings">投入時点で固定する地形生成設定です。</param>
         /// <param name="biomeSettings">投入時点で固定する新18Biome Definitionです。</param>
         /// <param name="resourceSettings">投入時点で固定する資源生成設定です。</param>
+        /// <param name="paletteCatalog">Biome・地質別Block候補を保持する読み取り専用Blobです。</param>
+        /// <param name="terrainRuntimeIds">海水・淡水・マグマなど固定用途へ解決済みのRuntime IDです。</param>
         /// <param name="maximumConcurrentGenerations">同時実行上限です。1未満は1へ正規化します。</param>
         /// <returns>この呼出しで1件以上の新しい生成Jobを投入した場合はtrueです。</returns>
         public bool ScheduleBatch(
@@ -151,6 +157,8 @@ namespace Farmware.WorldGeneration
             WorldGenerationSettings settings,
             BiomeClassificationSettings biomeSettings,
             ResourceGenerationSettings resourceSettings,
+            BlobAssetReference<TerrainBlockPaletteCatalogBlob> paletteCatalog,
+            BuiltInTerrainBlockRuntimeIds terrainRuntimeIds,
             int maximumConcurrentGenerations)
         {
             using (ScheduleProfilerMarker.Auto())
@@ -160,6 +168,8 @@ namespace Farmware.WorldGeneration
                     settings,
                     biomeSettings,
                     resourceSettings,
+                    paletteCatalog,
+                    terrainRuntimeIds,
                     math.max(1, maximumConcurrentGenerations));
             }
         }
@@ -313,6 +323,7 @@ namespace Farmware.WorldGeneration
                 GenerationSlot slot = slots[index];
                 slot.Handle.Complete();
                 slot.Tiles.Dispose();
+                slot.TerrainCells.Dispose();
                 slot.Resources.Dispose();
                 slot.HydrologyCells.Dispose();
                 slot.HydrologyCatchmentFrontier.Dispose();
@@ -356,7 +367,7 @@ namespace Farmware.WorldGeneration
             slots.Dispose();
         }
 
-        /// <summary>完成した作業枠だけを読み、存続する要求Entityへ5種類の固定生成Bufferをまとめて公開します。</summary>
+        /// <summary>完成した作業枠だけを読み、存続する要求Entityへ6種類の固定生成Bufferをまとめて公開します。</summary>
         /// <param name="manager">同じWorldの公開先です。所有Jobの専用配列から完成結果をコピーします。</param>
         private void PublishCompletedResults(EntityManager manager)
         {
@@ -375,6 +386,7 @@ namespace Farmware.WorldGeneration
                     && manager.HasComponent<ChunkCoordinateComponent>(slot.Entity)
                     && manager.HasComponent<ChunkGenerationStatus>(slot.Entity)
                     && manager.HasBuffer<GeneratedTile>(slot.Entity)
+                    && manager.HasBuffer<GeneratedTerrainCell>(slot.Entity)
                     && manager.HasBuffer<GeneratedResourceTile>(slot.Entity)
                     && manager.HasBuffer<GeneratedHydrologyCell>(slot.Entity)
                     && manager.HasBuffer<GeneratedSurfaceWaterTile>(slot.Entity)
@@ -412,8 +424,9 @@ namespace Farmware.WorldGeneration
                         }
                         else
                         {
-                            // 5つのBufferを確定してからReadyへ進め、半分だけ完成した結果を後続Systemへ渡しません。
+                            // 6つのBufferを確定してからReadyへ進め、半分だけ完成した結果を後続Systemへ渡しません。
                             manager.GetBuffer<GeneratedTile>(slot.Entity).CopyFrom(slot.Tiles);
+                            manager.GetBuffer<GeneratedTerrainCell>(slot.Entity).CopyFrom(slot.TerrainCells);
                             manager.GetBuffer<GeneratedResourceTile>(slot.Entity).CopyFrom(slot.Resources);
                             manager.GetBuffer<GeneratedHydrologyCell>(slot.Entity).CopyFrom(slot.HydrologyCells);
                             manager.GetBuffer<GeneratedSurfaceWaterTile>(slot.Entity).CopyFrom(slot.SurfaceWater);
@@ -435,7 +448,10 @@ namespace Farmware.WorldGeneration
         /// <summary>実行中枠数を上限内に保ち、Queued要求だけを専用配列のJobへ渡します。</summary>
         /// <param name="manager">要求と生成状態を所有する同じWorldです。</param>
         /// <param name="settings">値コピーしてJobへ渡す地形設定です。</param>
+        /// <param name="biomeSettings">値コピーしてJobへ渡す18Biome分類設定です。</param>
         /// <param name="resourceSettings">値コピーしてJobへ渡す資源設定です。</param>
+        /// <param name="paletteCatalog">Jobが自然Ground・Wallを選ぶ固定Blockパレットです。</param>
+        /// <param name="terrainRuntimeIds">Jobが固定液体を直接設定する解決済みIDです。</param>
         /// <param name="limit">1以上へ正規化済みの同時生成上限です。</param>
         /// <returns>1件以上のQueued要求をJobへ投入した場合はtrueです。</returns>
         private bool ScheduleRequests(
@@ -443,6 +459,8 @@ namespace Farmware.WorldGeneration
             WorldGenerationSettings settings,
             BiomeClassificationSettings biomeSettings,
             ResourceGenerationSettings resourceSettings,
+            BlobAssetReference<TerrainBlockPaletteCatalogBlob> paletteCatalog,
+            BuiltInTerrainBlockRuntimeIds terrainRuntimeIds,
             int limit)
         {
             int running = 0;
@@ -667,8 +685,11 @@ namespace Farmware.WorldGeneration
                     WorldSettings = settings,
                     BiomeSettings = biomeSettings,
                     ResourceSettings = resourceSettings,
+                    PaletteCatalog = paletteCatalog,
+                    TerrainRuntimeIds = terrainRuntimeIds,
                     Coordinate = slot.Coordinate,
                     Tiles = slot.Tiles,
+                    TerrainCells = slot.TerrainCells,
                     HydrologyTiles = slot.HydrologyTiles,
                     SurfaceWater = slot.SurfaceWater,
                     Resources = slot.Resources,
@@ -681,7 +702,7 @@ namespace Farmware.WorldGeneration
                 // 地下水Jobは完成した地形と表流水の両方へ依存します。
                 // 湖水収支・泉Job後は、周囲8チャンクを4担当ずつ2波で再構築してから最終評価します。
                 // 4件分の巨大Flood Fill領域を再利用し、8件分を常駐させずにWorker並列性を確保します。
-                // 公開先Bufferは増やさず、拡張した自然水文Bufferを含む同じ5 Bufferの一括公開境界を維持します。
+                // Blockセルを含む6 Bufferを同じ最終Jobと公開境界へ束ね、旧分類との部分公開を防ぎます。
                 JobHandle hydrologyHandle = hydrologyJob.Schedule(HydrologyRowWorkItemCount, 1);
                 JobHandle prepareLakeHandle = prepareLakeJob.Schedule(hydrologyHandle);
                 JobHandle lakeHandle = lakeJob.Schedule(HydrologyRowWorkItemCount, 1, prepareLakeHandle);
@@ -754,7 +775,7 @@ namespace Farmware.WorldGeneration
             }
         }
 
-        /// <summary>空き枠を返し、不足時だけ5出力Bufferと固定上限の中間作業用Persistent配列を追加確保します。</summary>
+        /// <summary>空き枠を返し、不足時だけ6出力Bufferと固定上限の中間作業用Persistent配列を追加確保します。</summary>
         /// <returns>投入するJobの所有情報を書き込む枠の添字です。</returns>
         private int GetAvailableSlot()
         {
@@ -769,6 +790,10 @@ namespace Farmware.WorldGeneration
             slots.Add(new GenerationSlot
             {
                 Tiles = new NativeArray<GeneratedTile>(WorldGridConstants.TilesPerChunk, Allocator.Persistent,
+                    NativeArrayOptions.UninitializedMemory),
+                TerrainCells = new NativeArray<GeneratedTerrainCell>(
+                    WorldGridConstants.TilesPerChunk,
+                    Allocator.Persistent,
                     NativeArrayOptions.UninitializedMemory),
                 Resources = new NativeArray<GeneratedResourceTile>(WorldGridConstants.TilesPerChunk, Allocator.Persistent,
                     NativeArrayOptions.UninitializedMemory),
@@ -955,6 +980,8 @@ namespace Farmware.WorldGeneration
             public JobHandle NaturalFloodingHandle;
             /// <summary>地形4096件の作業配列です。枠の再利用中は保持し、System終了時にDisposeします。</summary>
             public NativeArray<GeneratedTile> Tiles;
+            /// <summary>完成Blockセル4096件の作業配列です。最終Jobが全件上書きし、完成時だけECSへ公開します。</summary>
+            public NativeArray<GeneratedTerrainCell> TerrainCells;
             /// <summary>資源4096件の作業配列です。地形配列と同じ所有・解放規則です。</summary>
             public NativeArray<GeneratedResourceTile> Resources;
             /// <summary>中心がチャンク内に属する固定水文64件の作業配列です。枠の再利用中は保持します。</summary>
@@ -999,11 +1026,11 @@ namespace Farmware.WorldGeneration
             public NativeArray<byte> HydrologyGenerationFailed;
             /// <summary>地形・資源Jobが失敗時に先頭へ1を書く、公開処理への独立通知領域です。</summary>
             public NativeArray<byte> TerrainGenerationFailed;
-            /// <summary>表流水細分化Jobが失敗時に先頭へ1を書き、5 Bufferすべての公開を止める通知領域です。</summary>
+            /// <summary>表流水細分化Jobが失敗時に先頭へ1を書き、6 Bufferすべての公開を止める通知領域です。</summary>
             public NativeArray<byte> SurfaceWaterGenerationFailed;
-            /// <summary>地下水・自然土壌飽和Jobが失敗時に先頭へ1を書き、5 Bufferの公開を止める通知領域です。</summary>
+            /// <summary>地下水・自然土壌飽和Jobが失敗時に先頭へ1を書き、6 Bufferの公開を止める通知領域です。</summary>
             public NativeArray<byte> GroundwaterGenerationFailed;
-            /// <summary>湖水収支・泉Jobが失敗時に先頭へ1を書き、5 Bufferの公開を止める通知領域です。</summary>
+            /// <summary>湖水収支・泉Jobが失敗時に先頭へ1を書き、6 Bufferの公開を止める通知領域です。</summary>
             public NativeArray<byte> LakeSpringGenerationFailed;
             /// <summary>周辺4チャンクの64水文セルを同時再構築し、2波で再利用する自然冠水作業配列です。</summary>
             public NativeArray<GeneratedHydrologyCell> NaturalFloodingScratchHydrologyCells;
@@ -1029,7 +1056,7 @@ namespace Farmware.WorldGeneration
             public NativeArray<byte> WetlandVisitedCells;
             /// <summary>湿原成分を上下左右へ探索する最大225件のFIFO配列です。</summary>
             public NativeArray<int> WetlandCellQueue;
-            /// <summary>周囲8担当または最終湿原評価の失敗時に1を書き、5 Bufferの公開を止めます。</summary>
+            /// <summary>周囲8担当または最終湿原評価の失敗時に1を書き、6 Bufferの公開を止めます。</summary>
             public NativeArray<byte> NaturalFloodingGenerationFailed;
         }
 
@@ -1116,7 +1143,7 @@ namespace Farmware.WorldGeneration
             /// <summary>このJobだけが全4096件を上書きし、最終Handle完了後にSystemへ返す地形配列です。</summary>
             public NativeArray<GeneratedTile> Tiles;
 
-            /// <summary>生成失敗時に先頭へ1を書き、5 Bufferすべての公開を止める地形専用通知領域です。</summary>
+            /// <summary>生成失敗時に先頭へ1を書き、6 Bufferすべての公開を止める地形専用通知領域です。</summary>
             public NativeArray<byte> GenerationFailed;
 
             /// <summary>地質キャッシュを一度構築し、全タイルの分類前地形を順に生成します。</summary>
@@ -1310,7 +1337,7 @@ namespace Farmware.WorldGeneration
             /// <summary>成功時に4096件すべてを上書きし、最終Handle後にECSへ公開する表流水配列です。</summary>
             public NativeArray<GeneratedSurfaceWaterTile> SurfaceWater;
 
-            /// <summary>生成失敗時に先頭へ1を書き、地形・資源・水文を含む5 Bufferの公開を止めます。</summary>
+            /// <summary>生成失敗時に先頭へ1を書き、地形・Blockセル・資源・水文を含む6 Bufferの公開を止めます。</summary>
             public NativeArray<byte> GenerationFailed;
 
             /// <summary>固定長作業領域を純粋生成へ渡し、失敗時だけ公開停止フラグを設定します。</summary>
@@ -1375,7 +1402,7 @@ namespace Farmware.WorldGeneration
             [ReadOnly]
             public NativeArray<byte> TerrainGenerationFailed;
 
-            /// <summary>地下水または自然土壌飽和に失敗した場合、先頭へ1を書いて5 Bufferの公開を止めます。</summary>
+            /// <summary>地下水または自然土壌飽和に失敗した場合、先頭へ1を書いて6 Bufferの公開を止めます。</summary>
             public NativeArray<byte> GenerationFailed;
 
             /// <summary>先行失敗を確認し、完成入力だけを純粋生成へ渡して一括成功または一括失敗にします。</summary>
@@ -1518,7 +1545,7 @@ namespace Farmware.WorldGeneration
             [ReadOnly]
             public NativeArray<byte> SpringHydrologyGenerationFailed;
 
-            /// <summary>湖区分または泉生成が失敗した場合に1を書き、5 Bufferの部分公開を止めます。</summary>
+            /// <summary>湖区分または泉生成が失敗した場合に1を書き、6 Bufferの部分公開を止めます。</summary>
             public NativeArray<byte> GenerationFailed;
 
             /// <summary>先行失敗を確認し、湖・泉を一括成功または一括失敗として適用します。</summary>
@@ -1726,7 +1753,7 @@ namespace Farmware.WorldGeneration
             public NativeArray<int> CellQueue;
             /// <summary>先行する湖・泉生成の失敗通知です。</summary>
             [ReadOnly] public NativeArray<byte> LakeSpringGenerationFailed;
-            /// <summary>周囲8担当と最終評価の失敗を保持し、5 Buffer一括公開を止めます。</summary>
+            /// <summary>周囲8担当と最終評価の失敗を保持し、6 Buffer一括公開を止めます。</summary>
             public NativeArray<byte> GenerationFailed;
 
             /// <summary>先行失敗を集約し、成功時だけ固定順の結合と4096件の最終評価を実行します。</summary>
@@ -1768,8 +1795,8 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>
-        /// 完成したC3／C4水文の後で新18Biomeを確定し、既存GroundTypeと仮資源へ一括反映する最終Burst Jobです。
-        /// このJobが成功するまでBiomeIdを公開しないため、水文特殊Biomeを後から書き換える二重経路を作りません。
+        /// 完成した水文の後で新18Biome、Blockセル、仮資源を一括確定する最終Burst Jobです。
+        /// このJobが成功するまでBiomeIdとBlockセルを公開せず、旧分類から後変換する二重経路を作りません。
         /// </summary>
         [BurstCompile]
         private struct FinalizeBiomeTerrainJob : IJob
@@ -1783,17 +1810,27 @@ namespace Farmware.WorldGeneration
             /// <summary>C7まで維持する木・石・砂の仮資源生成設定です。</summary>
             public ResourceGenerationSettings ResourceSettings;
 
+            /// <summary>Biome表層と地質由来のGround・Wall候補を固定順で保持するBlobです。</summary>
+            [ReadOnly]
+            public BlobAssetReference<TerrainBlockPaletteCatalogBlob> PaletteCatalog;
+
+            /// <summary>自然水域とマグマへ直接設定する解決済みLiquid IDです。</summary>
+            public BuiltInTerrainBlockRuntimeIds TerrainRuntimeIds;
+
             /// <summary>生成対象となるSurface上の絶対論理チャンク座標です。</summary>
             public ChunkCoordinateComponent Coordinate;
 
             /// <summary>基礎環境・地質を読み、新Biomeと最終地面属性を書き戻す4096タイルです。</summary>
             public NativeArray<GeneratedTile> Tiles;
 
+            /// <summary>最終Biome・地質・水文から全件上書きする自然Blockセル4096件です。</summary>
+            public NativeArray<GeneratedTerrainCell> TerrainCells;
+
             /// <summary>水文特殊Biomeの判定に使う、完成済み自然水文4096タイルです。</summary>
             [ReadOnly]
             public NativeArray<GeneratedHydrologyTile> HydrologyTiles;
 
-            /// <summary>既存GroundTypeへ一時反映する、湖・泉まで確定済みの固定表流水です。</summary>
+            /// <summary>最終Liquid選択へ渡す、湖・泉まで確定済みの固定表流水です。</summary>
             [ReadOnly]
             public NativeArray<GeneratedSurfaceWaterTile> SurfaceWater;
 
@@ -1833,11 +1870,36 @@ namespace Farmware.WorldGeneration
                         {
                             GenerationFailed[0] = 1;
                             Tiles[tileIndex] = default;
+                            TerrainCells[tileIndex] = default;
                             Resources[tileIndex] = default;
                             continue;
                         }
 
+                        if (!DeterministicTerrainCellFinalizer.TryFinalizeSurfaceCell(
+                                WorldSettings,
+                                PaletteCatalog,
+                                TerrainRuntimeIds,
+                                worldTileX,
+                                worldTileY,
+                                finalizedTile,
+                                HydrologyTiles[tileIndex],
+                                SurfaceWater[tileIndex],
+                                out GeneratedTerrainCell terrainCell))
+                        {
+                            // 1セルでもBlock確定に失敗した場合は、旧GeneratedTileだけを公開できないよう全出力を失敗扱いにします。
+                            GenerationFailed[0] = 1;
+                            Tiles[tileIndex] = default;
+                            TerrainCells[tileIndex] = default;
+                            Resources[tileIndex] = default;
+                            continue;
+                        }
+
+                        // C7で資源適性を拡張するまでは、旧地形分類ではなく確定Blockセルから暫定3資源候補を決めます。
+                        finalizedTile.ResourceSuitability =
+                            DeterministicTerrainCellFinalizer.ClassifyInterimResourceSuitability(
+                                terrainCell);
                         Tiles[tileIndex] = finalizedTile;
+                        TerrainCells[tileIndex] = terrainCell;
                         Resources[tileIndex] = DeterministicResourceGenerator.GenerateResource(
                             WorldSettings,
                             ResourceSettings,
@@ -1868,6 +1930,8 @@ namespace Farmware.WorldGeneration
             state.RequireForUpdate<WorldGenerationSettings>();
             state.RequireForUpdate<BiomeClassificationSettings>();
             state.RequireForUpdate<ResourceGenerationSettings>();
+            state.RequireForUpdate<TerrainBlockCatalog>();
+            state.RequireForUpdate<TerrainBlockPaletteCatalog>();
         }
 
         /// <summary>同じWorldの生成Systemを探し、完成確認済みバッチを公開して次のバッチを非同期投入します。</summary>
@@ -1902,6 +1966,8 @@ namespace Farmware.WorldGeneration
                 SystemAPI.GetSingleton<WorldGenerationSettings>(),
                 SystemAPI.GetSingleton<BiomeClassificationSettings>(),
                 SystemAPI.GetSingleton<ResourceGenerationSettings>(),
+                SystemAPI.GetSingleton<TerrainBlockPaletteCatalog>().Value,
+                SystemAPI.GetSingleton<TerrainBlockCatalog>().BuiltInRuntimeIds,
                 limit);
             generator.RefreshFixedTickReadiness(state.EntityManager, true, scheduled);
         }

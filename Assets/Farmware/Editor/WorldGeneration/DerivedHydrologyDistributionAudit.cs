@@ -216,9 +216,11 @@ namespace Farmware.WorldGeneration.Editor
 
         /// <summary>指定した複数Seed・有限チャンク範囲を完成生成し、件数・極値・比較署名を返します。</summary>
         /// <param name="auditSettings">検証済みのSeed一覧、チャンク半径、GeneratorVersionです。</param>
+        /// <param name="terrainCatalogs">Main Threadで完成し、監査中は破棄されない地形カタログです。</param>
         /// <returns>0件分類も保持する派生水文分布監査結果です。</returns>
         public static DerivedHydrologyDistributionAuditResult Analyze(
-            HydrologyDistributionAuditSettings auditSettings)
+            HydrologyDistributionAuditSettings auditSettings,
+            HydrologyDiagnosticTerrainCatalogs terrainCatalogs)
         {
             if (auditSettings == null)
             {
@@ -251,6 +253,7 @@ namespace Farmware.WorldGeneration.Editor
                                 settings,
                                 biomeSettings,
                                 coordinate,
+                                terrainCatalogs,
                                 out HydrologyDiagnosticChunk chunk,
                                 out HydrologyDiagnosticGenerationStage stage))
                         {

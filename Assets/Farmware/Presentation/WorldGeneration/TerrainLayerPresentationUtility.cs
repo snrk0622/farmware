@@ -1,6 +1,7 @@
 // このファイルは、16×24の土地ブロック、16×28の岩壁ブロック、液面アニメーション、岩壁際の資源レイヤー分類に共通する表示規則を定義します。
 // Tilemapへ実際に描画するChunkTilemapPresenterと数値を分離し、Sceneを開かないEditModeテストでも高さ規則を検証できるようにします。
 
+using Farmware.Simulation;
 using UnityEngine;
 
 namespace Farmware.WorldGeneration.Presentation
@@ -95,42 +96,48 @@ namespace Farmware.WorldGeneration.Presentation
             RockWallElevationInPixels / (float)TerrainSurfaceHeightInPixels;
 
         /// <summary>
-        /// 1セルの地形と塩分から、重ねる液面アニメーション種類を返します。
+        /// 1セルのLiquid Runtime IDから、重ねる液面アニメーション種類を返します。
         /// </summary>
-        /// <param name="tile">ECSを正とする1セル分の生成地形です。</param>
+        /// <param name="terrainCell">ECSを正とする1セル分の自然生成Blockセルです。</param>
+        /// <param name="runtimeIds">淡水、海水、マグマを識別する組み込みIDです。</param>
         /// <returns>淡水・海水・マグマの表示種類です。通常地形ならNoneです。</returns>
-        public static LiquidAnimationKind ClassifyLiquidAnimation(GeneratedTile tile)
+        public static LiquidAnimationKind ClassifyLiquidAnimation(
+            in GeneratedTerrainCell terrainCell,
+            in BuiltInTerrainBlockRuntimeIds runtimeIds)
         {
-            if (tile.Ground == GroundType.Magma)
+            if (terrainCell.LiquidRuntimeId.IsValid
+                && terrainCell.LiquidRuntimeId.Value == runtimeIds.Magma.Value)
             {
                 return LiquidAnimationKind.Magma;
             }
 
-            if (tile.Ground != GroundType.Water)
+            if (terrainCell.LiquidRuntimeId.IsValid
+                && terrainCell.LiquidRuntimeId.Value == runtimeIds.FreshWater.Value)
             {
-                return LiquidAnimationKind.None;
+                return LiquidAnimationKind.FreshWater;
             }
 
-            return tile.WaterSalinity == WaterSalinity.FreshWater
-                ? LiquidAnimationKind.FreshWater
-                : LiquidAnimationKind.SaltWater;
+            return terrainCell.LiquidRuntimeId.IsValid
+                && terrainCell.LiquidRuntimeId.Value == runtimeIds.SaltWater.Value
+                ? LiquidAnimationKind.SaltWater
+                : LiquidAnimationKind.None;
         }
 
         /// <summary>
         /// 通常地面の資源を、直前方にある岩壁より後ろへ描画する必要があるか判定します。
         /// </summary>
         /// <param name="resourceTile">現在セルの資源データです。配置なしなら背面へ分けません。</param>
-        /// <param name="currentTerrainTile">資源の接地セルです。岩壁上資源は専用レイヤーを使うため対象外です。</param>
-        /// <param name="frontTerrainTile">画面手前方向に隣接する、ワールドYが1小さいセルです。</param>
+        /// <param name="currentTerrainCell">資源の接地セルです。岩壁上資源は専用レイヤーを使うため対象外です。</param>
+        /// <param name="frontTerrainCell">画面手前方向に隣接する、ワールドYが1小さいセルです。</param>
         /// <returns>通常地面に資源があり、直前方が岩壁ならtrueです。</returns>
         public static bool ShouldRenderResourceBehindRockWall(
             GeneratedResourceTile resourceTile,
-            GeneratedTile currentTerrainTile,
-            GeneratedTile frontTerrainTile)
+            GeneratedTerrainCell currentTerrainCell,
+            GeneratedTerrainCell frontTerrainCell)
         {
             return resourceTile.Type != GeneratedResourceType.None
-                && currentTerrainTile.Ground != GroundType.RockWall
-                && frontTerrainTile.Ground == GroundType.RockWall;
+                && !currentTerrainCell.WallBlockRuntimeId.IsValid
+                && frontTerrainCell.WallBlockRuntimeId.IsValid;
         }
 
     }

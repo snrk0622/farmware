@@ -94,36 +94,28 @@ namespace Farmware.Simulation
     }
 
     /// <summary>
-    /// 現在の互換生成器が出力する地形分類を、新しいブロック定義へ変換するための解決済みID一式です。
-    /// TERRAIN-01Cで生成器がBlockを直接出力するまでの境界として使用します。
+    /// 自然生成器、移動、配置、表示が共通利用する組み込みLiquidの解決済みID一式です。
+    /// GroundとWallは41材質カタログから選び、液体だけを用途固定のIDとして共有します。
     /// </summary>
     public struct BuiltInTerrainBlockRuntimeIds
     {
-        /// <summary>既存Landを表す地面定義です。</summary>
-        public DefinitionRuntimeId LandGround;
-
-        /// <summary>既存RockWallを表す壁定義です。</summary>
-        public DefinitionRuntimeId NaturalRockWall;
-
-        /// <summary>既存FreshWaterを表す液体定義です。</summary>
+        /// <summary>自然生成で共通利用する淡水定義です。</summary>
         public DefinitionRuntimeId FreshWater;
 
-        /// <summary>既存SaltWaterを表す液体定義です。</summary>
+        /// <summary>自然生成で共通利用する海水定義です。</summary>
         public DefinitionRuntimeId SaltWater;
 
-        /// <summary>既存Magmaを表す液体定義です。</summary>
+        /// <summary>自然生成で共通利用するマグマ定義です。</summary>
         public DefinitionRuntimeId Magma;
 
-        /// <summary>互換変換に必要な5定義がすべて解決済みかを返します。</summary>
-        public bool IsValid => LandGround.IsValid
-            && NaturalRockWall.IsValid
-            && FreshWater.IsValid
+        /// <summary>自然生成と利用側が共有する3液体定義をすべて解決済みか返します。</summary>
+        public bool IsValid => FreshWater.IsValid
             && SaltWater.IsValid
             && Magma.IsValid;
     }
 
     /// <summary>
-    /// Bakerが構築した地形定義と互換変換用IDをECS Worldへ公開するSingleton Componentです。
+    /// Bakerが構築した地形定義と自然生成用の組み込みIDをECS Worldへ公開するSingleton Componentです。
     /// 全セルが共有する静的状態であり、地形編集によって書き換えません。
     /// </summary>
     public struct TerrainBlockCatalog : IComponentData
@@ -131,24 +123,16 @@ namespace Farmware.Simulation
         /// <summary>検証済み地形定義の読み取り専用Blob Assetです。</summary>
         public BlobAssetReference<TerrainBlockCatalogBlob> Value;
 
-        /// <summary>既存GeneratedTileを新しいブロック参照へ移すための解決済みIDです。</summary>
+        /// <summary>自然生成、移動、配置、表示が共有する解決済み組み込みIDです。</summary>
         public BuiltInTerrainBlockRuntimeIds BuiltInRuntimeIds;
     }
 
     /// <summary>
-    /// TERRAIN-01Aで既存Surface生成を新しい有効セルへ接続する最小の組み込み定義です。
-    /// GUIDはセーブ互換境界になるため変更せず、追加定義は別GUIDとして増やします。
+    /// 自然生成で用途が固定される液体を共通定義とRuntime IDへ接続します。
+    /// GroundとWallはTerrainBlockMaterialDefinitionsが管理し、旧互換定義を混在させません。
     /// </summary>
     public static class BuiltInTerrainBlockDefinitions
     {
-        /// <summary>通常地面の変更禁止GUIDです。</summary>
-        public static readonly DefinitionGuid LandGroundGuid =
-            new DefinitionGuid(0x8f5c1c7a25b84d10UL, 0xa1d63a6ff1f9a001UL);
-
-        /// <summary>自然岩壁の変更禁止GUIDです。</summary>
-        public static readonly DefinitionGuid NaturalRockWallGuid =
-            new DefinitionGuid(0x8f5c1c7a25b84d10UL, 0xa1d63a6ff1f9a002UL);
-
         /// <summary>淡水の変更禁止GUIDです。</summary>
         public static readonly DefinitionGuid FreshWaterGuid =
             new DefinitionGuid(0x8f5c1c7a25b84d10UL, 0xa1d63a6ff1f9a003UL);
@@ -162,19 +146,17 @@ namespace Farmware.Simulation
             new DefinitionGuid(0x8f5c1c7a25b84d10UL, 0xa1d63a6ff1f9a005UL);
 
         /// <summary>
-        /// 共通DefinitionCatalogへ追加する暫定5定義と41材質の123定義入力を作ります。
+        /// 共通DefinitionCatalogへ追加する固定3液体と41材質の123定義入力を作ります。
         /// </summary>
         /// <param name="referenceStartIndex">先行する定義が使用した参照総数です。</param>
         /// <param name="references">41材質のGround・Wallから共通Itemを指す明示参照を受け取ります。</param>
-        /// <returns>既存入力の末尾へ追加できる、暫定地形と41材質の共通定義配列です。</returns>
+        /// <returns>既存入力の末尾へ追加できる、固定液体と41材質の共通定義配列です。</returns>
         public static DefinitionBuildEntry[] CreateCommonDefinitions(
             int referenceStartIndex,
             out DefinitionBuildReference[] references)
         {
-            DefinitionBuildEntry[] legacyDefinitions =
+            DefinitionBuildEntry[] liquidDefinitions =
             {
-                CreateCommonDefinition(LandGroundGuid, DefinitionKind.GroundBlock, referenceStartIndex),
-                CreateCommonDefinition(NaturalRockWallGuid, DefinitionKind.WallBlock, referenceStartIndex),
                 CreateCommonDefinition(FreshWaterGuid, DefinitionKind.Liquid, referenceStartIndex),
                 CreateCommonDefinition(SaltWaterGuid, DefinitionKind.Liquid, referenceStartIndex),
                 CreateCommonDefinition(MagmaGuid, DefinitionKind.Liquid, referenceStartIndex)
@@ -185,42 +167,31 @@ namespace Farmware.Simulation
                     referenceStartIndex,
                     out references);
             DefinitionBuildEntry[] combined = new DefinitionBuildEntry[
-                legacyDefinitions.Length + materialDefinitions.Length];
-            Array.Copy(legacyDefinitions, 0, combined, 0, legacyDefinitions.Length);
+                liquidDefinitions.Length + materialDefinitions.Length];
+            Array.Copy(liquidDefinitions, 0, combined, 0, liquidDefinitions.Length);
             Array.Copy(
                 materialDefinitions,
                 0,
                 combined,
-                legacyDefinitions.Length,
+                liquidDefinitions.Length,
                 materialDefinitions.Length);
             return combined;
         }
 
         /// <summary>
-        /// 地形固有カタログへ入れる暫定5定義と、41材質のGround・Wall属性を作ります。
+        /// 地形固有カタログへ入れる固定3液体と、41材質のGround・Wall属性を作ります。
         /// 41材質は共通Itemを解決して回収品へ接続し、採掘硬度だけをGATHER-01まで未設定にします。
         /// </summary>
-        /// <param name="definitionCatalog">暫定5定義と41材質を登録済みの共通Definitionカタログです。</param>
-        /// <param name="definitions">成功時に暫定5件と材質82件を連結した地形固有入力を受け取ります。</param>
+        /// <param name="definitionCatalog">固定3液体と41材質を登録済みの共通Definitionカタログです。</param>
+        /// <param name="definitions">成功時に液体3件と材質82件を連結した地形固有入力を受け取ります。</param>
         /// <returns>41材質のItem・Ground・Wallをすべて正しい分類へ解決できた場合はtrueです。</returns>
         public static bool TryCreateTerrainDefinitions(
             BlobAssetReference<DefinitionCatalogBlob> definitionCatalog,
             out TerrainBlockDefinitionBuildEntry[] definitions)
         {
             definitions = null;
-            TerrainBlockDefinitionBuildEntry[] legacyDefinitions =
+            TerrainBlockDefinitionBuildEntry[] liquidDefinitions =
             {
-                CreateTerrainDefinition(
-                    LandGroundGuid,
-                    DefinitionKind.GroundBlock,
-                    TerrainBlockDefinitionFlags.AllowsNormalEquipment |
-                    TerrainBlockDefinitionFlags.AllowsNormalBelt),
-                CreateTerrainDefinition(
-                    NaturalRockWallGuid,
-                    DefinitionKind.WallBlock,
-                    TerrainBlockDefinitionFlags.BlocksMovement |
-                    TerrainBlockDefinitionFlags.Watertight |
-                    TerrainBlockDefinitionFlags.FacilityBoundary),
                 CreateTerrainDefinition(
                     FreshWaterGuid,
                     DefinitionKind.Liquid,
@@ -245,38 +216,30 @@ namespace Farmware.Simulation
 
             TerrainBlockDefinitionBuildEntry[] combined =
                 new TerrainBlockDefinitionBuildEntry[
-                    legacyDefinitions.Length + materialDefinitions.Length];
-            Array.Copy(legacyDefinitions, 0, combined, 0, legacyDefinitions.Length);
+                    liquidDefinitions.Length + materialDefinitions.Length];
+            Array.Copy(liquidDefinitions, 0, combined, 0, liquidDefinitions.Length);
             Array.Copy(
                 materialDefinitions,
                 0,
                 combined,
-                legacyDefinitions.Length,
+                liquidDefinitions.Length,
                 materialDefinitions.Length);
             definitions = combined;
             return true;
         }
 
         /// <summary>
-        /// 共通カタログから互換生成に必要な5件の実行時IDを解決します。
+        /// 共通カタログから自然生成に必要な3液体の実行時IDを解決します。
         /// </summary>
         /// <param name="catalog">Bakerが構築した共通定義カタログです。</param>
-        /// <param name="runtimeIds">成功時に既存分類からBlockへ変換するID一式を受け取ります。</param>
-        /// <returns>5件すべてが共通カタログに存在する場合はtrueです。</returns>
+        /// <param name="runtimeIds">成功時に淡水、海水、マグマを識別するID一式を受け取ります。</param>
+        /// <returns>3液体すべてが共通カタログに存在する場合はtrueです。</returns>
         public static bool TryResolveRuntimeIds(
             BlobAssetReference<DefinitionCatalogBlob> catalog,
             out BuiltInTerrainBlockRuntimeIds runtimeIds)
         {
             runtimeIds = default;
             bool succeeded = DefinitionCatalogLookup.TryResolve(
-                    catalog,
-                    LandGroundGuid,
-                    out runtimeIds.LandGround)
-                && DefinitionCatalogLookup.TryResolve(
-                    catalog,
-                    NaturalRockWallGuid,
-                    out runtimeIds.NaturalRockWall)
-                && DefinitionCatalogLookup.TryResolve(
                     catalog,
                     FreshWaterGuid,
                     out runtimeIds.FreshWater)

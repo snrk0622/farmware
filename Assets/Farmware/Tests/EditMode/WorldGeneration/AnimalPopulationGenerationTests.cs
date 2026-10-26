@@ -22,6 +22,10 @@ namespace Farmware.WorldGeneration.Tests
         /// <summary>テスト用共通定義で鶏を識別する変更禁止GUIDです。</summary>
         private static readonly DefinitionGuid ChickenGuid = new DefinitionGuid(0, 0xC1);
 
+        /// <summary>純粋な動物適格判定で通常Groundを表す仮Runtime IDです。</summary>
+        private static readonly DefinitionRuntimeId TestGroundRuntimeId =
+            new DefinitionRuntimeId(1);
+
         /// <summary>
         /// 同じSeed・地域X/Yを異なるWorldLayerで初期化し、地域キーと乱数系列が互いに衝突しないことを保証します。
         /// </summary>
@@ -57,9 +61,10 @@ namespace Farmware.WorldGeneration.Tests
         {
             BlobAssetReference<DefinitionCatalogBlob> definitionCatalog = default;
             BlobAssetReference<AnimalSpeciesCatalogBlob> animalCatalog = default;
-            using NativeArray<GeneratedTile> tiles = CreateUniformTiles(
+            BuiltInTerrainBlockRuntimeIds terrainRuntimeIds = CreateTerrainRuntimeIds();
+            using NativeArray<GeneratedTerrainCell> tiles = CreateUniformTerrainCells(
                 BiomeId.TemperateGrassland,
-                GroundType.Land);
+                TestGroundRuntimeId);
             using NativeArray<GeneratedResourceTile> resources =
                 new NativeArray<GeneratedResourceTile>(tiles.Length, Allocator.Temp);
             using NativeList<AnimalSpawnCandidate> candidates =
@@ -77,6 +82,7 @@ namespace Farmware.WorldGeneration.Tests
                     animalCatalog,
                     tiles,
                     resources,
+                    terrainRuntimeIds,
                     ref regionState,
                     candidates);
 
@@ -360,9 +366,10 @@ namespace Farmware.WorldGeneration.Tests
         {
             BlobAssetReference<DefinitionCatalogBlob> definitionCatalog = default;
             BlobAssetReference<AnimalSpeciesCatalogBlob> animalCatalog = default;
-            using NativeArray<GeneratedTile> tiles = CreateUniformTiles(
+            BuiltInTerrainBlockRuntimeIds terrainRuntimeIds = CreateTerrainRuntimeIds();
+            using NativeArray<GeneratedTerrainCell> tiles = CreateUniformTerrainCells(
                 BiomeId.TemperateGrassland,
-                GroundType.Land);
+                TestGroundRuntimeId);
             using NativeArray<GeneratedResourceTile> resources =
                 new NativeArray<GeneratedResourceTile>(tiles.Length, Allocator.Temp);
             using NativeList<AnimalSpawnCandidate> first =
@@ -383,6 +390,7 @@ namespace Farmware.WorldGeneration.Tests
                         animalCatalog,
                         tiles,
                         resources,
+                        terrainRuntimeIds,
                         ref firstState,
                         first),
                     Is.True);
@@ -391,6 +399,7 @@ namespace Farmware.WorldGeneration.Tests
                         animalCatalog,
                         tiles,
                         resources,
+                        terrainRuntimeIds,
                         ref repeatedState,
                         repeated),
                     Is.True);
@@ -399,6 +408,7 @@ namespace Farmware.WorldGeneration.Tests
                         animalCatalog,
                         tiles,
                         resources,
+                        terrainRuntimeIds,
                         ref differentState,
                         differentWorld),
                     Is.True);
@@ -427,20 +437,36 @@ namespace Farmware.WorldGeneration.Tests
         public void Eligibility_RequiresBothAllowedBiomeAndGround()
         {
             AnimalSpeciesDefinitionBlob chicken = CreateChickenBlob(new DefinitionRuntimeId(1));
+            BuiltInTerrainBlockRuntimeIds terrainRuntimeIds = CreateTerrainRuntimeIds();
 
             Assert.That(
                 AnimalPopulationGenerator.IsTileEligible(
-                    new GeneratedTile { Biome = BiomeId.TemperateGrassland, Ground = GroundType.Land },
+                    new GeneratedTerrainCell
+                    {
+                        Biome = BiomeId.TemperateGrassland,
+                        GroundBlockRuntimeId = TestGroundRuntimeId
+                    },
+                    terrainRuntimeIds,
                     chicken),
                 Is.True);
             Assert.That(
                 AnimalPopulationGenerator.IsTileEligible(
-                    new GeneratedTile { Biome = BiomeId.TemperateDeciduousForest, Ground = GroundType.Land },
+                    new GeneratedTerrainCell
+                    {
+                        Biome = BiomeId.TemperateDeciduousForest,
+                        GroundBlockRuntimeId = TestGroundRuntimeId
+                    },
+                    terrainRuntimeIds,
                     chicken),
                 Is.False);
             Assert.That(
                 AnimalPopulationGenerator.IsTileEligible(
-                    new GeneratedTile { Biome = BiomeId.TemperateGrassland, Ground = GroundType.Water },
+                    new GeneratedTerrainCell
+                    {
+                        Biome = BiomeId.TemperateGrassland,
+                        LiquidRuntimeId = terrainRuntimeIds.FreshWater
+                    },
+                    terrainRuntimeIds,
                     chicken),
                 Is.False);
             Assert.That(
@@ -581,6 +607,8 @@ namespace Farmware.WorldGeneration.Tests
             try
             {
                 CreateCatalogs(out definitions, out animals);
+                using TerrainGenerationTestCatalogSet terrainCatalogs =
+                    TerrainGenerationTestCatalogSet.Create();
                 using World world = new World("Chunk generation pre-schedule boundary test");
                 EntityManager manager = world.EntityManager;
                 PrepareWorldSingletons(world, animals);
@@ -590,11 +618,13 @@ namespace Farmware.WorldGeneration.Tests
                 manager.AddComponentData(configuration, ResourceGenerationSettings.CreateDefault());
                 manager.AddComponentData(configuration, ChunkStreamingSettings.CreateDefault());
                 manager.AddComponentData(configuration, new SimulationPauseState());
+                AddTerrainCatalogComponents(manager, configuration, terrainCatalogs);
 
                 Entity chunk = CreateReadyChunk(manager, -4, -4);
                 manager.SetComponentData(chunk, new ChunkGenerationStatus { Phase = ChunkGenerationPhase.Queued });
                 manager.AddComponent<ChunkGenerationRequest>(chunk);
                 manager.GetBuffer<GeneratedTile>(chunk).Clear();
+                manager.GetBuffer<GeneratedTerrainCell>(chunk).Clear();
                 manager.GetBuffer<GeneratedResourceTile>(chunk).Clear();
 
                 SystemHandle generation = world.GetOrCreateSystem<ChunkGenerationSystem>();
@@ -607,6 +637,7 @@ namespace Farmware.WorldGeneration.Tests
                     Is.EqualTo(ChunkGenerationPhase.GeneratingData));
                 Assert.That(manager.IsComponentEnabled<ChunkGenerationRequest>(chunk), Is.False);
                 Assert.That(manager.GetBuffer<GeneratedTile>(chunk).Length, Is.Zero);
+                Assert.That(manager.GetBuffer<GeneratedTerrainCell>(chunk).Length, Is.Zero);
                 Assert.That(manager.GetBuffer<GeneratedResourceTile>(chunk).Length, Is.Zero);
                 Assert.That(manager.GetBuffer<GeneratedHydrologyCell>(chunk).Length, Is.Zero);
                 Assert.That(manager.GetBuffer<GeneratedSurfaceWaterTile>(chunk).Length, Is.Zero);
@@ -621,6 +652,8 @@ namespace Farmware.WorldGeneration.Tests
                     manager.GetComponentData<ChunkGenerationStatus>(chunk).Phase,
                     Is.EqualTo(ChunkGenerationPhase.ReadyToApply));
                 Assert.That(manager.GetBuffer<GeneratedTile>(chunk).Length,
+                    Is.EqualTo(WorldGridConstants.TilesPerChunk));
+                Assert.That(manager.GetBuffer<GeneratedTerrainCell>(chunk).Length,
                     Is.EqualTo(WorldGridConstants.TilesPerChunk));
                 Assert.That(manager.GetBuffer<GeneratedResourceTile>(chunk).Length,
                     Is.EqualTo(WorldGridConstants.TilesPerChunk));
@@ -645,6 +678,8 @@ namespace Farmware.WorldGeneration.Tests
         private static SimulationStateHash RunFramePartitionedGeneration(
             BlobAssetReference<AnimalSpeciesCatalogBlob> catalog, float[] frameDeltas, bool reverseCreation)
         {
+            using TerrainGenerationTestCatalogSet terrainCatalogs =
+                TerrainGenerationTestCatalogSet.Create();
             using World world = new World("Animal frame partition regression");
             EntityManager manager = world.EntityManager;
             PrepareWorldSingletons(world, catalog);
@@ -657,6 +692,7 @@ namespace Farmware.WorldGeneration.Tests
             manager.AddComponentData(configuration, ChunkStreamingSettings.CreateDefault());
             manager.AddComponentData(configuration, FixedTickConfiguration.CreateDefault());
             manager.AddComponentData(configuration, new SimulationPauseState());
+            AddTerrainCatalogComponents(manager, configuration, terrainCatalogs);
             int[] xs = { -4, -3, 1, 2 };
             for (int i = 0; i < xs.Length; i++)
             {
@@ -739,6 +775,8 @@ namespace Farmware.WorldGeneration.Tests
         private static SimulationStateHash RunGenerationBoundary(
             BlobAssetReference<AnimalSpeciesCatalogBlob> catalog, int earlySlot, bool isPaused)
         {
+            using TerrainGenerationTestCatalogSet terrainCatalogs =
+                TerrainGenerationTestCatalogSet.Create();
             using World world = new World("Animal deterministic generation boundary test");
             EntityManager manager = world.EntityManager;
             PrepareWorldSingletons(world, catalog);
@@ -748,6 +786,7 @@ namespace Farmware.WorldGeneration.Tests
             manager.AddComponentData(configuration, ResourceGenerationSettings.CreateDefault());
             manager.AddComponentData(configuration, ChunkStreamingSettings.CreateDefault());
             manager.AddComponentData(configuration, new SimulationPauseState { Value = isPaused ? (byte)1 : (byte)0 });
+            AddTerrainCatalogComponents(manager, configuration, terrainCatalogs);
             SystemHandle generation = world.GetOrCreateSystem<ChunkGenerationSystem>();
             SystemHandle boundary = world.GetOrCreateSystem<ChunkGenerationFixedTickPublicationSystem>();
             SystemHandle population = world.GetOrCreateSystem<AnimalPopulationInitializationSystem>();
@@ -774,7 +813,10 @@ namespace Farmware.WorldGeneration.Tests
                     ref ChunkGenerationSystem generator = ref world.Unmanaged.GetUnsafeSystemRef<ChunkGenerationSystem>(generation);
                     generator.ScheduleBatch(manager, WorldGenerationSettings.CreateDefault(123456789UL, WorldGenerationSettings.CurrentGeneratorVersion),
                         BiomeDefinitionCatalog.CreateDefault(),
-                        ResourceGenerationSettings.CreateDefault(), 2);
+                        ResourceGenerationSettings.CreateDefault(),
+                        terrainCatalogs.PaletteCatalog,
+                        terrainCatalogs.RuntimeIds,
+                        2);
                 }
                 ulong nextIdBeforePublication = GetAllocatorState(manager).NextId;
                 if (earlySlot >= 0)
@@ -1090,24 +1132,39 @@ namespace Farmware.WorldGeneration.Tests
                 regionY);
         }
 
-        /// <summary>全面を同じBiomeとGroundで満たした4096タイル配列を準備します。</summary>
-        private static NativeArray<GeneratedTile> CreateUniformTiles(
+        /// <summary>全面を同じBiomeとGroundBlockで満たした4096セル配列を準備します。</summary>
+        /// <param name="biome">全セルへ設定するBiomeです。</param>
+        /// <param name="groundRuntimeId">全セルへ設定するGroundBlock Runtime IDです。</param>
+        /// <returns>呼び出し側が破棄する自然生成Blockセル配列です。</returns>
+        private static NativeArray<GeneratedTerrainCell> CreateUniformTerrainCells(
             BiomeId biome,
-            GroundType ground)
+            DefinitionRuntimeId groundRuntimeId)
         {
-            NativeArray<GeneratedTile> tiles = new NativeArray<GeneratedTile>(
+            NativeArray<GeneratedTerrainCell> tiles = new NativeArray<GeneratedTerrainCell>(
                 WorldGridConstants.TilesPerChunk,
                 Allocator.Temp);
             for (int index = 0; index < tiles.Length; index++)
             {
-                tiles[index] = new GeneratedTile
+                tiles[index] = new GeneratedTerrainCell
                 {
                     Biome = biome,
-                    Ground = ground
+                    GroundBlockRuntimeId = groundRuntimeId
                 };
             }
 
             return tiles;
+        }
+
+        /// <summary>純粋な動物候補テストで使う、有効な仮Liquid Runtime ID一式を作ります。</summary>
+        /// <returns>淡水、海水、マグマを一意に識別できるIDです。</returns>
+        private static BuiltInTerrainBlockRuntimeIds CreateTerrainRuntimeIds()
+        {
+            return new BuiltInTerrainBlockRuntimeIds
+            {
+                FreshWater = new DefinitionRuntimeId(3),
+                SaltWater = new DefinitionRuntimeId(4),
+                Magma = new DefinitionRuntimeId(5)
+            };
         }
 
         /// <summary>純粋な適格判定テストへ渡す、鶏の検証済み相当Blob値を作ります。</summary>
@@ -1250,6 +1307,12 @@ namespace Farmware.WorldGeneration.Tests
             world.EntityManager.AddComponentData(
                 singletonEntity,
                 new FixedTickReadinessState { ChunkGenerationPending = 0 });
+            world.EntityManager.AddComponentData(
+                singletonEntity,
+                new TerrainBlockCatalog
+                {
+                    BuiltInRuntimeIds = CreateTerrainRuntimeIds()
+                });
         }
 
         /// <summary>全面草原陸地で生成完了済みのストリーミング用チャンクEntityを作ります。</summary>
@@ -1272,27 +1335,53 @@ namespace Farmware.WorldGeneration.Tests
                     GeneratedWithVersion = WorldGenerationSettings.CurrentGeneratorVersion
                 });
             entityManager.AddBuffer<GeneratedTile>(chunkEntity);
+            entityManager.AddBuffer<GeneratedTerrainCell>(chunkEntity);
             entityManager.AddBuffer<GeneratedResourceTile>(chunkEntity);
             entityManager.AddBuffer<GeneratedHydrologyCell>(chunkEntity);
             entityManager.AddBuffer<GeneratedSurfaceWaterTile>(chunkEntity);
             entityManager.AddBuffer<GeneratedHydrologyTile>(chunkEntity);
-            // Buffer追加は構造変更なので、4つを追加した後に参照を取り直してから既存の地形・資源初期値を書き込みます。
-            DynamicBuffer<GeneratedTile> tiles = entityManager.GetBuffer<GeneratedTile>(chunkEntity);
+            // Buffer追加は構造変更なので、すべて追加した後に参照を取り直してから既存の地形・資源初期値を書き込みます。
+            DynamicBuffer<GeneratedTerrainCell> terrainCells =
+                entityManager.GetBuffer<GeneratedTerrainCell>(chunkEntity);
             DynamicBuffer<GeneratedResourceTile> resources =
                 entityManager.GetBuffer<GeneratedResourceTile>(chunkEntity);
-            tiles.ResizeUninitialized(WorldGridConstants.TilesPerChunk);
+            terrainCells.ResizeUninitialized(WorldGridConstants.TilesPerChunk);
             resources.ResizeUninitialized(WorldGridConstants.TilesPerChunk);
-            for (int index = 0; index < tiles.Length; index++)
+            for (int index = 0; index < terrainCells.Length; index++)
             {
-                tiles[index] = new GeneratedTile
+                terrainCells[index] = new GeneratedTerrainCell
                 {
                     Biome = BiomeId.TemperateGrassland,
-                    Ground = GroundType.Land
+                    GroundBlockRuntimeId = TestGroundRuntimeId
                 };
                 resources[index] = default;
             }
 
             return chunkEntity;
+        }
+
+        /// <summary>個体群テストの設定Entityへ、チャンク生成が必要とする地形定義と固定Blockパレットを追加します。</summary>
+        /// <param name="entityManager">設定Entityを保持するテストWorldです。</param>
+        /// <param name="configuration">生成設定と同じ寿命でカタログを保持するEntityです。</param>
+        /// <param name="catalogs">呼び出し側がWorld終了後まで所有するテスト用Blob一式です。</param>
+        private static void AddTerrainCatalogComponents(
+            EntityManager entityManager,
+            Entity configuration,
+            TerrainGenerationTestCatalogSet catalogs)
+        {
+            EntityQuery terrainCatalogQuery = entityManager.CreateEntityQuery(
+                ComponentType.ReadWrite<TerrainBlockCatalog>());
+            Entity terrainCatalogEntity = terrainCatalogQuery.GetSingletonEntity();
+            terrainCatalogQuery.Dispose();
+            entityManager.SetComponentData(terrainCatalogEntity, new TerrainBlockCatalog
+            {
+                Value = catalogs.TerrainCatalog,
+                BuiltInRuntimeIds = catalogs.RuntimeIds
+            });
+            entityManager.AddComponentData(configuration, new TerrainBlockPaletteCatalog
+            {
+                Value = catalogs.PaletteCatalog
+            });
         }
 
         /// <summary>AnimalSpeciesCatalogBuilderと共通Builderで鶏1種のBlobを作ります。</summary>

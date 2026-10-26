@@ -2,6 +2,7 @@
 // ChunkGenerationSystem、状態ハッシュ、湖Resolver、診断表示が同じ固定水文値を共有し、ロード順や表示状態による差を防ぎます。
 
 using System;
+using Farmware.Simulation;
 using Unity.Collections;
 using Unity.Entities;
 
@@ -1256,16 +1257,20 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>
-        /// 指定チャンクの地下水反映済み64水文セル、4096固定表流水、4096自然水文タイルを地形ハッシュへ追加します。
+        /// 指定チャンクの完成地形・Blockセル、地下水反映済み64水文セル、4096固定表流水、4096自然水文タイルを地形ハッシュへ追加します。
         /// </summary>
         /// <param name="settings">固定ワールド生成設定です。</param>
         /// <param name="biomeSettings">C5の新18Biome Definitionです。</param>
+        /// <param name="paletteCatalog">自然Ground・Wallを選ぶ固定Blockパレットです。</param>
+        /// <param name="terrainRuntimeIds">海水・淡水・マグマを直接設定する解決済みIDです。</param>
         /// <param name="chunkCoordinate">Surface上の論理チャンク座標です。</param>
         /// <param name="currentHash">呼び出し元が用意した64bitハッシュ初期値です。</param>
         /// <returns>全固定水文結果、または明示的な生成失敗印を追加した64bitハッシュです。</returns>
         public static ulong AppendChunkHash(
             in WorldGenerationSettings settings,
             in BiomeClassificationSettings biomeSettings,
+            BlobAssetReference<TerrainBlockPaletteCatalogBlob> paletteCatalog,
+            in BuiltInTerrainBlockRuntimeIds terrainRuntimeIds,
             ChunkCoordinate chunkCoordinate,
             ulong currentHash)
         {
@@ -1537,9 +1542,31 @@ namespace Farmware.WorldGeneration
                         return WorldSeedUtility.Mix64(currentHash ^ 0xC5C0FA11ED000001UL);
                     }
 
+                    if (!DeterministicTerrainCellFinalizer.TryFinalizeSurfaceCell(
+                            settings,
+                            paletteCatalog,
+                            terrainRuntimeIds,
+                            worldTileX,
+                            worldTileY,
+                            finalizedTile,
+                            hydrologyTiles[tileIndex],
+                            surfaceWater[tileIndex],
+                            out GeneratedTerrainCell terrainCell))
+                    {
+                        // ECS公開と同じ確定器が失敗した状態を、Blockセル未混合の通常チャンクと区別します。
+                        return WorldSeedUtility.Mix64(currentHash ^ 0xC6C2FA11ED000001UL);
+                    }
+
+                    // ECS公開経路と同じBlockセル由来の暫定資源適性を混合し、署名だけが旧分類へ依存しないようにします。
+                    finalizedTile.ResourceSuitability =
+                        DeterministicTerrainCellFinalizer.ClassifyInterimResourceSuitability(
+                            terrainCell);
                     // using変数のNativeArrayはreadonly扱いになるため、既存の値コピー用ヘルパー経由で書き戻します。
                     SetTerrainTile(terrainTiles, tileIndex, finalizedTile);
                     currentHash = DeterministicChunkGenerator.HashTile(currentHash, finalizedTile);
+                    currentHash = DeterministicTerrainCellFinalizer.HashCell(
+                        currentHash,
+                        terrainCell);
                 }
             }
 

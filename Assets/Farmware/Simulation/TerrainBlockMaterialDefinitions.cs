@@ -178,7 +178,7 @@ namespace Farmware.Simulation
         /// <summary>各材質にGroundとWallの2地形Definitionがあることを表す件数です。</summary>
         public const int TerrainDefinitionCount = Count * 2;
 
-        // GUID上位値を専用名前空間として固定し、既存の暫定地形5定義やInspector定義と区別します。
+        // GUID上位値を専用名前空間として固定し、用途固定の液体3定義やInspector定義と区別します。
         private const ulong GuidNamespaceHigh = 0x4b9d67e23c1146a8UL;
 
         // 下位値は「材質ID×16 + 役割番号」で固定します。既存IDの意味を変えず、追加材質は末尾IDだけにします。

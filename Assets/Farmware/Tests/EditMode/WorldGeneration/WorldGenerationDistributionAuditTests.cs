@@ -37,9 +37,16 @@ namespace Farmware.WorldGeneration.Tests
                 new[] { "c5-e-editmode-audit" },
                 0,
                 WorldGenerationSettings.CurrentGeneratorVersion);
+            Assert.That(
+                HydrologyDiagnosticTerrainCatalogs.TryCreate(
+                    out HydrologyDiagnosticTerrainCatalogs createdCatalogs),
+                Is.True);
+            using HydrologyDiagnosticTerrainCatalogs terrainCatalogs = createdCatalogs;
 
-            BiomeDistributionAuditResult first = BiomeDistributionAnalyzer.Analyze(settings);
-            BiomeDistributionAuditResult second = BiomeDistributionAnalyzer.Analyze(settings);
+            BiomeDistributionAuditResult first =
+                BiomeDistributionAnalyzer.Analyze(settings, terrainCatalogs);
+            BiomeDistributionAuditResult second =
+                BiomeDistributionAnalyzer.Analyze(settings, terrainCatalogs);
 
             Assert.That(first.SeedCount, Is.EqualTo(1));
             Assert.That(first.TotalChunks, Is.EqualTo(1));
@@ -92,8 +99,15 @@ namespace Farmware.WorldGeneration.Tests
         [Timeout(600000)]
         public void Analyze_DefaultMultiSeedAudit_CompletesSpecialCoverage()
         {
+            Assert.That(
+                HydrologyDiagnosticTerrainCatalogs.TryCreate(
+                    out HydrologyDiagnosticTerrainCatalogs createdCatalogs),
+                Is.True);
+            using HydrologyDiagnosticTerrainCatalogs terrainCatalogs = createdCatalogs;
             BiomeDistributionAuditResult result =
-                BiomeDistributionAnalyzer.Analyze(BiomeDistributionAuditSettings.CreateDefault());
+                BiomeDistributionAnalyzer.Analyze(
+                    BiomeDistributionAuditSettings.CreateDefault(),
+                    terrainCatalogs);
 
             Assert.That(result.SeedCount, Is.EqualTo(3));
             Assert.That(result.TotalChunks, Is.EqualTo(27));

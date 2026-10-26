@@ -1353,7 +1353,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
         }
 
         /// <summary>
-        /// 同じBiomeでSoilTypeだけを変えても、Presenterが同じプレイヤー向け土地Tileを選ぶことを保証します。
+        /// 同じBiomeとGroundへ地表Blockを重ねても、Presenterが同じプレイヤー向け土地Tileを選ぶことを保証します。
         /// </summary>
         [Test]
         public void ChunkTilemapPresenter_IgnoresSoilForPlayerTerrainTile()
@@ -1391,26 +1391,20 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     BindingFlags.Instance | BindingFlags.NonPublic);
                 Assert.That(selectLandTile, Is.Not.Null);
 
-                GeneratedTile forestNormal = new GeneratedTile
+                GeneratedTerrainCell forestWithoutSurface = new GeneratedTerrainCell
                 {
-                    Ground = GroundType.Land,
                     Biome = BiomeId.TemperateDeciduousForest,
-                    Soil = SoilType.Normal
+                    GroundBlockRuntimeId = new DefinitionRuntimeId(1)
                 };
-                GeneratedTile forestFertile = forestNormal;
-                forestFertile.Soil = SoilType.Fertile;
-                GeneratedTile forestSandy = forestNormal;
-                forestSandy.Soil = SoilType.Sandy;
+                GeneratedTerrainCell forestWithSurface = forestWithoutSurface;
+                forestWithSurface.TerrainSurfaceRuntimeId = new DefinitionRuntimeId(2);
 
-                // SoilTypeは資源生成の内部情報なので、3種類とも森林の同じTileへ到達する必要があります。
+                // 地表Blockは土地基準Tileを置き換えないため、どちらも森林の同じTileへ到達する必要があります。
                 Assert.That(
-                    selectLandTile.Invoke(presenter, new object[] { forestNormal }),
+                    selectLandTile.Invoke(presenter, new object[] { forestWithoutSurface }),
                     Is.SameAs(forestBase));
                 Assert.That(
-                    selectLandTile.Invoke(presenter, new object[] { forestFertile }),
-                    Is.SameAs(forestBase));
-                Assert.That(
-                    selectLandTile.Invoke(presenter, new object[] { forestSandy }),
+                    selectLandTile.Invoke(presenter, new object[] { forestWithSurface }),
                     Is.SameAs(forestBase));
             }
             finally
@@ -1472,8 +1466,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
         }
 
         /// <summary>
-        /// 開発者用可視化がBiome、Soil、連続環境軸、水域、資源、地形配置属性を異なる色へ写像することを検証します。
-        /// SceneやECS Worldを作らない純粋計算として、TERRAIN-01C1各軸の表示色、水域分類、配置契約、最終資源分類と入力値の不変性をまとめて保証します。
+        /// 開発者用可視化がBiome、Block、連続環境軸、液体、資源を異なる色へ写像することを検証します。
+        /// SceneやECS Worldを作らない純粋計算として、各軸の表示色、最終Block分類、最終資源分類と入力値の不変性をまとめて保証します。
         /// </summary>
         [Test]
         public void DebugVisualization_MapsGeneratedTileValuesWithoutChangingSimulationData()
@@ -1481,10 +1475,6 @@ namespace Farmware.WorldGeneration.PlayModeTests
             GeneratedTile forestTransitionTile = new GeneratedTile
             {
                 Biome = BiomeId.TemperateDeciduousForest,
-                Ground = GroundType.Land,
-                Soil = SoilType.Normal,
-                // Terrain Placement表示は補助物流のベルト可否に依存せず、通常設備可否だけで陸上色を選びます。
-                GameplayFlags = TileGameplayFlags.AllowsNormalEquipment,
                 Elevation = ushort.MaxValue,
                 Temperature = 0,
                 Moisture = ushort.MaxValue,
@@ -1500,6 +1490,18 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 GeologyErosionResistance = ushort.MaxValue
             };
             GeneratedTile originalForestTransitionTile = forestTransitionTile;
+            DefinitionRuntimeId groundRuntimeId = new DefinitionRuntimeId(1);
+            BuiltInTerrainBlockRuntimeIds terrainRuntimeIds = new BuiltInTerrainBlockRuntimeIds
+            {
+                FreshWater = new DefinitionRuntimeId(3),
+                SaltWater = new DefinitionRuntimeId(4),
+                Magma = new DefinitionRuntimeId(5)
+            };
+            GeneratedTerrainCell forestTerrainCell = new GeneratedTerrainCell
+            {
+                Biome = forestTransitionTile.Biome,
+                GroundBlockRuntimeId = groundRuntimeId
+            };
 
             Color coldColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
                 WorldGenerationDebugVisualizationMode.BaseTemperature,
@@ -1601,62 +1603,56 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Is.Not.EqualTo(volcanicColor),
                 "新18Biome表示では淡水湿原と火山地熱地帯を別色で判別できる必要があります。");
 
-            Color normalSoilColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
-                WorldGenerationDebugVisualizationMode.Soil,
-                new GeneratedTile { Soil = SoilType.Normal });
-            Color fertileSoilColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
-                WorldGenerationDebugVisualizationMode.Soil,
-                new GeneratedTile { Soil = SoilType.Fertile });
-            Color sandySoilColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
-                WorldGenerationDebugVisualizationMode.Soil,
-                new GeneratedTile { Soil = SoilType.Sandy });
-            Assert.That(normalSoilColor, Is.Not.EqualTo(fertileSoilColor));
-            Assert.That(fertileSoilColor, Is.Not.EqualTo(sandySoilColor));
-            Assert.That(sandySoilColor, Is.Not.EqualTo(normalSoilColor));
+            Color groundBlockColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                WorldGenerationDebugVisualizationMode.GroundBlock,
+                forestTransitionTile,
+                terrainCell: forestTerrainCell);
+            GeneratedTerrainCell differentGroundCell = forestTerrainCell;
+            differentGroundCell.GroundBlockRuntimeId = new DefinitionRuntimeId(6);
+            Color differentGroundBlockColor =
+                WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
+                    WorldGenerationDebugVisualizationMode.GroundBlock,
+                    forestTransitionTile,
+                    terrainCell: differentGroundCell);
+            Assert.That(groundBlockColor, Is.Not.EqualTo(differentGroundBlockColor));
 
-            GeneratedTile waterTile = forestTransitionTile;
-            waterTile.Ground = GroundType.Water;
-            waterTile.WaterSalinity = WaterSalinity.FreshWater;
-            waterTile.WaterBodyType = WaterBodyType.River;
+            GeneratedTerrainCell freshWaterCell = new GeneratedTerrainCell
+            {
+                Biome = BiomeId.FreshwaterMarshFloodplain,
+                LiquidRuntimeId = terrainRuntimeIds.FreshWater
+            };
 
             Color freshWaterColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
-                WorldGenerationDebugVisualizationMode.WaterSalinity,
-                waterTile);
-            GeneratedTile saltWaterTile = waterTile;
-            saltWaterTile.WaterSalinity = WaterSalinity.SaltWater;
-            saltWaterTile.WaterBodyType = WaterBodyType.Sea;
+                WorldGenerationDebugVisualizationMode.Liquid,
+                forestTransitionTile,
+                terrainCell: freshWaterCell,
+                terrainRuntimeIds: terrainRuntimeIds);
+            GeneratedTerrainCell saltWaterCell = freshWaterCell;
+            saltWaterCell.Biome = BiomeId.None;
+            saltWaterCell.LiquidRuntimeId = terrainRuntimeIds.SaltWater;
             Color saltWaterColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
-                WorldGenerationDebugVisualizationMode.WaterSalinity,
-                saltWaterTile);
+                WorldGenerationDebugVisualizationMode.Liquid,
+                forestTransitionTile,
+                terrainCell: saltWaterCell,
+                terrainRuntimeIds: terrainRuntimeIds);
             Assert.That(
                 freshWaterColor,
                 Is.Not.EqualTo(saltWaterColor),
-                "淡水と海水はWater Salinity表示で別の色になる必要があります。");
+                "淡水と海水はLiquid表示で別の色になる必要があります。");
 
-            Color riverColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
-                WorldGenerationDebugVisualizationMode.WaterBody,
-                waterTile);
-            GeneratedTile pondTile = waterTile;
-            pondTile.WaterBodyType = WaterBodyType.Pond;
-            Color pondColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
-                WorldGenerationDebugVisualizationMode.WaterBody,
-                pondTile);
-            Color seaColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
-                WorldGenerationDebugVisualizationMode.WaterBody,
-                saltWaterTile);
-            Assert.That(riverColor, Is.Not.EqualTo(pondColor), "川と池は別の色で判別できる必要があります。");
-            Assert.That(pondColor, Is.Not.EqualTo(seaColor), "池と海は別の色で判別できる必要があります。");
-            Assert.That(riverColor, Is.Not.EqualTo(seaColor), "川と海は別の色で判別できる必要があります。");
-
-            GeneratedTile magmaTile = forestTransitionTile;
-            magmaTile.Biome = BiomeId.VolcanicGeothermal;
-            magmaTile.Ground = GroundType.Magma;
+            GeneratedTerrainCell magmaCell = new GeneratedTerrainCell
+            {
+                Biome = BiomeId.VolcanicGeothermal,
+                LiquidRuntimeId = terrainRuntimeIds.Magma
+            };
             Color magmaColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
                 WorldGenerationDebugVisualizationMode.Magma,
-                magmaTile,
+                forestTransitionTile,
                 0f,
                 GeneratedResourceType.None,
-                true);
+                true,
+                terrainCell: magmaCell,
+                terrainRuntimeIds: terrainRuntimeIds);
             Color magmaCandidateColor =
                 WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
                     WorldGenerationDebugVisualizationMode.Magma,
@@ -1692,36 +1688,6 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 emptyResourceColor,
                 Is.Not.EqualTo(treeResourceColor),
                 "Resources表示では配置なしと樹木を別色で判別できる必要があります。");
-
-            Color normalGroundPlacementColor =
-                WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
-                    WorldGenerationDebugVisualizationMode.TerrainPlacement,
-                    forestTransitionTile);
-            waterTile.GameplayFlags = TileGameplayFlags.AllowsBridge;
-            Color waterBridgePlacementColor =
-                WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
-                    WorldGenerationDebugVisualizationMode.TerrainPlacement,
-                    waterTile);
-            magmaTile.GameplayFlags = TileGameplayFlags.AllowsBridge
-                | TileGameplayFlags.RequiresHeatResistance;
-            Color magmaBridgePlacementColor =
-                WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
-                    WorldGenerationDebugVisualizationMode.TerrainPlacement,
-                    magmaTile);
-            Color blockedPlacementColor =
-                WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
-                    WorldGenerationDebugVisualizationMode.TerrainPlacement,
-                    new GeneratedTile
-                    {
-                        Ground = GroundType.RockWall,
-                        GameplayFlags = TileGameplayFlags.None
-                    });
-
-            // 設備と橋について4つの結果パターンを別色にし、水とマグマで橋の耐熱要件が異なることを目視でも判別できるようにします。
-            Assert.That(normalGroundPlacementColor, Is.Not.EqualTo(waterBridgePlacementColor));
-            Assert.That(waterBridgePlacementColor, Is.Not.EqualTo(magmaBridgePlacementColor));
-            Assert.That(magmaBridgePlacementColor, Is.Not.EqualTo(blockedPlacementColor));
-            Assert.That(blockedPlacementColor, Is.Not.EqualTo(normalGroundPlacementColor));
 
             Color animalIneligibleColor =
                 WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
@@ -1801,15 +1767,16 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Is.True,
                 "通常地面の資源アイコンは岩壁用の非表示規則へ巻き込んではいけません。");
 
-            using var southWest = CreateFilledTerrainChunk(GroundType.RockWall);
-            using var south = CreateFilledTerrainChunk(GroundType.RockWall);
-            using var southEast = CreateFilledTerrainChunk(GroundType.RockWall);
-            using var west = CreateFilledTerrainChunk(GroundType.RockWall);
-            using var center = CreateFilledTerrainChunk(GroundType.RockWall);
-            using var east = CreateFilledTerrainChunk(GroundType.RockWall);
-            using var northWest = CreateFilledTerrainChunk(GroundType.RockWall);
-            using var north = CreateFilledTerrainChunk(GroundType.RockWall);
-            using var northEast = CreateFilledTerrainChunk(GroundType.RockWall);
+            DefinitionRuntimeId rockWallRuntimeId = new DefinitionRuntimeId(1);
+            using var southWest = CreateFilledTerrainChunk(rockWallRuntimeId);
+            using var south = CreateFilledTerrainChunk(rockWallRuntimeId);
+            using var southEast = CreateFilledTerrainChunk(rockWallRuntimeId);
+            using var west = CreateFilledTerrainChunk(rockWallRuntimeId);
+            using var center = CreateFilledTerrainChunk(rockWallRuntimeId);
+            using var east = CreateFilledTerrainChunk(rockWallRuntimeId);
+            using var northWest = CreateFilledTerrainChunk(rockWallRuntimeId);
+            using var north = CreateFilledTerrainChunk(rockWallRuntimeId);
+            using var northEast = CreateFilledTerrainChunk(rockWallRuntimeId);
             var neighborhood = new CompletedChunkTerrainNeighborhood(
                 southWest, south, southEast,
                 west, center, east,
@@ -1830,15 +1797,20 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 boundaryOpacity,
                 Is.InRange(0f, RockWallAppearanceUtility.MaximumShadowOpacity));
 
-            GeneratedTile rockWallTile = new GeneratedTile { Ground = GroundType.RockWall };
+            GeneratedTerrainCell rockWallCell = new GeneratedTerrainCell
+            {
+                WallBlockRuntimeId = rockWallRuntimeId
+            };
             Color exposedColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
                 WorldGenerationDebugVisualizationMode.RockWall,
-                rockWallTile,
-                0f);
+                default,
+                0f,
+                terrainCell: rockWallCell);
             Color deepShadowColor = WorldGenerationDebugVisualizationOverlay.GetVisualizationColor(
                 WorldGenerationDebugVisualizationMode.RockWall,
-                rockWallTile,
-                RockWallAppearanceUtility.MaximumShadowOpacity);
+                default,
+                RockWallAppearanceUtility.MaximumShadowOpacity,
+                terrainCell: rockWallCell);
             Assert.That(
                 exposedColor,
                 Is.Not.EqualTo(deepShadowColor),
@@ -1917,6 +1889,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                         ComponentType.ReadOnly<ChunkCoordinateComponent>(),
                         ComponentType.ReadOnly<ChunkGenerationStatus>(),
                         ComponentType.ReadOnly<GeneratedTile>(),
+                        ComponentType.ReadOnly<GeneratedTerrainCell>(),
                         ComponentType.ReadOnly<GeneratedResourceTile>());
                     queriesCreated = true;
                 }
@@ -2686,6 +2659,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                         ComponentType.ReadOnly<ChunkCoordinateComponent>(),
                         ComponentType.ReadOnly<ChunkGenerationStatus>(),
                         ComponentType.ReadOnly<GeneratedTile>(),
+                        ComponentType.ReadOnly<GeneratedTerrainCell>(),
                         ComponentType.ReadOnly<GeneratedResourceTile>());
                     queriesCreated = true;
                 }
@@ -2777,7 +2751,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     initialSpawnChunk.Y,
                     out _),
                 Is.True,
-                "初期チャンクの描画完了時に左隣チャンクの5 Bufferが先読み完了していません。");
+                "初期チャンクの描画完了時に左隣チャンクの6 Bufferが先読み完了していません。");
 
             // 実際のSubScene Baker結果を読み、Sceneの文字列だけ正しくてもRuntime Blobが欠ける回帰を検出します。
             DefinitionCatalog runtimeDefinitionCatalog =
@@ -2820,20 +2794,9 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(chickenDefinition.MaximumWanderDistanceInTiles, Is.EqualTo(8));
             Assert.That(chickenDefinition.AppearanceVariantCount, Is.EqualTo(3));
 
-            // TERRAIN-01Aの暫定5定義も同じSubSceneからBakeし、旧GroundTypeを有効セルへ変換できることを確認します。
+            // 自然生成で共有する3液体も同じSubSceneからBakeし、用途固定IDを解決できることを確認します。
             Assert.That(runtimeTerrainCatalog.Value.IsCreated, Is.True);
             Assert.That(runtimeTerrainCatalog.BuiltInRuntimeIds.IsValid, Is.True);
-            Assert.That(
-                TerrainBlockCatalogLookup.TryGetDefinition(
-                    runtimeTerrainCatalog.Value,
-                    runtimeTerrainCatalog.BuiltInRuntimeIds.NaturalRockWall,
-                    out TerrainBlockDefinitionBlob runtimeRockWall),
-                Is.True,
-                "自然岩壁の組み込みBlock定義がBakeされていません。");
-            Assert.That(runtimeRockWall.Kind, Is.EqualTo(DefinitionKind.WallBlock));
-            Assert.That(
-                runtimeRockWall.Flags & TerrainBlockDefinitionFlags.BlocksMovement,
-                Is.Not.EqualTo(TerrainBlockDefinitionFlags.None));
 
             // C6-B1の41材質対応も同じBakerから公開し、代表材質のItem・Ground・Wallが欠けていないことを確認します。
             Assert.That(runtimeMaterialCatalog.Value.IsCreated, Is.True);
@@ -2847,6 +2810,17 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(runtimeGrassLoam.ItemRuntimeId.IsValid, Is.True);
             Assert.That(runtimeGrassLoam.GroundRuntimeId.IsValid, Is.True);
             Assert.That(runtimeGrassLoam.WallRuntimeId.IsValid, Is.True);
+            Assert.That(
+                TerrainBlockCatalogLookup.TryGetDefinition(
+                    runtimeTerrainCatalog.Value,
+                    runtimeGrassLoam.WallRuntimeId,
+                    out TerrainBlockDefinitionBlob runtimeRockWall),
+                Is.True,
+                "自然Wall候補の材質Block定義がBakeされていません。");
+            Assert.That(runtimeRockWall.Kind, Is.EqualTo(DefinitionKind.WallBlock));
+            Assert.That(
+                runtimeRockWall.Flags & TerrainBlockDefinitionFlags.BlocksMovement,
+                Is.Not.EqualTo(TerrainBlockDefinitionFlags.None));
 
             // 固定Blockパレットも同じBakerから公開し、Biome表層と地質Wallが材質対応へ接続されていることを確認します。
             Assert.That(runtimeBlockPaletteCatalog.Value.IsCreated, Is.True);
@@ -2944,11 +2918,25 @@ namespace Farmware.WorldGeneration.PlayModeTests
             MethodInfo animalCandidateMethod = typeof(WorldGenerationDebugVisualizationOverlay).GetMethod(
                 "IsEligibleForAnyAnimalSpecies", BindingFlags.NonPublic | BindingFlags.Static);
             Assert.That(animalCandidateMethod, Is.Not.Null);
-            GeneratedTile candidateTerrain = new GeneratedTile { Biome = BiomeId.TemperateGrassland, Ground = GroundType.Land };
+            GeneratedTerrainCell candidateTerrain = new GeneratedTerrainCell
+            {
+                Biome = BiomeId.TemperateGrassland,
+                GroundBlockRuntimeId = runtimeGrassLoam.GroundRuntimeId
+            };
             Assert.That(animalCandidateMethod.Invoke(null, new object[]
-                { candidateTerrain, new GeneratedResourceTile { Type = GeneratedResourceType.Tree }, runtimeAnimalCatalog.Value }), Is.False);
+                {
+                    candidateTerrain,
+                    new GeneratedResourceTile { Type = GeneratedResourceType.Tree },
+                    runtimeTerrainCatalog.BuiltInRuntimeIds,
+                    runtimeAnimalCatalog.Value
+                }), Is.False);
             Assert.That(animalCandidateMethod.Invoke(null, new object[]
-                { candidateTerrain, default(GeneratedResourceTile), runtimeAnimalCatalog.Value }), Is.True);
+                {
+                    candidateTerrain,
+                    default(GeneratedResourceTile),
+                    runtimeTerrainCatalog.BuiltInRuntimeIds,
+                    runtimeAnimalCatalog.Value
+                }), Is.True);
             int2 initialDisplayOrigin =
                 cameraPanController.CurrentDisplayOrigin.AbsoluteTileCoordinate;
             int originalResourceAbsoluteTileX = initialDisplayOrigin.x + originalResourceCell.x;
@@ -3271,7 +3259,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(
                 foundLiquidCell,
                 Is.True,
-                "初期スポーンから2048タイル以内に、液面レイヤーを実表示検証できる水・マグマが見つかりませんでした。");
+                "初期スポーンから2048タイル以内に、液面レイヤーを実表示検証できる海面以下のセルが見つかりませんでした。");
 
             cameraPanController.SetAbsoluteWorldPosition(
                 liquidCell.x + 0.5d,
@@ -3456,13 +3444,13 @@ namespace Farmware.WorldGeneration.PlayModeTests
         }
 
         /// <summary>
-        /// 初期スポーンを中心とする一定範囲を粗く走査し、実表示テストに使う水またはマグマの論理セルを決定論的に探します。
+        /// 初期スポーンを中心とする一定範囲を粗く走査し、実表示テストに使う海面以下の論理セルを決定論的に探します。
         /// </summary>
         /// <param name="settings">実行中Worldが使用している地形生成設定です。</param>
         /// <param name="centerTileX">探索中心となる水平ワールドタイル座標です。</param>
         /// <param name="centerTileY">探索中心となる垂直ワールドタイル座標です。</param>
         /// <param name="liquidCell">成功時に、見つかった液体セルのワールド座標を返します。</param>
-        /// <returns>探索範囲内に水またはマグマが見つかった場合はtrueです。</returns>
+        /// <returns>探索範囲内に海面以下のセルが見つかった場合はtrueです。</returns>
         private static bool TryFindLiquidCell(
             in WorldGenerationSettings settings,
             int centerTileX,
@@ -3484,8 +3472,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     int tileY = centerTileY + offsetY;
                     GeneratedTile generatedTile =
                         DeterministicChunkGenerator.GenerateTile(settings, tileX, tileY);
-                    if (generatedTile.Ground != GroundType.Water
-                        && generatedTile.Ground != GroundType.Magma)
+                    if (generatedTile.Elevation > settings.SeaLevelThreshold)
                     {
                         continue;
                     }
@@ -3500,7 +3487,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
         }
 
         /// <summary>
-        /// 指定座標のチャンクを調べ、Active状態かつ地形・資源を各4096件保持するEntityを取得します。
+        /// 指定座標のチャンクを調べ、Active状態かつ環境・Blockセル・資源を各4096件保持するEntityを取得します。
         /// </summary>
         /// <param name="entityManager">Default WorldのEntityManagerです。</param>
         /// <param name="chunkQuery">座標、状態、地形・資源Bufferを持つチャンクQueryです。</param>
@@ -3532,9 +3519,12 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 }
 
                 DynamicBuffer<GeneratedTile> tiles = entityManager.GetBuffer<GeneratedTile>(entities[index], true);
+                DynamicBuffer<GeneratedTerrainCell> terrainCells =
+                    entityManager.GetBuffer<GeneratedTerrainCell>(entities[index], true);
                 DynamicBuffer<GeneratedResourceTile> resources =
                     entityManager.GetBuffer<GeneratedResourceTile>(entities[index], true);
                 if (tiles.Length == WorldGridConstants.TilesPerChunk
+                    && terrainCells.Length == WorldGridConstants.TilesPerChunk
                     && resources.Length == WorldGridConstants.TilesPerChunk)
                 {
                     chunkEntity = entities[index];
@@ -3547,15 +3537,15 @@ namespace Farmware.WorldGeneration.PlayModeTests
         }
 
         /// <summary>
-        /// 指定座標でReadyToApply、Active、Inactiveのいずれかとなり、5種類の固定生成Bufferがそろったチャンクを取得します。
+        /// 指定座標でReadyToApply、Active、Inactiveのいずれかとなり、6種類の固定生成Bufferがそろったチャンクを取得します。
         /// 画面外の先読みはTilemap反映前のReadyToApplyまたは反映後のInactiveなので、Active限定の検索と分けます。
         /// </summary>
-        /// <param name="entityManager">5種類のBufferを所有するDefault WorldのEntityManagerです。</param>
+        /// <param name="entityManager">6種類のBufferを所有するDefault WorldのEntityManagerです。</param>
         /// <param name="chunkQuery">座標、状態、地形・資源Bufferを持つチャンクQueryです。</param>
         /// <param name="chunkX">検索する水平論理チャンク座標です。</param>
         /// <param name="chunkY">検索する垂直論理チャンク座標です。</param>
         /// <param name="chunkEntity">成功時に、完全生成済みのチャンクEntityを返します。</param>
-        /// <returns>Simulationの5 Buffer公開と表示対象判定が完了していればtrueです。</returns>
+        /// <returns>Simulationの6 Buffer公開と表示対象判定が完了していればtrueです。</returns>
         private static bool TryGetCompleteChunk(
             EntityManager entityManager,
             EntityQuery chunkQuery,
@@ -3583,8 +3573,10 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 }
 
                 Entity entity = entities[index];
-                // 5 Bufferのいずれかが欠ける部分公開も、先読み完了とはみなしません。
+                // 6 Bufferのいずれかが欠ける部分公開も、先読み完了とはみなしません。
                 if (entityManager.GetBuffer<GeneratedTile>(entity, true).Length
+                        == WorldGridConstants.TilesPerChunk
+                    && entityManager.GetBuffer<GeneratedTerrainCell>(entity, true).Length
                         == WorldGridConstants.TilesPerChunk
                     && entityManager.GetBuffer<GeneratedResourceTile>(entity, true).Length
                         == WorldGridConstants.TilesPerChunk
@@ -3843,32 +3835,14 @@ namespace Farmware.WorldGeneration.PlayModeTests
         private static void AssertTileEquals(GeneratedTile expected, GeneratedTile actual, int tileIndex)
         {
             Assert.That(actual.Biome, Is.EqualTo(expected.Biome), $"Biomeが一致しません。Index={tileIndex}");
-            Assert.That(actual.Ground, Is.EqualTo(expected.Ground), $"Groundが一致しません。Index={tileIndex}");
-            Assert.That(actual.Soil, Is.EqualTo(expected.Soil), $"Soilが一致しません。Index={tileIndex}");
-            Assert.That(
-                actual.WaterSalinity,
-                Is.EqualTo(expected.WaterSalinity),
-                $"WaterSalinityが一致しません。Index={tileIndex}");
-            Assert.That(
-                actual.WaterBodyType,
-                Is.EqualTo(expected.WaterBodyType),
-                $"WaterBodyTypeが一致しません。Index={tileIndex}");
             Assert.That(
                 actual.ElevationClass,
                 Is.EqualTo(expected.ElevationClass),
                 $"ElevationClassが一致しません。Index={tileIndex}");
             Assert.That(
-                actual.GameplayFlags,
-                Is.EqualTo(expected.GameplayFlags),
-                $"GameplayFlagsが一致しません。Index={tileIndex}");
-            Assert.That(
                 actual.ResourceSuitability,
                 Is.EqualTo(expected.ResourceSuitability),
                 $"ResourceSuitabilityが一致しません。Index={tileIndex}");
-            Assert.That(
-                actual.MovementCost,
-                Is.EqualTo(expected.MovementCost),
-                $"MovementCostが一致しません。Index={tileIndex}");
             Assert.That(actual.Elevation, Is.EqualTo(expected.Elevation), $"Elevationが一致しません。Index={tileIndex}");
             Assert.That(actual.Temperature, Is.EqualTo(expected.Temperature), $"Temperatureが一致しません。Index={tileIndex}");
             Assert.That(actual.Moisture, Is.EqualTo(expected.Moisture), $"Moistureが一致しません。Index={tileIndex}");
@@ -3956,17 +3930,21 @@ namespace Farmware.WorldGeneration.PlayModeTests
             return presenter;
         }
 
-        /// <summary>岩壁表示の完成チャンク境界テスト用に、全セルが同じ地面の4096要素配列を作ります。</summary>
-        /// <param name="ground">水文・Biome確定後として全セルへ設定する地面です。</param>
+        /// <summary>岩壁表示の完成チャンク境界テスト用に、全セルが同じ壁Blockの4096要素配列を作ります。</summary>
+        /// <param name="wallBlockRuntimeId">水文・Biome確定後として全セルへ設定する壁Block IDです。</param>
         /// <returns>呼び出し側がusingで破棄する一時NativeArrayです。</returns>
-        private static NativeArray<GeneratedTile> CreateFilledTerrainChunk(GroundType ground)
+        private static NativeArray<GeneratedTerrainCell> CreateFilledTerrainChunk(
+            DefinitionRuntimeId wallBlockRuntimeId)
         {
-            var tiles = new NativeArray<GeneratedTile>(
+            var tiles = new NativeArray<GeneratedTerrainCell>(
                 WorldGridConstants.TilesPerChunk,
                 Allocator.TempJob);
             for (int index = 0; index < tiles.Length; index++)
             {
-                tiles[index] = new GeneratedTile { Ground = ground };
+                tiles[index] = new GeneratedTerrainCell
+                {
+                    WallBlockRuntimeId = wallBlockRuntimeId
+                };
             }
 
             return tiles;

@@ -1,119 +1,130 @@
-// このファイルは、地形属性と通常設備・通常ベルト・橋定義を組み合わせる共通配置可否マトリクスをEditModeで検証します。
-// 生成器、初期設備領域探索、後続の建築Command、開発者用可視化が同じTerrainPlacementRulesを安全に共有できることを保証します。
+// このファイルは、有効Blockセルと通常設備・通常ベルト・橋定義を組み合わせる共通配置可否マトリクスをEditModeで検証します。
+// 建築Commandと開発者用可視化が、旧分類ではなく同じTerrainPlacementRulesとDefinition属性を共有することを保証します。
 
+using Farmware.Simulation;
 using NUnit.Framework;
 
 namespace Farmware.WorldGeneration.Tests
 {
-    /// <summary>
-    /// 陸地、水域、マグマ、岩壁に対する4種類の配置要求と、異常入力を純粋計算で保証します。
-    /// Unity Test RunnerのEditModeテストから実行されます。
-    /// </summary>
+    /// <summary>地面、水域、マグマ、岩壁に対する配置要求と異常入力を純粋計算で保証します。</summary>
     public sealed class TerrainPlacementRulesTests
     {
-        /// <summary>
-        /// 4地形と通常設備・通常ベルト・非耐熱橋・耐熱橋の16組を準備し、仕様どおりの結果になることを保証します。
-        /// 生成済み属性を入力に使うことで、GroundTypeを呼び出し側が再解釈せず共通APIだけで判定できることも確認します。
-        /// </summary>
-        /// <param name="groundType">配置属性を作る基礎地形です。</param>
+        /// <summary>テスト入力で作るBlockセル構成を、製品の旧分類へ依存しない名前で区別します。</summary>
+        public enum TerrainScenario : byte
+        {
+            /// <summary>標準GroundBlockだけを持つセルです。</summary>
+            Land = 0,
+
+            /// <summary>淡水Liquidだけを持つセルです。</summary>
+            FreshWater = 1,
+
+            /// <summary>マグマLiquidだけを持つセルです。</summary>
+            Magma = 2,
+
+            /// <summary>GroundBlockと自然WallBlockを持つセルです。</summary>
+            RockWall = 3
+        }
+
+        /// <summary>4つのBlockセル構成と4配置要求の16組が、Definition属性どおりの結果になることを保証します。</summary>
+        /// <param name="scenario">評価する地面、淡水、マグマ、岩壁のセル構成です。</param>
         /// <param name="placementKind">配置を試す通常設備、通常ベルト、橋のいずれかです。</param>
         /// <param name="hasHeatResistance">橋定義が耐熱性を持つ場合はtrueです。</param>
         /// <param name="expectedResult">仕様で期待する地形配置判定結果です。</param>
-        [TestCase(GroundType.Land, TerrainPlacementKind.NormalEquipment, false, TerrainPlacementResult.Allowed)]
-        [TestCase(GroundType.Land, TerrainPlacementKind.NormalBelt, false, TerrainPlacementResult.Allowed)]
-        [TestCase(GroundType.Land, TerrainPlacementKind.Bridge, false, TerrainPlacementResult.TerrainDoesNotAllowPlacement)]
-        [TestCase(GroundType.Land, TerrainPlacementKind.Bridge, true, TerrainPlacementResult.TerrainDoesNotAllowPlacement)]
-        [TestCase(GroundType.Water, TerrainPlacementKind.NormalEquipment, false, TerrainPlacementResult.TerrainDoesNotAllowPlacement)]
-        [TestCase(GroundType.Water, TerrainPlacementKind.NormalBelt, false, TerrainPlacementResult.TerrainDoesNotAllowPlacement)]
-        [TestCase(GroundType.Water, TerrainPlacementKind.Bridge, false, TerrainPlacementResult.Allowed)]
-        [TestCase(GroundType.Water, TerrainPlacementKind.Bridge, true, TerrainPlacementResult.Allowed)]
-        [TestCase(GroundType.Magma, TerrainPlacementKind.NormalEquipment, false, TerrainPlacementResult.TerrainDoesNotAllowPlacement)]
-        [TestCase(GroundType.Magma, TerrainPlacementKind.NormalBelt, false, TerrainPlacementResult.TerrainDoesNotAllowPlacement)]
-        [TestCase(GroundType.Magma, TerrainPlacementKind.Bridge, false, TerrainPlacementResult.HeatResistanceRequired)]
-        [TestCase(GroundType.Magma, TerrainPlacementKind.Bridge, true, TerrainPlacementResult.Allowed)]
-        [TestCase(GroundType.RockWall, TerrainPlacementKind.NormalEquipment, false, TerrainPlacementResult.TerrainDoesNotAllowPlacement)]
-        [TestCase(GroundType.RockWall, TerrainPlacementKind.NormalBelt, false, TerrainPlacementResult.TerrainDoesNotAllowPlacement)]
-        [TestCase(GroundType.RockWall, TerrainPlacementKind.Bridge, false, TerrainPlacementResult.TerrainDoesNotAllowPlacement)]
-        [TestCase(GroundType.RockWall, TerrainPlacementKind.Bridge, true, TerrainPlacementResult.TerrainDoesNotAllowPlacement)]
+        [TestCase(TerrainScenario.Land, TerrainPlacementKind.NormalEquipment, false, TerrainPlacementResult.Allowed)]
+        [TestCase(TerrainScenario.Land, TerrainPlacementKind.NormalBelt, false, TerrainPlacementResult.Allowed)]
+        [TestCase(TerrainScenario.Land, TerrainPlacementKind.Bridge, false, TerrainPlacementResult.TerrainDoesNotAllowPlacement)]
+        [TestCase(TerrainScenario.Land, TerrainPlacementKind.Bridge, true, TerrainPlacementResult.TerrainDoesNotAllowPlacement)]
+        [TestCase(TerrainScenario.FreshWater, TerrainPlacementKind.NormalEquipment, false, TerrainPlacementResult.TerrainDoesNotAllowPlacement)]
+        [TestCase(TerrainScenario.FreshWater, TerrainPlacementKind.NormalBelt, false, TerrainPlacementResult.TerrainDoesNotAllowPlacement)]
+        [TestCase(TerrainScenario.FreshWater, TerrainPlacementKind.Bridge, false, TerrainPlacementResult.Allowed)]
+        [TestCase(TerrainScenario.FreshWater, TerrainPlacementKind.Bridge, true, TerrainPlacementResult.Allowed)]
+        [TestCase(TerrainScenario.Magma, TerrainPlacementKind.NormalEquipment, false, TerrainPlacementResult.TerrainDoesNotAllowPlacement)]
+        [TestCase(TerrainScenario.Magma, TerrainPlacementKind.NormalBelt, false, TerrainPlacementResult.TerrainDoesNotAllowPlacement)]
+        [TestCase(TerrainScenario.Magma, TerrainPlacementKind.Bridge, false, TerrainPlacementResult.HeatResistanceRequired)]
+        [TestCase(TerrainScenario.Magma, TerrainPlacementKind.Bridge, true, TerrainPlacementResult.Allowed)]
+        [TestCase(TerrainScenario.RockWall, TerrainPlacementKind.NormalEquipment, false, TerrainPlacementResult.TerrainDoesNotAllowPlacement)]
+        [TestCase(TerrainScenario.RockWall, TerrainPlacementKind.NormalBelt, false, TerrainPlacementResult.TerrainDoesNotAllowPlacement)]
+        [TestCase(TerrainScenario.RockWall, TerrainPlacementKind.Bridge, false, TerrainPlacementResult.TerrainDoesNotAllowPlacement)]
+        [TestCase(TerrainScenario.RockWall, TerrainPlacementKind.Bridge, true, TerrainPlacementResult.TerrainDoesNotAllowPlacement)]
         public void Evaluate_ReturnsSpecifiedPlacementMatrix(
-            GroundType groundType,
+            TerrainScenario scenario,
             TerrainPlacementKind placementKind,
             bool hasHeatResistance,
             TerrainPlacementResult expectedResult)
         {
-            TileGameplayFlags gameplayFlags =
-                DeterministicChunkGenerator.ClassifyGameplayFlags(groundType);
+            using TerrainGenerationTestCatalogSet catalogs =
+                TerrainGenerationTestCatalogSet.Create();
+            EffectiveTerrainCell cell = CreateCell(scenario, catalogs);
 
             TerrainPlacementResult actualResult = TerrainPlacementRules.Evaluate(
-                gameplayFlags,
+                cell,
+                catalogs.TerrainCatalog,
                 placementKind,
                 hasHeatResistance);
 
-            Assert.That(
-                actualResult,
-                Is.EqualTo(expectedResult),
-                $"{groundType}への{placementKind}配置で耐熱性={hasHeatResistance}の結果が仕様と異なります。");
+            Assert.That(actualResult, Is.EqualTo(expectedResult));
         }
 
-        /// <summary>
-        /// マグマ属性を持つGeneratedTileへ非耐熱橋と耐熱橋を順に評価し、入力タイルを変更せず不足理由だけを区別することを保証します。
-        /// </summary>
+        /// <summary>未知の配置対象を有効な地面へ入力し、許可へ倒さず未対応結果を返すことを保証します。</summary>
         [Test]
-        public void Evaluate_UsesGeneratedTileWithoutMutatingIt()
+        public void Evaluate_RejectsUnsupportedPlacementKind()
         {
-            GeneratedTile magmaTile = new GeneratedTile
+            using TerrainGenerationTestCatalogSet catalogs =
+                TerrainGenerationTestCatalogSet.Create();
+            EffectiveTerrainCell land = CreateCell(TerrainScenario.Land, catalogs);
+
+            Assert.That(
+                TerrainPlacementRules.Evaluate(
+                    land,
+                    catalogs.TerrainCatalog,
+                    TerrainPlacementKind.None),
+                Is.EqualTo(TerrainPlacementResult.UnsupportedPlacementKind));
+            Assert.That(
+                TerrainPlacementRules.Evaluate(
+                    land,
+                    catalogs.TerrainCatalog,
+                    (TerrainPlacementKind)byte.MaxValue),
+                Is.EqualTo(TerrainPlacementResult.UnsupportedPlacementKind));
+        }
+
+        /// <summary>テスト用の地形シナリオを、実カタログのRuntime IDを持つ有効セルへ変換します。</summary>
+        /// <param name="scenario">作成する地面、淡水、マグマ、岩壁の区別です。</param>
+        /// <param name="catalogs">材質Ground・Wallと固定Liquidを解決済みの実カタログ一式です。</param>
+        /// <returns>配置判定へ直接渡せる有効地形セルです。</returns>
+        private static EffectiveTerrainCell CreateCell(
+            TerrainScenario scenario,
+            TerrainGenerationTestCatalogSet catalogs)
+        {
+            switch (scenario)
             {
-                Ground = GroundType.Magma,
-                GameplayFlags = TileGameplayFlags.AllowsBridge
-                    | TileGameplayFlags.RequiresHeatResistance
-            };
-            GeneratedTile originalTile = magmaTile;
-
-            TerrainPlacementResult normalBridgeResult = TerrainPlacementRules.Evaluate(
-                magmaTile,
-                TerrainPlacementKind.Bridge,
-                hasHeatResistance: false);
-            TerrainPlacementResult heatResistantBridgeResult = TerrainPlacementRules.Evaluate(
-                magmaTile,
-                TerrainPlacementKind.Bridge,
-                hasHeatResistance: true);
-
-            Assert.That(
-                normalBridgeResult,
-                Is.EqualTo(TerrainPlacementResult.HeatResistanceRequired));
-            Assert.That(
-                heatResistantBridgeResult,
-                Is.EqualTo(TerrainPlacementResult.Allowed));
-            Assert.That(magmaTile.Ground, Is.EqualTo(originalTile.Ground));
-            Assert.That(magmaTile.GameplayFlags, Is.EqualTo(originalTile.GameplayFlags));
-        }
-
-        /// <summary>
-        /// 未定義の配置対象と、橋を許可しない不整合な耐熱要件だけの属性を準備し、安全側の結果へ倒れることを保証します。
-        /// </summary>
-        [Test]
-        public void Evaluate_RejectsUnsupportedOrIncompleteInputs()
-        {
-            TerrainPlacementResult unspecifiedKindResult = TerrainPlacementRules.Evaluate(
-                TileGameplayFlags.AllowsNormalEquipment,
-                TerrainPlacementKind.None);
-            TerrainPlacementResult unknownKindResult = TerrainPlacementRules.Evaluate(
-                TileGameplayFlags.AllowsNormalEquipment,
-                (TerrainPlacementKind)byte.MaxValue);
-            TerrainPlacementResult incompleteBridgeFlagsResult = TerrainPlacementRules.Evaluate(
-                TileGameplayFlags.RequiresHeatResistance,
-                TerrainPlacementKind.Bridge,
-                hasHeatResistance: true);
-
-            Assert.That(
-                unspecifiedKindResult,
-                Is.EqualTo(TerrainPlacementResult.UnsupportedPlacementKind));
-            Assert.That(
-                unknownKindResult,
-                Is.EqualTo(TerrainPlacementResult.UnsupportedPlacementKind));
-            Assert.That(
-                incompleteBridgeFlagsResult,
-                Is.EqualTo(TerrainPlacementResult.TerrainDoesNotAllowPlacement));
+                case TerrainScenario.Land:
+                    return new EffectiveTerrainCell
+                    {
+                        Biome = BiomeId.TemperateGrassland,
+                        GroundBlockRuntimeId = catalogs.GroundRuntimeId
+                    };
+                case TerrainScenario.FreshWater:
+                    return new EffectiveTerrainCell
+                    {
+                        Biome = BiomeId.TemperateGrassland,
+                        LiquidRuntimeId = catalogs.RuntimeIds.FreshWater
+                    };
+                case TerrainScenario.Magma:
+                    return new EffectiveTerrainCell
+                    {
+                        Biome = BiomeId.VolcanicGeothermal,
+                        LiquidRuntimeId = catalogs.RuntimeIds.Magma
+                    };
+                case TerrainScenario.RockWall:
+                    return new EffectiveTerrainCell
+                    {
+                        Biome = BiomeId.AlpineRockland,
+                        GroundBlockRuntimeId = catalogs.GroundRuntimeId,
+                        WallBlockRuntimeId = catalogs.WallRuntimeId
+                    };
+                default:
+                    return default;
+            }
         }
     }
 }

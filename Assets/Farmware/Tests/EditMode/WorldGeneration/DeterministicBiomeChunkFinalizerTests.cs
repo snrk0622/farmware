@@ -11,7 +11,7 @@ namespace Farmware.WorldGeneration.Tests
     public sealed class DeterministicBiomeChunkFinalizerTests
     {
         /// <summary>
-        /// 地上の基礎タイルを生成し、水文完成前にBiome・土壌・資源適性を先回り決定しないことを保証します。
+        /// 地上の基礎タイルを生成し、水文完成前にBiome・資源適性を先回り決定しないことを保証します。
         /// </summary>
         [Test]
         public void BaseTileGeneration_LeavesBiomeAndDerivedSurfaceUnclassified()
@@ -22,10 +22,7 @@ namespace Farmware.WorldGeneration.Tests
             GeneratedTile baseTile = FindBaseLandTile(settings, out _, out _);
 
             Assert.That(baseTile.Biome, Is.EqualTo(BiomeId.None));
-            Assert.That(baseTile.Soil, Is.EqualTo(SoilType.None));
             Assert.That(baseTile.ResourceSuitability, Is.EqualTo(ResourceSuitability.None));
-            Assert.That(baseTile.WaterBodyType, Is.EqualTo(WaterBodyType.None));
-            Assert.That(baseTile.Ground, Is.EqualTo(GroundType.Land).Or.EqualTo(GroundType.RockWall));
         }
 
         /// <summary>
@@ -140,21 +137,14 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(finalTile.Elevation, Is.EqualTo(baseTile.Elevation));
             Assert.That(finalTile.TerrainTemperature, Is.EqualTo(baseTile.TerrainTemperature));
             Assert.That(finalTile.GeologyClass, Is.EqualTo(baseTile.GeologyClass));
-            if (finalTile.Ground == GroundType.Land)
-            {
-                Assert.That(finalTile.Soil, Is.Not.EqualTo(SoilType.None));
-            }
-            else
-            {
-                Assert.That(finalTile.Soil, Is.EqualTo(SoilType.None));
-            }
+            Assert.That(finalTile.ResourceSuitability, Is.EqualTo(ResourceSuitability.None));
         }
 
         /// <summary>
-        /// 海面下のタイルを準備し、地上Biomeを偽装せずNone・海水・水域として正常完了することを保証します。
+        /// 海面下のタイルを準備し、地上Biomeを偽装せずNoneとして正常完了することを保証します。
         /// </summary>
         [Test]
-        public void FinalizeSeaTile_KeepsBiomeNoneAndPublishesSaltWater()
+        public void FinalizeSeaTile_KeepsBiomeNone()
         {
             WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
                 WorldSeedUtility.FromString("c5-c-sea"),
@@ -173,9 +163,6 @@ namespace Farmware.WorldGeneration.Tests
 
             Assert.That(finalized, Is.True);
             Assert.That(finalTile.Biome, Is.EqualTo(BiomeId.None));
-            Assert.That(finalTile.Ground, Is.EqualTo(GroundType.Water));
-            Assert.That(finalTile.WaterSalinity, Is.EqualTo(WaterSalinity.SaltWater));
-            Assert.That(finalTile.WaterBodyType, Is.EqualTo(WaterBodyType.Sea));
             Assert.That(finalTile.ResourceSuitability, Is.EqualTo(ResourceSuitability.None));
         }
 
@@ -298,7 +285,7 @@ namespace Farmware.WorldGeneration.Tests
         /// <param name="settings">固定Seedと海面を持つ生成設定です。</param>
         /// <param name="tileX">見つけた海タイルの水平座標を返します。</param>
         /// <param name="tileY">見つけた海タイルの垂直座標を返します。</param>
-        /// <returns>海面下でWaterBodyType.Seaを持つ基礎タイルです。</returns>
+        /// <returns>海面下の連続環境値を持つ基礎タイルです。</returns>
         private static GeneratedTile FindBaseSeaTile(
             in WorldGenerationSettings settings,
             out int tileX,

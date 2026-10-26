@@ -976,6 +976,8 @@ namespace Farmware.WorldGeneration.Tests
         [Timeout(300000)]
         public void LakeSpringGeneration_ReportsScaling(int chunkCount)
         {
+            using TerrainGenerationTestCatalogSet catalogs =
+                TerrainGenerationTestCatalogSet.Create();
             WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
                 WorldSeedUtility.FromString("lake-spring-performance"),
                 WorldGenerationSettings.CurrentGeneratorVersion);
@@ -984,6 +986,8 @@ namespace Farmware.WorldGeneration.Tests
             ulong warmup = DeterministicHydrologyGenerator.AppendChunkHash(
                 settings,
                 biomeSettings,
+                catalogs.PaletteCatalog,
+                catalogs.RuntimeIds,
                 warmupCoordinate,
                 0xC4C0000000000001UL);
             Assert.That(warmup, Is.Not.Zero);
@@ -998,6 +1002,8 @@ namespace Farmware.WorldGeneration.Tests
                 aggregate = DeterministicHydrologyGenerator.AppendChunkHash(
                     settings,
                     biomeSettings,
+                    catalogs.PaletteCatalog,
+                    catalogs.RuntimeIds,
                     new ChunkCoordinate(WorldLayer.Surface, chunkX, chunkY),
                     aggregate);
             }

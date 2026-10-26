@@ -2,6 +2,7 @@
 // SpriteやSceneを必要としない純粋計算として、47状態の網羅性、土地・岩壁の接続条件、回転方向を保証します。
 
 using System.Collections.Generic;
+using Farmware.Simulation;
 using Farmware.WorldGeneration.Presentation;
 using NUnit.Framework;
 
@@ -130,12 +131,12 @@ namespace Farmware.WorldGeneration.Tests
         [Test]
         public void SelectLand_DifferentBiomesAndRockWall_DoNotCreateBoundary()
         {
-            GeneratedTile current = CreateTile(GroundType.Land, BiomeId.TemperateGrassland);
+            GeneratedTerrainCell current = CreateLand(BiomeId.TemperateGrassland);
             TerrainNeighborTiles connectedNeighbors = CreateNeighbors(
-                CreateTile(GroundType.Land, BiomeId.TemperateDeciduousForest),
-                CreateTile(GroundType.RockWall, BiomeId.AlpineRockland),
-                CreateTile(GroundType.Land, BiomeId.HotDesert),
-                CreateTile(GroundType.Land, BiomeId.VolcanicGeothermal));
+                CreateLand(BiomeId.TemperateDeciduousForest),
+                CreateWall(BiomeId.AlpineRockland),
+                CreateLand(BiomeId.HotDesert),
+                CreateLand(BiomeId.VolcanicGeothermal));
 
             BoundaryHighlightSelection selection =
                 TerrainBoundaryHighlightUtility.SelectLand(current, connectedNeighbors);
@@ -149,17 +150,17 @@ namespace Farmware.WorldGeneration.Tests
         [Test]
         public void SelectLand_WaterOrMagmaNeighbor_SelectsLiquidBoundary()
         {
-            GeneratedTile current = CreateTile(GroundType.Land, BiomeId.TemperateGrassland);
+            GeneratedTerrainCell current = CreateLand(BiomeId.TemperateGrassland);
             TerrainNeighborTiles waterNeighbors = CreateNeighbors(
-                CreateTile(GroundType.Land),
-                CreateTile(GroundType.Water),
-                CreateTile(GroundType.Land),
-                CreateTile(GroundType.Land));
+                CreateLand(),
+                CreateLiquid(3),
+                CreateLand(),
+                CreateLand());
             TerrainNeighborTiles magmaNeighbors = CreateNeighbors(
-                CreateTile(GroundType.Land),
-                CreateTile(GroundType.Magma),
-                CreateTile(GroundType.Land),
-                CreateTile(GroundType.Land));
+                CreateLand(),
+                CreateLiquid(5),
+                CreateLand(),
+                CreateLand());
 
             BoundaryHighlightSelection waterSelection =
                 TerrainBoundaryHighlightUtility.SelectLand(current, waterNeighbors);
@@ -223,13 +224,13 @@ namespace Farmware.WorldGeneration.Tests
         [Test]
         public void SelectRockWall_LandNeighbor_SelectsRockWallBoundary()
         {
-            GeneratedTile current = CreateTile(GroundType.RockWall);
+            GeneratedTerrainCell current = CreateWall();
             TerrainNeighborTiles neighbors = CreateNeighbors(
-                CreateTile(GroundType.RockWall),
-                CreateTile(GroundType.Land),
-                CreateTile(GroundType.RockWall),
-                CreateTile(GroundType.RockWall),
-                diagonal: CreateTile(GroundType.RockWall));
+                CreateWall(),
+                CreateLand(),
+                CreateWall(),
+                CreateWall(),
+                diagonal: CreateWall());
 
             BoundaryHighlightSelection selection =
                 TerrainBoundaryHighlightUtility.SelectRockWall(current, neighbors);
@@ -239,19 +240,40 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 指定した地面種別とBiomeだけを持つ、境界選択に必要最小限の生成済み地形を作ります。
+        /// GroundBlockとBiomeだけを持つ、境界選択に必要最小限の陸地セルを作ります。
         /// </summary>
-        /// <param name="ground">設定する基礎地形種別です。</param>
         /// <param name="biome">設定するBiomeです。</param>
-        /// <returns>テスト用のGeneratedTileです。</returns>
-        private static GeneratedTile CreateTile(
-            GroundType ground,
+        /// <returns>テスト用の自然生成Blockセルです。</returns>
+        private static GeneratedTerrainCell CreateLand(
             BiomeId biome = BiomeId.TemperateGrassland)
         {
-            return new GeneratedTile
+            return new GeneratedTerrainCell
             {
-                Ground = ground,
+                GroundBlockRuntimeId = new DefinitionRuntimeId(1),
                 Biome = biome
+            };
+        }
+
+        /// <summary>地面の上へWallBlockを持つテスト用岩壁セルを作ります。</summary>
+        /// <param name="biome">設定するBiomeです。</param>
+        /// <returns>テスト用の自然岩壁セルです。</returns>
+        private static GeneratedTerrainCell CreateWall(
+            BiomeId biome = BiomeId.TemperateGrassland)
+        {
+            GeneratedTerrainCell cell = CreateLand(biome);
+            cell.WallBlockRuntimeId = new DefinitionRuntimeId(2);
+            return cell;
+        }
+
+        /// <summary>地面を持たず指定Liquid Runtime IDだけを持つテスト用セルを作ります。</summary>
+        /// <param name="runtimeId">水またはマグマを表す有効な仮Runtime IDです。</param>
+        /// <returns>境界上は非接続となる液体セルです。</returns>
+        private static GeneratedTerrainCell CreateLiquid(int runtimeId)
+        {
+            return new GeneratedTerrainCell
+            {
+                Biome = BiomeId.TemperateGrassland,
+                LiquidRuntimeId = new DefinitionRuntimeId(runtimeId)
             };
         }
 
@@ -265,13 +287,13 @@ namespace Farmware.WorldGeneration.Tests
         /// <param name="diagonal">斜め4方向へ共通で設定する地形です。省略時は通常土地です。</param>
         /// <returns>境界選択へ渡す8近傍です。</returns>
         private static TerrainNeighborTiles CreateNeighbors(
-            GeneratedTile north,
-            GeneratedTile east,
-            GeneratedTile south,
-            GeneratedTile west,
-            GeneratedTile? diagonal = null)
+            GeneratedTerrainCell north,
+            GeneratedTerrainCell east,
+            GeneratedTerrainCell south,
+            GeneratedTerrainCell west,
+            GeneratedTerrainCell? diagonal = null)
         {
-            GeneratedTile diagonalTile = diagonal ?? CreateTile(GroundType.Land);
+            GeneratedTerrainCell diagonalTile = diagonal ?? CreateLand();
             return new TerrainNeighborTiles(
                 north,
                 east,

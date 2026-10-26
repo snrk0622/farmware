@@ -20,8 +20,9 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>論理バイオーム表示へ切り替えるメニューパスです。</summary>
         private const string BiomeMenuPath = "Farmware/World Generation/Debug Visualization/Biome";
 
-        /// <summary>標準・肥沃・砂質の土壌表示へ切り替えるメニューパスです。</summary>
-        private const string SoilMenuPath = "Farmware/World Generation/Debug Visualization/Soil";
+        /// <summary>GroundBlock Runtime ID表示へ切り替えるメニューパスです。</summary>
+        private const string GroundBlockMenuPath =
+            "Farmware/World Generation/Debug Visualization/Ground Block";
 
         /// <summary>連続標高表示へ切り替えるメニューパスです。</summary>
         private const string ElevationMenuPath = "Farmware/World Generation/Debug Visualization/Elevation";
@@ -82,13 +83,9 @@ namespace Farmware.WorldGeneration.Editor
         private const string GeologySiteBoundaryMenuPath =
             "Farmware/World Generation/Debug Visualization/Geology/Site Boundary";
 
-        /// <summary>淡水・海水表示へ切り替えるメニューパスです。</summary>
-        private const string WaterSalinityMenuPath =
-            "Farmware/World Generation/Debug Visualization/Water Salinity";
-
-        /// <summary>川・池・海表示へ切り替えるメニューパスです。</summary>
-        private const string WaterBodyMenuPath =
-            "Farmware/World Generation/Debug Visualization/Water Body";
+        /// <summary>淡水・海水・マグマLiquid表示へ切り替えるメニューパスです。</summary>
+        private const string LiquidMenuPath =
+            "Farmware/World Generation/Debug Visualization/Liquid";
 
         /// <summary>岩壁の最終形状と内部影濃度表示へ切り替えるメニューパスです。</summary>
         private const string RockWallMenuPath =
@@ -176,11 +173,11 @@ namespace Farmware.WorldGeneration.Editor
             SelectMode(WorldGenerationDebugVisualizationMode.Biome);
         }
 
-        /// <summary>PlayMode中のSoilTypeを標準・肥沃・砂質の固定色で表示します。</summary>
-        [MenuItem(SoilMenuPath, false, 202)]
-        private static void SelectSoil()
+        /// <summary>PlayMode中のGroundBlock Runtime IDを安定疑似色で表示します。</summary>
+        [MenuItem(GroundBlockMenuPath, false, 202)]
+        private static void SelectGroundBlock()
         {
-            SelectMode(WorldGenerationDebugVisualizationMode.Soil);
+            SelectMode(WorldGenerationDebugVisualizationMode.GroundBlock);
         }
 
         /// <summary>PlayMode中の連続標高値を黒から白の濃淡で表示します。</summary>
@@ -288,18 +285,11 @@ namespace Farmware.WorldGeneration.Editor
             SelectMode(WorldGenerationDebugVisualizationMode.GeologySiteBoundary);
         }
 
-        /// <summary>PlayMode中の水域を陸地・淡水・海水の固定色で表示します。</summary>
-        [MenuItem(WaterSalinityMenuPath, false, 220)]
-        private static void SelectWaterSalinity()
+        /// <summary>PlayMode中のLiquidをなし・淡水・海水・マグマの固定色で表示します。</summary>
+        [MenuItem(LiquidMenuPath, false, 220)]
+        private static void SelectLiquid()
         {
-            SelectMode(WorldGenerationDebugVisualizationMode.WaterSalinity);
-        }
-
-        /// <summary>PlayMode中の水域を陸地・川・池・海の固定色で表示します。</summary>
-        [MenuItem(WaterBodyMenuPath, false, 221)]
-        private static void SelectWaterBody()
-        {
-            SelectMode(WorldGenerationDebugVisualizationMode.WaterBody);
+            SelectMode(WorldGenerationDebugVisualizationMode.Liquid);
         }
 
         /// <summary>PlayMode中の岩壁を非岩壁・露出面・内部影の濃淡で表示します。</summary>
@@ -444,12 +434,14 @@ namespace Farmware.WorldGeneration.Editor
             return ValidateMode(BiomeMenuPath, WorldGenerationDebugVisualizationMode.Biome);
         }
 
-        /// <summary>Soil項目の有効状態とチェック表示を更新します。</summary>
+        /// <summary>Ground Block項目の有効状態とチェック表示を更新します。</summary>
         /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
-        [MenuItem(SoilMenuPath, true)]
-        private static bool ValidateSoil()
+        [MenuItem(GroundBlockMenuPath, true)]
+        private static bool ValidateGroundBlock()
         {
-            return ValidateMode(SoilMenuPath, WorldGenerationDebugVisualizationMode.Soil);
+            return ValidateMode(
+                GroundBlockMenuPath,
+                WorldGenerationDebugVisualizationMode.GroundBlock);
         }
 
         /// <summary>Elevation項目の有効状態とチェック表示を更新します。</summary>
@@ -596,22 +588,14 @@ namespace Farmware.WorldGeneration.Editor
                 WorldGenerationDebugVisualizationMode.GeologySiteBoundary);
         }
 
-        /// <summary>Water Salinity項目の有効状態とチェック表示を更新します。</summary>
+        /// <summary>Liquid項目の有効状態とチェック表示を更新します。</summary>
         /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
-        [MenuItem(WaterSalinityMenuPath, true)]
-        private static bool ValidateWaterSalinity()
+        [MenuItem(LiquidMenuPath, true)]
+        private static bool ValidateLiquid()
         {
             return ValidateMode(
-                WaterSalinityMenuPath,
-                WorldGenerationDebugVisualizationMode.WaterSalinity);
-        }
-
-        /// <summary>Water Body項目の有効状態とチェック表示を更新します。</summary>
-        /// <returns>PlayMode中に対象Overlayが存在する場合はtrueです。</returns>
-        [MenuItem(WaterBodyMenuPath, true)]
-        private static bool ValidateWaterBody()
-        {
-            return ValidateMode(WaterBodyMenuPath, WorldGenerationDebugVisualizationMode.WaterBody);
+                LiquidMenuPath,
+                WorldGenerationDebugVisualizationMode.Liquid);
         }
 
         /// <summary>Rock Wall項目の有効状態とチェック表示を更新します。</summary>

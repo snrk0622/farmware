@@ -10,7 +10,7 @@ namespace Farmware.WorldGeneration.Tests
 {
     /// <summary>
     /// 河道幅の形、湖面候補の属性、ECSへ渡す固定長結果、状態ハッシュ、性能比較を検証するEditModeテストです。
-    /// 現在水位や旧GeneratedTile.WaterBodyTypeは入力にせず、固定生成結果だけを対象にします。
+    /// 現在水位や廃止済みの水域分類は入力にせず、固定生成結果だけを対象にします。
     /// </summary>
     public sealed class DeterministicSurfaceWaterGeneratorTests
     {

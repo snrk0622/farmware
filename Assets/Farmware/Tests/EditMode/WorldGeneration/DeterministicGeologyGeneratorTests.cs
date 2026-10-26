@@ -381,6 +381,8 @@ namespace Farmware.WorldGeneration.Tests
         [Test]
         public void ChunkHash_ContainsGeneratedGeologyProperties()
         {
+            using TerrainGenerationTestCatalogSet catalogs =
+                TerrainGenerationTestCatalogSet.Create();
             WorldGenerationSettings firstSettings = CreateSettings("geology-hash");
             WorldGenerationSettings secondSettings = firstSettings;
             GeologyGenerationSettings modifiedGeology = secondSettings.Geology;
@@ -395,8 +397,10 @@ namespace Farmware.WorldGeneration.Tests
             secondSettings.Geology = modifiedGeology;
             ChunkCoordinate coordinate = new ChunkCoordinate(-2, 3);
             BiomeClassificationSettings biomeSettings = BiomeDefinitionCatalog.CreateDefault();
-            ulong firstHash = DeterministicChunkGenerator.ComputeChunkHash(firstSettings, biomeSettings, coordinate);
-            ulong secondHash = DeterministicChunkGenerator.ComputeChunkHash(secondSettings, biomeSettings, coordinate);
+            ulong firstHash = DeterministicChunkGenerator.ComputeChunkHash(
+                firstSettings, biomeSettings, catalogs.PaletteCatalog, catalogs.RuntimeIds, coordinate);
+            ulong secondHash = DeterministicChunkGenerator.ComputeChunkHash(
+                secondSettings, biomeSettings, catalogs.PaletteCatalog, catalogs.RuntimeIds, coordinate);
 
             Assert.That(DeterministicGeologyGenerator.ValidateSettings(modifiedGeology), Is.True);
             Assert.That(secondHash, Is.Not.EqualTo(firstHash));

@@ -64,6 +64,51 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// 自動登録入力が41材質のItem・Ground・Wallと固定3液体だけで構成され、
+        /// 置換済みの共通Ground・Wallを余分に登録しないことを保証します。
+        /// </summary>
+        [Test]
+        public void BuiltInInputs_ContainMaterialsAndThreeLiquidsWithoutCompatibilityBlocks()
+        {
+            DefinitionBuildEntry[] commonDefinitions =
+                BuiltInTerrainBlockDefinitions.CreateCommonDefinitions(
+                    0,
+                    out DefinitionBuildReference[] commonReferences);
+            Assert.That(
+                commonDefinitions.Length,
+                Is.EqualTo(TerrainBlockMaterialDefinitions.CommonDefinitionCount + 3));
+            Assert.That(
+                commonReferences.Length,
+                Is.EqualTo(TerrainBlockMaterialDefinitions.TerrainDefinitionCount));
+
+            int liquidCount = 0;
+            int groundCount = 0;
+            int wallCount = 0;
+            for (int definitionIndex = 0;
+                 definitionIndex < commonDefinitions.Length;
+                 definitionIndex++)
+            {
+                // 分類別件数を数え、材質41組以外のGround・Wallが紛れ込んでいないことを直接検出します。
+                switch (commonDefinitions[definitionIndex].Kind)
+                {
+                    case DefinitionKind.Liquid:
+                        liquidCount++;
+                        break;
+                    case DefinitionKind.GroundBlock:
+                        groundCount++;
+                        break;
+                    case DefinitionKind.WallBlock:
+                        wallCount++;
+                        break;
+                }
+            }
+
+            Assert.That(liquidCount, Is.EqualTo(3));
+            Assert.That(groundCount, Is.EqualTo(TerrainBlockMaterialDefinitions.Count));
+            Assert.That(wallCount, Is.EqualTo(TerrainBlockMaterialDefinitions.Count));
+        }
+
+        /// <summary>
         /// 既定表が41行を持ち、全123 GUIDが有効かつ重複せず、各安定IDを検索できることを保証します。
         /// </summary>
         [Test]

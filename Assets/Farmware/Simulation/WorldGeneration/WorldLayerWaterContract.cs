@@ -180,33 +180,44 @@ namespace Farmware.WorldGeneration
     public static class WorldLayerWaterContract
     {
         /// <summary>
-        /// 既存の自然水域分類と沖合候補から、固定3層へ適用する自然水柱区分を返します。
+        /// 自然生成Blockセルと沖合候補から、固定3層へ適用する自然水柱区分を返します。
         /// </summary>
-        /// <param name="waterBodyType">地上生成で確定した水域なし、川、池、海の分類です。</param>
+        /// <param name="terrainCell">地上生成で確定したBiomeとLiquidを持つ自然生成セルです。</param>
+        /// <param name="runtimeIds">淡水、海水、マグマを識別する組み込みRuntime IDです。</param>
         /// <param name="isOffshoreDeepCandidate">海の中で沖合深水域として選ばれたセルならtrueです。</param>
         /// <param name="columnKind">成功時に得られる陸地、通常水域、沖合深水域の分類です。</param>
-        /// <returns>既知のWaterBodyTypeならtrue、未知の保存・生成値ならfalseです。</returns>
+        /// <returns>Liquidが未設定または既知の組み込みIDならtrue、未知のLiquid IDならfalseです。</returns>
         public static bool TryResolveNaturalWaterColumnKind(
-            WaterBodyType waterBodyType,
+            in GeneratedTerrainCell terrainCell,
+            in BuiltInTerrainBlockRuntimeIds runtimeIds,
             bool isOffshoreDeepCandidate,
             out NaturalWaterColumnKind columnKind)
         {
-            if (waterBodyType == WaterBodyType.None)
+            if (!runtimeIds.IsValid)
             {
+                columnKind = default;
+                return false;
+            }
+
+            if (!terrainCell.LiquidRuntimeId.IsValid
+                || terrainCell.LiquidRuntimeId.Value == runtimeIds.Magma.Value)
+            {
+                // マグマは水柱ではなく、液体なしの陸地と同じく下層を自然水域へ接続しません。
                 columnKind = NaturalWaterColumnKind.Land;
                 return true;
             }
 
-            if (waterBodyType == WaterBodyType.River || waterBodyType == WaterBodyType.Pond)
+            if (terrainCell.LiquidRuntimeId.Value == runtimeIds.FreshWater.Value)
             {
-                // 川と池は沖合候補が誤って渡されてもDeepSeaへせず、Underwaterまでの通常水域に固定します。
+                // 淡水は沖合候補が誤って渡されてもDeepSeaへせず、Underwaterまでの通常水域に固定します。
                 columnKind = NaturalWaterColumnKind.StandardWater;
                 return true;
             }
 
-            if (waterBodyType == WaterBodyType.Sea)
+            if (terrainCell.LiquidRuntimeId.Value == runtimeIds.SaltWater.Value)
             {
-                columnKind = isOffshoreDeepCandidate
+                // 地上Biomeを持たない海だけを深水候補にし、内陸の塩湖を通常水域へ固定します。
+                columnKind = terrainCell.Biome == BiomeId.None && isOffshoreDeepCandidate
                     ? NaturalWaterColumnKind.OffshoreDeepWater
                     : NaturalWaterColumnKind.StandardWater;
                 return true;

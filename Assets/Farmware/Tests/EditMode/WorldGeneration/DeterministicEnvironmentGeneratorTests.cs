@@ -236,14 +236,18 @@ namespace Farmware.WorldGeneration.Tests
         [Test]
         public void ChunkHash_ChangesWhenContinuousEnvironmentSettingChanges()
         {
+            using TerrainGenerationTestCatalogSet catalogs =
+                TerrainGenerationTestCatalogSet.Create();
             WorldGenerationSettings firstSettings = CreateSettings("environment-hash");
             WorldGenerationSettings secondSettings = firstSettings;
             secondSettings.EnvironmentAxes.WoodyVegetationCellSizeInTiles = 96;
             ChunkCoordinate coordinate = new ChunkCoordinate(-2, 3);
             BiomeClassificationSettings biomeSettings = BiomeDefinitionCatalog.CreateDefault();
 
-            ulong firstHash = DeterministicChunkGenerator.ComputeChunkHash(firstSettings, biomeSettings, coordinate);
-            ulong secondHash = DeterministicChunkGenerator.ComputeChunkHash(secondSettings, biomeSettings, coordinate);
+            ulong firstHash = DeterministicChunkGenerator.ComputeChunkHash(
+                firstSettings, biomeSettings, catalogs.PaletteCatalog, catalogs.RuntimeIds, coordinate);
+            ulong secondHash = DeterministicChunkGenerator.ComputeChunkHash(
+                secondSettings, biomeSettings, catalogs.PaletteCatalog, catalogs.RuntimeIds, coordinate);
 
             Assert.That(secondHash, Is.Not.EqualTo(firstHash));
         }
