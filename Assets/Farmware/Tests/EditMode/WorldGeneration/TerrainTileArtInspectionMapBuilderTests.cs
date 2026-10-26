@@ -1,4 +1,4 @@
-// このファイルは、代表5材質の固定順・可変長素材契約・同一地面上の2段Wall・固定接地影・動的影検品レイアウトと、GrassLoamを使う3段の崖勾配、連続水深、U字の仮波線、Wall上面暗化、8pxのWall折れ目影を検証します。
+// このファイルは、代表5材質の固定順・可変長素材契約・同一地面上の2段Wall・固定接地影・動的影検品レイアウトと、GrassLoamを使う3段の崖勾配、連続水深、U字の仮波線、Wall上面暗化、32pxのWall折れ目影を検証します。
 // Scene自体は開閉せず、現在のUnity Editor作業状態を変えないAsset検証と固定値確認だけを実行します。
 
 using Farmware.WorldGeneration.Authoring;
@@ -98,38 +98,23 @@ namespace Farmware.WorldGeneration.Tests
                 Is.EqualTo(2));
             Assert.That(
                 TerrainTileArtInspectionMapBuilder.WallFoldShadowFadePixels,
-                Is.EqualTo(8));
+                Is.EqualTo(32));
             Assert.That(
                 TerrainTileArtInspectionMapBuilder.WallFoldShadowTopAlpha,
                 Is.EqualTo(0.35f));
 
-            // 折れ目影は上端を最も濃くし、8px目で完全透過へ到達して、それより下のFaceを暗くしません。
+            // 折れ目影は上端を最も濃くし、Face 2段をまたいで32px目で完全透過へ到達します。
             Assert.That(
                 TerrainTileArtInspectionMapBuilder.GetWallFoldShadowAlpha(0),
                 Is.EqualTo(0.35f));
             Assert.That(
-                TerrainTileArtInspectionMapBuilder.GetWallFoldShadowAlpha(1),
-                Is.EqualTo(0.30f).Within(0.0001f));
+                TerrainTileArtInspectionMapBuilder.GetWallFoldShadowAlpha(16),
+                Is.EqualTo(0.35f * (1f - (16f / 31f))).Within(0.0001f));
             Assert.That(
-                TerrainTileArtInspectionMapBuilder.GetWallFoldShadowAlpha(2),
-                Is.EqualTo(0.25f).Within(0.0001f));
-            Assert.That(
-                TerrainTileArtInspectionMapBuilder.GetWallFoldShadowAlpha(3),
-                Is.EqualTo(0.20f).Within(0.0001f));
-            Assert.That(
-                TerrainTileArtInspectionMapBuilder.GetWallFoldShadowAlpha(4),
-                Is.EqualTo(0.15f).Within(0.0001f));
-            Assert.That(
-                TerrainTileArtInspectionMapBuilder.GetWallFoldShadowAlpha(5),
-                Is.EqualTo(0.10f).Within(0.0001f));
-            Assert.That(
-                TerrainTileArtInspectionMapBuilder.GetWallFoldShadowAlpha(6),
-                Is.EqualTo(0.05f).Within(0.0001f));
-            Assert.That(
-                TerrainTileArtInspectionMapBuilder.GetWallFoldShadowAlpha(7),
+                TerrainTileArtInspectionMapBuilder.GetWallFoldShadowAlpha(31),
                 Is.EqualTo(0f));
             Assert.That(
-                TerrainTileArtInspectionMapBuilder.GetWallFoldShadowAlpha(8),
+                TerrainTileArtInspectionMapBuilder.GetWallFoldShadowAlpha(32),
                 Is.EqualTo(0f));
             Assert.Throws<System.ArgumentOutOfRangeException>(() =>
                 TerrainTileArtInspectionMapBuilder.GetWallFoldShadowAlpha(-1));
@@ -307,7 +292,7 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// Scene再構築で生成した連続深度Shader、波線Shader、折れ目影Shader、9種類のMaterialを再読込できることを保証します。
+        /// Scene再構築で生成した連続深度Shader、波線Shader、折れ目影Shader、10種類のMaterialを再読込できることを保証します。
         /// </summary>
         [Test]
         public void GeneratedLiquidPreviewAssets_ArePersistentAndComplete()
@@ -357,13 +342,22 @@ namespace Farmware.WorldGeneration.Tests
                 AssetDatabase.LoadAssetAtPath<Material>(
                     $"{folder}/SaltWaterEdgeWaveVertical.mat"),
                 Is.Not.Null);
-            Material wallFoldShadow = AssetDatabase.LoadAssetAtPath<Material>(
-                $"{folder}/WallFoldShadow.mat");
-            Assert.That(wallFoldShadow, Is.Not.Null);
-            Assert.That(wallFoldShadow.shader, Is.EqualTo(wallFoldShadowShader));
-            Assert.That(wallFoldShadow.GetFloat("_TopAlpha"), Is.EqualTo(0.35f));
-            Assert.That(wallFoldShadow.GetFloat("_FadePixelCount"), Is.EqualTo(8f));
-            Assert.That(wallFoldShadow.GetFloat("_SpritePixelHeight"), Is.EqualTo(16f));
+            Material wallFoldShadowTop = AssetDatabase.LoadAssetAtPath<Material>(
+                TerrainTileArtInspectionMapBuilder.WallFoldShadow32TopMaterialPath);
+            Material wallFoldShadowBottom = AssetDatabase.LoadAssetAtPath<Material>(
+                TerrainTileArtInspectionMapBuilder.WallFoldShadow32BottomMaterialPath);
+            Assert.That(wallFoldShadowTop, Is.Not.Null);
+            Assert.That(wallFoldShadowBottom, Is.Not.Null);
+            Assert.That(wallFoldShadowTop.shader, Is.EqualTo(wallFoldShadowShader));
+            Assert.That(wallFoldShadowBottom.shader, Is.EqualTo(wallFoldShadowShader));
+            Assert.That(wallFoldShadowTop.GetFloat("_TopAlpha"), Is.EqualTo(0.35f));
+            Assert.That(wallFoldShadowBottom.GetFloat("_TopAlpha"), Is.EqualTo(0.35f));
+            Assert.That(wallFoldShadowTop.GetFloat("_FadePixelCount"), Is.EqualTo(32f));
+            Assert.That(wallFoldShadowBottom.GetFloat("_FadePixelCount"), Is.EqualTo(32f));
+            Assert.That(wallFoldShadowTop.GetFloat("_StartPixelRow"), Is.EqualTo(0f));
+            Assert.That(wallFoldShadowBottom.GetFloat("_StartPixelRow"), Is.EqualTo(16f));
+            Assert.That(wallFoldShadowTop.GetFloat("_SpritePixelHeight"), Is.EqualTo(16f));
+            Assert.That(wallFoldShadowBottom.GetFloat("_SpritePixelHeight"), Is.EqualTo(16f));
 
             // 旧飛沫方式を同時に残すと二重表示になるため、置換後は旧Animation資産を受理しません。
             Assert.That(

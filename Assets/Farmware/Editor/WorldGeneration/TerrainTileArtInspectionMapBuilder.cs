@@ -153,9 +153,17 @@ namespace Farmware.WorldGeneration.Editor
         public const string AnimatedWaterEdgeWaveShaderPath =
             "Assets/Farmware/Shaders/Development/AnimatedWaterEdgeWave.shader";
 
-        /// <summary>Wall上面と前面の折れ目へ8pxの共通陰影を描く検品用Shaderです。</summary>
+        /// <summary>Wall上面と前面の折れ目へ32pxの共通陰影を描く検品用Shaderです。</summary>
         public const string WallFoldShadowShaderPath =
             "Assets/Farmware/Shaders/Development/WallFoldShadow.shader";
+
+        /// <summary>採用した32px折れ目影の1段目を描く検品用Materialです。</summary>
+        public const string WallFoldShadow32TopMaterialPath =
+            "Assets/Farmware/Art/WorldGeneration/Generated/Inspection/WallFoldShadow32pxTop.mat";
+
+        /// <summary>採用した32px折れ目影の2段目を描く検品用Materialです。</summary>
+        public const string WallFoldShadow32BottomMaterialPath =
+            "Assets/Farmware/Art/WorldGeneration/Generated/Inspection/WallFoldShadow32pxBottom.mat";
 
         /// <summary>Light 2DとShadow Caster 2Dの影響を受けるURP 2D Lit Materialです。</summary>
         private const string SpriteLitMaterialPath =
@@ -179,7 +187,7 @@ namespace Farmware.WorldGeneration.Editor
         public const int WallFaceDepth = 2;
 
         /// <summary>Wall前面1段目の上端から折れ目影が完全透過になるまでの画素数です。</summary>
-        public const int WallFoldShadowFadePixels = 8;
+        public const int WallFoldShadowFadePixels = 32;
 
         /// <summary>Wall折れ目影の最上段へ掛ける黒のAlpha初期値です。</summary>
         public const float WallFoldShadowTopAlpha = 0.35f;
@@ -458,8 +466,8 @@ namespace Farmware.WorldGeneration.Editor
             /// <summary>海水の左右辺へ使う縦方向の2色波線Materialです。</summary>
             public Material SaltWaterVerticalWaveMaterial { get; }
 
-            /// <summary>Wall前面1段目の上端8pxへ共通して重ねる折れ目影Materialです。</summary>
-            public Material WallFoldShadowMaterial { get; }
+            /// <summary>Wall前面2段へ連続して重ねる32px折れ目影Materialです。</summary>
+            public Material[] WallFoldShadowMaterials { get; }
 
             /// <summary>生成済みの検品用表示素材をScene構築へ渡します。</summary>
             /// <param name="dryCliffFadeMaterial">乾燥崖の黒勾配Materialです。</param>
@@ -470,7 +478,7 @@ namespace Farmware.WorldGeneration.Editor
             /// <param name="freshWaterVerticalWaveMaterial">淡水の左右辺用波線Materialです。</param>
             /// <param name="saltWaterHorizontalWaveMaterial">海水の奥辺用波線Materialです。</param>
             /// <param name="saltWaterVerticalWaveMaterial">海水の左右辺用波線Materialです。</param>
-            /// <param name="wallFoldShadowMaterial">Wall前面1段目へ重ねる折れ目影Materialです。</param>
+            /// <param name="wallFoldShadowMaterials">Wall前面2段へ開始行を変えて重ねる折れ目影Materialです。</param>
             public GeneratedPreviewAssets(
                 Material dryCliffFadeMaterial,
                 Material freshWaterWithFloorMaterial,
@@ -480,7 +488,7 @@ namespace Farmware.WorldGeneration.Editor
                 Material freshWaterVerticalWaveMaterial,
                 Material saltWaterHorizontalWaveMaterial,
                 Material saltWaterVerticalWaveMaterial,
-                Material wallFoldShadowMaterial)
+                Material[] wallFoldShadowMaterials)
             {
                 DryCliffFadeMaterial = dryCliffFadeMaterial;
                 FreshWaterWithFloorMaterial = freshWaterWithFloorMaterial;
@@ -490,7 +498,7 @@ namespace Farmware.WorldGeneration.Editor
                 FreshWaterVerticalWaveMaterial = freshWaterVerticalWaveMaterial;
                 SaltWaterHorizontalWaveMaterial = saltWaterHorizontalWaveMaterial;
                 SaltWaterVerticalWaveMaterial = saltWaterVerticalWaveMaterial;
-                WallFoldShadowMaterial = wallFoldShadowMaterial;
+                WallFoldShadowMaterials = wallFoldShadowMaterials;
             }
         }
 
@@ -628,9 +636,9 @@ namespace Farmware.WorldGeneration.Editor
             return 1f - Mathf.Clamp01(depthFromGridTopPixels / DryCliffFadePixels);
         }
 
-        /// <summary>Wall前面1段目の上端から数えた画素行に対応する折れ目影Alphaを返します。</summary>
+        /// <summary>Wall前面2段を連結した上端から数えた画素行に対応する折れ目影Alphaを返します。</summary>
         /// <param name="pixelRowFromTop">上端を0とする0以上の画素行です。</param>
-        /// <returns>上端で初期Alpha、8px目で0になり、それより下も0となるAlphaです。</returns>
+        /// <returns>上端で初期Alpha、32px目で0になり、それより下も0となるAlphaです。</returns>
         public static float GetWallFoldShadowAlpha(int pixelRowFromTop)
         {
             if (pixelRowFromTop < 0)
@@ -638,7 +646,7 @@ namespace Farmware.WorldGeneration.Editor
                 throw new ArgumentOutOfRangeException(nameof(pixelRowFromTop));
             }
 
-            // 8pxの範囲内で最後の行を完全透過にするため、0～7行を「行数-1」で割ります。
+            // 32pxの範囲内で最後の行を完全透過にするため、0～31行を「行数-1」で割ります。
             // Shaderと同じ式を公開しておくことで、検品用見た目の調整値をEditModeテストで固定できます。
             if (pixelRowFromTop >= WallFoldShadowFadePixels)
             {
@@ -930,9 +938,8 @@ namespace Farmware.WorldGeneration.Editor
                 new Color32(78, 135, 205, 255),
                 new Color32(157, 201, 237, 255),
                 verticalWaveLengthPixels);
-            Material wallFoldShadow = EnsureWallFoldShadowMaterial(
-                wallFoldShadowShader,
-                GeneratedPreviewAssetFolder + "/WallFoldShadow.mat");
+            Material[] wallFoldShadows = EnsureAdoptedWallFoldShadowMaterials(
+                wallFoldShadowShader);
             AssetDatabase.SaveAssets();
 
             return new GeneratedPreviewAssets(
@@ -944,7 +951,7 @@ namespace Farmware.WorldGeneration.Editor
                 freshVerticalWave,
                 saltHorizontalWave,
                 saltVerticalWave,
-                wallFoldShadow);
+                wallFoldShadows);
         }
 
         /// <summary>Wall暗化比較Sceneだけで使う折れ目影Materialを、液体用Assetへ依存せず生成または更新します。</summary>
@@ -966,9 +973,33 @@ namespace Farmware.WorldGeneration.Editor
             // 必要な共通影だけを確定し、比較ツールの入力範囲をWall素材へ限定します。
             Material material = EnsureWallFoldShadowMaterial(
                 shader,
-                GeneratedPreviewAssetFolder + "/WallFoldShadow.mat");
+                GeneratedPreviewAssetFolder + "/WallFoldShadow.mat",
+                fadePixelCount: 8,
+                startPixelRow: 0);
             AssetDatabase.SaveAssets();
             return material;
+        }
+
+        /// <summary>正式採用した32px折れ目影を、Faceの1段目と2段目へ連続表示できるMaterial配列として生成または更新します。</summary>
+        /// <param name="shader">画素行単位のAlpha勾配を描く検品用Shaderです。</param>
+        /// <returns>配列0が1段目、配列1が2段目に対応する永続Materialです。</returns>
+        private static Material[] EnsureAdoptedWallFoldShadowMaterials(Shader shader)
+        {
+            // 32px影は16pxのFaceを2段またぐため、2段目の開始行を16px進めます。
+            // 同じ0行目から再計算すると段境界で影が濃く戻るので、段ごとに開始行だけが異なるMaterialを保存します。
+            return new[]
+            {
+                EnsureWallFoldShadowMaterial(
+                    shader,
+                    WallFoldShadow32TopMaterialPath,
+                    WallFoldShadowFadePixels,
+                    startPixelRow: 0),
+                EnsureWallFoldShadowMaterial(
+                    shader,
+                    WallFoldShadow32BottomMaterialPath,
+                    WallFoldShadowFadePixels,
+                    startPixelRow: TerrainTileArtGenerationSettings.TileSizeInPixels)
+            };
         }
 
         /// <summary>指定色・開始位置・到達距離・最大Alphaを持つ連続深度Materialを生成または更新します。</summary>
@@ -1048,13 +1079,17 @@ namespace Farmware.WorldGeneration.Editor
             return material;
         }
 
-        /// <summary>Wall前面1段目の上端8pxへ掛ける共通折れ目影Materialを生成または更新します。</summary>
+        /// <summary>指定深度と開始行を持つ共通折れ目影Materialを生成または更新します。</summary>
         /// <param name="shader">画素行単位のAlpha勾配を描く検品用Shaderです。</param>
         /// <param name="assetPath">Materialの保存先です。</param>
+        /// <param name="fadePixelCount">Wall前面上端から完全透過へ到達する画素数です。</param>
+        /// <param name="startPixelRow">このMaterialを使うFace段が全体勾配の何画素目から始まるかを示します。</param>
         /// <returns>AssetDatabaseへ保存済みのMaterialです。</returns>
         private static Material EnsureWallFoldShadowMaterial(
             Shader shader,
-            string assetPath)
+            string assetPath,
+            int fadePixelCount,
+            int startPixelRow)
         {
             Material material = AssetDatabase.LoadAssetAtPath<Material>(assetPath);
             if (material == null)
@@ -1070,14 +1105,15 @@ namespace Farmware.WorldGeneration.Editor
                 material.shader = shader;
             }
 
-            // 折れ目影は材質色を持たず、黒のAlphaだけを8画素で減衰させます。
+            // 折れ目影は材質色を持たず、黒のAlphaだけを指定画素数で減衰させます。
             // Sprite寸法は生成設定の16pxを参照し、Shader側のマジックナンバーと食い違わないようにします。
             material.SetColor("_ShadowColor", Color.black);
             material.SetFloat("_TopAlpha", WallFoldShadowTopAlpha);
-            material.SetFloat("_FadePixelCount", WallFoldShadowFadePixels);
+            material.SetFloat("_FadePixelCount", fadePixelCount);
             material.SetFloat(
                 "_SpritePixelHeight",
                 TerrainTileArtGenerationSettings.TileSizeInPixels);
+            material.SetFloat("_StartPixelRow", startPixelRow);
             EditorUtility.SetDirty(material);
             return material;
         }
@@ -1135,9 +1171,19 @@ namespace Farmware.WorldGeneration.Editor
             GeneratedPreviewAssets previewAssets = comparisonOnly
                 ? null
                 : EnsureGeneratedPreviewAssets();
-            Material wallFoldShadowMaterial = comparisonOnly
-                ? EnsureWallFoldShadowPreviewMaterial()
-                : previewAssets.WallFoldShadowMaterial;
+            Material[] wallFoldShadowMaterials;
+            if (comparisonOnly)
+            {
+                // 暗化比較でも採用済み32px影を使います。先に基準Materialを生成してShaderのImportとnull検証を共通化します。
+                Material previewBaseMaterial = EnsureWallFoldShadowPreviewMaterial();
+                wallFoldShadowMaterials = EnsureAdoptedWallFoldShadowMaterials(
+                    previewBaseMaterial.shader);
+                AssetDatabase.SaveAssets();
+            }
+            else
+            {
+                wallFoldShadowMaterials = previewAssets.WallFoldShadowMaterials;
+            }
             Scene scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
             scene.name = comparisonOnly
                 ? "TerrainWallSurfaceDarkenComparison"
@@ -1146,7 +1192,7 @@ namespace Farmware.WorldGeneration.Editor
             GameObject root = new GameObject("Terrain Tile Art Inspection");
             if (comparisonOnly)
             {
-                CreateDarkenComparison(root, assets, wallFoldShadowMaterial);
+                CreateDarkenComparison(root, assets, wallFoldShadowMaterials);
             }
             else
             {
@@ -1159,7 +1205,7 @@ namespace Farmware.WorldGeneration.Editor
                 CreateRepresentativeMaterialWallPanels(
                     root,
                     assets.RepresentativeMaterials,
-                    wallFoldShadowMaterial,
+                    wallFoldShadowMaterials,
                     assets.SpriteLitMaterial,
                     assets.SpriteUnlitMaterial);
 
@@ -1219,14 +1265,15 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="assets">配置するSprite一式です。</param>
         /// <param name="darkenFactor">Wall上面へ掛けるRGB乗算係数です。</param>
         /// <param name="horizontalOffset">比較Scene内での水平移動量です。</param>
-        /// <param name="wallFoldShadowMaterial">Wall前面1段目へ重ねる共通折れ目影です。</param>
+        /// <param name="wallFoldShadowMaterials">Wall前面2段へ連続して重ねる共通折れ目影です。</param>
         private static void CreateGroundAndWallInspection(
             GameObject root,
             InspectionAssets assets,
             float darkenFactor,
             float horizontalOffset,
-            Material wallFoldShadowMaterial)
+            Material[] wallFoldShadowMaterials)
         {
+            ValidateAdoptedWallFoldShadowMaterials(wallFoldShadowMaterials);
             GameObject group = CreateChild(root, $"Ground and Wall x{darkenFactor:0.00}");
             for (int y = 0; y < GroundRepeatHeight; y++)
             {
@@ -1293,19 +1340,16 @@ namespace Farmware.WorldGeneration.Editor
                                 Color.white,
                                 20);
 
-                            if (faceStage == 1)
-                            {
-                                // 上面と前面の明度が近い材質でも立ち上がりを読めるよう、1段目の上端だけへ共通影を重ねます。
-                                // Face自体や2段目以降は暗化せず、材質本来の断面色と模様を維持します。
-                                CreateSpriteObject(
-                                    group,
-                                    $"WallFoldShadow_{x:D2}",
-                                    face,
-                                    facePosition,
-                                    Color.white,
-                                    21,
-                                    wallFoldShadowMaterial);
-                            }
+                            // 採用した32px影はFace 2段をまたぐため、各段へ開始行の異なるMaterialを重ねます。
+                            // Face Sprite自体は暗化せず、段境界で影が濃く戻らない連続グラデーションだけを追加します。
+                            CreateSpriteObject(
+                                group,
+                                $"WallFoldShadow_{x:D2}_Stage_{faceStage:D2}",
+                                face,
+                                facePosition,
+                                Color.white,
+                                21,
+                                wallFoldShadowMaterials[faceStage - 1]);
                         }
                     }
                 }
@@ -1330,16 +1374,17 @@ namespace Farmware.WorldGeneration.Editor
         /// </summary>
         /// <param name="root">固定検品Scene内の全表示をまとめる親です。</param>
         /// <param name="materials">左から右の固定順で検証済みの代表材質です。</param>
-        /// <param name="wallFoldShadowMaterial">Wall前面1段目の上端へ重ねる共通折れ目影です。</param>
+        /// <param name="wallFoldShadowMaterials">Wall前面2段へ連続して重ねる共通折れ目影です。</param>
         /// <param name="spriteLitMaterial">Ground、Wall、Faceへ使うURP 2D Lit Materialです。</param>
         /// <param name="spriteUnlitMaterial">固定接地影へ使うURP 2D Unlit Materialです。</param>
         private static void CreateRepresentativeMaterialWallPanels(
             GameObject root,
             InspectionMaterialAssets[] materials,
-            Material wallFoldShadowMaterial,
+            Material[] wallFoldShadowMaterials,
             Material spriteLitMaterial,
             Material spriteUnlitMaterial)
         {
+            ValidateAdoptedWallFoldShadowMaterials(wallFoldShadowMaterials);
             GameObject group = CreateChild(root, "Representative Material Wall Panels");
             GameObject lightsGroup = CreateChild(group, "Representative Panel Lights");
             for (int materialIndex = 0; materialIndex < materials.Length; materialIndex++)
@@ -1472,21 +1517,19 @@ namespace Farmware.WorldGeneration.Editor
                             80,
                             spriteLitMaterial);
 
-                        if (faceStage == 1)
-                        {
-                            // 折れ目影はWall上面に接する1段目だけへ重ね、2段目のFace本体は元色を保ちます。
-                            CreateSpriteObject(
-                                materialGroup,
-                                $"{material.MaterialId}_WallFoldShadow_{wallX:D2}",
-                                faceSprite,
-                                new Vector3(
-                                    facePosition.x,
-                                    facePosition.y,
-                                    -0.21f),
-                                Color.white,
-                                81,
-                                wallFoldShadowMaterial);
-                        }
+                        // 採用した32px影は2段を1本の勾配として扱います。
+                        // 2段目には開始行16pxのMaterialを使い、段境界でAlphaが上端値へ戻らないようにします。
+                        CreateSpriteObject(
+                            materialGroup,
+                            $"{material.MaterialId}_WallFoldShadow_{wallX:D2}_Stage_{faceStage:D2}",
+                            faceSprite,
+                            new Vector3(
+                                facePosition.x,
+                                facePosition.y,
+                                -0.21f),
+                            Color.white,
+                            81,
+                            wallFoldShadowMaterials[faceStage - 1]);
                     }
                 }
 
@@ -2165,11 +2208,11 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>3種類の壁暗化係数を同じ小型配置で横並びにします。</summary>
         /// <param name="root">検品オブジェクトの親です。</param>
         /// <param name="assets">配置するGroundTopとFaceです。</param>
-        /// <param name="wallFoldShadowMaterial">Wall前面1段目へ重ねる共通折れ目影です。</param>
+        /// <param name="wallFoldShadowMaterials">Wall前面2段へ連続して重ねる共通折れ目影です。</param>
         private static void CreateDarkenComparison(
             GameObject root,
             InspectionAssets assets,
-            Material wallFoldShadowMaterial)
+            Material[] wallFoldShadowMaterials)
         {
             for (int index = 0; index < WallSurfaceDarkenComparisonFactors.Length; index++)
             {
@@ -2179,7 +2222,30 @@ namespace Farmware.WorldGeneration.Editor
                     assets,
                     WallSurfaceDarkenComparisonFactors[index],
                     offset,
-                    wallFoldShadowMaterial);
+                    wallFoldShadowMaterials);
+            }
+        }
+
+        /// <summary>採用した32px折れ目影に、Wall前面2段分のMaterialが揃っていることを確認します。</summary>
+        /// <param name="materials">1段目、2段目の順で渡す折れ目影Materialです。</param>
+        private static void ValidateAdoptedWallFoldShadowMaterials(Material[] materials)
+        {
+            if (materials == null || materials.Length != WallFaceDepth)
+            {
+                throw new ArgumentException(
+                    $"32px折れ目影にはWall前面{WallFaceDepth}段分のMaterialが必要です。",
+                    nameof(materials));
+            }
+
+            // nullを許すとSceneは保存できても該当段だけ影が欠けるため、構築前に明示的に停止します。
+            for (int stageIndex = 0; stageIndex < materials.Length; stageIndex++)
+            {
+                if (materials[stageIndex] == null)
+                {
+                    throw new ArgumentException(
+                        $"32px折れ目影Materialが未設定です: stageIndex={stageIndex}",
+                        nameof(materials));
+                }
             }
         }
 
