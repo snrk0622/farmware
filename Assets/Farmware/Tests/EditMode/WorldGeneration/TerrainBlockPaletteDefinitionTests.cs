@@ -257,7 +257,7 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 重み合計違反、行内材質重複、Biome行重複の入力を構築時に拒否することを保証します。
+        /// 重み合計違反、行内材質重複、Biome行重複、非泥炭候補なしの入力を構築時に拒否することを保証します。
         /// </summary>
         [Test]
         public void Builder_RejectsInvalidWeightDuplicateMaterialAndDuplicateStableRow()
@@ -279,6 +279,14 @@ namespace Farmware.WorldGeneration.Tests
                 TerrainBlockPaletteDefinitions.CreateBiomeSurfaceDefaults();
             duplicateBiomeRows[17].BiomeId = duplicateBiomeRows[0].BiomeId;
             AssertBuildRejected(duplicateBiomeRows, TerrainBlockPaletteDefinitions.CreateGeologyDefaults());
+
+            BiomeSurfaceBlockPaletteDefinition[] peatOnlyBiomes =
+                TerrainBlockPaletteDefinitions.CreateBiomeSurfaceDefaults();
+            peatOnlyBiomes[0].Entries = new[]
+            {
+                new TerrainBlockPaletteWeight(TerrainBlockMaterialId.PeatSoil, 256)
+            };
+            AssertBuildRejected(peatOnlyBiomes, TerrainBlockPaletteDefinitions.CreateGeologyDefaults());
         }
 
         /// <summary>

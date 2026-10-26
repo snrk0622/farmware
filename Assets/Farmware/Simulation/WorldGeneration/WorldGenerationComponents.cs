@@ -373,6 +373,12 @@ namespace Farmware.WorldGeneration
         public NaturalFloodingGenerationSettings NaturalFlooding;
 
         /// <summary>
+        /// Biome表層、地質差分、露出基盤、泥炭条件を再計算する固定設定です。
+        /// GeneratorVersionと一緒にワールド寿命中は変更しません。
+        /// </summary>
+        public TerrainBlockPaletteSelectionSettings TerrainBlockPaletteSelection;
+
+        /// <summary>
         /// これ未満の標高を海水域にする固定小数点閾値です。
         /// 地上18Biomeの固定標高範囲と両立する20,000以上、保存済み低地上限以下を設定検証で要求します。
         /// </summary>
@@ -458,6 +464,8 @@ namespace Farmware.WorldGeneration
                 Groundwater = GroundwaterGenerationSettings.CreateDefault(),
                 LakeSpring = LakeSpringGenerationSettings.CreateDefault(),
                 NaturalFlooding = NaturalFloodingGenerationSettings.CreateDefault(),
+                TerrainBlockPaletteSelection =
+                    TerrainBlockPaletteSelectionSettings.CreateDefault(),
                 SeaLevelThreshold = DefaultSeaLevelThreshold,
                 MagmaCellSizeInTiles = 24,
                 MagmaDetailCellSizeInTiles = 8,

@@ -228,7 +228,13 @@ C6-B1の初回41材質について、安定材質ID 1〜41、共通Item・Ground
 
 #### `TerrainBlockPaletteDefinitionTests`
 
-C6-B2の18Biome表層Groundパレットと8地質の露出基盤Ground・自然Wallパレットについて、確定表の材質順と重み、全26行の安定ID、行内材質の一意性、各パレットの重み合計256を保証する。本番Bakerと同じ共通Definition・地形・41材質カタログへ接続してRuntime Blobを構築し、全Ground候補が`GroundBlock`、全Wall候補が移動遮断・水密属性を持つ`WallBlock`へ解決されることを確認する。入力行を逆順にしても安定ID順の検索結果が変わらず、重み合計違反、行内材質重複、安定行ID重複、予約ID、Range外参照を拒否する。
+C6-B2の18Biome表層Groundパレットと8地質の露出基盤Ground・自然Wallパレットについて、確定表の材質順と重み、全26行の安定ID、行内材質の一意性、各パレットの重み合計256を保証する。本番Bakerと同じ共通Definition・地形・41材質カタログへ接続してRuntime Blobを構築し、全Ground候補が`GroundBlock`、全Wall候補が移動遮断・水密属性を持つ`WallBlock`へ解決されることを確認する。入力行を逆順にしても安定ID順の検索結果が変わらず、重み合計違反、行内材質重複、安定行ID重複、予約ID、Range外参照を拒否する。C6-B3以降は自然土壌飽和不足の泥炭を必ず置換できるよう、全Biome行に非`PeatSoil`候補が1件以上あることも構築時に保証する。
+
+#### `DeterministicTerrainBlockPaletteSelectorTests`
+
+C6-B3の純粋Blockパレット選択について、表層64／32／16タイル・4：2：1、地質32／16タイル・2：1、露出32／16タイル・2：1の固定設定と用途別Saltを、負座標の明示ノイズ合成と照合する。0〜255へ変換した累積重み区間の全境界、露出式の64bit合成、境界39,320／39,321／39,322、露出率0／65,535の端点、中間値だけの厳密な未満比較を保証する。`SwampForest`で選ばれた`PeatSoil`は自然土壌飽和39,320で最初の非泥炭候補`MarshMud`へ置換し、39,321では維持する。同一入力の再実行とBiome・地質行の逆登録順で、途中ノイズ、候補材質、最終Ground、自然Wallがすべて一致することも確認する。
+
+2026-10-26のC6-B3 AI確認では、Unity 6000.3.8f1 Editorで`DeterministicTerrainBlockPaletteSelectorTests` 7件、B2・B3の`TerrainBlockPalette`関連14件、共有既定設定1件がすべて成功し、対象実行後のConsoleはエラー0件・警告0件だった。生成済みプロジェクト参照を使うRuntime・World Generation Testsの静的ビルドも警告0件・エラー0件で成功した。World Generation EditMode Assembly 622件の一括実行は約52分31秒で完走し、620件成功・2件失敗だった。失敗のうち`WorldGenerationMapViewerTests.Sample_ReportsDiagnosticChunksAndCompletedRowsWithoutChangingPixels`は一括実行時に180秒でTimeoutとなったが、単独再実行では90.55秒で成功した。もう1件の`TerrainProductIsolationTests.LegacyBoundaryHighlightRemovalGate_RemovesAllImplementation`は、後続C6-Dで旧境界ハイライトを削除した後に成功させる明示実行用`Explicit`ゲートであり、現時点では仕様どおり旧表示が残るため失敗する。全体実行後のConsoleはエラー0件で、警告6件は既存ECS Systemの無効な更新順属性2種類が各3回出力されたもので、C6-B3の変更箇所からの新規警告はなかった。
 
 #### `WorldGenerationDistributionAuditTests`
 

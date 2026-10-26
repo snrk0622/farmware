@@ -372,12 +372,13 @@ namespace Farmware.WorldGeneration
 
     /// <summary>
     /// 固定パレット入力を材質・地形カタログへ接続し、実行時用Blob Assetを構築します。
-    /// 不完全な行、重複材質、重み合計違反、Block分類違反をBake時に拒否します。
+    /// 不完全な行、重複材質、重み合計違反、泥炭の代替不足、Block分類違反をBake時に拒否します。
     /// </summary>
     public static class TerrainBlockPaletteCatalogBuilder
     {
         /// <summary>
         /// 18Biomeと8地質の全パレットを検証し、安定ID順の実行時カタログを作ります。
+        /// 全Biome行には、自然土壌飽和不足時にPeatSoilを置換できる非泥炭候補も要求します。
         /// </summary>
         /// <param name="terrainCatalog">Block分類と自然Wall属性を確認する地形カタログです。</param>
         /// <param name="materialCatalog">安定材質IDをGround・Wall Runtime IDへ解決する材質カタログです。</param>
@@ -425,7 +426,8 @@ namespace Farmware.WorldGeneration
                         materialCatalog,
                         definition.Entries,
                         DefinitionKind.GroundBlock,
-                        false))
+                        false)
+                    || !ContainsNonPeatEntry(definition.Entries))
                 {
                     return false;
                 }
@@ -580,6 +582,25 @@ namespace Farmware.WorldGeneration
             }
 
             return weightTotal == TerrainBlockPaletteDefinitions.RequiredWeightTotal;
+        }
+
+        /// <summary>
+        /// Biome表層行に、自然土壌飽和が不足したPeatSoilを置き換えられる候補があるか確認します。
+        /// </summary>
+        /// <param name="entries">検証済みBiome表層候補です。</param>
+        /// <returns>PeatSoil以外の材質を1件以上含む場合はtrueです。</returns>
+        private static bool ContainsNonPeatEntry(TerrainBlockPaletteWeight[] entries)
+        {
+            // 泥炭を含まない通常Biomeも同じ条件を満たします。分岐を分けず、全行で乾燥時の代替先を保証します。
+            for (int entryIndex = 0; entryIndex < entries.Length; entryIndex++)
+            {
+                if (entries[entryIndex].MaterialId != TerrainBlockMaterialId.PeatSoil)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>
