@@ -502,18 +502,32 @@ namespace Farmware.WorldGeneration.Editor
             }
         }
 
-        /// <summary>未保存Sceneを保護したうえで、代表5材質の固定検品Sceneを再構築して開きます。</summary>
+        /// <summary>未保存Sceneを保護したうえで、保存済みの代表5材質固定検品Sceneを開きます。</summary>
         [MenuItem("Farmware/World Generation/Inspection Scenes/Open Terrain Tile Inspection Map")]
         public static void BuildAndOpenFromMenu()
         {
-            BuildFromMenu(false);
+            OpenOrRebuildFromMenu(comparisonOnly: false, forceRebuild: false);
         }
 
-        /// <summary>未保存Sceneを保護したうえで、壁暗化係数の比較Sceneを再構築して開きます。</summary>
+        /// <summary>未保存Sceneを保護したうえで、保存済みの壁暗化係数比較Sceneを開きます。</summary>
         [MenuItem("Farmware/World Generation/Inspection Scenes/Open Wall Surface Darken Comparison")]
         public static void BuildWallSurfaceDarkenComparisonFromMenu()
         {
-            BuildFromMenu(true);
+            OpenOrRebuildFromMenu(comparisonOnly: true, forceRebuild: false);
+        }
+
+        /// <summary>素材または配置規則を変更したときだけ、代表5材質固定検品Sceneを明示的に再構築します。</summary>
+        [MenuItem("Farmware/World Generation/Generation/Rebuild Terrain Tile Inspection Map")]
+        public static void RebuildFromMenu()
+        {
+            OpenOrRebuildFromMenu(comparisonOnly: false, forceRebuild: true);
+        }
+
+        /// <summary>素材または配置規則を変更したときだけ、壁暗化係数比較Sceneを明示的に再構築します。</summary>
+        [MenuItem("Farmware/World Generation/Generation/Rebuild Wall Surface Darken Comparison")]
+        public static void RebuildWallSurfaceDarkenComparisonFromMenu()
+        {
+            OpenOrRebuildFromMenu(comparisonOnly: true, forceRebuild: true);
         }
 
         /// <summary>CLIや自動処理から固定検品Sceneを構築する入口です。</summary>
@@ -658,9 +672,10 @@ namespace Farmware.WorldGeneration.Editor
             return WallFoldShadowTopAlpha * fade;
         }
 
-        /// <summary>メニュー操作時だけ未保存Sceneを確認してから構築を実行します。</summary>
+        /// <summary>メニュー操作時だけ未保存Sceneを確認し、通常は保存済みSceneを開き、明示指定時だけ再構築します。</summary>
         /// <param name="comparisonOnly">暗化比較Sceneを作る場合はtrueです。</param>
-        private static void BuildFromMenu(bool comparisonOnly)
+        /// <param name="forceRebuild">既存Sceneがあっても生成し直す場合はtrueです。</param>
+        private static void OpenOrRebuildFromMenu(bool comparisonOnly, bool forceRebuild)
         {
             InspectionAssets assets;
             try
@@ -685,6 +700,17 @@ namespace Farmware.WorldGeneration.Editor
             SceneSetup[] originalSetup = EditorSceneManager.GetSceneManagerSetup();
             try
             {
+                string scenePath = comparisonOnly
+                    ? WallSurfaceDarkenComparisonScenePath
+                    : InspectionScenePath;
+                if (!forceRebuild
+                    && TryOpenExistingInspectionScene(
+                        scenePath,
+                        "Terrain Tile Art Inspection"))
+                {
+                    return;
+                }
+
                 BuildAndOpenScene(assets, comparisonOnly);
             }
             catch (Exception exception)
@@ -696,6 +722,44 @@ namespace Farmware.WorldGeneration.Editor
                     exception.Message,
                     "閉じる");
             }
+        }
+
+        /// <summary>保存済み検品Sceneがあれば、アセットを書き換えずにSingleモードで開きます。</summary>
+        /// <param name="scenePath">Assetsから始まる検品Sceneの保存先です。</param>
+        /// <param name="selectionRootName">開いた後にHierarchyで選択するルート名です。</param>
+        /// <returns>保存済みSceneを開けた場合はtrue、未生成ならfalseです。</returns>
+        internal static bool TryOpenExistingInspectionScene(
+            string scenePath,
+            string selectionRootName)
+        {
+            SceneAsset sceneAsset = AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath);
+            if (sceneAsset == null)
+            {
+                // 初回だけは既存Sceneがないため、呼び出し元が従来どおり構築へ進みます。
+                return false;
+            }
+
+            // 破棄される現在SceneのObjectをInspectorが保持し続けると、Unity内部で
+            // SerializedObjectNotCreatableExceptionが出るため、Scene切替前に選択を解除します。
+            Selection.activeObject = null;
+            Scene scene = EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+            GameObject[] rootObjects = scene.GetRootGameObjects();
+            for (int index = 0; index < rootObjects.Length; index++)
+            {
+                if (!string.Equals(
+                    rootObjects[index].name,
+                    selectionRootName,
+                    StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                Selection.activeGameObject = rootObjects[index];
+                SceneView.lastActiveSceneView?.FrameSelected();
+                break;
+            }
+
+            return true;
         }
 
         /// <summary>設定アセットから代表5材質と生成済み境界Spriteを読み込み、件数と参照を検証します。</summary>
@@ -1029,6 +1093,7 @@ namespace Farmware.WorldGeneration.Editor
             float maximumAlpha)
         {
             Material material = AssetDatabase.LoadAssetAtPath<Material>(assetPath);
+            bool changed = false;
             if (material == null)
             {
                 material = new Material(shader)
@@ -1036,20 +1101,30 @@ namespace Farmware.WorldGeneration.Editor
                     name = Path.GetFileNameWithoutExtension(assetPath)
                 };
                 AssetDatabase.CreateAsset(material, assetPath);
+                changed = true;
             }
-            else
+            else if (material.shader != shader)
             {
                 material.shader = shader;
+                changed = true;
             }
 
             // Shaderは穴全体のUVを0～1として受け取るため、Pixel距離を160px全高に対する比率へ変換します。
-            material.SetColor("_OverlayColor", overlayColor);
-            material.SetFloat(
+            changed |= SetMaterialColorIfDifferent(material, "_OverlayColor", overlayColor);
+            changed |= SetMaterialFloatIfDifferent(
+                material,
                 "_ClippedTopRatio",
                 clippedTopPixels / (float)InspectionHoleHeightPixels);
-            material.SetFloat("_FadeRatio", fadePixels / (float)InspectionHoleHeightPixels);
-            material.SetFloat("_MaximumAlpha", maximumAlpha);
-            EditorUtility.SetDirty(material);
+            changed |= SetMaterialFloatIfDifferent(
+                material,
+                "_FadeRatio",
+                fadePixels / (float)InspectionHoleHeightPixels);
+            changed |= SetMaterialFloatIfDifferent(material, "_MaximumAlpha", maximumAlpha);
+            if (changed)
+            {
+                EditorUtility.SetDirty(material);
+            }
+
             return material;
         }
 
@@ -1068,6 +1143,7 @@ namespace Farmware.WorldGeneration.Editor
             int pixelLength)
         {
             Material material = AssetDatabase.LoadAssetAtPath<Material>(assetPath);
+            bool changed = false;
             if (material == null)
             {
                 material = new Material(shader)
@@ -1075,17 +1151,26 @@ namespace Farmware.WorldGeneration.Editor
                     name = Path.GetFileNameWithoutExtension(assetPath)
                 };
                 AssetDatabase.CreateAsset(material, assetPath);
+                changed = true;
             }
-            else
+            else if (material.shader != shader)
             {
                 material.shader = shader;
+                changed = true;
             }
 
-            material.SetColor("_FirstColor", firstColor);
-            material.SetColor("_SecondColor", secondColor);
-            material.SetFloat("_PixelLength", pixelLength);
-            material.SetFloat("_PixelsPerSecond", WaterEdgeWavePixelsPerSecond);
-            EditorUtility.SetDirty(material);
+            changed |= SetMaterialColorIfDifferent(material, "_FirstColor", firstColor);
+            changed |= SetMaterialColorIfDifferent(material, "_SecondColor", secondColor);
+            changed |= SetMaterialFloatIfDifferent(material, "_PixelLength", pixelLength);
+            changed |= SetMaterialFloatIfDifferent(
+                material,
+                "_PixelsPerSecond",
+                WaterEdgeWavePixelsPerSecond);
+            if (changed)
+            {
+                EditorUtility.SetDirty(material);
+            }
+
             return material;
         }
 
@@ -1102,6 +1187,7 @@ namespace Farmware.WorldGeneration.Editor
             int startPixelRow)
         {
             Material material = AssetDatabase.LoadAssetAtPath<Material>(assetPath);
+            bool changed = false;
             if (material == null)
             {
                 material = new Material(shader)
@@ -1109,23 +1195,77 @@ namespace Farmware.WorldGeneration.Editor
                     name = Path.GetFileNameWithoutExtension(assetPath)
                 };
                 AssetDatabase.CreateAsset(material, assetPath);
+                changed = true;
             }
-            else
+            else if (material.shader != shader)
             {
                 material.shader = shader;
+                changed = true;
             }
 
             // 折れ目影は材質色を持たず、黒のAlphaだけを指定画素数で減衰させます。
             // Sprite寸法は生成設定の16pxを参照し、Shader側のマジックナンバーと食い違わないようにします。
-            material.SetColor("_ShadowColor", Color.black);
-            material.SetFloat("_TopAlpha", WallFoldShadowTopAlpha);
-            material.SetFloat("_FadePixelCount", fadePixelCount);
-            material.SetFloat(
+            changed |= SetMaterialColorIfDifferent(material, "_ShadowColor", Color.black);
+            changed |= SetMaterialFloatIfDifferent(
+                material,
+                "_TopAlpha",
+                WallFoldShadowTopAlpha);
+            changed |= SetMaterialFloatIfDifferent(
+                material,
+                "_FadePixelCount",
+                fadePixelCount);
+            changed |= SetMaterialFloatIfDifferent(
+                material,
                 "_SpritePixelHeight",
                 TerrainTileArtGenerationSettings.TileSizeInPixels);
-            material.SetFloat("_StartPixelRow", startPixelRow);
-            EditorUtility.SetDirty(material);
+            changed |= SetMaterialFloatIfDifferent(
+                material,
+                "_StartPixelRow",
+                startPixelRow);
+            if (changed)
+            {
+                EditorUtility.SetDirty(material);
+            }
+
             return material;
+        }
+
+        /// <summary>Materialの色が期待値と異なる場合だけ更新し、不要な再保存を防ぎます。</summary>
+        /// <param name="material">更新対象の検品用Materialです。</param>
+        /// <param name="propertyName">Shaderへ定義された色プロパティ名です。</param>
+        /// <param name="expectedValue">保存すべき色です。</param>
+        /// <returns>値を変更した場合はtrueです。</returns>
+        internal static bool SetMaterialColorIfDifferent(
+            Material material,
+            string propertyName,
+            Color expectedValue)
+        {
+            if (material.GetColor(propertyName) == expectedValue)
+            {
+                return false;
+            }
+
+            material.SetColor(propertyName, expectedValue);
+            return true;
+        }
+
+        /// <summary>Materialの数値が期待値と異なる場合だけ更新し、不要な再保存を防ぎます。</summary>
+        /// <param name="material">更新対象の検品用Materialです。</param>
+        /// <param name="propertyName">Shaderへ定義された数値プロパティ名です。</param>
+        /// <param name="expectedValue">保存すべき数値です。</param>
+        /// <returns>値を変更した場合はtrueです。</returns>
+        internal static bool SetMaterialFloatIfDifferent(
+            Material material,
+            string propertyName,
+            float expectedValue)
+        {
+            if (Mathf.Approximately(material.GetFloat(propertyName), expectedValue))
+            {
+                return false;
+            }
+
+            material.SetFloat(propertyName, expectedValue);
+            return true;
         }
 
         /// <summary>指定した材質IDをMaterials配列から探します。</summary>
@@ -1194,6 +1334,8 @@ namespace Farmware.WorldGeneration.Editor
             {
                 wallFoldShadowMaterials = previewAssets.WallFoldShadowMaterials;
             }
+            // 現在の選択ObjectはScene破棄と同時にnullになるため、Inspectorの内部例外を避けてから切り替えます。
+            Selection.activeObject = null;
             Scene scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
             scene.name = comparisonOnly
                 ? "TerrainWallSurfaceDarkenComparison"

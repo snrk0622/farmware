@@ -388,9 +388,23 @@ namespace Farmware.WorldGeneration.Editor
             }
         }
 
-        /// <summary>未保存Sceneを保護してから、Wall動的影比較Sceneを再構築して開きます。</summary>
+        /// <summary>未保存Sceneを保護してから、保存済みのWall動的影比較Sceneを開きます。</summary>
         [MenuItem("Farmware/World Generation/Inspection Scenes/Open Wall Shadow Comparison")]
         public static void BuildAndOpenFromMenu()
+        {
+            OpenOrRebuildShadowComparisonFromMenu(forceRebuild: false);
+        }
+
+        /// <summary>素材または配置規則を変更したときだけ、Wall動的影比較Sceneを明示的に再構築します。</summary>
+        [MenuItem("Farmware/World Generation/Generation/Rebuild Wall Shadow Comparison")]
+        public static void RebuildFromMenu()
+        {
+            OpenOrRebuildShadowComparisonFromMenu(forceRebuild: true);
+        }
+
+        /// <summary>入力を検証し、通常は保存済みSceneを開き、明示指定時だけWall動的影比較Sceneを再構築します。</summary>
+        /// <param name="forceRebuild">既存Sceneがあっても生成し直す場合はtrueです。</param>
+        private static void OpenOrRebuildShadowComparisonFromMenu(bool forceRebuild)
         {
             InspectionAssets assets;
             try
@@ -415,6 +429,14 @@ namespace Farmware.WorldGeneration.Editor
             SceneSetup[] originalSetup = EditorSceneManager.GetSceneManagerSetup();
             try
             {
+                if (!forceRebuild
+                    && TerrainTileArtInspectionMapBuilder.TryOpenExistingInspectionScene(
+                        InspectionScenePath,
+                        "Wall Shadow Comparison"))
+                {
+                    return;
+                }
+
                 BuildAndOpenScene(assets);
             }
             catch (Exception exception)
@@ -435,18 +457,38 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>
-        /// 未保存Sceneを保護してから、折れ目影と境界ハイライトの専用比較Sceneを再構築して開きます。
+        /// 未保存Sceneを保護してから、保存済みの折れ目影と境界ハイライト専用比較Sceneを開きます。
         /// Ground、Wall暗化、Face、固定接地影、動的影、照明は両パネルで共通にします。
         /// </summary>
         [MenuItem("Farmware/World Generation/Inspection Scenes/Open Wall Edge Cue Comparison")]
         public static void BuildAndOpenEdgeCueComparisonFromMenu()
         {
+            OpenOrRebuildEdgeCueComparisonFromMenu(forceRebuild: false);
+        }
+
+        /// <summary>素材または配置規則を変更したときだけ、Wall境界補助比較Sceneを明示的に再構築します。</summary>
+        [MenuItem("Farmware/World Generation/Generation/Rebuild Wall Edge Cue Comparison")]
+        public static void RebuildEdgeCueComparisonFromMenu()
+        {
+            OpenOrRebuildEdgeCueComparisonFromMenu(forceRebuild: true);
+        }
+
+        /// <summary>入力を検証し、通常は保存済みSceneを開き、明示指定時だけWall境界補助比較Sceneを再構築します。</summary>
+        /// <param name="forceRebuild">既存Sceneがあっても生成し直す場合はtrueです。</param>
+        private static void OpenOrRebuildEdgeCueComparisonFromMenu(bool forceRebuild)
+        {
             InspectionAssets[] assets;
-            Material[,] wallFoldShadowMaterials;
+            bool sceneExists;
             try
             {
+                sceneExists = AssetDatabase.LoadAssetAtPath<SceneAsset>(
+                    EdgeCueComparisonScenePath) != null;
                 assets = LoadAndValidateRepresentativeAssets();
-                wallFoldShadowMaterials = EnsureEdgeCueFoldShadowMaterials();
+                if (!forceRebuild && sceneExists)
+                {
+                    // Openメニューは保存済みMaterialを読むだけにし、保存確認より前にAssetを変更しません。
+                    LoadAndValidateEdgeCueFoldShadowMaterials();
+                }
             }
             catch (Exception exception)
             {
@@ -466,6 +508,15 @@ namespace Farmware.WorldGeneration.Editor
             SceneSetup[] originalSetup = EditorSceneManager.GetSceneManagerSetup();
             try
             {
+                if (!forceRebuild
+                    && TerrainTileArtInspectionMapBuilder.TryOpenExistingInspectionScene(
+                        EdgeCueComparisonScenePath,
+                        "Wall Edge Cue Comparison"))
+                {
+                    return;
+                }
+
+                Material[,] wallFoldShadowMaterials = EnsureEdgeCueFoldShadowMaterials();
                 BuildAndOpenEdgeCueComparisonScene(assets, wallFoldShadowMaterials);
             }
             catch (Exception exception)
@@ -570,20 +621,30 @@ namespace Farmware.WorldGeneration.Editor
                         fadePixelCount,
                         stageIndex);
                     Material material = AssetDatabase.LoadAssetAtPath<Material>(assetPath);
+                    bool changed = false;
                     if (material == null)
                     {
                         // 8px基準Materialは既存ツールが作成済みです。それ以外だけ複製して個別Assetとして保存します。
                         material = new Material(baseMaterial.shader);
                         material.CopyPropertiesFromMaterial(baseMaterial);
                         AssetDatabase.CreateAsset(material, assetPath);
+                        changed = true;
                     }
 
                     // Scene保存後も深度設定が残るよう、PropertyBlockではなく永続Materialへ値を保存します。
-                    material.SetFloat("_FadePixelCount", fadePixelCount);
-                    material.SetFloat(
+                    changed |= TerrainTileArtInspectionMapBuilder.SetMaterialFloatIfDifferent(
+                        material,
+                        "_FadePixelCount",
+                        fadePixelCount);
+                    changed |= TerrainTileArtInspectionMapBuilder.SetMaterialFloatIfDifferent(
+                        material,
                         "_StartPixelRow",
                         stageIndex * FaceSpriteHeightPixels);
-                    EditorUtility.SetDirty(material);
+                    if (changed)
+                    {
+                        EditorUtility.SetDirty(material);
+                    }
+
                     materials[foldIndex, stageIndex] = material;
                 }
             }
@@ -840,6 +901,8 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="assets">検証済みのSprite、Material、Wall暗化色です。</param>
         private static void BuildAndOpenScene(InspectionAssets assets)
         {
+            // 現在Sceneの選択を先に外し、破棄済みObjectをInspectorが参照して内部例外を出すことを防ぎます。
+            Selection.activeObject = null;
             Scene scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
             scene.name = "TerrainWallShadowComparison";
             CreateCamera();

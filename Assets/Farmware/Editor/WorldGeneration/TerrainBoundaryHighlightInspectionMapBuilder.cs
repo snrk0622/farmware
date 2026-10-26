@@ -130,9 +130,23 @@ namespace Farmware.WorldGeneration.Editor
             }
         }
 
-        /// <summary>未保存Sceneを保護してから、47状態の固定検品Sceneを再構築して開きます。</summary>
+        /// <summary>未保存Sceneを保護してから、保存済みの47状態固定検品Sceneを開きます。</summary>
         [MenuItem("Farmware/World Generation/Inspection Scenes/Open Boundary Highlight Inspection Map")]
         public static void BuildAndOpenFromMenu()
+        {
+            OpenOrRebuildFromMenu(forceRebuild: false);
+        }
+
+        /// <summary>素材または配置規則を変更したときだけ、47状態固定検品Sceneを明示的に再構築します。</summary>
+        [MenuItem("Farmware/World Generation/Generation/Rebuild Boundary Highlight Inspection Map")]
+        public static void RebuildFromMenu()
+        {
+            OpenOrRebuildFromMenu(forceRebuild: true);
+        }
+
+        /// <summary>入力を検証し、通常は保存済みSceneを開き、明示指定時だけ再構築します。</summary>
+        /// <param name="forceRebuild">既存Sceneがあっても生成し直す場合はtrueです。</param>
+        private static void OpenOrRebuildFromMenu(bool forceRebuild)
         {
             InspectionAssets assets;
             try
@@ -157,6 +171,14 @@ namespace Farmware.WorldGeneration.Editor
             SceneSetup[] originalSetup = EditorSceneManager.GetSceneManagerSetup();
             try
             {
+                if (!forceRebuild
+                    && TerrainTileArtInspectionMapBuilder.TryOpenExistingInspectionScene(
+                        InspectionScenePath,
+                        "Boundary Highlight Inspection"))
+                {
+                    return;
+                }
+
                 BuildAndOpenScene(assets);
             }
             catch (Exception exception)
@@ -286,6 +308,8 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="assets">検証済みのSpriteと接続状態です。</param>
         private static void BuildAndOpenScene(InspectionAssets assets)
         {
+            // 現在Sceneの選択を先に外し、破棄済みObjectをInspectorが参照して内部例外を出すことを防ぎます。
+            Selection.activeObject = null;
             Scene scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
             scene.name = "TerrainBoundaryHighlightInspection";
             CreateCamera();

@@ -62,7 +62,7 @@ Sceneを使わない最小ECS Worldで、受付番号が1から単調増加し�
 
 通常実行の`EnabledBuildScenes_DoNotDependOnDevelopmentOnlyAssets`は、Build Settingsで有効な全Sceneの再帰依存を`AssetDatabase.GetDependencies`で検査する。`Assets/Scenes/Development/`、`Assets/Farmware/Editor/`、`Assets/Farmware/Tests/`、`Assets/Farmware/Shaders/Development/`、`Assets/Farmware/Art/WorldGeneration/Generated/Inspection/`、手描き制作入力、`TerrainTileArtGenerationSettings.asset`のいずれかを製品Sceneが直接・間接に参照した場合は失敗する。検証SceneをBuild Settingsへ誤登録した場合も、そのScene自身のパスから検出する。地形タイル生成設定の型が`Farmware.WorldGeneration.Editor`へ所属することは`TerrainTileArtGeneratorTests`でも保証し、Player対応Authoring Assemblyへ戻さない。
 
-`LegacyBoundaryHighlightRemovalGate_RemovesAllImplementation`は、C6-Dの表示置換が終わるまでは失敗するため`Explicit`とする。C6-D完了確認ではこのテストを明示実行し、旧14形状境界ハイライトのPNG、Atlas、比較Scene、Runtime選択Utility、Editor生成・検品コード、専用テストが存在しないことに加え、Assets配下のC#・Scene・Prefab・Material・Shader・Atlasなどに旧型名、SerializedProperty名、旧PNG／Atlas GUIDの参照が残っていないことを一括確認する。通常テストから除外されていることを削除延期の根拠にはせず、C6-Dの完了条件として成功させる。
+`LegacyBoundaryHighlightRemovalGate_RemovesAllImplementation`は、C6-Dの表示置換が終わるまでは失敗するため`Explicit`とする。C6-D完了確認ではこのテストに加え、地形タイルの比較・検品専用インフラ全体の不存在を確認する製品分離テストを明示実行する。旧14形状境界ハイライトのPNG、Atlas、Runtime選択Utilityだけでなく、採用方式を含む比較・検品専用のScene、Builder、Editorメニュー、Material／Shader、生成Asset、設定および専用テストが存在せず、Assets配下のC#・Scene・Prefab・Material・Shader・Atlasなどに旧型名、SerializedProperty名、旧PNG／Atlas GUIDや検品専用参照が残っていないことを一括確認する。通常テストから除外されていることを削除延期の根拠にはせず、採用方式の本番接続と本番経路の回帰テスト成功後に検品専用インフラを0件にすることをC6-Dの完了条件とする。
 
 #### `WorldLayerWaterContractTests`
 
@@ -301,7 +301,7 @@ Editor構築ツールが生成した7種類の16×24土地PNGと16×28岩壁PNG�
 
 #### `WorldGenerationSpriteAtlasTests`
 
-Sprite Packer ModeがV2であること、土地Atlasが現行Biome仮色Textureだけ、岩壁Atlasが岩壁TextureだけをPackableに持つこと、両AtlasがBuilt-in配信とPixel Art向け設定を持つことを検証する。共通境界ハイライトは8px／16px／32px折れ目影との最終比較が終わるまで、専用の`TerrainBoundaryHighlightArtGeneratorTests`でPNGと`BoundaryHighlightAtlas`の既存契約を検証する。C6-Dでは比較で不採用となった補助表現の素材・Material／Shader・Atlas・Scene参照・選択処理と同時に専用テストを削除し、並行経路が残らないことを確認する。
+Sprite Packer ModeがV2であること、土地Atlasが現行Biome仮色Textureだけ、岩壁Atlasが岩壁TextureだけをPackableに持つこと、両AtlasがBuilt-in配信とPixel Art向け設定を持つことを検証する。共通境界ハイライトは8px／16px／32px折れ目影との最終比較が終わるまで、専用の`TerrainBoundaryHighlightArtGeneratorTests`でPNGと`BoundaryHighlightAtlas`の既存契約を検証する。C6-Dでは本番接続と製品回帰テストの成功後、不採用となった補助表現だけでなく、採用方式を含む比較・検品専用の素材、Material／Shader、Atlas、Scene参照、選択処理および専用テストを削除し、並行する検品経路が残らないことを確認する。
 
 #### `TerrainBoundaryHighlightArtGeneratorTests`
 
@@ -328,6 +328,8 @@ Sprite Packer ModeがV2であること、土地Atlasが現行Biome仮色Texture�
 自動テストは水平な`GroundTop`／`WallTop`が映っていない見た目、鏡像の向き、反射の強さ、波線との重なり、ドットの読みやすさを合格判定しない。これらは`Open Water Reflection Comparison`を実行し、Edit Modeで左右差、Play Modeで0／+1／0／-1 pxの段階移動を人間が確認する。採用前の検証値なので、本番Runtimeの描画契約や性能合格値には含めない。
 
 `Open Wall Surface Darken Comparison`では0.85、0.70、0.55を比較し、0.85を採用した。`Open Wall Shadow Comparison`では同じ13セル形状を3区画へ置き、「旧ハイライト＋動的影」「動的影のみ」「左右各1px・手前3px・各レイヤーAlpha 22%の固定接地影＋動的影」を同じ照明条件で比較し、2026-10-25の人間確認で固定接地影と動的影を組み合わせるCを採用した。追加の`Open Wall Edge Cue Comparison`では、代表5材質を5列、8px折れ目影、16px折れ目影、32px折れ目影、1px境界ハイライトを4行へ並べる。全20パネルは最大横5セルを含む同じ13セルWall形状を使い、CのGround、Wall暗化、Face 2段、固定接地影、動的影、照明を共通配置する。8px／16px行では各露出列の1段目へ折れ目影を各1枚、32px行では1段目と2段目へ各1枚、境界ハイライト行ではハイライトを各12枚置く。32pxのShader値は2段目で開始行を16px進め、段境界でAlphaが濃く戻らないことを保証する。自動テストは20パネル、各13 Wallセル、露出Face 5列、Face 10枚、固定接地影36枚、Caster 13個、Composite 1個、Point Light 2個が方式間で一致し、補助表現だけが異なることを保証する。2026-10-26の初回確認では16pxを最有力としたが、32pxが全体暗化に見えた現象には比較用動的影の不安定な挙動が混在していた。折れ目影自体を再評価して32pxを正式採用し、8px、16px、1px境界ハイライトを不採用とした。比較SceneのPoint Light配置とセル別Casterは製品照明の正ではなく、方式を同条件で比較するための仮構成である。動的影用CasterはWall上面からFace段数だけ手前の設置面へ移し、影が最下段Faceの根元から伸びて上面から始まらないことを確認する。本番の固定接地影と`Shadow Caster 2D`は材質境界で分割せず、Dirtyな16×16サブチャンクのWall設置面輪郭から結合形状を更新すること、移動する`Light 2D`へ動的影だけが追従すること、アンロード・再利用後に旧影が残らないことをEditMode／PlayMode／Gameビューで検証する。不採用となった8px／16px折れ目影と境界ハイライトの素材、Material／Shader、Atlas、Scene参照、選択処理、専用テストがC6-D後に残っていないことも検索と参照確認で保証する。水面反射の回帰では、反射Shaderが`SpriteRenderer.flipY`をWorld座標変換前に適用し、上下非対称なFaceも鏡像になる契約をShaderソースとGameビューで確認する。
+
+C6-Dで採用方式の本番接続と製品回帰テストが成功した後は、不採用経路に加えて、採用32px折れ目影、壁影、水面反射などを確認した比較・検品専用のScene、Builder、Editorメニュー、Material／Shader、生成Asset、設定および専用テストもすべて削除する。本番実装と本番挙動を保証するテストだけを残し、比較・検品専用インフラが0件であることを検索、Serialized参照確認および製品分離テストで保証する。水面反射の回帰では、削除する検品用Shaderではなく製品用反射Shaderを対象にする。
 
 #### `WorldGenerationSceneBootstrapTests`
 

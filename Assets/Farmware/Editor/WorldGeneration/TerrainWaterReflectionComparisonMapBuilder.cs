@@ -14,7 +14,7 @@ namespace Farmware.WorldGeneration.Editor
 {
     /// <summary>
     /// GrassLoamの岸とWallを映す、水面反射あり／なし比較Sceneを再現可能に構築します。
-    /// EditorメニューとCLIの両方から呼び出し、検証用SceneとMaterialだけを更新します。
+    /// EditorのOpenメニューは保存済みSceneを変更せずに開き、明示的な再構築とCLIだけが検証用SceneとMaterialを更新します。
     /// </summary>
     public static class TerrainWaterReflectionComparisonMapBuilder
     {
@@ -69,10 +69,44 @@ namespace Farmware.WorldGeneration.Editor
         // 反射あり区画の中心World X座標です。
         private const float WithReflectionCenterX = 4f;
 
-        /// <summary>未保存Sceneを保護したうえで、水面反射の比較Sceneを再構築して開きます。</summary>
+        /// <summary>未保存Sceneを保護したうえで、保存済みの水面反射比較Sceneを開きます。</summary>
         [MenuItem("Farmware/World Generation/Inspection Scenes/Open Water Reflection Comparison")]
         public static void BuildAndOpenFromMenu()
         {
+            OpenOrRebuildFromMenu(forceRebuild: false);
+        }
+
+        /// <summary>素材または配置規則を変更したときだけ、水面反射比較Sceneを明示的に再構築します。</summary>
+        [MenuItem("Farmware/World Generation/Generation/Rebuild Water Reflection Comparison")]
+        public static void RebuildFromMenu()
+        {
+            OpenOrRebuildFromMenu(forceRebuild: true);
+        }
+
+        /// <summary>入力を検証し、通常は保存済みSceneを開き、明示指定時だけ再構築します。</summary>
+        /// <param name="forceRebuild">既存SceneがあってもMaterialとSceneを生成し直す場合はtrueです。</param>
+        private static void OpenOrRebuildFromMenu(bool forceRebuild)
+        {
+            try
+            {
+                ValidateSortingLayerConfiguration();
+                LoadAndValidateAssets();
+                bool sceneExists = AssetDatabase.LoadAssetAtPath<SceneAsset>(ScenePath) != null;
+                if (!forceRebuild && sceneExists)
+                {
+                    LoadAndValidateReflectionMaterial();
+                }
+            }
+            catch (Exception exception)
+            {
+                Debug.LogException(exception);
+                EditorUtility.DisplayDialog(
+                    "水面反射の比較Sceneを開けません",
+                    exception.Message,
+                    "閉じる");
+                return;
+            }
+
             if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
             {
                 return;
@@ -81,6 +115,14 @@ namespace Farmware.WorldGeneration.Editor
             SceneSetup[] originalSetup = EditorSceneManager.GetSceneManagerSetup();
             try
             {
+                if (!forceRebuild
+                    && TerrainTileArtInspectionMapBuilder.TryOpenExistingInspectionScene(
+                        ScenePath,
+                        "Water Reflection Comparison"))
+                {
+                    return;
+                }
+
                 Execute();
             }
             catch (Exception exception)
@@ -219,6 +261,7 @@ namespace Farmware.WorldGeneration.Editor
 
             EnsureAssetFolder(Path.GetDirectoryName(ReflectionMaterialPath));
             Material material = AssetDatabase.LoadAssetAtPath<Material>(ReflectionMaterialPath);
+            bool changed = false;
             if (material == null)
             {
                 material = new Material(shader)
@@ -226,30 +269,69 @@ namespace Farmware.WorldGeneration.Editor
                     name = Path.GetFileNameWithoutExtension(ReflectionMaterialPath)
                 };
                 AssetDatabase.CreateAsset(material, ReflectionMaterialPath);
+                changed = true;
             }
-            else
+            else if (material.shader != shader)
             {
-                // 以前の画面取り込み方式で使っていたMaterialプロパティを残さないため、
-                // 既存AssetのGUIDを維持したまま、新しいShader既定値で内容を丸ごと初期化します。
-                Material cleanMaterial = new Material(shader)
-                {
-                    name = material.name
-                };
-                EditorUtility.CopySerialized(cleanMaterial, material);
-                UnityEngine.Object.DestroyImmediate(cleanMaterial);
+                // Shaderが変わった場合だけ参照を更新します。同じShaderのMaterialを丸ごと初期化すると、
+                // 値が同一でもUnityが再シリアライズしてGit差分を作るため、通常実行では行いません。
+                material.shader = shader;
+                changed = true;
             }
 
             // 初期値は反射の存在を確認できつつ、水中床と青Overlayを隠しすぎない弱い反射として設定します。
-            material.SetColor("_ReflectionTint", new Color32(143, 209, 232, 255));
-            material.SetFloat("_MaximumAlpha", MaximumReflectionAlpha);
-            material.SetFloat("_ReflectionAxisWorldY", ReflectionAxisWorldY);
-            material.SetFloat(
+            changed |= TerrainTileArtInspectionMapBuilder.SetMaterialColorIfDifferent(
+                material,
+                "_ReflectionTint",
+                new Color32(143, 209, 232, 255));
+            changed |= TerrainTileArtInspectionMapBuilder.SetMaterialFloatIfDifferent(
+                material,
+                "_MaximumAlpha",
+                MaximumReflectionAlpha);
+            changed |= TerrainTileArtInspectionMapBuilder.SetMaterialFloatIfDifferent(
+                material,
+                "_ReflectionAxisWorldY",
+                ReflectionAxisWorldY);
+            changed |= TerrainTileArtInspectionMapBuilder.SetMaterialFloatIfDifferent(
+                material,
                 "_MaximumDepthWorldUnits",
                 MaximumReflectionDepthPixels / (float)AssetsPixelsPerUnit);
-            material.SetFloat("_PixelsPerUnit", AssetsPixelsPerUnit);
-            material.SetFloat("_WavePixelsPerSecond", WavePixelsPerSecond);
-            EditorUtility.SetDirty(material);
-            AssetDatabase.SaveAssets();
+            changed |= TerrainTileArtInspectionMapBuilder.SetMaterialFloatIfDifferent(
+                material,
+                "_PixelsPerUnit",
+                AssetsPixelsPerUnit);
+            changed |= TerrainTileArtInspectionMapBuilder.SetMaterialFloatIfDifferent(
+                material,
+                "_WavePixelsPerSecond",
+                WavePixelsPerSecond);
+            if (changed)
+            {
+                EditorUtility.SetDirty(material);
+                AssetDatabase.SaveAssetIfDirty(material);
+            }
+
+            return material;
+        }
+
+        /// <summary>保存済みの反射MaterialとShader参照を読み取り専用で検証します。</summary>
+        /// <returns>比較Sceneが参照できる既存Materialです。</returns>
+        private static Material LoadAndValidateReflectionMaterial()
+        {
+            Shader shader = AssetDatabase.LoadAssetAtPath<Shader>(ReflectionShaderPath);
+            if (shader == null || ShaderUtil.ShaderHasError(shader))
+            {
+                throw new InvalidOperationException(
+                    $"水面反射Shaderを正常に読み込めません: {ReflectionShaderPath}");
+            }
+
+            Material material = AssetDatabase.LoadAssetAtPath<Material>(ReflectionMaterialPath);
+            if (material == null || material.shader != shader)
+            {
+                throw new InvalidOperationException(
+                    "水面反射Materialが未生成または現在のShaderと一致しません。"
+                    + "Generationメニューから比較Sceneを再構築してください。");
+            }
+
             return material;
         }
 
@@ -260,6 +342,8 @@ namespace Farmware.WorldGeneration.Editor
             ReflectionAssets assets,
             Material reflectionMaterial)
         {
+            // 現在Sceneの選択を先に外し、破棄済みObjectをInspectorが参照して内部例外を出すことを防ぎます。
+            Selection.activeObject = null;
             Scene scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
             scene.name = "TerrainWaterReflectionComparison";
             CreateCamera();
