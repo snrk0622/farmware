@@ -89,6 +89,14 @@ namespace Farmware.WorldGeneration.Tests
                 typeof(TerrainMaterialArtSource).Assembly.GetType(
                     "Farmware.WorldGeneration.Authoring.TerrainWallTopRimInput"),
                 Is.Null);
+            Assert.That(
+                typeof(TerrainMaterialArtSource).Assembly.GetName().Name,
+                Is.EqualTo("Farmware.WorldGeneration.Editor"),
+                "材質Spriteの制作入力はEditor専用Assemblyへ隔離してください。");
+            Assert.That(
+                typeof(TerrainTileArtGenerationSettings).Assembly.GetName().Name,
+                Is.EqualTo("Farmware.WorldGeneration.Editor"),
+                "地形タイル生成設定はPlayer対応Authoring Assemblyへ含めないでください。");
         }
 
         /// <summary>Wall用断面1段目ではOverlayだけが暗く、Faceは変わらないことを確認します。</summary>

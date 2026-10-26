@@ -1,6 +1,6 @@
 # Unity Editorツール
 
-- 最終更新日: 2026-10-25
+- 最終更新日: 2026-10-26
 - 対象: `Assets/Farmware/Editor/WorldGeneration/`
 
 ## 1. 用途
@@ -368,6 +368,8 @@ C3基礎水文5モードはGameビューと同じRGBで、流向、終端、集�
 
 Projectビューの`Create > Farmware > Terrain Tile Art Generation Settings`から設定Assetを作成する。Inspectorでは次を編集・確認できる。
 
+`TerrainTileArtGenerationSettings`と材質入力型は`Farmware.WorldGeneration.Editor` Assemblyに置き、Player対応のAuthoring Assemblyへ含めない。設定Asset、手描き制作入力、検品用生成物、Development Scene／Shaderは製品Build Sceneから参照しない。`TerrainProductIsolationTests.EnabledBuildScenes_DoNotDependOnDevelopmentOnlyAssets`が、Build Settingsで有効な全Sceneの再帰依存を通常のEditModeテストで検査する。
+
 - `Assets/`配下の出力ルート。
 - 材質ID、日本語確認名、全候補を均等確率で選ぶ可変長の`GroundTop`、`Face`、任意の`FaceBoundaryOverlay`。個別Weightや出現率Overrideは持たない。
 - `DarkenWallSurface`と`WallDarkenFactor`。新規材質の初期値は暗色化ON、係数0.85とする。
@@ -394,6 +396,7 @@ Projectビューの`Create > Farmware > Terrain Tile Art Generation Settings`か
 4. 入力画像、配列順、暗化の有効状態または係数を変更すると要再生成表示へ変わり、再生成後に最新表示へ戻る。
 5. Inspectorの生成結果プレビューにGround／Wall境界の全`F×B`組合せが別一覧に64×64の整数4倍で表示され、画像をクリックすると対応する生成SpriteをProjectビューで選択する。
 6. Wall上面は生成PNGではなく同じ`GroundTop`参照へ表示時Tintを掛けること、`Face`自体は暗色化されないことをGameビューで確認する。
+7. Build Settingsで有効な製品Sceneが、設定Asset、手描き制作入力、検品用Material、Development Scene／Shaderへ依存していないことを`TerrainProductIsolationTests`で確認する。
 
 ### 2.11 Open Terrain Tile Inspection Map
 

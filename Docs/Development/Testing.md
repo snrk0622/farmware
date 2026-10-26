@@ -1,6 +1,6 @@
 # テスト
 
-- 最終更新日: 2026-10-25
+- 最終更新日: 2026-10-26
 - 対象: `Assets/Farmware/Tests/`
 
 2026-10-19にゲーム方針を改訂した。第3章・第5章の既存テストと計測履歴は当時の実装に対する記録として保持し、今後の適用範囲は第4章と[新ロードマップ](./ImplementationRoadmap.md)を正とする。旧ANIMAL-01C〜Eの未着手計画はECO-01へ移し、PERF-GATE-BはECO-01C後・ECO-01E前、Cは段階的な縦切り、DはRELEASE-01Bで実施する。
@@ -57,6 +57,12 @@ Sceneを使わない最小ECS Worldで、受付番号が1から単調増加し�
 動物個体群Seed、Layer付き地域別乱数状態・次回受付順・初期化Tick、個体の永続ID・種類・Layer付き整数位置・群れID・外見差分を機能固有セクション1025へ追加する。地域Entityと個体Entityの作成順を逆転しても同じハッシュになること、同じ地域X/Yの別Layerを重複扱いしないこと、Layerだけの変更と将来の抽選結果を変える地域乱数状態の変更を検出すること、存在しない群れ先頭ID、循環する所属、別群れのメンバーへの所属、別種・別Layerの群れ先頭への所属、必須Componentが欠けた野生動物、動物種カタログに存在しない種ID、種定義の上限外となる外見差分番号を正式な状態として受理しないことを検証する。群れ先頭自身が自分の永続IDを群れIDに持つ正常な自己参照は受理する。
 
 ### 3.2 EditMode: `Farmware.WorldGeneration.Tests`
+
+#### `TerrainProductIsolationTests`
+
+通常実行の`EnabledBuildScenes_DoNotDependOnDevelopmentOnlyAssets`は、Build Settingsで有効な全Sceneの再帰依存を`AssetDatabase.GetDependencies`で検査する。`Assets/Scenes/Development/`、`Assets/Farmware/Editor/`、`Assets/Farmware/Tests/`、`Assets/Farmware/Shaders/Development/`、`Assets/Farmware/Art/WorldGeneration/Generated/Inspection/`、手描き制作入力、`TerrainTileArtGenerationSettings.asset`のいずれかを製品Sceneが直接・間接に参照した場合は失敗する。検証SceneをBuild Settingsへ誤登録した場合も、そのScene自身のパスから検出する。地形タイル生成設定の型が`Farmware.WorldGeneration.Editor`へ所属することは`TerrainTileArtGeneratorTests`でも保証し、Player対応Authoring Assemblyへ戻さない。
+
+`C6DCompletionGate_RemovesLegacyBoundaryHighlightImplementation`は、C6-Dの表示置換が終わるまでは失敗するため`Explicit`とする。C6-D完了確認ではこのテストを明示実行し、旧14形状境界ハイライトのPNG、Atlas、比較Scene、Runtime選択Utility、Editor生成・検品コード、専用テストが存在しないことに加え、Assets配下のC#・Scene・Prefab・Material・Shader・Atlasなどに旧型名、SerializedProperty名、旧PNG／Atlas GUIDの参照が残っていないことを一括確認する。通常テストから除外されていることを削除延期の根拠にはせず、C6-Dの完了条件として成功させる。
 
 #### `WorldLayerWaterContractTests`
 

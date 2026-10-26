@@ -1,5 +1,5 @@
-// このファイルは、地形材質Spriteの手描き入力と壁表示用の調整値を保持します。
-// Runtimeの地形状態は持たず、Editor生成ツールとPresentation設定の入力としてだけ使用します。
+// このファイルは、地形材質Spriteの手描き入力と壁表示用の調整値をEditor内だけで保持します。
+// Runtimeの地形状態は持たず、地形タイル生成ツールと検品Scene構築ツールの入力としてだけ使用します。
 
 using System;
 using System.Collections.Generic;
