@@ -240,8 +240,7 @@ namespace Farmware.Authoring
                     };
                 }
 
-                // 暫定5地形とC6-Bの41材質は既存Sceneへ手作業のGUID追加を要求せず、全Worldで同じ定義を登録します。
-                // 暫定5定義はC6-Cの置換まで意味を維持し、新41材質は別GUIDとして並行登録します。
+                // 自然生成で共有する5地形と41材質は、Sceneへ手作業のGUID追加を要求せず全Worldで同じ定義を登録します。
                 DefinitionBuildEntry[] builtInTerrainDefinitions =
                     BuiltInTerrainBlockDefinitions.CreateCommonDefinitions(
                         buildReferences.Count,
@@ -340,7 +339,7 @@ namespace Farmware.Authoring
                         TerrainBlockPaletteDefinitions.CreateBiomeSurfaceDefaults(),
                         TerrainBlockPaletteDefinitions.CreateGeologyDefaults(),
                         out blockPaletteCatalog);
-                bool legacyIdsResolved = blockPaletteCatalogCreated
+                bool builtInIdsResolved = blockPaletteCatalogCreated
                     && BuiltInTerrainBlockDefinitions.TryResolveRuntimeIds(
                         catalog,
                         out terrainRuntimeIds);
@@ -348,7 +347,7 @@ namespace Farmware.Authoring
                     || !terrainCatalogCreated
                     || !materialCatalogCreated
                     || !blockPaletteCatalogCreated
-                    || !legacyIdsResolved)
+                    || !builtInIdsResolved)
                 {
                     // どのBlobもまだBakerへ登録していないため、失敗時はこの処理が作成済みBlobの所有権を解放します。
                     if (terrainCatalog.IsCreated)

@@ -2,6 +2,7 @@
 // 水文・Biome確定前の単一タイル生成へ戻らず、再利用配列へ古い値を残さない表示境界を保証します。
 
 using System;
+using Farmware.Simulation;
 using Farmware.WorldGeneration.Presentation;
 using NUnit.Framework;
 using Unity.Collections;
@@ -19,13 +20,13 @@ namespace Farmware.WorldGeneration.Tests
             using var neighborhoodStorage = new NeighborhoodStorage();
             using World world = new World("TerrainHaloBatchTests");
             Entity entity = world.EntityManager.CreateEntity();
-            DynamicBuffer<GeneratedTile> tiles = world.EntityManager.AddBuffer<GeneratedTile>(entity);
+            DynamicBuffer<GeneratedTerrainCell> tiles = world.EntityManager.AddBuffer<GeneratedTerrainCell>(entity);
             CopyToBuffer(neighborhoodStorage.Center, tiles);
-            using var storage = new NativeArray<GeneratedTile>(
+            using var storage = new NativeArray<GeneratedTerrainCell>(
                 TerrainNeighborHaloUtility.TileCount,
                 Allocator.TempJob);
             // using変数はreadonlyなので、書き込み用の借用コピーを作ります。破棄はstorageだけが担当します。
-            NativeArray<GeneratedTile> halo = storage;
+            NativeArray<GeneratedTerrainCell> halo = storage;
 
             for (int first = 0; first < WorldGridConstants.SubChunksPerChunk; first++)
             {
@@ -34,7 +35,7 @@ namespace Farmware.WorldGeneration.Tests
                     // 毎回あり得ないBiome値で汚し、必要なセルが未更新のまま前バッチの値を読む退行を検出します。
                     for (int index = 0; index < halo.Length; index++)
                     {
-                        halo[index] = new GeneratedTile { Biome = (BiomeId)255 };
+                        halo[index] = new GeneratedTerrainCell { Biome = (BiomeId)255 };
                     }
 
                     TerrainNeighborHaloUtility.Fill(
@@ -68,9 +69,9 @@ namespace Farmware.WorldGeneration.Tests
                                     neighborhoodStorage.Neighborhood.TryGetTile(
                                         x,
                                         y,
-                                        out GeneratedTile expected),
+                                        out GeneratedTerrainCell expected),
                                     Is.True);
-                                GeneratedTile actual = TerrainNeighborHaloUtility.GetTile(
+                                GeneratedTerrainCell actual = TerrainNeighborHaloUtility.GetTile(
                                     x,
                                     y,
                                     tiles,
@@ -92,9 +93,9 @@ namespace Farmware.WorldGeneration.Tests
         {
             using World world = new World("TerrainHaloReuseTests");
             Entity entity = world.EntityManager.CreateEntity();
-            DynamicBuffer<GeneratedTile> tiles = world.EntityManager.AddBuffer<GeneratedTile>(entity);
+            DynamicBuffer<GeneratedTerrainCell> tiles = world.EntityManager.AddBuffer<GeneratedTerrainCell>(entity);
             tiles.ResizeUninitialized(WorldGridConstants.TilesPerChunk);
-            using var halo = new NativeArray<GeneratedTile>(
+            using var halo = new NativeArray<GeneratedTerrainCell>(
                 TerrainNeighborHaloUtility.TileCount,
                 Allocator.TempJob);
 
@@ -113,9 +114,9 @@ namespace Farmware.WorldGeneration.Tests
                         if (x >= 0 && x < 64 && y >= 0 && y < 64)
                         {
                             // 近傍の中心配列と異なる値を置き、GetTileが現在のECS Bufferを正として維持することを検証します。
-                            GeneratedTile authoritative = new GeneratedTile
+                            GeneratedTerrainCell authoritative = new GeneratedTerrainCell
                             {
-                                Ground = GroundType.Magma,
+                                LiquidRuntimeId = new DefinitionRuntimeId(5),
                                 Biome = (BiomeId)(trial + 1)
                             };
                             tiles[WorldGrid.ToTileIndex(x, y)] = authoritative;
@@ -129,7 +130,7 @@ namespace Farmware.WorldGeneration.Tests
                                 neighborhoodStorage.Neighborhood.TryGetTile(
                                     x,
                                     y,
-                                    out GeneratedTile expected),
+                                    out GeneratedTerrainCell expected),
                                 Is.True);
                             Assert.That(
                                 TerrainNeighborHaloUtility.GetTile(x, y, tiles, halo),
@@ -154,14 +155,14 @@ namespace Farmware.WorldGeneration.Tests
         public void Fill_PreparesOnlyBatchRectangle(int first, int count, int expectedCount)
         {
             using var neighborhoodStorage = new NeighborhoodStorage();
-            using var storage = new NativeArray<GeneratedTile>(
+            using var storage = new NativeArray<GeneratedTerrainCell>(
                 TerrainNeighborHaloUtility.TileCount,
                 Allocator.TempJob);
             // 書き込み用の借用コピーです。storageだけがDisposeします。
-            NativeArray<GeneratedTile> halo = storage;
+            NativeArray<GeneratedTerrainCell> halo = storage;
             for (int index = 0; index < halo.Length; index++)
             {
-                halo[index] = new GeneratedTile { Biome = (BiomeId)255 };
+                halo[index] = new GeneratedTerrainCell { Biome = (BiomeId)255 };
             }
 
             TerrainNeighborHaloUtility.Fill(
@@ -186,10 +187,10 @@ namespace Farmware.WorldGeneration.Tests
         public void Fill_InvalidArguments_RejectsBeforeJobExecution()
         {
             using var neighborhoodStorage = new NeighborhoodStorage();
-            using var halo = new NativeArray<GeneratedTile>(
+            using var halo = new NativeArray<GeneratedTerrainCell>(
                 TerrainNeighborHaloUtility.TileCount,
                 Allocator.TempJob);
-            using var shortHalo = new NativeArray<GeneratedTile>(1, Allocator.TempJob);
+            using var shortHalo = new NativeArray<GeneratedTerrainCell>(1, Allocator.TempJob);
             Assert.Throws<ArgumentException>(() => TerrainNeighborHaloUtility.Fill(
                 neighborhoodStorage.Neighborhood, 0, 1, shortHalo));
             Assert.Throws<ArgumentOutOfRangeException>(() => TerrainNeighborHaloUtility.Fill(
@@ -216,7 +217,7 @@ namespace Farmware.WorldGeneration.Tests
                 for (int offsetX = -1; offsetX <= 1; offsetX++)
                 {
                     Entity entity = entityManager.CreateEntity();
-                    DynamicBuffer<GeneratedTile> buffer = entityManager.AddBuffer<GeneratedTile>(entity);
+                    DynamicBuffer<GeneratedTerrainCell> buffer = entityManager.AddBuffer<GeneratedTerrainCell>(entity);
                     buffer.ResizeUninitialized(WorldGridConstants.TilesPerChunk);
                     completedEntities[new ChunkCoordinate(offsetX, offsetY)] = entity;
                 }
@@ -256,7 +257,7 @@ namespace Farmware.WorldGeneration.Tests
                 for (int offsetX = 0; offsetX <= 1; offsetX++)
                 {
                     Entity entity = entityManager.CreateEntity();
-                    DynamicBuffer<GeneratedTile> buffer = entityManager.AddBuffer<GeneratedTile>(entity);
+                    DynamicBuffer<GeneratedTerrainCell> buffer = entityManager.AddBuffer<GeneratedTerrainCell>(entity);
                     buffer.ResizeUninitialized(WorldGridConstants.TilesPerChunk);
                     completedEntities[new ChunkCoordinate(minimum + offsetX, minimum + offsetY)] = entity;
                 }
@@ -280,8 +281,8 @@ namespace Farmware.WorldGeneration.Tests
         /// <param name="source">コピー元の4096完成セルです。</param>
         /// <param name="destination">テストWorldが所有するコピー先Bufferです。</param>
         private static void CopyToBuffer(
-            NativeArray<GeneratedTile> source,
-            DynamicBuffer<GeneratedTile> destination)
+            NativeArray<GeneratedTerrainCell> source,
+            DynamicBuffer<GeneratedTerrainCell> destination)
         {
             destination.ResizeUninitialized(source.Length);
             for (int index = 0; index < source.Length; index++)
@@ -294,34 +295,34 @@ namespace Farmware.WorldGeneration.Tests
         private sealed class NeighborhoodStorage : IDisposable
         {
             // 左下チャンクの4096完成セルを保持し、このヘルパーが破棄します。
-            private NativeArray<GeneratedTile> southWest;
+            private NativeArray<GeneratedTerrainCell> southWest;
 
             // 下チャンクの4096完成セルを保持し、このヘルパーが破棄します。
-            private NativeArray<GeneratedTile> south;
+            private NativeArray<GeneratedTerrainCell> south;
 
             // 右下チャンクの4096完成セルを保持し、このヘルパーが破棄します。
-            private NativeArray<GeneratedTile> southEast;
+            private NativeArray<GeneratedTerrainCell> southEast;
 
             // 左チャンクの4096完成セルを保持し、このヘルパーが破棄します。
-            private NativeArray<GeneratedTile> west;
+            private NativeArray<GeneratedTerrainCell> west;
 
             // 中心チャンクの4096完成セルを保持し、このヘルパーが破棄します。
-            private NativeArray<GeneratedTile> center;
+            private NativeArray<GeneratedTerrainCell> center;
 
             // 右チャンクの4096完成セルを保持し、このヘルパーが破棄します。
-            private NativeArray<GeneratedTile> east;
+            private NativeArray<GeneratedTerrainCell> east;
 
             // 左上チャンクの4096完成セルを保持し、このヘルパーが破棄します。
-            private NativeArray<GeneratedTile> northWest;
+            private NativeArray<GeneratedTerrainCell> northWest;
 
             // 上チャンクの4096完成セルを保持し、このヘルパーが破棄します。
-            private NativeArray<GeneratedTile> north;
+            private NativeArray<GeneratedTerrainCell> north;
 
             // 右上チャンクの4096完成セルを保持し、このヘルパーが破棄します。
-            private NativeArray<GeneratedTile> northEast;
+            private NativeArray<GeneratedTerrainCell> northEast;
 
             /// <summary>中心チャンクの完成配列です。DynamicBufferへの比較用コピーだけに使います。</summary>
-            public NativeArray<GeneratedTile> Center => center;
+            public NativeArray<GeneratedTerrainCell> Center => center;
 
             /// <summary>9配列を同期処理中だけ参照する完成地形近傍です。</summary>
             public CompletedChunkTerrainNeighborhood Neighborhood { get; }
@@ -368,24 +369,26 @@ namespace Farmware.WorldGeneration.Tests
             /// <summary>完成後の水域・マグマを含む、チャンクごとに識別可能な4096セルを作ります。</summary>
             /// <param name="chunkValue">9チャンクと再利用試行を区別する固定値です。</param>
             /// <returns>呼び出し側が所有・破棄する完成地形配列です。</returns>
-            private static NativeArray<GeneratedTile> CreateChunk(int chunkValue)
+            private static NativeArray<GeneratedTerrainCell> CreateChunk(int chunkValue)
             {
-                var tiles = new NativeArray<GeneratedTile>(
+                var tiles = new NativeArray<GeneratedTerrainCell>(
                     WorldGridConstants.TilesPerChunk,
                     Allocator.TempJob);
                 for (int index = 0; index < tiles.Length; index++)
                 {
-                    // Biomeと連続値も変え、Groundだけ一致する誤ったコピーではテストを通過できないようにします。
-                    tiles[index] = new GeneratedTile
+                    // BiomeとRuntime IDも変え、区画の有無だけ一致する誤ったコピーではテストを通過できないようにします。
+                    tiles[index] = new GeneratedTerrainCell
                     {
                         Biome = (BiomeId)(chunkValue + 1),
-                        Ground = chunkValue % 3 == 0
-                            ? GroundType.Water
-                            : chunkValue % 3 == 1
-                                ? GroundType.Magma
-                                : GroundType.RockWall,
-                        Elevation = (ushort)(chunkValue * 100 + index % 97),
-                        Moisture = (ushort)(index % 65536)
+                        GroundBlockRuntimeId = chunkValue % 3 == 2
+                            ? new DefinitionRuntimeId(100 + chunkValue + (index % 7))
+                            : default,
+                        WallBlockRuntimeId = chunkValue % 3 == 2
+                            ? new DefinitionRuntimeId(200 + chunkValue + (index % 7))
+                            : default,
+                        LiquidRuntimeId = chunkValue % 3 != 2
+                            ? new DefinitionRuntimeId(300 + chunkValue + (index % 7))
+                            : default
                     };
                 }
 

@@ -38,25 +38,32 @@ namespace Farmware.WorldGeneration.Tests
                     new[] { 0x1029384756ABCDEFUL },
                     regionRadius: 0,
                     generatorVersion: WorldGenerationSettings.CurrentGeneratorVersion);
+            Assert.That(
+                HydrologyDiagnosticTerrainCatalogs.TryCreate(
+                    out HydrologyDiagnosticTerrainCatalogs terrainCatalogs),
+                Is.True);
 
-            AnimalPopulationDistributionAuditResult first =
-                AnimalPopulationDistributionAnalyzer.Analyze(settings);
-            AnimalPopulationDistributionAuditResult second =
-                AnimalPopulationDistributionAnalyzer.Analyze(settings);
+            using (terrainCatalogs)
+            {
+                AnimalPopulationDistributionAuditResult first =
+                    AnimalPopulationDistributionAnalyzer.Analyze(settings, terrainCatalogs);
+                AnimalPopulationDistributionAuditResult second =
+                    AnimalPopulationDistributionAnalyzer.Analyze(settings, terrainCatalogs);
 
-            Assert.That(first.SeedPairCount, Is.EqualTo(1));
-            Assert.That(first.RegionCount, Is.EqualTo(1));
-            Assert.That(first.EligibleTileCount, Is.GreaterThan(0));
-            // 18Biome化後は原点1チャンク内の温帯草原が密度換算で1羽未満になる場合があります。
-            // 小数を切り上げて分布を水増しせず、0を含む目標数と配置数の包含関係を監査します。
-            Assert.That(first.TargetPopulation, Is.GreaterThanOrEqualTo(0));
-            Assert.That(first.SpawnedPopulation, Is.InRange(0, first.TargetPopulation));
-            Assert.That(first.InvalidHerdCount, Is.Zero);
-            Assert.That(first.DuplicatePositionCount, Is.Zero);
-            Assert.That(second.Signature, Is.EqualTo(first.Signature));
-            Assert.That(second.EligibleTileCount, Is.EqualTo(first.EligibleTileCount));
-            Assert.That(second.TargetPopulation, Is.EqualTo(first.TargetPopulation));
-            Assert.That(second.SpawnedPopulation, Is.EqualTo(first.SpawnedPopulation));
+                Assert.That(first.SeedPairCount, Is.EqualTo(1));
+                Assert.That(first.RegionCount, Is.EqualTo(1));
+                Assert.That(first.EligibleTileCount, Is.GreaterThan(0));
+                // 18Biome化後は原点1チャンク内の温帯草原が密度換算で1羽未満になる場合があります。
+                // 小数を切り上げて分布を水増しせず、0を含む目標数と配置数の包含関係を監査します。
+                Assert.That(first.TargetPopulation, Is.GreaterThanOrEqualTo(0));
+                Assert.That(first.SpawnedPopulation, Is.InRange(0, first.TargetPopulation));
+                Assert.That(first.InvalidHerdCount, Is.Zero);
+                Assert.That(first.DuplicatePositionCount, Is.Zero);
+                Assert.That(second.Signature, Is.EqualTo(first.Signature));
+                Assert.That(second.EligibleTileCount, Is.EqualTo(first.EligibleTileCount));
+                Assert.That(second.TargetPopulation, Is.EqualTo(first.TargetPopulation));
+                Assert.That(second.SpawnedPopulation, Is.EqualTo(first.SpawnedPopulation));
+            }
         }
     }
 }

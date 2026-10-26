@@ -21,33 +21,42 @@ namespace Farmware.WorldGeneration.Tests
                 new[] { "derived-hydrology-distribution-test" },
                 0,
                 WorldGenerationSettings.CurrentGeneratorVersion);
+            Assert.That(
+                HydrologyDiagnosticTerrainCatalogs.TryCreate(
+                    out HydrologyDiagnosticTerrainCatalogs terrainCatalogs),
+                Is.True);
 
-            DerivedHydrologyDistributionAuditResult first =
-                DerivedHydrologyDistributionAnalyzer.Analyze(settings);
-            // 実メニューと同じThreadPool境界で再実行し、Main Thread限定APIや短命Allocatorへの依存も検出します。
-            DerivedHydrologyDistributionAuditResult second = Task.Run(
-                    () => DerivedHydrologyDistributionAnalyzer.Analyze(settings))
-                .GetAwaiter()
-                .GetResult();
+            using (terrainCatalogs)
+            {
+                DerivedHydrologyDistributionAuditResult first =
+                    DerivedHydrologyDistributionAnalyzer.Analyze(settings, terrainCatalogs);
+                // 実メニューと同じく、Main Threadで完成したBlobだけをThreadPoolへ渡す境界を検証します。
+                DerivedHydrologyDistributionAuditResult second = Task.Run(
+                        () => DerivedHydrologyDistributionAnalyzer.Analyze(
+                            settings,
+                            terrainCatalogs))
+                    .GetAwaiter()
+                    .GetResult();
 
-            Assert.That(first.SeedCount, Is.EqualTo(1));
-            Assert.That(first.ChunkRadius, Is.Zero);
-            Assert.That(first.TotalChunks, Is.EqualTo(1));
-            Assert.That(first.TotalHydrologyCells, Is.EqualTo(DeterministicHydrologyGenerator.CellsPerChunk));
-            Assert.That(first.TotalTiles, Is.EqualTo(WorldGridConstants.TilesPerChunk));
-            Assert.That(first.GroundwaterConnectedCellCount, Is.InRange(0, first.TotalHydrologyCells));
-            Assert.That(first.SaturatedTileCount, Is.InRange(0, first.TotalTiles));
-            Assert.That(first.SpringStreamTileCount, Is.InRange(0, first.TotalTiles));
-            Assert.That(first.FloodedTileCount, Is.InRange(0, first.TotalTiles));
-            Assert.That(first.WetlandEligibleTileCount, Is.InRange(0, first.TotalTiles));
-            Assert.That(first.LargeWetlandExtentTileCount, Is.InRange(0, first.TotalTiles));
-            Assert.That(SumLakeClassifications(first), Is.InRange(0, first.TotalHydrologyCells));
+                Assert.That(first.SeedCount, Is.EqualTo(1));
+                Assert.That(first.ChunkRadius, Is.Zero);
+                Assert.That(first.TotalChunks, Is.EqualTo(1));
+                Assert.That(first.TotalHydrologyCells, Is.EqualTo(DeterministicHydrologyGenerator.CellsPerChunk));
+                Assert.That(first.TotalTiles, Is.EqualTo(WorldGridConstants.TilesPerChunk));
+                Assert.That(first.GroundwaterConnectedCellCount, Is.InRange(0, first.TotalHydrologyCells));
+                Assert.That(first.SaturatedTileCount, Is.InRange(0, first.TotalTiles));
+                Assert.That(first.SpringStreamTileCount, Is.InRange(0, first.TotalTiles));
+                Assert.That(first.FloodedTileCount, Is.InRange(0, first.TotalTiles));
+                Assert.That(first.WetlandEligibleTileCount, Is.InRange(0, first.TotalTiles));
+                Assert.That(first.LargeWetlandExtentTileCount, Is.InRange(0, first.TotalTiles));
+                Assert.That(SumLakeClassifications(first), Is.InRange(0, first.TotalHydrologyCells));
 
-            Assert.That(second.Signature, Is.EqualTo(first.Signature));
-            Assert.That(second.Report, Is.EqualTo(first.Report));
-            Assert.That(first.Report, Does.Contain("派生水文分布監査"));
-            Assert.That(first.Report, Does.Contain("SpringStreamTiles="));
-            Assert.That(first.Report, Does.Contain("0件を失敗にする固定の合否閾値は設定していません"));
+                Assert.That(second.Signature, Is.EqualTo(first.Signature));
+                Assert.That(second.Report, Is.EqualTo(first.Report));
+                Assert.That(first.Report, Does.Contain("派生水文分布監査"));
+                Assert.That(first.Report, Does.Contain("SpringStreamTiles="));
+                Assert.That(first.Report, Does.Contain("0件を失敗にする固定の合否閾値は設定していません"));
+            }
         }
 
         /// <summary>相互排他的な最終湖4区分のセル件数を合計します。</summary>

@@ -1,5 +1,5 @@
 // このファイルは、C5-Cで完成したECSチャンクから新規ワールドの初期スポーン候補を段階的に探します。
-// 分類前の単一タイルを別経路で再生成せず、ChunkGenerationSystemが公開した18Biome・水文・資源を正として読み取ります。
+// 分類前の単一タイルを別経路で再生成せず、ChunkGenerationSystemが公開したBlockセル・18Biome・資源を正として読み取ります。
 
 using Farmware.Simulation;
 using Unity.Collections;
@@ -41,7 +41,7 @@ namespace Farmware.WorldGeneration
         {
             chunkQuery = new EntityQueryBuilder(Allocator.Temp)
                 .WithAll<ChunkCoordinateComponent, ChunkGenerationStatus>()
-                .WithAll<GeneratedTile, GeneratedResourceTile>()
+                .WithAll<GeneratedTerrainCell, GeneratedResourceTile>()
                 .Build(ref state);
 
             searchStatusEntity = state.EntityManager.CreateEntity();
@@ -54,6 +54,7 @@ namespace Farmware.WorldGeneration
             state.RequireForUpdate<WorldGenerationSettings>();
             state.RequireForUpdate<BiomeClassificationSettings>();
             state.RequireForUpdate<ResourceGenerationSettings>();
+            state.RequireForUpdate<TerrainBlockCatalog>();
             currentSearchRadiusInChunks = 0;
             searchState = 0;
         }
@@ -91,9 +92,11 @@ namespace Farmware.WorldGeneration
 
             BiomeClassificationSettings biomeSettings =
                 SystemAPI.GetSingleton<BiomeClassificationSettings>();
+            TerrainBlockCatalog terrainCatalog = SystemAPI.GetSingleton<TerrainBlockCatalog>();
             if (TryFindNearestCandidate(
                     state.EntityManager,
                     biomeSettings,
+                    terrainCatalog.Value,
                     currentSearchRadiusInChunks,
                     out int tileX,
                     out int tileY)
@@ -224,6 +227,7 @@ namespace Farmware.WorldGeneration
         /// </summary>
         /// <param name="manager">完成地形・資源Bufferを読むManagerです。</param>
         /// <param name="biomeSettings">初期スポーン許可フラグを持つ新18Biome Definitionです。</param>
+        /// <param name="terrainCatalog">Block Runtime IDの分類と通行属性を解決するカタログです。</param>
         /// <param name="radiusInChunks">走査済み範囲のチャンク半径です。</param>
         /// <param name="tileX">成功時に選んだ水平ワールドタイル座標です。</param>
         /// <param name="tileY">成功時に選んだ垂直ワールドタイル座標です。</param>
@@ -231,6 +235,7 @@ namespace Farmware.WorldGeneration
         private bool TryFindNearestCandidate(
             EntityManager manager,
             in BiomeClassificationSettings biomeSettings,
+            BlobAssetReference<TerrainBlockCatalogBlob> terrainCatalog,
             int radiusInChunks,
             out int tileX,
             out int tileY)
@@ -256,10 +261,11 @@ namespace Farmware.WorldGeneration
                         continue;
                     }
 
-                    DynamicBuffer<GeneratedTile> tiles = manager.GetBuffer<GeneratedTile>(entity);
+                    DynamicBuffer<GeneratedTerrainCell> terrainCells =
+                        manager.GetBuffer<GeneratedTerrainCell>(entity);
                     DynamicBuffer<GeneratedResourceTile> resources =
                         manager.GetBuffer<GeneratedResourceTile>(entity);
-                    if (tiles.Length != WorldGridConstants.TilesPerChunk
+                    if (terrainCells.Length != WorldGridConstants.TilesPerChunk
                         || resources.Length != WorldGridConstants.TilesPerChunk)
                     {
                         continue;
@@ -267,10 +273,10 @@ namespace Farmware.WorldGeneration
 
                     for (int index = 0; index < WorldGridConstants.TilesPerChunk; index++)
                     {
-                        GeneratedTile terrain = tiles[index];
                         if (!IsInitialSpawnCandidate(
                                 biomeSettings,
-                                terrain,
+                                terrainCatalog,
+                                terrainCells[index],
                                 resources[index]))
                         {
                             continue;
@@ -336,30 +342,43 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>
-        /// 1セルが現行仕様の初期スポーン候補かを、完成済み地形・資源とBiome Definitionだけから判定します。
+        /// 1セルが現行仕様の初期スポーン候補かを、完成済みBlockセル・資源とBiome Definitionから判定します。
         /// </summary>
         /// <param name="biomeSettings">安定IDに対応する許可フラグを検索する設定です。</param>
-        /// <param name="terrain">ChunkGenerationSystemがC5-Cまで完成させた地形です。</param>
+        /// <param name="terrainCatalog">Block Runtime IDの分類と移動属性を解決するカタログです。</param>
+        /// <param name="terrainCell">ChunkGenerationSystemが完成させた自然生成Blockセルです。</param>
         /// <param name="resource">同じ座標の暫定自然資源です。</param>
         /// <returns>乾いた陸上を歩け、資源に埋まらず、Biomeが開始を許可する場合はtrueです。</returns>
         private static bool IsInitialSpawnCandidate(
             in BiomeClassificationSettings biomeSettings,
-            in GeneratedTile terrain,
+            BlobAssetReference<TerrainBlockCatalogBlob> terrainCatalog,
+            in GeneratedTerrainCell terrainCell,
             in GeneratedResourceTile resource)
         {
-            if (terrain.Ground != GroundType.Land
-                || terrain.WaterSalinity != WaterSalinity.None
-                || terrain.MovementCost == 0
-                || resource.Type != GeneratedResourceType.None
+            if (resource.Type != GeneratedResourceType.None
                 || !BiomeDefinitionCatalog.TryGetDefinition(
                     biomeSettings,
-                    (byte)terrain.Biome,
+                    (byte)terrainCell.Biome,
                     out BiomeDefinition definition))
             {
                 return false;
             }
 
-            return (definition.Flags & BiomeDefinitionFlags.AllowsInitialSpawn) != 0;
+            TerrainCellDelta noDelta = default;
+            TerrainTraversalCapabilities walkingCapabilities = default;
+            return (definition.Flags & BiomeDefinitionFlags.AllowsInitialSpawn) != 0
+                && EffectiveTerrainResolver.TryResolve(
+                    terrainCell,
+                    false,
+                    noDelta,
+                    terrainCatalog,
+                    out EffectiveTerrainCell effectiveCell)
+                    == EffectiveTerrainResolveResult.Success
+                && TerrainTraversalRules.Evaluate(
+                    effectiveCell,
+                    terrainCatalog,
+                    walkingCapabilities)
+                    == TerrainTraversalResult.Allowed;
         }
 
         /// <summary>

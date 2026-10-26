@@ -123,23 +123,26 @@ namespace Farmware.WorldGeneration.Animals
         /// 全動物種を実行時ID順に処理し、地域の有効地形面積へ比例した初期個体群を候補一覧へ追加します。
         /// </summary>
         /// <param name="catalog">検証済みの動物種カタログです。</param>
-        /// <param name="tiles">対象地域の行優先4096タイルです。</param>
+        /// <param name="terrainCells">対象地域の行優先4096自然生成Blockセルです。</param>
         /// <param name="resources">同じ添字に対応する行優先4096件の資源予約です。非空セルへは動物を生成しません。</param>
+        /// <param name="terrainRuntimeIds">淡水、海水、マグマを動物用地形Maskへ対応付ける組み込みIDです。</param>
         /// <param name="regionState">抽選前の地域状態です。成功時だけ次回状態へ進みます。</param>
         /// <param name="candidates">複数地域をまとめられる候補一覧です。既存要素は保持します。</param>
         /// <returns>入力が有効で、候補をすべて追加できた場合はtrueです。</returns>
         public static bool TryAppendInitialPopulation(
             BlobAssetReference<AnimalSpeciesCatalogBlob> catalog,
-            NativeArray<GeneratedTile> tiles,
+            NativeArray<GeneratedTerrainCell> terrainCells,
             NativeArray<GeneratedResourceTile> resources,
+            in BuiltInTerrainBlockRuntimeIds terrainRuntimeIds,
             ref AnimalPopulationRegionState regionState,
             NativeList<AnimalSpawnCandidate> candidates)
         {
             if (!catalog.IsCreated
-                || !tiles.IsCreated
-                || tiles.Length != WorldGridConstants.TilesPerChunk
+                || !terrainCells.IsCreated
+                || terrainCells.Length != WorldGridConstants.TilesPerChunk
                 || !resources.IsCreated
-                || resources.Length != tiles.Length
+                || resources.Length != terrainCells.Length
+                || !terrainRuntimeIds.IsValid
                 || regionState.NextSpawnSequence == 0
                 || !WorldLayerUtility.IsPlayable(regionState.Layer)
                 || !candidates.IsCreated)
@@ -160,15 +163,22 @@ namespace Farmware.WorldGeneration.Animals
                     new NativeList<int>(64, Allocator.Temp);
                 int eligibleTerrainTileCount = 0;
 
-                for (int tileIndex = 0; tileIndex < tiles.Length; tileIndex++)
+                for (int tileIndex = 0; tileIndex < terrainCells.Length; tileIndex++)
                 {
                     // 地形条件と優先する資源予約から候補集合を作り、動物の抽選で地形や資源を書き換えません。
-                    if (IsTileEligible(tiles[tileIndex], species))
+                    if (IsTileEligible(
+                            terrainCells[tileIndex],
+                            terrainRuntimeIds,
+                            species))
                     {
                         // 密度は従来どおり有効地形面積を基準にし、資源予約は実際の配置先だけを制限します。
                         // 木や石が増えたことを理由に種定義の地域目標密度そのものを変えないためです。
                         eligibleTerrainTileCount++;
-                        if (IsSpawnTileEligible(tiles[tileIndex], resources[tileIndex], species))
+                        if (IsSpawnTileEligible(
+                                terrainCells[tileIndex],
+                                resources[tileIndex],
+                                terrainRuntimeIds,
+                                species))
                         {
                             eligibleLocalTileIndices.Add(tileIndex);
                         }
@@ -684,17 +694,21 @@ namespace Farmware.WorldGeneration.Animals
         }
 
         /// <summary>
-        /// GeneratedTileのバイオームと基礎地形を、動物種の別Maskへ明示的に対応付けて適格性を返します。
+        /// Blockセルのバイオームと区画を、動物種の別Maskへ明示的に対応付けて適格性を返します。
         /// </summary>
-        /// <param name="tile">判定する生成済み地形タイルです。</param>
+        /// <param name="terrainCell">判定する生成済みBlockセルです。</param>
+        /// <param name="terrainRuntimeIds">液体の種類を識別する組み込みIDです。</param>
         /// <param name="species">許可Maskを持つ動物種定義です。</param>
         /// <returns>バイオームと基礎地形の両方が許可される場合はtrueです。</returns>
         public static bool IsTileEligible(
-            GeneratedTile tile,
+            GeneratedTerrainCell terrainCell,
+            in BuiltInTerrainBlockRuntimeIds terrainRuntimeIds,
             AnimalSpeciesDefinitionBlob species)
         {
-            AnimalBiomeMask biomeMask = ToAnimalBiomeMask(tile.Biome);
-            AnimalGroundMask groundMask = ToAnimalGroundMask(tile.Ground);
+            AnimalBiomeMask biomeMask = ToAnimalBiomeMask(terrainCell.Biome);
+            AnimalGroundMask groundMask = ToAnimalGroundMask(
+                terrainCell,
+                terrainRuntimeIds);
             return AnimalSpeciesCatalogLookup.IsBiomeAllowed(
                     species.AllowedBiomes,
                     biomeMask)
@@ -707,16 +721,19 @@ namespace Farmware.WorldGeneration.Animals
         /// 地形条件と、動物より優先される資源予約を合わせて生成候補を判定します。
         /// 初期生成、後続リスポーン向けの候補抽出、分布監査、開発者表示で同じ条件を共有します。
         /// </summary>
-        /// <param name="tile">動物種の対応条件を照合する生成済み地形です。</param>
+        /// <param name="terrainCell">動物種の対応条件を照合する生成済みBlockセルです。</param>
         /// <param name="resource">同じタイルに予約された資源です。None以外は生成候補にしません。</param>
+        /// <param name="terrainRuntimeIds">液体の種類を識別する組み込みIDです。</param>
         /// <param name="species">生成対象の動物種定義です。</param>
         /// <returns>資源がなく、種の地形条件も満たす場合はtrueです。</returns>
         public static bool IsSpawnTileEligible(
-            GeneratedTile tile,
+            GeneratedTerrainCell terrainCell,
             GeneratedResourceTile resource,
+            in BuiltInTerrainBlockRuntimeIds terrainRuntimeIds,
             AnimalSpeciesDefinitionBlob species)
         {
-            return resource.Type == GeneratedResourceType.None && IsTileEligible(tile, species);
+            return resource.Type == GeneratedResourceType.None
+                && IsTileEligible(terrainCell, terrainRuntimeIds, species);
         }
 
         /// <summary>
@@ -968,17 +985,33 @@ namespace Farmware.WorldGeneration.Animals
             }
         }
 
-        /// <summary>GroundTypeの予約値に依存せず、動物定義の同名bitへ明示的に変換します。</summary>
-        private static AnimalGroundMask ToAnimalGroundMask(GroundType ground)
+        /// <summary>Blockセルの区画優先順を、動物定義の地形bitへ明示的に変換します。</summary>
+        /// <param name="terrainCell">壁、液体、地面のRuntime IDを保持する自然生成セルです。</param>
+        /// <param name="terrainRuntimeIds">淡水、海水、マグマを識別する組み込みIDです。</param>
+        /// <returns>岩壁、マグマ、水、陸のいずれか1bitです。不明な構成はNoneです。</returns>
+        private static AnimalGroundMask ToAnimalGroundMask(
+            in GeneratedTerrainCell terrainCell,
+            in BuiltInTerrainBlockRuntimeIds terrainRuntimeIds)
         {
-            switch (ground)
+            if (terrainCell.WallBlockRuntimeId.IsValid)
             {
-                case GroundType.Land: return AnimalGroundMask.Land;
-                case GroundType.Water: return AnimalGroundMask.Water;
-                case GroundType.RockWall: return AnimalGroundMask.RockWall;
-                case GroundType.Magma: return AnimalGroundMask.Magma;
-                default: return AnimalGroundMask.None;
+                return AnimalGroundMask.RockWall;
             }
+
+            if (terrainCell.LiquidRuntimeId.Value == terrainRuntimeIds.Magma.Value)
+            {
+                return AnimalGroundMask.Magma;
+            }
+
+            if (terrainCell.LiquidRuntimeId.Value == terrainRuntimeIds.FreshWater.Value
+                || terrainCell.LiquidRuntimeId.Value == terrainRuntimeIds.SaltWater.Value)
+            {
+                return AnimalGroundMask.Water;
+            }
+
+            return terrainCell.GroundBlockRuntimeId.IsValid
+                ? AnimalGroundMask.Land
+                : AnimalGroundMask.None;
         }
 
         /// <summary>SplitMix64の混合処理で、入力bitの偏りを地域別状態へ持ち込みにくくします。</summary>

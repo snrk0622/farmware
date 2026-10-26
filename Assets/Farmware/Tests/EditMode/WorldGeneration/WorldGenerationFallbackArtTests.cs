@@ -60,7 +60,7 @@ namespace Farmware.WorldGeneration.Tests
             "RockWallFrontFace.png"
         };
 
-        // プレイヤー表示からSoilTypeを除いたため削除する、旧肥沃土・砂質土派生アセットの拡張子なし名称です。
+        // プレイヤー表示から旧土壌分類を除いたため削除する、肥沃土・砂質土派生アセットの拡張子なし名称です。
         private static readonly string[] ObsoleteSoilVariantNames =
         {
             "GrasslandFertile", "GrasslandSandy",

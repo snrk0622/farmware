@@ -129,32 +129,13 @@ namespace Farmware.WorldGeneration
             }
 
             ushort elevation = environment.Elevation;
-            GroundType ground = elevation < settings.SeaLevelThreshold
-                ? GroundType.Water
-                : DeterministicRockWallGenerator.IsRockWallCandidate(
-                    settings,
-                    worldTileX,
-                    worldTileY)
-                    ? GroundType.RockWall
-                    : GroundType.Land;
-            WaterBodyType waterBodyType = ground == GroundType.Water
-                ? WaterBodyType.Sea
-                : WaterBodyType.None;
 
             tile = new GeneratedTile
             {
                 // BiomeはC3/C4の固定水文が完成するまで確定できないため、中間BufferではNoneを明示します。
                 Biome = BiomeId.None,
-                Ground = ground,
-                Soil = SoilType.None,
-                WaterSalinity = waterBodyType == WaterBodyType.Sea
-                    ? WaterSalinity.SaltWater
-                    : WaterSalinity.None,
-                WaterBodyType = waterBodyType,
                 ElevationClass = DeterministicEnvironmentGenerator.ClassifyElevation(elevation, settings),
-                GameplayFlags = ClassifyGameplayFlags(ground),
                 ResourceSuitability = ResourceSuitability.None,
-                MovementCost = ground == GroundType.Land ? (byte)1 : (byte)0,
                 Elevation = elevation,
                 Temperature = environment.BaseTemperature,
                 Moisture = environment.BaseMoisture,
@@ -201,34 +182,6 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>
-        /// 地面種別から通常設備、通常ベルト、橋の配置可否と、橋の耐熱要件を決めます。
-        /// 後続の建築処理がGroundTypeを独自解釈せず、生成済み属性だけを参照できるようにします。
-        /// </summary>
-        /// <param name="ground">分類済みの地面種別です。</param>
-        /// <returns>各配置可否と橋の耐熱要件を表すビットフラグです。</returns>
-        public static TileGameplayFlags ClassifyGameplayFlags(GroundType ground)
-        {
-            switch (ground)
-            {
-                case GroundType.Land:
-                    return TileGameplayFlags.AllowsNormalEquipment
-                        | TileGameplayFlags.AllowsNormalBelt;
-                case GroundType.Water:
-                    // 水上では橋の素材を耐熱性で制限しないため、橋可だけを設定します。
-                    return TileGameplayFlags.AllowsBridge;
-                case GroundType.Magma:
-                    // マグマ上の橋は耐熱性を持つ定義だけに限定できるよう、要件を独立したbitで記録します。
-                    return TileGameplayFlags.AllowsBridge
-                        | TileGameplayFlags.RequiresHeatResistance;
-                case GroundType.RockWall:
-                    return TileGameplayFlags.None;
-                default:
-                    // 予約済みIDや破損データを配置可能地として扱わず、すべて不許可の安全側へ倒します。
-                    return TileGameplayFlags.None;
-            }
-        }
-
-        /// <summary>
         /// 1タイルの全基礎値を、それまでのチャンクハッシュへ順序付きで混合します。
         /// </summary>
         /// <param name="currentHash">直前までのタイルを反映したハッシュです。</param>
@@ -239,13 +192,8 @@ namespace Farmware.WorldGeneration
             unchecked
             {
                 ulong packedClassifications = (byte)tile.Biome;
-                packedClassifications |= (ulong)(byte)tile.Ground << 8;
-                packedClassifications |= (ulong)(byte)tile.ElevationClass << 16;
-                packedClassifications |= (ulong)(byte)tile.GameplayFlags << 24;
-                packedClassifications |= (ulong)(byte)tile.ResourceSuitability << 32;
-                packedClassifications |= (ulong)tile.MovementCost << 40;
-                packedClassifications |= (ulong)(byte)tile.WaterSalinity << 48;
-                packedClassifications |= (ulong)(byte)tile.WaterBodyType << 56;
+                packedClassifications |= (ulong)(byte)tile.ElevationClass << 8;
+                packedClassifications |= (ulong)(byte)tile.ResourceSuitability << 16;
 
                 ulong packedClimate = tile.Elevation;
                 packedClimate |= (ulong)tile.Temperature << 16;
@@ -258,9 +206,7 @@ namespace Farmware.WorldGeneration
                 packedEnvironment |= (ulong)tile.CoastalInfluence << 48;
 
                 ulong classificationsHash = WorldSeedUtility.Mix64(currentHash ^ packedClassifications);
-                // 既存8分類で64bitを使い切っているため、土壌は独立した混合段階へ加えて配置差分も検出します。
-                ulong soilHash = WorldSeedUtility.Mix64(classificationsHash ^ (byte)tile.Soil);
-                ulong climateHash = WorldSeedUtility.Mix64(soilHash ^ packedClimate);
+                ulong climateHash = WorldSeedUtility.Mix64(classificationsHash ^ packedClimate);
                 ulong environmentHash = WorldSeedUtility.Mix64(climateHash ^ packedEnvironment);
                 ulong volcanicHash = WorldSeedUtility.Mix64(
                     environmentHash ^ tile.VolcanicActivityPotential);

@@ -3,6 +3,7 @@
 // 影マスクの同期Burst処理も、チャンク境界で水文・Biome確定後の完成地形と一致することを保証します。
 
 using System;
+using Farmware.Simulation;
 using Farmware.WorldGeneration.Presentation;
 using NUnit.Framework;
 using Unity.Collections;
@@ -14,6 +15,16 @@ namespace Farmware.WorldGeneration.Tests
     /// </summary>
     public sealed class TerrainLayerPresentationUtilityTests
     {
+        /// <summary>表示分類テストで共有する解決済み組み込みRuntime IDです。</summary>
+        private static readonly BuiltInTerrainBlockRuntimeIds RuntimeIds = new BuiltInTerrainBlockRuntimeIds
+        {
+            LandGround = new DefinitionRuntimeId(1),
+            NaturalRockWall = new DefinitionRuntimeId(2),
+            FreshWater = new DefinitionRuntimeId(3),
+            SaltWater = new DefinitionRuntimeId(4),
+            Magma = new DefinitionRuntimeId(5)
+        };
+
         /// <summary>
         /// 3×3へ水面・マグマを含む完成データを用意し、全6400セルが借用Bufferの岩壁状態と一致することを保証します。
         /// 同じ出力配列を再利用しても古いtrueを残さず、入力地形を書き換えないことも確認します。
@@ -21,21 +32,27 @@ namespace Farmware.WorldGeneration.Tests
         [Test]
         public void FillShadowMask_MatchesCompletedTerrainAcrossChunkBoundaries()
         {
-            using var southWest = CreateFilledChunk(GroundType.RockWall);
-            using var south = CreateFilledChunk(GroundType.RockWall);
-            using var southEast = CreateFilledChunk(GroundType.RockWall);
-            using var west = CreateFilledChunk(GroundType.RockWall);
-            using var centerStorage = CreateFilledChunk(GroundType.RockWall);
-            using var eastStorage = CreateFilledChunk(GroundType.RockWall);
-            using var northWest = CreateFilledChunk(GroundType.RockWall);
-            using var northStorage = CreateFilledChunk(GroundType.RockWall);
-            using var northEast = CreateFilledChunk(GroundType.RockWall);
+            using var southWest = CreateFilledChunk(hasWall: true);
+            using var south = CreateFilledChunk(hasWall: true);
+            using var southEast = CreateFilledChunk(hasWall: true);
+            using var west = CreateFilledChunk(hasWall: true);
+            using var centerStorage = CreateFilledChunk(hasWall: true);
+            using var eastStorage = CreateFilledChunk(hasWall: true);
+            using var northWest = CreateFilledChunk(hasWall: true);
+            using var northStorage = CreateFilledChunk(hasWall: true);
+            using var northEast = CreateFilledChunk(hasWall: true);
             // using変数の要素変更用に借用コピーを分け、完成水面とマグマが基礎岩壁候補を抑制した状態を再現します。
-            NativeArray<GeneratedTile> center = centerStorage;
-            NativeArray<GeneratedTile> east = eastStorage;
-            NativeArray<GeneratedTile> north = northStorage;
-            east[WorldGrid.ToTileIndex(0, 32)] = new GeneratedTile { Ground = GroundType.Water };
-            north[WorldGrid.ToTileIndex(16, 0)] = new GeneratedTile { Ground = GroundType.Magma };
+            NativeArray<GeneratedTerrainCell> center = centerStorage;
+            NativeArray<GeneratedTerrainCell> east = eastStorage;
+            NativeArray<GeneratedTerrainCell> north = northStorage;
+            east[WorldGrid.ToTileIndex(0, 32)] = new GeneratedTerrainCell
+            {
+                LiquidRuntimeId = RuntimeIds.FreshWater
+            };
+            north[WorldGrid.ToTileIndex(16, 0)] = new GeneratedTerrainCell
+            {
+                LiquidRuntimeId = RuntimeIds.Magma
+            };
             var neighborhood = new CompletedChunkTerrainNeighborhood(
                 southWest, south, southEast,
                 west, center, east,
@@ -56,8 +73,8 @@ namespace Farmware.WorldGeneration.Tests
                         bool expected = neighborhood.TryGetTile(
                                 localX,
                                 localY,
-                                out GeneratedTile tile)
-                            && tile.Ground == GroundType.RockWall;
+                                out GeneratedTerrainCell tile)
+                            && tile.WallBlockRuntimeId.IsValid;
 
                         Assert.That(mask[y * size + x], Is.EqualTo(expected),
                             $"Local=({localX},{localY}), Pass={pass}");
@@ -67,12 +84,15 @@ namespace Farmware.WorldGeneration.Tests
                 if (pass == 0)
                 {
                     Assert.That(
-                        east[WorldGrid.ToTileIndex(0, 32)].Ground,
-                        Is.EqualTo(GroundType.Water),
+                        east[WorldGrid.ToTileIndex(0, 32)].LiquidRuntimeId,
+                        Is.EqualTo(RuntimeIds.FreshWater),
                         "外周の完成水面を入力側で書き換えてはいけません。");
                     for (int index = 0; index < center.Length; index++)
                     {
-                        center[index] = new GeneratedTile { Ground = GroundType.Water };
+                        center[index] = new GeneratedTerrainCell
+                        {
+                            LiquidRuntimeId = RuntimeIds.FreshWater
+                        };
                     }
                 }
             }
@@ -135,30 +155,34 @@ namespace Farmware.WorldGeneration.Tests
         [Test]
         public void ClassifyLiquidAnimation_DistinguishesLiquidTypes()
         {
-            GeneratedTile freshWater = new GeneratedTile
+            GeneratedTerrainCell freshWater = new GeneratedTerrainCell
             {
-                Ground = GroundType.Water,
-                WaterSalinity = WaterSalinity.FreshWater
+                LiquidRuntimeId = RuntimeIds.FreshWater
             };
-            GeneratedTile saltWater = new GeneratedTile
+            GeneratedTerrainCell saltWater = new GeneratedTerrainCell
             {
-                Ground = GroundType.Water,
-                WaterSalinity = WaterSalinity.SaltWater
+                LiquidRuntimeId = RuntimeIds.SaltWater
             };
-            GeneratedTile magma = new GeneratedTile { Ground = GroundType.Magma };
-            GeneratedTile land = new GeneratedTile { Ground = GroundType.Land };
+            GeneratedTerrainCell magma = new GeneratedTerrainCell
+            {
+                LiquidRuntimeId = RuntimeIds.Magma
+            };
+            GeneratedTerrainCell land = new GeneratedTerrainCell
+            {
+                GroundBlockRuntimeId = RuntimeIds.LandGround
+            };
 
             Assert.That(
-                TerrainLayerPresentationUtility.ClassifyLiquidAnimation(freshWater),
+                TerrainLayerPresentationUtility.ClassifyLiquidAnimation(freshWater, RuntimeIds),
                 Is.EqualTo(LiquidAnimationKind.FreshWater));
             Assert.That(
-                TerrainLayerPresentationUtility.ClassifyLiquidAnimation(saltWater),
+                TerrainLayerPresentationUtility.ClassifyLiquidAnimation(saltWater, RuntimeIds),
                 Is.EqualTo(LiquidAnimationKind.SaltWater));
             Assert.That(
-                TerrainLayerPresentationUtility.ClassifyLiquidAnimation(magma),
+                TerrainLayerPresentationUtility.ClassifyLiquidAnimation(magma, RuntimeIds),
                 Is.EqualTo(LiquidAnimationKind.Magma));
             Assert.That(
-                TerrainLayerPresentationUtility.ClassifyLiquidAnimation(land),
+                TerrainLayerPresentationUtility.ClassifyLiquidAnimation(land, RuntimeIds),
                 Is.EqualTo(LiquidAnimationKind.None));
         }
 
@@ -173,8 +197,15 @@ namespace Farmware.WorldGeneration.Tests
                 Type = GeneratedResourceType.Tree
             };
             GeneratedResourceTile noResource = default;
-            GeneratedTile land = new GeneratedTile { Ground = GroundType.Land };
-            GeneratedTile rockWall = new GeneratedTile { Ground = GroundType.RockWall };
+            GeneratedTerrainCell land = new GeneratedTerrainCell
+            {
+                GroundBlockRuntimeId = RuntimeIds.LandGround
+            };
+            GeneratedTerrainCell rockWall = new GeneratedTerrainCell
+            {
+                GroundBlockRuntimeId = RuntimeIds.LandGround,
+                WallBlockRuntimeId = RuntimeIds.NaturalRockWall
+            };
 
             Assert.That(
                 TerrainLayerPresentationUtility.ShouldRenderResourceBehindRockWall(
@@ -206,17 +237,23 @@ namespace Farmware.WorldGeneration.Tests
                 "岩壁上資源は高さ12pxの専用レイヤーを使うため、通常資源の背面レイヤーへ分類してはいけません。");
         }
 
-        /// <summary>全セルを同じ完成地面で埋めた、呼び出し側所有の4096要素配列を作ります。</summary>
-        /// <param name="ground">各セルへ設定する水文・Biome確定後の地面です。</param>
+        /// <summary>全セルを同じ完成Blockセルで埋めた、呼び出し側所有の4096要素配列を作ります。</summary>
+        /// <param name="hasWall">各セルへ自然岩壁を設定する場合はtrueです。</param>
         /// <returns>テスト終了時に呼び出し側が破棄するNativeArrayです。</returns>
-        private static NativeArray<GeneratedTile> CreateFilledChunk(GroundType ground)
+        private static NativeArray<GeneratedTerrainCell> CreateFilledChunk(bool hasWall)
         {
-            var tiles = new NativeArray<GeneratedTile>(
+            var tiles = new NativeArray<GeneratedTerrainCell>(
                 WorldGridConstants.TilesPerChunk,
                 Allocator.TempJob);
             for (int index = 0; index < tiles.Length; index++)
             {
-                tiles[index] = new GeneratedTile { Ground = ground };
+                tiles[index] = new GeneratedTerrainCell
+                {
+                    GroundBlockRuntimeId = RuntimeIds.LandGround,
+                    WallBlockRuntimeId = hasWall
+                        ? RuntimeIds.NaturalRockWall
+                        : default
+                };
             }
 
             return tiles;

@@ -94,27 +94,27 @@ namespace Farmware.Simulation
     }
 
     /// <summary>
-    /// 現在の互換生成器が出力する地形分類を、新しいブロック定義へ変換するための解決済みID一式です。
-    /// TERRAIN-01Cで生成器がBlockを直接出力するまでの境界として使用します。
+    /// 自然生成器、移動、配置、表示が共通利用する組み込みBlockの解決済みID一式です。
+    /// 生成セルは分類enumへ戻さず、このIDを直接保持して定義カタログの属性を参照します。
     /// </summary>
     public struct BuiltInTerrainBlockRuntimeIds
     {
-        /// <summary>既存Landを表す地面定義です。</summary>
+        /// <summary>自然生成で共通利用する標準地面定義です。</summary>
         public DefinitionRuntimeId LandGround;
 
-        /// <summary>既存RockWallを表す壁定義です。</summary>
+        /// <summary>自然生成で共通利用する岩壁定義です。</summary>
         public DefinitionRuntimeId NaturalRockWall;
 
-        /// <summary>既存FreshWaterを表す液体定義です。</summary>
+        /// <summary>自然生成で共通利用する淡水定義です。</summary>
         public DefinitionRuntimeId FreshWater;
 
-        /// <summary>既存SaltWaterを表す液体定義です。</summary>
+        /// <summary>自然生成で共通利用する海水定義です。</summary>
         public DefinitionRuntimeId SaltWater;
 
-        /// <summary>既存Magmaを表す液体定義です。</summary>
+        /// <summary>自然生成で共通利用するマグマ定義です。</summary>
         public DefinitionRuntimeId Magma;
 
-        /// <summary>互換変換に必要な5定義がすべて解決済みかを返します。</summary>
+        /// <summary>自然生成と利用側が共有する5定義をすべて解決済みか返します。</summary>
         public bool IsValid => LandGround.IsValid
             && NaturalRockWall.IsValid
             && FreshWater.IsValid
@@ -123,7 +123,7 @@ namespace Farmware.Simulation
     }
 
     /// <summary>
-    /// Bakerが構築した地形定義と互換変換用IDをECS Worldへ公開するSingleton Componentです。
+    /// Bakerが構築した地形定義と自然生成用の組み込みIDをECS Worldへ公開するSingleton Componentです。
     /// 全セルが共有する静的状態であり、地形編集によって書き換えません。
     /// </summary>
     public struct TerrainBlockCatalog : IComponentData
@@ -131,7 +131,7 @@ namespace Farmware.Simulation
         /// <summary>検証済み地形定義の読み取り専用Blob Assetです。</summary>
         public BlobAssetReference<TerrainBlockCatalogBlob> Value;
 
-        /// <summary>既存GeneratedTileを新しいブロック参照へ移すための解決済みIDです。</summary>
+        /// <summary>自然生成、移動、配置、表示が共有する解決済み組み込みIDです。</summary>
         public BuiltInTerrainBlockRuntimeIds BuiltInRuntimeIds;
     }
 

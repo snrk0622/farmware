@@ -123,8 +123,11 @@ namespace Farmware.WorldGeneration.Editor
         /// 指定した全Seedで連続完成チャンクを生成し、候補、最終面積、全隣接、境界理由、領域形状を返します。
         /// </summary>
         /// <param name="auditSettings">Seed、チャンク半径、GeneratorVersionを固定した監査条件です。</param>
+        /// <param name="terrainCatalogs">Main Threadで完成し、監査中は破棄されない地形カタログです。</param>
         /// <returns>全Seedが候補なしや不一致なく完走した場合の不変な監査結果です。</returns>
-        public static BiomeDistributionAuditResult Analyze(BiomeDistributionAuditSettings auditSettings)
+        public static BiomeDistributionAuditResult Analyze(
+            BiomeDistributionAuditSettings auditSettings,
+            HydrologyDiagnosticTerrainCatalogs terrainCatalogs)
         {
             if (auditSettings == null)
             {
@@ -152,6 +155,7 @@ namespace Farmware.WorldGeneration.Editor
                 GenerateSeedSamples(
                     worldSettings,
                     biomeSettings,
+                    terrainCatalogs,
                     auditSettings.ChunkRadius,
                     tilesPerAxis,
                     samples,
@@ -191,9 +195,17 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>
         /// 1 Seedの連続チャンクを製品順で完成させ、管理配列へ行優先で格納します。
         /// </summary>
+        /// <param name="worldSettings">対象Seedと固定生成設定です。</param>
+        /// <param name="biomeSettings">最終Biome選択に使う検証済み18Biome設定です。</param>
+        /// <param name="terrainCatalogs">Main Threadで完成済みの共有地形カタログです。</param>
+        /// <param name="chunkRadius">原点から各軸の正負へ生成するチャンク半径です。</param>
+        /// <param name="tilesPerAxis">監査窓1辺の管理配列タイル数です。</param>
+        /// <param name="samples">各完成チャンクを行優先で転記する監査用配列です。</param>
+        /// <param name="accumulator">候補数、面積、境界、署名を更新する集計器です。</param>
         private static void GenerateSeedSamples(
             in WorldGenerationSettings worldSettings,
             in BiomeClassificationSettings biomeSettings,
+            HydrologyDiagnosticTerrainCatalogs terrainCatalogs,
             int chunkRadius,
             int tilesPerAxis,
             BiomeAuditSample[] samples,
@@ -208,6 +220,7 @@ namespace Farmware.WorldGeneration.Editor
                             worldSettings,
                             biomeSettings,
                             coordinate,
+                            terrainCatalogs,
                             out HydrologyDiagnosticChunk chunk,
                             out HydrologyDiagnosticGenerationStage stage))
                     {

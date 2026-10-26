@@ -128,28 +128,28 @@ namespace Farmware.WorldGeneration.Presentation
     public readonly struct TerrainNeighborTiles
     {
         /// <summary>北側の生成済み地形です。</summary>
-        public GeneratedTile North { get; }
+        public GeneratedTerrainCell North { get; }
 
         /// <summary>東側の生成済み地形です。</summary>
-        public GeneratedTile East { get; }
+        public GeneratedTerrainCell East { get; }
 
         /// <summary>南側の生成済み地形です。</summary>
-        public GeneratedTile South { get; }
+        public GeneratedTerrainCell South { get; }
 
         /// <summary>西側の生成済み地形です。</summary>
-        public GeneratedTile West { get; }
+        public GeneratedTerrainCell West { get; }
 
         /// <summary>北東側の生成済み地形です。</summary>
-        public GeneratedTile NorthEast { get; }
+        public GeneratedTerrainCell NorthEast { get; }
 
         /// <summary>南東側の生成済み地形です。</summary>
-        public GeneratedTile SouthEast { get; }
+        public GeneratedTerrainCell SouthEast { get; }
 
         /// <summary>南西側の生成済み地形です。</summary>
-        public GeneratedTile SouthWest { get; }
+        public GeneratedTerrainCell SouthWest { get; }
 
         /// <summary>北西側の生成済み地形です。</summary>
-        public GeneratedTile NorthWest { get; }
+        public GeneratedTerrainCell NorthWest { get; }
 
         /// <summary>
         /// 中央セルを囲む8方向の地形を、北から時計回りの明示的な順番で保存します。
@@ -163,14 +163,14 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="southWest">南西側の地形です。</param>
         /// <param name="northWest">北西側の地形です。</param>
         public TerrainNeighborTiles(
-            GeneratedTile north,
-            GeneratedTile east,
-            GeneratedTile south,
-            GeneratedTile west,
-            GeneratedTile northEast,
-            GeneratedTile southEast,
-            GeneratedTile southWest,
-            GeneratedTile northWest)
+            GeneratedTerrainCell north,
+            GeneratedTerrainCell east,
+            GeneratedTerrainCell south,
+            GeneratedTerrainCell west,
+            GeneratedTerrainCell northEast,
+            GeneratedTerrainCell southEast,
+            GeneratedTerrainCell southWest,
+            GeneratedTerrainCell northWest)
         {
             North = north;
             East = east;
@@ -357,10 +357,12 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="neighbors">中央を囲む8方向の地形です。</param>
         /// <returns>中央が通常土地でなければNone、それ以外は土地境界の選択結果です。</returns>
         public static BoundaryHighlightSelection SelectLand(
-            GeneratedTile current,
+            GeneratedTerrainCell current,
             in TerrainNeighborTiles neighbors)
         {
-            if (current.Ground != GroundType.Land)
+            if (!current.GroundBlockRuntimeId.IsValid
+                || current.WallBlockRuntimeId.IsValid
+                || current.LiquidRuntimeId.IsValid)
             {
                 return default;
             }
@@ -378,10 +380,10 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="neighbors">中央を囲む8方向の地形です。</param>
         /// <returns>中央が岩壁でなければNone、それ以外は岩壁上面境界の選択結果です。</returns>
         public static BoundaryHighlightSelection SelectRockWall(
-            GeneratedTile current,
+            GeneratedTerrainCell current,
             in TerrainNeighborTiles neighbors)
         {
-            if (current.Ground != GroundType.RockWall)
+            if (!current.WallBlockRuntimeId.IsValid)
             {
                 return default;
             }
@@ -496,7 +498,7 @@ namespace Farmware.WorldGeneration.Presentation
         private static void AddConnectionIfMatched(
             ref BoundaryNeighborConnection connections,
             BoundaryNeighborConnection direction,
-            GeneratedTile tile,
+            GeneratedTerrainCell tile,
             ConnectionRegion region)
         {
             if (IsConnected(tile, region))
@@ -511,14 +513,15 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="tile">隣接する生成済み地形です。</param>
         /// <param name="region">土地または岩壁の判定種別です。</param>
         /// <returns>土地では水・マグマ以外、岩壁では岩壁ならtrueです。</returns>
-        private static bool IsConnected(GeneratedTile tile, ConnectionRegion region)
+        private static bool IsConnected(GeneratedTerrainCell tile, ConnectionRegion region)
         {
             if (region == ConnectionRegion.RockWall)
             {
-                return tile.Ground == GroundType.RockWall;
+                return tile.WallBlockRuntimeId.IsValid;
             }
 
-            return tile.Ground != GroundType.Water && tile.Ground != GroundType.Magma;
+            return !tile.LiquidRuntimeId.IsValid
+                && (tile.GroundBlockRuntimeId.IsValid || tile.WallBlockRuntimeId.IsValid);
         }
 
         /// <summary>

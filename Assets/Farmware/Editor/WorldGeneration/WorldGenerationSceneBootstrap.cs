@@ -558,7 +558,7 @@ namespace Farmware.WorldGeneration.Editor
                     Color32 selectedColor;
                     if (y >= TerrainLayerPresentationUtility.TerrainFrontFaceHeightInPixels)
                     {
-                        // フォールバック上面はBiome色だけを示し、草・葉・砂紋やSoilTypeの模様を重ねません。
+                        // フォールバック上面はBiome色だけを示し、草・葉・砂紋や旧土壌分類の模様を重ねません。
                         selectedColor = surfaceColor;
                     }
                     else if (y == TerrainLayerPresentationUtility.TerrainFrontFaceHeightInPixels - 1)

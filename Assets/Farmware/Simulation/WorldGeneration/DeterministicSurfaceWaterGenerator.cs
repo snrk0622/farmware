@@ -1,5 +1,5 @@
 // このファイルは、8×8水文セルの河道と閉鎖流域の湖面を、1論理チャンク4096タイルの固定表流水へ細分化します。
-// DeterministicHydrologyGeneratorの流向・流出・湖面を正として読み、現在水位や旧GeneratedTile.WaterBodyTypeへは書き戻しません。
+// DeterministicHydrologyGeneratorの流向・流出・湖面を正として読み、現在水位や廃止済みの水域分類へは書き戻しません。
 
 using System;
 using Unity.Collections;

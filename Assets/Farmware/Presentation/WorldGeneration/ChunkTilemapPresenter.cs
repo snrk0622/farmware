@@ -1,6 +1,6 @@
 // このファイルは、ECSで生成済みの地形・資源チャンクデータを、バイオームだけを示す一体型土地、岩壁Sprite、液面を含む複数Tilemapへ16×16サブチャンク単位で反映・消去します。
 // 既定のチャンク別ローカルTilemapを自動原点変更で再利用し、比較・診断用に旧共有Tilemap方式へ切り替えられます。
-// Tilemapは表示専用キャッシュであり、地形はGeneratedTile、資源はGeneratedResourceTileをゲーム状態の正として参照します。
+// Tilemapは表示専用キャッシュであり、地形はGeneratedTerrainCell、資源はGeneratedResourceTileを正として参照します。
 // 分類用の外周1セルは反映バッチごとに同期Burstでまとめ、同じ隣接地形の重複生成を減らします。
 
 using System.Collections.Generic;
@@ -159,20 +159,20 @@ namespace Farmware.WorldGeneration.Presentation
         [Tooltip("BiomeId 1〜18の順に対応する土地Tileです。18要素すべてを設定し、未設定Biomeを別Biomeへフォールバックさせないでください。")]
         [SerializeField] private TileBase[] biomeTiles = new TileBase[BiomeStableIds.Count];
 
-        // GroundType.Magmaへ使用する表示専用Tileで、水域や火山地面とは別のゲームルールを視覚化します。
+        // マグマLiquidへ使用する表示専用Tileで、水域や火山地面とは別のゲームルールを視覚化します。
         [Tooltip("マグマ地形に表示するTileです。通常設備・通常ベルト・通常移動の禁止と、橋の耐熱要件はECSデータで判定します。")]
         [SerializeField] private TileBase magmaTile;
 
-        // WaterSalinity.FreshWaterへ使用する表示専用Tileです。
+        // 淡水Liquidへ使用する表示専用Tileです。
         [Tooltip("川と池の淡水域に表示するTileです。採水種別はECSデータで判定し、この参照には依存しません。")]
         [SerializeField] private TileBase freshWaterTile;
 
-        // WaterSalinity.SaltWaterへ使用する表示専用Tileです。旧waterTile参照は海水表示として引き継ぎます。
+        // 海水Liquidへ使用する表示専用Tileです。旧waterTile参照は海水表示として引き継ぎます。
         [FormerlySerializedAs("waterTile")]
         [Tooltip("海の海水域に表示するTileです。採水種別はECSデータで判定し、この参照には依存しません。")]
         [SerializeField] private TileBase saltWaterTile;
 
-        // GroundType.RockWallの全セルへ、上面と12px側面を一体化して表示する共通Tileです。
+        // WallBlockを持つ全セルへ、上面と12px側面を一体化して表示する共通Tileです。
         [Tooltip("すべての岩壁に表示する16×28の共通Tileです。内部の暗さは影メッシュで後付けします。")]
         [SerializeField] private TileBase rockWallTile;
 
@@ -221,6 +221,12 @@ namespace Farmware.WorldGeneration.Presentation
 
         // AuthoringからBakeされたTilemap適用予算を取得するSingleton Queryです。
         private EntityQuery streamingSettingsQuery;
+
+        // Liquid Runtime IDを淡水・海水・マグマ表示へ対応付けるSingleton Queryです。
+        private EntityQuery terrainCatalogQuery;
+
+        // 現在Worldのカタログから毎フレーム取得し、サブチャンク分類中に同じ組み込みIDを再利用します。
+        private BuiltInTerrainBlockRuntimeIds terrainRuntimeIds;
 
         // Queryを現在のWorld向けに作成済みかを示し、未初期化のEntityQueryを使用しないために保持します。
         private bool queriesAreCreated;
@@ -310,7 +316,7 @@ namespace Farmware.WorldGeneration.Presentation
 
         // 分類用の外周1セルを保持する260要素です。Awakeで確保しOnDestroyで破棄します。
         // チャンクと反映フレームが変わるたびに必要範囲を上書きし、フレームをまたぐキャッシュにはしません。
-        private NativeArray<GeneratedTile> terrainNeighborHaloBuffer;
+        private NativeArray<GeneratedTerrainCell> terrainNeighborHaloBuffer;
 
         // チャンク境界の頂点を計算するため、-1〜64の66×66タイル中心の影不透明度を保持する再利用配列です。
         private float[] rockWallShadowTileOpacityBuffer;
@@ -360,10 +366,10 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="terrainTilemap">水・マグマを除く生成地形だけを描画する専用Tilemapです。</param>
         /// <param name="generatedResourceTilemap">生成資源だけを描画する専用Tilemapです。</param>
         /// <param name="biomeBaseTiles">BiomeId 1〜18の順に対応する18枚の土地Tileです。</param>
-        /// <param name="magma">GroundType.Magmaの全セルに表示するTileです。</param>
+        /// <param name="magma">マグマLiquidの全セルに表示するTileです。</param>
         /// <param name="freshWater">淡水の川と池に表示するTileです。</param>
         /// <param name="saltWater">海水の海に表示するTileです。</param>
-        /// <param name="rockWall">GroundType.RockWallの全セルで、専用上面Tilemapへ表示する共通Tileです。</param>
+        /// <param name="rockWall">WallBlockを持つ全セルで、専用上面Tilemapへ表示する共通Tileです。</param>
         /// <param name="treeResource">樹木資源に表示するTileです。</param>
         /// <param name="stoneResource">石資源に表示するTileです。</param>
         /// <param name="sandResource">砂資源に表示するTileです。</param>
@@ -403,7 +409,7 @@ namespace Farmware.WorldGeneration.Presentation
 
         /// <summary>
         /// Editor構築ツールまたはテストから、低い液面、一体型岩壁、液面アニメーション用の表示レイヤー・Tileを設定します。
-        /// ECSのGeneratedTileは変更せず、表示の高さだけを組み立てるPresentation設定を保存します。
+        /// ECSのGeneratedTerrainCellは変更せず、表示の高さだけを組み立てるPresentation設定を保存します。
         /// </summary>
         /// <param name="baseLiquidTilemap">淡水・海水・マグマの静止した基礎Tile専用Tilemapです。</param>
         /// <param name="animatedLiquidTilemap">淡水・海水・マグマの透明アニメーション専用Tilemapです。</param>
@@ -483,7 +489,7 @@ namespace Farmware.WorldGeneration.Presentation
             rockWallResourceSubChunkTileBuffer = new TileBase[tileCount];
             landBoundaryHighlightSubChunkTileBuffer = new TileBase[tileCount];
             rockWallBoundaryHighlightSubChunkTileBuffer = new TileBase[tileCount];
-            terrainNeighborHaloBuffer = new NativeArray<GeneratedTile>(TerrainNeighborHaloUtility.TileCount,
+            terrainNeighborHaloBuffer = new NativeArray<GeneratedTerrainCell>(TerrainNeighborHaloUtility.TileCount,
                 Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
             AllocateRockWallShadowBuffers();
             EnsureFreshWaterFallbackTile();
@@ -666,6 +672,19 @@ namespace Farmware.WorldGeneration.Presentation
                 }
 
                 if (observerQuery.CalculateEntityCount() != 1)
+                {
+                    return;
+                }
+
+                if (terrainCatalogQuery.CalculateEntityCount() != 1)
+                {
+                    return;
+                }
+
+                terrainRuntimeIds = terrainCatalogQuery
+                    .GetSingleton<TerrainBlockCatalog>()
+                    .BuiltInRuntimeIds;
+                if (!terrainRuntimeIds.IsValid)
                 {
                     return;
                 }
@@ -959,11 +978,13 @@ namespace Farmware.WorldGeneration.Presentation
             chunkQuery = entityManager.CreateEntityQuery(
                 ComponentType.ReadOnly<ChunkCoordinateComponent>(),
                 ComponentType.ReadOnly<ChunkGenerationStatus>(),
-                ComponentType.ReadOnly<GeneratedTile>(),
+                ComponentType.ReadOnly<GeneratedTerrainCell>(),
                 ComponentType.ReadOnly<GeneratedResourceTile>());
             observerQuery = entityManager.CreateEntityQuery(ComponentType.ReadOnly<ChunkStreamingObserver>());
             streamingSettingsQuery =
                 entityManager.CreateEntityQuery(ComponentType.ReadOnly<ChunkStreamingSettings>());
+            terrainCatalogQuery =
+                entityManager.CreateEntityQuery(ComponentType.ReadOnly<TerrainBlockCatalog>());
             queriesAreCreated = true;
             return true;
         }
@@ -994,13 +1015,13 @@ namespace Farmware.WorldGeneration.Presentation
                     || status.Phase == ChunkGenerationPhase.Inactive;
                 if (!hasCompleteData
                     || !entityManager.Exists(entities[index])
-                    || !entityManager.HasBuffer<GeneratedTile>(entities[index]))
+                    || !entityManager.HasBuffer<GeneratedTerrainCell>(entities[index]))
                 {
                     continue;
                 }
 
-                DynamicBuffer<GeneratedTile> completedTiles =
-                    entityManager.GetBuffer<GeneratedTile>(entities[index], true);
+                DynamicBuffer<GeneratedTerrainCell> completedTiles =
+                    entityManager.GetBuffer<GeneratedTerrainCell>(entities[index], true);
                 if (completedTiles.Length != WorldGridConstants.TilesPerChunk)
                 {
                     continue;
@@ -1085,7 +1106,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// 未表示の可視・先行準備チャンクを反映待ちへ追加し、すでに待機中なら最新Entity参照へ更新します。
         /// </summary>
         /// <param name="coordinate">反映する論理チャンク座標です。</param>
-        /// <param name="entity">GeneratedTile Bufferを所有する現在のEntityです。</param>
+        /// <param name="entity">GeneratedTerrainCell Bufferを所有する現在のEntityです。</param>
         private void ScheduleApply(ChunkCoordinate coordinate, Entity entity)
         {
             if (displayedCoordinates.Contains(coordinate) || pendingClearCoordinates.Contains(coordinate))
@@ -1170,7 +1191,7 @@ namespace Farmware.WorldGeneration.Presentation
                 }
 
                 if (!entityManager.Exists(progress.Entity)
-                    || !entityManager.HasBuffer<GeneratedTile>(progress.Entity)
+                    || !entityManager.HasBuffer<GeneratedTerrainCell>(progress.Entity)
                     || !entityManager.HasBuffer<GeneratedResourceTile>(progress.Entity))
                 {
                     CancelApplyAndScheduleClearIfNeeded(coordinate);
@@ -1178,10 +1199,11 @@ namespace Farmware.WorldGeneration.Presentation
                     continue;
                 }
 
-                DynamicBuffer<GeneratedTile> tiles = entityManager.GetBuffer<GeneratedTile>(progress.Entity, true);
+                DynamicBuffer<GeneratedTerrainCell> terrainCells =
+                    entityManager.GetBuffer<GeneratedTerrainCell>(progress.Entity, true);
                 DynamicBuffer<GeneratedResourceTile> resources =
                     entityManager.GetBuffer<GeneratedResourceTile>(progress.Entity, true);
-                if (tiles.Length != WorldGridConstants.TilesPerChunk
+                if (terrainCells.Length != WorldGridConstants.TilesPerChunk
                     || resources.Length != WorldGridConstants.TilesPerChunk)
                 {
                     // Job完了前または不正バッファは描画せず、次フレームに再確認します。
@@ -1214,7 +1236,7 @@ namespace Farmware.WorldGeneration.Presentation
                 ApplySubChunk(
                     coordinate,
                     progress.NextSubChunkIndex,
-                    tiles,
+                    terrainCells,
                     resources);
                 progress.NextSubChunkIndex++;
                 remainingBudget--;
@@ -1277,12 +1299,12 @@ namespace Farmware.WorldGeneration.Presentation
         /// </summary>
         /// <param name="coordinate">対象の論理チャンク座標です。</param>
         /// <param name="subChunkIndex">行優先の0〜15サブチャンク番号です。</param>
-        /// <param name="tiles">4096件の生成済みタイルBufferです。</param>
+        /// <param name="terrainCells">4096件の自然生成BlockセルBufferです。</param>
         /// <param name="resources">地形と同じ行優先4096件の生成済み資源Bufferです。</param>
         private void ApplySubChunk(
             ChunkCoordinate coordinate,
             int subChunkIndex,
-            DynamicBuffer<GeneratedTile> tiles,
+            DynamicBuffer<GeneratedTerrainCell> terrainCells,
             DynamicBuffer<GeneratedResourceTile> resources)
         {
             int subChunkX = subChunkIndex % WorldGridConstants.SubChunksPerAxis;
@@ -1300,35 +1322,35 @@ namespace Farmware.WorldGeneration.Presentation
                         int destinationIndex = (localY * WorldGridConstants.SubChunkSize) + localX;
                         int tileLocalX = localStartX + localX;
                         int tileLocalY = localStartY + localY;
-                        GeneratedTile tile = tiles[sourceIndex];
+                        GeneratedTerrainCell terrainCell = terrainCells[sourceIndex];
                         RockWallAppearance rockWallAppearance = ClassifyRockWallAppearance(
                             tileLocalX,
                             tileLocalY,
-                            tile,
-                            tiles,
+                            terrainCell,
+                            terrainCells,
                             terrainNeighborHaloBuffer);
-                        bool isLiquid = tile.Ground == GroundType.Water
-                            || tile.Ground == GroundType.Magma;
+                        bool isLiquid = terrainCell.LiquidRuntimeId.IsValid;
 
                         BoundaryHighlightSelection landBoundarySelection = default;
                         BoundaryHighlightSelection rockWallBoundarySelection = default;
-                        if (tile.Ground == GroundType.Land || tile.Ground == GroundType.RockWall)
+                        if (terrainCell.GroundBlockRuntimeId.IsValid
+                            || terrainCell.WallBlockRuntimeId.IsValid)
                         {
                             // 内部は現在のECS Buffer、外周は同じ反映バッチで一度だけ生成した値を読み、ロード順へ依存しません。
                             TerrainNeighborTiles neighbors = GetTerrainNeighborTiles(
                                 tileLocalX,
                                 tileLocalY,
-                                tiles,
+                                terrainCells,
                                 terrainNeighborHaloBuffer);
-                            if (tile.Ground == GroundType.Land)
+                            if (!terrainCell.WallBlockRuntimeId.IsValid)
                             {
                                 landBoundarySelection =
-                                    TerrainBoundaryHighlightUtility.SelectLand(tile, neighbors);
+                                    TerrainBoundaryHighlightUtility.SelectLand(terrainCell, neighbors);
                             }
                             else
                             {
                                 rockWallBoundarySelection =
-                                    TerrainBoundaryHighlightUtility.SelectRockWall(tile, neighbors);
+                                    TerrainBoundaryHighlightUtility.SelectRockWall(terrainCell, neighbors);
                             }
                         }
 
@@ -1337,16 +1359,16 @@ namespace Farmware.WorldGeneration.Presentation
                         // 画面手前の土地ブロックを後から重ねることで、奥側の不要な断面を自然に隠します。
                         subChunkTileBuffer[destinationIndex] = isLiquid
                             ? null
-                            : SelectLandTile(tile);
+                            : SelectLandTile(terrainCell);
                         liquidBaseSubChunkTileBuffer[destinationIndex] = isLiquid
-                            ? SelectLiquidBaseTile(tile)
+                            ? SelectLiquidBaseTile(terrainCell)
                             : null;
                         liquidAnimationSubChunkTileBuffer[destinationIndex] =
-                            SelectLiquidAnimationTile(tile);
+                            SelectLiquidAnimationTile(terrainCell);
 
                         // 岩壁セルにもBiome由来の16×24土地ブロックを残し、その上へ16×28岩壁ブロックを重ねます。
                         // 岩壁SpriteのPivotが側面12px分の高さを表すため、Tilemap Transform自体は基準面から動かしません。
-                        bool isRockWall = tile.Ground == GroundType.RockWall;
+                        bool isRockWall = terrainCell.WallBlockRuntimeId.IsValid;
                         rockWallSubChunkTileBuffer[destinationIndex] = isRockWall
                             ? rockWallTile
                             : null;
@@ -1365,16 +1387,16 @@ namespace Farmware.WorldGeneration.Presentation
                         bool isBehindFrontRockWall = false;
                         if (!isRockWall && selectedResource != null)
                         {
-                            GeneratedTile frontTerrainTile = TerrainNeighborHaloUtility.GetTile(
+                            GeneratedTerrainCell frontTerrainCell = TerrainNeighborHaloUtility.GetTile(
                                 tileLocalX,
                                 tileLocalY - 1,
-                                tiles,
+                                terrainCells,
                                 terrainNeighborHaloBuffer);
                             isBehindFrontRockWall =
                                 TerrainLayerPresentationUtility.ShouldRenderResourceBehindRockWall(
                                     resources[sourceIndex],
-                                    tile,
-                                    frontTerrainTile);
+                                    terrainCell,
+                                    frontTerrainCell);
                         }
                         resourceSubChunkTileBuffer[destinationIndex] = !isRockWall
                             && !isBehindFrontRockWall
@@ -1793,8 +1815,10 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="halo">中心セルを含む反映範囲でFill済みの外周配列です。</param>
         /// <returns>境界表示へ渡す8方向の生成地形です。</returns>
         private static TerrainNeighborTiles GetTerrainNeighborTiles(
-            int localTileX, int localTileY, DynamicBuffer<GeneratedTile> tiles,
-            NativeArray<GeneratedTile> halo)
+            int localTileX,
+            int localTileY,
+            DynamicBuffer<GeneratedTerrainCell> tiles,
+            NativeArray<GeneratedTerrainCell> halo)
         {
             return new TerrainNeighborTiles(
                 TerrainNeighborHaloUtility.GetTile(localTileX, localTileY + 1, tiles, halo),
@@ -1834,11 +1858,13 @@ namespace Farmware.WorldGeneration.Presentation
         /// <summary>
         /// ECS地形から、液面アニメーション専用Tilemapへ重ねるTileを選択します。
         /// </summary>
-        /// <param name="tile">ECSを正とする1セル分の生成地形です。</param>
+        /// <param name="terrainCell">ECSを正とする1セル分の自然生成Blockセルです。</param>
         /// <returns>淡水・海水・マグマのAnimatedTileです。通常地形ならnullです。</returns>
-        private TileBase SelectLiquidAnimationTile(GeneratedTile tile)
+        private TileBase SelectLiquidAnimationTile(GeneratedTerrainCell terrainCell)
         {
-            switch (TerrainLayerPresentationUtility.ClassifyLiquidAnimation(tile))
+            switch (TerrainLayerPresentationUtility.ClassifyLiquidAnimation(
+                terrainCell,
+                terrainRuntimeIds))
             {
                 case LiquidAnimationKind.FreshWater:
                     return freshWaterAnimationTile;
@@ -1852,34 +1878,38 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// 液体のゲームルール用GeneratedTileを、8px下げる静止液面Tileへ変換します。
+        /// Liquid Runtime IDを、8px下げる静止液面Tileへ変換します。
         /// </summary>
-        /// <param name="tile">ECSを正とする水またはマグマ1セル分の生成地形です。</param>
+        /// <param name="terrainCell">ECSを正とする水またはマグマ1セル分のBlockセルです。</param>
         /// <returns>淡水・海水・マグマの基礎Tileです。液体でなければnullです。</returns>
-        private TileBase SelectLiquidBaseTile(GeneratedTile tile)
+        private TileBase SelectLiquidBaseTile(GeneratedTerrainCell terrainCell)
         {
-            if (tile.Ground == GroundType.Water)
+            if (terrainCell.LiquidRuntimeId.Value == terrainRuntimeIds.FreshWater.Value)
             {
                 // 移行直後の旧Sceneでも淡水を空表示にしないよう、淡水参照が未設定なら海水Tileへフォールバックします。
-                return tile.WaterSalinity == WaterSalinity.FreshWater && freshWaterTile != null
+                return freshWaterTile != null
                     ? freshWaterTile
                     : saltWaterTile;
             }
 
-            return tile.Ground == GroundType.Magma
+            if (terrainCell.LiquidRuntimeId.Value == terrainRuntimeIds.SaltWater.Value)
+            {
+                return saltWaterTile;
+            }
+
+            return terrainCell.LiquidRuntimeId.Value == terrainRuntimeIds.Magma.Value
                 ? magmaTile
                 : null;
         }
 
         /// <summary>
-        /// 液体を除くゲームルール用GeneratedTileを、論理バイオームに対応する一体型土地Tileへ変換します。
-        /// SoilTypeは資源生成の内部情報として保持しますが、プレイヤー向け土地表示には反映しません。
+        /// 液体を除くBlockセルを、論理バイオームに対応する一体型土地Tileへ変換します。
         /// </summary>
-        /// <param name="tile">ECSを正とする1タイル分の土地地形データです。</param>
+        /// <param name="terrainCell">ECSを正とする1タイル分の自然生成Blockセルです。</param>
         /// <returns>岩壁セルを含めて論理バイオームに対応する土地の基準面Tileです。</returns>
-        private TileBase SelectLandTile(GeneratedTile tile)
+        private TileBase SelectLandTile(GeneratedTerrainCell terrainCell)
         {
-            return SelectBiomeBaseTile(tile.Biome);
+            return SelectBiomeBaseTile(terrainCell.Biome);
         }
 
         /// <summary>
@@ -1910,20 +1940,23 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="halo">中心セルを含む反映範囲でFill済みの外周配列です。</param>
         /// <returns>非岩壁ならNone、非岩壁に接する岩壁ならExposed、それ以外はInteriorです。</returns>
         private static RockWallAppearance ClassifyRockWallAppearance(
-            int localX, int localY, GeneratedTile tile, DynamicBuffer<GeneratedTile> tiles,
-            NativeArray<GeneratedTile> halo)
+            int localX,
+            int localY,
+            GeneratedTerrainCell terrainCell,
+            DynamicBuffer<GeneratedTerrainCell> terrainCells,
+            NativeArray<GeneratedTerrainCell> halo)
         {
-            if (tile.Ground != GroundType.RockWall)
+            if (!terrainCell.WallBlockRuntimeId.IsValid)
             {
                 return RockWallAppearance.None;
             }
 
             // 影の連続濃度は別処理です。ここでは資源を隠すかどうかだけを従来と同じ上下左右で決めます。
             bool touchesOpenTile =
-                TerrainNeighborHaloUtility.GetTile(localX - 1, localY, tiles, halo).Ground != GroundType.RockWall
-                || TerrainNeighborHaloUtility.GetTile(localX + 1, localY, tiles, halo).Ground != GroundType.RockWall
-                || TerrainNeighborHaloUtility.GetTile(localX, localY - 1, tiles, halo).Ground != GroundType.RockWall
-                || TerrainNeighborHaloUtility.GetTile(localX, localY + 1, tiles, halo).Ground != GroundType.RockWall;
+                !TerrainNeighborHaloUtility.GetTile(localX - 1, localY, terrainCells, halo).WallBlockRuntimeId.IsValid
+                || !TerrainNeighborHaloUtility.GetTile(localX + 1, localY, terrainCells, halo).WallBlockRuntimeId.IsValid
+                || !TerrainNeighborHaloUtility.GetTile(localX, localY - 1, terrainCells, halo).WallBlockRuntimeId.IsValid
+                || !TerrainNeighborHaloUtility.GetTile(localX, localY + 1, terrainCells, halo).WallBlockRuntimeId.IsValid;
             return touchesOpenTile ? RockWallAppearance.Exposed : RockWallAppearance.Interior;
         }
 
@@ -2409,6 +2442,7 @@ namespace Farmware.WorldGeneration.Presentation
                 chunkQuery.Dispose();
                 observerQuery.Dispose();
                 streamingSettingsQuery.Dispose();
+                terrainCatalogQuery.Dispose();
             }
 
             queriesAreCreated = false;
@@ -2487,7 +2521,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// </summary>
         private sealed class ChunkApplyProgress
         {
-            /// <summary>GeneratedTile Bufferを読み取る現在のチャンクEntityです。</summary>
+            /// <summary>GeneratedTerrainCell Bufferを読み取る現在のチャンクEntityです。</summary>
             public Entity Entity;
 
             /// <summary>次に反映する行優先のサブチャンク番号です。範囲は0〜16です。</summary>

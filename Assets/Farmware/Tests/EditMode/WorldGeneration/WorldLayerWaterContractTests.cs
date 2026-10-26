@@ -64,44 +64,112 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 水域なし、川、池、海と沖合候補を準備し、DeepSeaが海の沖合だけに分類されることを確認します。
+        /// 地面、淡水、内陸塩水、海、マグマを準備し、DeepSeaが海の沖合だけに分類されることを確認します。
         /// </summary>
-        /// <param name="waterBodyType">地上生成で確定した自然水域分類です。</param>
-        /// <param name="isOffshoreDeepCandidate">沖合深水域候補として選ばれたかを表します。</param>
-        /// <param name="expectedColumnKind">契約上期待する自然水柱区分です。</param>
-        [TestCase(WaterBodyType.None, false, NaturalWaterColumnKind.Land)]
-        [TestCase(WaterBodyType.River, false, NaturalWaterColumnKind.StandardWater)]
-        [TestCase(WaterBodyType.River, true, NaturalWaterColumnKind.StandardWater)]
-        [TestCase(WaterBodyType.Pond, false, NaturalWaterColumnKind.StandardWater)]
-        [TestCase(WaterBodyType.Pond, true, NaturalWaterColumnKind.StandardWater)]
-        [TestCase(WaterBodyType.Sea, false, NaturalWaterColumnKind.StandardWater)]
-        [TestCase(WaterBodyType.Sea, true, NaturalWaterColumnKind.OffshoreDeepWater)]
-        public void TryResolveNaturalWaterColumnKind_RestrictsDeepSeaToOffshoreSea(
-            WaterBodyType waterBodyType,
-            bool isOffshoreDeepCandidate,
-            NaturalWaterColumnKind expectedColumnKind)
+        [Test]
+        public void TryResolveNaturalWaterColumnKind_RestrictsDeepSeaToOffshoreSea()
         {
-            bool resolved = WorldLayerWaterContract.TryResolveNaturalWaterColumnKind(
-                waterBodyType,
-                isOffshoreDeepCandidate,
-                out NaturalWaterColumnKind actual);
-
-            Assert.That(resolved, Is.True);
-            Assert.That(actual, Is.EqualTo(expectedColumnKind));
+            BuiltInTerrainBlockRuntimeIds runtimeIds = CreateRuntimeIds();
+            AssertColumn(default, runtimeIds, true, NaturalWaterColumnKind.Land);
+            AssertColumn(
+                new GeneratedTerrainCell
+                {
+                    Biome = BiomeId.FreshwaterMarshFloodplain,
+                    LiquidRuntimeId = runtimeIds.FreshWater
+                },
+                runtimeIds,
+                true,
+                NaturalWaterColumnKind.StandardWater);
+            AssertColumn(
+                new GeneratedTerrainCell
+                {
+                    Biome = BiomeId.HotDesert,
+                    LiquidRuntimeId = runtimeIds.SaltWater
+                },
+                runtimeIds,
+                true,
+                NaturalWaterColumnKind.StandardWater);
+            AssertColumn(
+                new GeneratedTerrainCell
+                {
+                    Biome = BiomeId.None,
+                    LiquidRuntimeId = runtimeIds.SaltWater
+                },
+                runtimeIds,
+                false,
+                NaturalWaterColumnKind.StandardWater);
+            AssertColumn(
+                new GeneratedTerrainCell
+                {
+                    Biome = BiomeId.None,
+                    LiquidRuntimeId = runtimeIds.SaltWater
+                },
+                runtimeIds,
+                true,
+                NaturalWaterColumnKind.OffshoreDeepWater);
+            AssertColumn(
+                new GeneratedTerrainCell
+                {
+                    Biome = BiomeId.VolcanicGeothermal,
+                    LiquidRuntimeId = runtimeIds.Magma
+                },
+                runtimeIds,
+                true,
+                NaturalWaterColumnKind.Land);
         }
 
         /// <summary>
-        /// 未知の水域分類を準備し、陸地や通常水域へ暗黙に丸めないことを確認します。
+        /// 未知のLiquid Runtime IDを準備し、陸地や通常水域へ暗黙に丸めないことを確認します。
         /// </summary>
         [Test]
-        public void TryResolveNaturalWaterColumnKind_RejectsUnknownWaterBodyType()
+        public void TryResolveNaturalWaterColumnKind_RejectsUnknownLiquidRuntimeId()
         {
+            BuiltInTerrainBlockRuntimeIds runtimeIds = CreateRuntimeIds();
             bool resolved = WorldLayerWaterContract.TryResolveNaturalWaterColumnKind(
-                (WaterBodyType)byte.MaxValue,
+                new GeneratedTerrainCell
+                {
+                    LiquidRuntimeId = new DefinitionRuntimeId(999)
+                },
+                runtimeIds,
                 true,
                 out _);
 
             Assert.That(resolved, Is.False);
+        }
+
+        /// <summary>自然水柱テストで共有する5つの有効な仮Runtime IDを作ります。</summary>
+        /// <returns>WorldLayerWaterContractが受理できる組み込みID一式です。</returns>
+        private static BuiltInTerrainBlockRuntimeIds CreateRuntimeIds()
+        {
+            return new BuiltInTerrainBlockRuntimeIds
+            {
+                LandGround = new DefinitionRuntimeId(1),
+                NaturalRockWall = new DefinitionRuntimeId(2),
+                FreshWater = new DefinitionRuntimeId(3),
+                SaltWater = new DefinitionRuntimeId(4),
+                Magma = new DefinitionRuntimeId(5)
+            };
+        }
+
+        /// <summary>1つの自然生成Blockセルを解決し、期待する水柱分類と一致することを確認します。</summary>
+        /// <param name="cell">判定する自然生成Blockセルです。</param>
+        /// <param name="runtimeIds">液体種を識別する組み込みIDです。</param>
+        /// <param name="isOffshoreDeepCandidate">沖合深水候補ならtrueです。</param>
+        /// <param name="expected">期待する自然水柱分類です。</param>
+        private static void AssertColumn(
+            in GeneratedTerrainCell cell,
+            in BuiltInTerrainBlockRuntimeIds runtimeIds,
+            bool isOffshoreDeepCandidate,
+            NaturalWaterColumnKind expected)
+        {
+            Assert.That(
+                WorldLayerWaterContract.TryResolveNaturalWaterColumnKind(
+                    cell,
+                    runtimeIds,
+                    isOffshoreDeepCandidate,
+                    out NaturalWaterColumnKind actual),
+                Is.True);
+            Assert.That(actual, Is.EqualTo(expected));
         }
 
         /// <summary>

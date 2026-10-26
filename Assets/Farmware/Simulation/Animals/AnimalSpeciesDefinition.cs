@@ -59,8 +59,8 @@ namespace Farmware.Simulation.Animals
     }
 
     /// <summary>
-    /// 動物が滞在できる基礎地形をbit単位で表す安定した分類です。
-    /// GroundTypeの数値には廃止済み予約値があるため、直接shiftせず明示的な対応表として扱います。
+    /// 動物が滞在できるBlockセル構成をbit単位で表す安定した分類です。
+    /// Runtime IDの数値を直接shiftせず、壁・液体・地面の意味から明示的に対応付けます。
     /// </summary>
     [Flags]
     public enum AnimalGroundMask : byte
@@ -68,16 +68,16 @@ namespace Farmware.Simulation.Animals
         /// <summary>滞在可能な地形がない無効値です。</summary>
         None = 0,
 
-        /// <summary>通常の陸地を許可します。GroundType.Landに対応します。</summary>
+        /// <summary>GroundBlockを持つ通常の陸地を許可します。</summary>
         Land = 1 << 0,
 
-        /// <summary>水域を許可します。GroundType.Waterに対応します。</summary>
+        /// <summary>淡水または海水Liquidを持つ水域を許可します。</summary>
         Water = 1 << 1,
 
-        /// <summary>岩壁上を許可します。GroundType.RockWallに対応します。</summary>
+        /// <summary>WallBlockを持つ岩壁セルを許可します。</summary>
         RockWall = 1 << 2,
 
-        /// <summary>マグマ上を許可します。GroundType.Magmaに対応します。</summary>
+        /// <summary>マグマLiquidを持つセルを許可します。</summary>
         Magma = 1 << 3,
 
         /// <summary>現在定義済みの全基礎地形を表します。</summary>

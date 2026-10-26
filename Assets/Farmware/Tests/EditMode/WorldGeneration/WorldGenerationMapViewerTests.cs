@@ -87,11 +87,20 @@ namespace Farmware.WorldGeneration.Tests
         [Test]
         public void Sample_EveryPixelMatchesFinalizedTerrainSample()
         {
+            using TerrainGenerationTestCatalogSet catalogs =
+                TerrainGenerationTestCatalogSet.Create();
             WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
                 WorldSeedUtility.FromString("map-viewer-shared-generator-test"),
                 WorldGenerationSettings.CurrentGeneratorVersion);
+            Assert.That(
+                HydrologyDiagnosticTerrainCatalogs.TryCreate(
+                    out HydrologyDiagnosticTerrainCatalogs createdDiagnosticCatalogs),
+                Is.True);
+            using HydrologyDiagnosticTerrainCatalogs diagnosticCatalogs =
+                createdDiagnosticCatalogs;
             WorldGenerationMapSampleResult result = WorldGenerationMapSampler.Sample(
                 settings,
+                diagnosticCatalogs,
                 -65,
                 130,
                 7,
@@ -114,10 +123,10 @@ namespace Farmware.WorldGeneration.Tests
                     bool found = result.TryGetFinalizedTerrainSample(
                         worldTileX,
                         worldTileY,
-                        out GeneratedTile finalizedTile);
-                    Color32 expectedColor = WorldGenerationMapSampler.GetDisplayColor(
-                        WorldGenerationMapViewMode.Terrain,
-                        finalizedTile);
+                        out FinalizedTerrainMapSample finalizedSample);
+                    Color32 expectedColor = WorldGenerationMapSampler.GetTerrainDisplayColor(
+                        finalizedSample.TerrainCell,
+                        catalogs.RuntimeIds);
 
                     Assert.That(found, Is.True, $"tile=({worldTileX}, {worldTileY})");
                     Assert.That(
@@ -125,7 +134,7 @@ namespace Farmware.WorldGeneration.Tests
                         Is.EqualTo(expectedColor),
                         $"pixel=({pixelX}, {pixelY}), tile=({worldTileX}, {worldTileY})");
 
-                    if (finalizedTile.Biome != BiomeId.None)
+                    if (finalizedSample.Tile.Biome != BiomeId.None)
                     {
                         foundLandBiome = true;
                         bool foundBiomeDiagnostics = result.TryGetBiomeClassificationSample(
@@ -136,7 +145,7 @@ namespace Farmware.WorldGeneration.Tests
                             $"地上Biomeの選択診断がありません: tile=({worldTileX}, {worldTileY})");
                         Assert.That(
                             biomeSample.Selection.StableId,
-                            Is.EqualTo((byte)finalizedTile.Biome),
+                            Is.EqualTo((byte)finalizedSample.Tile.Biome),
                             $"完成地形と選択診断が不一致です: tile=({worldTileX}, {worldTileY})");
                     }
                 }
@@ -416,50 +425,44 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 同じ論理Biomeへ3種類のSoilTypeを設定しても、TerrainとBiomeの両表示が所属色だけを維持することを保証します。
+        /// 同じ論理Biomeと地面へ異なる地表Blockを重ねても、TerrainとBiomeの両表示が所属色だけを維持することを保証します。
         /// </summary>
         [Test]
-        public void DisplayColor_PlayerTerrainIgnoresSoilAndKeepsBiomeIdentity()
+        public void DisplayColor_PlayerTerrainIgnoresSurfaceAndKeepsBiomeIdentity()
         {
-            GeneratedTile forestNormal = new GeneratedTile
+            BuiltInTerrainBlockRuntimeIds runtimeIds = new BuiltInTerrainBlockRuntimeIds
+            {
+                FreshWater = new DefinitionRuntimeId(1),
+                SaltWater = new DefinitionRuntimeId(2),
+                Magma = new DefinitionRuntimeId(3)
+            };
+            GeneratedTile forestTile = new GeneratedTile
+            {
+                Biome = BiomeId.TemperateDeciduousForest
+            };
+            GeneratedTerrainCell forestWithoutSurface = new GeneratedTerrainCell
             {
                 Biome = BiomeId.TemperateDeciduousForest,
-                Ground = GroundType.Land,
-                Soil = SoilType.Normal
+                GroundBlockRuntimeId = new DefinitionRuntimeId(4)
             };
-            GeneratedTile forestFertile = forestNormal;
-            forestFertile.Soil = SoilType.Fertile;
-            GeneratedTile forestSandy = forestNormal;
-            forestSandy.Soil = SoilType.Sandy;
+            GeneratedTerrainCell forestWithSurface = forestWithoutSurface;
+            forestWithSurface.TerrainSurfaceRuntimeId = new DefinitionRuntimeId(5);
 
-            Color32 terrainNormal = WorldGenerationMapSampler.GetDisplayColor(
-                WorldGenerationMapViewMode.Terrain,
-                forestNormal);
-            Color32 terrainFertile = WorldGenerationMapSampler.GetDisplayColor(
-                WorldGenerationMapViewMode.Terrain,
-                forestFertile);
-            Color32 terrainSandy = WorldGenerationMapSampler.GetDisplayColor(
-                WorldGenerationMapViewMode.Terrain,
-                forestSandy);
-            Color32 biomeNormal = WorldGenerationMapSampler.GetDisplayColor(
+            Color32 terrainWithoutSurface = WorldGenerationMapSampler.GetTerrainDisplayColor(
+                forestWithoutSurface,
+                runtimeIds);
+            Color32 terrainWithSurface = WorldGenerationMapSampler.GetTerrainDisplayColor(
+                forestWithSurface,
+                runtimeIds);
+            Color32 biomeColor = WorldGenerationMapSampler.GetDisplayColor(
                 WorldGenerationMapViewMode.Biome,
-                forestNormal);
-            Color32 biomeFertile = WorldGenerationMapSampler.GetDisplayColor(
-                WorldGenerationMapViewMode.Biome,
-                forestFertile);
+                forestTile);
 
             Assert.That(
-                terrainNormal,
-                Is.EqualTo(terrainFertile),
-                "プレイヤー向けTerrain表示へ肥沃土の違いを反映してはいけません。");
-            Assert.That(
-                terrainSandy,
-                Is.EqualTo(terrainNormal),
-                "プレイヤー向けTerrain表示へ砂質土の違いを反映してはいけません。");
-            Assert.That(
-                biomeNormal,
-                Is.EqualTo(biomeFertile),
-                "Biome表示はSoilに左右されず、両方を同じ森林として表示する必要があります。");
+                terrainWithoutSurface,
+                Is.EqualTo(terrainWithSurface),
+                "プレイヤー向けTerrain表示は地表Block差分ではなく基礎地形のBiome色を維持します。");
+            Assert.That(terrainWithoutSurface, Is.EqualTo(biomeColor));
         }
 
         /// <summary>
@@ -826,8 +829,14 @@ namespace Farmware.WorldGeneration.Tests
             WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
                 WorldSeedUtility.FromString("map-viewer-initial-hover-test"),
                 WorldGenerationSettings.CurrentGeneratorVersion);
+            Assert.That(
+                HydrologyDiagnosticTerrainCatalogs.TryCreate(
+                    out HydrologyDiagnosticTerrainCatalogs createdCatalogs),
+                Is.True);
+            using HydrologyDiagnosticTerrainCatalogs terrainCatalogs = createdCatalogs;
             WorldGenerationMapSampleResult result = WorldGenerationMapSampler.Sample(
                 settings,
+                terrainCatalogs,
                 centerTileX,
                 centerTileY,
                 4,
@@ -1072,6 +1081,31 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
+        /// 有効範囲のTerrain要求へ完成済み地形カタログを渡さず、ThreadPool内でBlobを暗黙構築する前に拒否することを保証します。
+        /// Map ViewerはMain Threadでカタログを完成させてから重い生成だけをTask.Runへ渡す必要があります。
+        /// </summary>
+        [Test]
+        public void Sample_CompletedChunkViewRequiresMainThreadPreparedCatalogs()
+        {
+            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.FromString("map-viewer-prebuilt-catalog-test"),
+                WorldGenerationSettings.CurrentGeneratorVersion);
+
+            Assert.That(
+                () => WorldGenerationMapSampler.Sample(
+                    settings,
+                    WorldLayer.Surface,
+                    0,
+                    0,
+                    1,
+                    1,
+                    4,
+                    WorldGenerationMapViewMode.Terrain,
+                    CancellationToken.None),
+                Throws.TypeOf<System.InvalidOperationException>());
+        }
+
+        /// <summary>
         /// レイアウト前のNaN、無限大、縮小されたCanvas、最小寸法を準備し、実寸確定前の1×1生成を防ぐことを保証します。
         /// </summary>
         /// <param name="width">Canvasの横幅です。単位はEditorポイントです。</param>
@@ -1120,11 +1154,16 @@ namespace Farmware.WorldGeneration.Tests
             WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
                 WorldSeedUtility.FromString("map-viewer-progress-test"), WorldGenerationSettings.CurrentGeneratorVersion);
             RecordingProgress progress = new RecordingProgress();
+            Assert.That(
+                HydrologyDiagnosticTerrainCatalogs.TryCreate(
+                    out HydrologyDiagnosticTerrainCatalogs createdCatalogs),
+                Is.True);
+            using HydrologyDiagnosticTerrainCatalogs terrainCatalogs = createdCatalogs;
             WorldGenerationMapSampleResult result = WorldGenerationMapSampler.Sample(
-                settings, WorldLayer.Surface, -64, 64, 3, 33, 4,
+                settings, terrainCatalogs, WorldLayer.Surface, -64, 64, 3, 33, 4,
                 WorldGenerationMapViewMode.Terrain, CancellationToken.None, progress);
             WorldGenerationMapSampleResult withoutProgress = WorldGenerationMapSampler.Sample(
-                settings, WorldLayer.Surface, -64, 64, 3, 33, 4,
+                settings, terrainCatalogs, WorldLayer.Surface, -64, 64, 3, 33, 4,
                 WorldGenerationMapViewMode.Terrain, CancellationToken.None);
 
             Assert.That(progress.Values, Is.Not.Empty);

@@ -1830,7 +1830,7 @@ namespace Farmware.WorldGeneration
             [ReadOnly]
             public NativeArray<GeneratedHydrologyTile> HydrologyTiles;
 
-            /// <summary>既存GroundTypeへ一時反映する、湖・泉まで確定済みの固定表流水です。</summary>
+            /// <summary>最終Liquid選択へ渡す、湖・泉まで確定済みの固定表流水です。</summary>
             [ReadOnly]
             public NativeArray<GeneratedSurfaceWaterTile> SurfaceWater;
 
@@ -1894,6 +1894,10 @@ namespace Farmware.WorldGeneration
                             continue;
                         }
 
+                        // C7で資源適性を拡張するまでは、旧地形分類ではなく確定Blockセルから暫定3資源候補を決めます。
+                        finalizedTile.ResourceSuitability =
+                            DeterministicTerrainCellFinalizer.ClassifyInterimResourceSuitability(
+                                terrainCell);
                         Tiles[tileIndex] = finalizedTile;
                         TerrainCells[tileIndex] = terrainCell;
                         Resources[tileIndex] = DeterministicResourceGenerator.GenerateResource(

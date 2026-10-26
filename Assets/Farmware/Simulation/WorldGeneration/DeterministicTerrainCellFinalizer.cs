@@ -1,5 +1,5 @@
 // このファイルは、完成したBiome・地質・固定水文からGroundBlock、WallBlock、Liquidを直接確定します。
-// Blockパレット選択と有効地形差分の間を結び、旧GroundTypeやWaterBodyTypeを経由しない自然生成境界を提供します。
+// Blockパレット選択と有効地形差分の間を結び、廃止済みの地面・水域分類を経由しない自然生成境界を提供します。
 
 using Farmware.Simulation;
 using Unity.Entities;
@@ -142,6 +142,38 @@ namespace Farmware.WorldGeneration
                     : default
             };
             return true;
+        }
+
+        /// <summary>
+        /// C7の28資源適性へ移行するまで、完成済みBlockセルから木・石・砂の暫定候補を導出します。
+        /// </summary>
+        /// <param name="terrainCell">液体、壁、地面の優先関係を確定済みの自然生成セルです。</param>
+        /// <returns>既存の暫定資源生成へ渡す木・石・砂の候補ビットです。</returns>
+        public static ResourceSuitability ClassifyInterimResourceSuitability(
+            in GeneratedTerrainCell terrainCell)
+        {
+            if (terrainCell.LiquidRuntimeId.IsValid)
+            {
+                // 淡水、海水、マグマを問わず、液体セルへ固定採取資源を重ねません。
+                return ResourceSuitability.None;
+            }
+
+            if (terrainCell.WallBlockRuntimeId.IsValid
+                || terrainCell.Biome == BiomeId.AlpineRockland
+                || terrainCell.Biome == BiomeId.VolcanicGeothermal)
+            {
+                return ResourceSuitability.Stone;
+            }
+
+            if (terrainCell.Biome == BiomeId.CactusDesertDryPlateau
+                || terrainCell.Biome == BiomeId.HotDesert)
+            {
+                return ResourceSuitability.Sand | ResourceSuitability.Stone;
+            }
+
+            return terrainCell.GroundBlockRuntimeId.IsValid
+                ? ResourceSuitability.Tree | ResourceSuitability.Stone
+                : ResourceSuitability.None;
         }
 
         /// <summary>入力タイルが同じ座標から生成された固定環境値を保持するか照合します。</summary>

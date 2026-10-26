@@ -116,7 +116,7 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(worldTileY, Is.Zero);
         }
 
-        /// <summary>ワールド外の表示用外周を生成し、土地・岩壁へ接続しない水域値になることを保証します。</summary>
+        /// <summary>ワールド外の表示用外周を生成し、土地・岩壁へ接続しない空Block値になることを保証します。</summary>
         /// <param name="chunkCoordinate">正または負の端にある論理チャンク座標です。</param>
         /// <param name="outsideLocalCoordinate">外周1セルのローカル座標です。</param>
         [TestCase(WorldGridConstants.MinimumLogicalChunkCoordinate, -1)]
@@ -134,13 +134,16 @@ namespace Farmware.WorldGeneration.Tests
                 for (int offsetX = minimumOffset; offsetX <= maximumOffset; offsetX++)
                 {
                     Entity entity = entityManager.CreateEntity();
-                    DynamicBuffer<GeneratedTile> completedTiles =
-                        entityManager.AddBuffer<GeneratedTile>(entity);
+                    DynamicBuffer<GeneratedTerrainCell> completedTiles =
+                        entityManager.AddBuffer<GeneratedTerrainCell>(entity);
                     completedTiles.ResizeUninitialized(WorldGridConstants.TilesPerChunk);
                     for (int tileIndex = 0; tileIndex < completedTiles.Length; tileIndex++)
                     {
-                        // ワールド内側は岩壁で埋め、外側だけが明示的な非接続水域へ変わることを比較しやすくします。
-                        completedTiles[tileIndex] = new GeneratedTile { Ground = GroundType.RockWall };
+                        // ワールド内側は岩壁で埋め、外側だけが無効IDになることを比較しやすくします。
+                        completedTiles[tileIndex] = new GeneratedTerrainCell
+                        {
+                            WallBlockRuntimeId = new DefinitionRuntimeId(2)
+                        };
                     }
 
                     completedEntities[new ChunkCoordinate(
@@ -150,10 +153,10 @@ namespace Farmware.WorldGeneration.Tests
             }
 
             var centerCoordinate = new ChunkCoordinate(chunkCoordinate, chunkCoordinate);
-            DynamicBuffer<GeneratedTile> tiles = entityManager.GetBuffer<GeneratedTile>(
+            DynamicBuffer<GeneratedTerrainCell> tiles = entityManager.GetBuffer<GeneratedTerrainCell>(
                 completedEntities[centerCoordinate],
                 true);
-            using var halo = new Unity.Collections.NativeArray<GeneratedTile>(TerrainNeighborHaloUtility.TileCount,
+            using var halo = new Unity.Collections.NativeArray<GeneratedTerrainCell>(TerrainNeighborHaloUtility.TileCount,
                 Unity.Collections.Allocator.TempJob);
             Assert.That(
                 CompletedChunkTerrainNeighborhoodFactory.TryCreate(
@@ -165,9 +168,15 @@ namespace Farmware.WorldGeneration.Tests
             // Factoryはワールド外のdefault配列を中心借用で安全に代用しつつ、外側を非接続として区別します。
             TerrainNeighborHaloUtility.Fill(neighborhood,
                 0, WorldGridConstants.SubChunksPerChunk, halo);
-            GeneratedTile neighbor = TerrainNeighborHaloUtility.GetTile(outsideLocalCoordinate, 0, tiles, halo);
-            Assert.That(neighbor.Ground, Is.EqualTo(GroundType.Water),
-                "int端の外側は土地・岩壁のどちらにも接続せず、資源を壁の背後へ隠さない値にします。");
+            GeneratedTerrainCell neighbor = TerrainNeighborHaloUtility.GetTile(
+                outsideLocalCoordinate,
+                0,
+                tiles,
+                halo);
+            Assert.That(neighbor.GroundBlockRuntimeId.IsValid, Is.False);
+            Assert.That(neighbor.WallBlockRuntimeId.IsValid, Is.False);
+            Assert.That(neighbor.LiquidRuntimeId.IsValid, Is.False,
+                "int端の外側は土地・岩壁・液体のいずれにも接続しない空Block値にします。");
         }
 
         /// <summary>
@@ -358,48 +367,6 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 岩壁候補と水域が重なる座標を探し、海・川・池の判定が優先されて岩壁データを重ねないことを保証します。
-        /// </summary>
-        [Test]
-        public void RockWallNoise_WaterAlwaysSuppressesRockWallGround()
-        {
-            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
-                WorldSeedUtility.FromString("rock-wall-water-priority-test"),
-                WorldGenerationSettings.CurrentGeneratorVersion);
-            // 新しい標高帯契約では海面が低地上限を越える設定を無効とするため、
-            // 有効範囲内で海を最大化し、試験範囲では標高格子を細かくして水域との重なりを十分に確保します。
-            settings.SeaLevelThreshold = settings.WetlandMaximumElevation;
-            settings.ElevationCellSizeInTiles = 16;
-            int overlappingWaterCandidateCount = 0;
-
-            // 64×64だけを調べれば複数のノイズ形状を含み、重い広域生成をせず優先順位を確認できます。
-            for (int tileY = -32; tileY < 32; tileY++)
-            {
-                for (int tileX = -32; tileX < 32; tileX++)
-                {
-                    if (!DeterministicRockWallGenerator.IsRockWallCandidate(settings, tileX, tileY))
-                    {
-                        continue;
-                    }
-
-                    GeneratedTile tile = DeterministicChunkGenerator.GenerateTile(settings, tileX, tileY);
-                    if (tile.WaterBodyType == WaterBodyType.None)
-                    {
-                        continue;
-                    }
-
-                    overlappingWaterCandidateCount++;
-                    Assert.That(tile.Ground, Is.EqualTo(GroundType.Water));
-                }
-            }
-
-            Assert.That(
-                overlappingWaterCandidateCount,
-                Is.GreaterThan(0),
-                "試験範囲で水域と岩壁候補の重なりを確認できませんでした。");
-        }
-
-        /// <summary>
         /// 生の密度場、平滑化後の最終形状、通路削りを同じ範囲で調べ、固定図形ではない複雑な輪郭と空路が生じることを保証します。
         /// 連結成分を広域探索せず3×3近傍パターンだけを数えるため、形状退行を軽量に検出できます。
         /// </summary>
@@ -548,60 +515,6 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 4種類の基礎地形を直接分類し、通常設備・通常ベルト・橋・耐熱要件が仕様の組み合わせになることを保証します。
-        /// 生成ノイズを介さず地形契約そのものを検証するため、後続の建築処理が地形種別を再解釈する必要はありません。
-        /// </summary>
-        [Test]
-        public void GameplayFlags_ExposeExplicitPlacementAttributesForEveryGroundType()
-        {
-            TileGameplayFlags normalGround =
-                TileGameplayFlags.AllowsNormalEquipment
-                | TileGameplayFlags.AllowsNormalBelt;
-            TileGameplayFlags normalBridge = TileGameplayFlags.AllowsBridge;
-            TileGameplayFlags heatResistantBridge =
-                TileGameplayFlags.AllowsBridge
-                | TileGameplayFlags.RequiresHeatResistance;
-
-            Assert.That(
-                DeterministicChunkGenerator.ClassifyGameplayFlags(GroundType.Land),
-                Is.EqualTo(normalGround),
-                "通常地面では通常設備と通常ベルトだけを許可する必要があります。");
-            Assert.That(
-                DeterministicChunkGenerator.ClassifyGameplayFlags(GroundType.Water),
-                Is.EqualTo(normalBridge),
-                "水域では耐熱性の有無にかかわらず橋を許可する必要があります。");
-            Assert.That(
-                DeterministicChunkGenerator.ClassifyGameplayFlags(GroundType.Magma),
-                Is.EqualTo(heatResistantBridge),
-                "マグマでは耐熱性を持つ橋だけを許可できる属性が必要です。");
-            Assert.That(
-                DeterministicChunkGenerator.ClassifyGameplayFlags(GroundType.RockWall),
-                Is.EqualTo(TileGameplayFlags.None),
-                "岩壁では通常設備、通常ベルト、橋のすべてを拒否する必要があります。");
-            Assert.That(
-                DeterministicChunkGenerator.ClassifyGameplayFlags((GroundType)byte.MaxValue),
-                Is.EqualTo(TileGameplayFlags.None),
-                "未知の地形IDは配置可能として扱わず、安全側へ倒す必要があります。");
-
-            GeneratedTile equipmentTile = new GeneratedTile
-            {
-                GameplayFlags = TileGameplayFlags.AllowsNormalEquipment
-            };
-            GeneratedTile bridgeOnlyTile = new GeneratedTile
-            {
-                GameplayFlags = TileGameplayFlags.AllowsBridge
-            };
-
-            // 共通配置APIが橋用属性を誤って許可しないよう、通常設備専用の正方向属性だけを参照することを固定します。
-            Assert.That(
-                TerrainPlacementRules.Evaluate(equipmentTile, TerrainPlacementKind.NormalEquipment),
-                Is.EqualTo(TerrainPlacementResult.Allowed));
-            Assert.That(
-                TerrainPlacementRules.Evaluate(bridgeOnlyTile, TerrainPlacementKind.NormalEquipment),
-                Is.Not.EqualTo(TerrainPlacementResult.Allowed));
-        }
-
-        /// <summary>
         /// 完成済みの乾いたタイル座標を準備し、初期スポーンが余分な旧建設領域を持たず同じ座標を記録することを保証します。
         /// </summary>
         [Test]
@@ -634,75 +547,84 @@ namespace Farmware.WorldGeneration.Tests
             resourceSettings.SandThreshold = 0;
             ChunkCoordinate coordinate = new ChunkCoordinate(WorldLayer.Surface, 0, 0);
             Assert.That(
-                HydrologyDiagnosticChunk.TryGenerate(
-                    generationSettings,
-                    biomeSettings,
-                    coordinate,
-                    out HydrologyDiagnosticChunk chunk,
-                    out HydrologyDiagnosticGenerationStage stage),
-                Is.True,
-                $"完成地形チャンクを生成できませんでした。Stage={stage}");
-
-            using (chunk)
+                HydrologyDiagnosticTerrainCatalogs.TryCreate(
+                    out HydrologyDiagnosticTerrainCatalogs terrainCatalogs),
+                Is.True);
+            using (terrainCatalogs)
             {
-                int generatedResourceCount = 0;
-                for (int tileIndex = 0;
-                    tileIndex < WorldGridConstants.TilesPerChunk;
-                    tileIndex++)
-                {
-                    int localX = tileIndex % WorldGridConstants.LogicalChunkSize;
-                    int localY = tileIndex / WorldGridConstants.LogicalChunkSize;
-                    int worldX = WorldGrid.ToWorldTileX(coordinate.X, localX);
-                    int worldY = WorldGrid.ToWorldTileY(coordinate.Y, localY);
-                    GeneratedTile terrainTile = chunk.TerrainTiles[tileIndex];
-                    GeneratedResourceTile first = DeterministicResourceGenerator.GenerateResource(
-                        generationSettings,
-                        resourceSettings,
-                        terrainTile,
-                        worldX,
-                        worldY);
-                    GeneratedResourceTile second = DeterministicResourceGenerator.GenerateResource(
-                        generationSettings,
-                        resourceSettings,
-                        terrainTile,
-                        worldX,
-                        worldY);
-
-                    // 数十万回のNUnit Assert呼び出しは検証本体より重いため、不一致時だけ詳細メッセージ付きで失敗させます。
-                    if (first.Type != second.Type || first.VisualVariant != second.VisualVariant)
-                    {
-                        Assert.Fail(
-                            $"同じ入力の資源結果が一致しません。座標=({worldX}, {worldY}), "
-                            + $"first=({first.Type}, {first.VisualVariant}), "
-                            + $"second=({second.Type}, {second.VisualVariant})");
-                    }
-
-                    if (terrainTile.ResourceSuitability != ResourceSuitability.None
-                        && (terrainTile.Ground == GroundType.Water
-                            || terrainTile.Ground == GroundType.Magma))
-                    {
-                        Assert.Fail(
-                            $"水域またはマグマへ別配置資源の適性が残っています。座標=({worldX}, {worldY})");
-                    }
-
-                    if (first.Type == GeneratedResourceType.None)
-                    {
-                        continue;
-                    }
-
-                    generatedResourceCount++;
-                    ResourceSuitability requiredSuitability = ToSuitability(first.Type);
-                    if ((terrainTile.ResourceSuitability & requiredSuitability) == 0)
-                    {
-                        Assert.Fail(
-                            $"地形適性外へ資源が配置されました。座標=({worldX}, {worldY}), 資源={first.Type}");
-                    }
-                }
-
                 Assert.That(
-                    generatedResourceCount,
-                    Is.GreaterThan(0),
-                    "完成チャンク内で資源生成の有効経路を少なくとも1件検証します。");
+                    HydrologyDiagnosticChunk.TryGenerate(
+                        generationSettings,
+                        biomeSettings,
+                        coordinate,
+                        terrainCatalogs,
+                        out HydrologyDiagnosticChunk chunk,
+                        out HydrologyDiagnosticGenerationStage stage),
+                    Is.True,
+                    $"完成地形チャンクを生成できませんでした。Stage={stage}");
+
+                using (chunk)
+                {
+                    int generatedResourceCount = 0;
+                    for (int tileIndex = 0;
+                        tileIndex < WorldGridConstants.TilesPerChunk;
+                        tileIndex++)
+                    {
+                        int localX = tileIndex % WorldGridConstants.LogicalChunkSize;
+                        int localY = tileIndex / WorldGridConstants.LogicalChunkSize;
+                        int worldX = WorldGrid.ToWorldTileX(coordinate.X, localX);
+                        int worldY = WorldGrid.ToWorldTileY(coordinate.Y, localY);
+                        GeneratedTile terrainTile = chunk.TerrainTiles[tileIndex];
+                        GeneratedResourceTile first = DeterministicResourceGenerator.GenerateResource(
+                            generationSettings,
+                            resourceSettings,
+                            terrainTile,
+                            worldX,
+                            worldY);
+                        GeneratedResourceTile second = DeterministicResourceGenerator.GenerateResource(
+                            generationSettings,
+                            resourceSettings,
+                            terrainTile,
+                            worldX,
+                            worldY);
+
+                        // 数十万回のNUnit Assert呼び出しは検証本体より重いため、不一致時だけ詳細メッセージ付きで失敗させます。
+                        if (first.Type != second.Type || first.VisualVariant != second.VisualVariant)
+                        {
+                            Assert.Fail(
+                                $"同じ入力の資源結果が一致しません。座標=({worldX}, {worldY}), "
+                                + $"first=({first.Type}, {first.VisualVariant}), "
+                                + $"second=({second.Type}, {second.VisualVariant})");
+                        }
+
+                        GeneratedTerrainCell terrainCell = chunk.TerrainCells[tileIndex];
+                        if (terrainTile.ResourceSuitability != ResourceSuitability.None
+                            && (terrainCell.LiquidRuntimeId.IsValid
+                                || terrainCell.WallBlockRuntimeId.IsValid))
+                        {
+                            Assert.Fail(
+                                $"液体または壁セルへ別配置資源の適性が残っています。座標=({worldX}, {worldY})");
+                        }
+
+                        if (first.Type == GeneratedResourceType.None)
+                        {
+                            continue;
+                        }
+
+                        generatedResourceCount++;
+                        ResourceSuitability requiredSuitability = ToSuitability(first.Type);
+                        if ((terrainTile.ResourceSuitability & requiredSuitability) == 0)
+                        {
+                            Assert.Fail(
+                                $"地形適性外へ資源が配置されました。座標=({worldX}, {worldY}), 資源={first.Type}");
+                        }
+                    }
+
+                    Assert.That(
+                        generatedResourceCount,
+                        Is.GreaterThan(0),
+                        "完成チャンク内で資源生成の有効経路を少なくとも1件検証します。");
+                }
             }
         }
 
@@ -810,6 +732,8 @@ namespace Farmware.WorldGeneration.Tests
         [Test]
         public void InitialSpawnLocationSystem_RecordsCandidateFromCompletedChunk()
         {
+            using TerrainGenerationTestCatalogSet catalogs =
+                TerrainGenerationTestCatalogSet.Create();
             using World world = new World("InitialSpawnLocationSystemTests");
             EntityManager entityManager = world.EntityManager;
             WorldGenerationSettings generationSettings = WorldGenerationSettings.CreateDefault(
@@ -820,6 +744,7 @@ namespace Farmware.WorldGeneration.Tests
             entityManager.AddComponentData(settingsEntity, generationSettings);
             entityManager.AddComponentData(settingsEntity, resourceSettings);
             entityManager.AddComponentData(settingsEntity, BiomeDefinitionCatalog.CreateDefault());
+            AddTerrainCatalogComponents(entityManager, settingsEntity, catalogs);
 
             Entity chunkEntity = CreateChunkEntity(
                 entityManager,
@@ -828,7 +753,12 @@ namespace Farmware.WorldGeneration.Tests
                 ChunkGenerationPhase.ReadyToApply,
                 false);
             InitializeCompletedChunkBuffers(entityManager, chunkEntity);
-            SetInitialSpawnCandidate(entityManager, chunkEntity, 0, 0);
+            SetInitialSpawnCandidate(
+                entityManager,
+                chunkEntity,
+                catalogs.RuntimeIds.LandGround,
+                0,
+                0);
 
             SystemHandle system = world.GetOrCreateSystem<InitialSpawnLocationSystem>();
 
@@ -868,6 +798,8 @@ namespace Farmware.WorldGeneration.Tests
             int originLocalX,
             int originLocalY)
         {
+            using TerrainGenerationTestCatalogSet catalogs =
+                TerrainGenerationTestCatalogSet.Create();
             using World world = new World("InitialSpawnLocationSystem Negative Ring Test");
             EntityManager entityManager = world.EntityManager;
             Entity settingsEntity = entityManager.CreateEntity();
@@ -882,6 +814,7 @@ namespace Farmware.WorldGeneration.Tests
             entityManager.AddComponentData(
                 settingsEntity,
                 BiomeDefinitionCatalog.CreateDefault());
+            AddTerrainCatalogComponents(entityManager, settingsEntity, catalogs);
 
             Entity originChunk = Entity.Null;
             Entity negativeXChunk = Entity.Null;
@@ -910,8 +843,18 @@ namespace Farmware.WorldGeneration.Tests
 
             // 負側チャンクの候補は常に(-1, 0)です。原点チャンクを(63, 63)にしたケースでは距離で、
             // (1, 0)にしたケースでは同距離時のY・X昇順で、どちらも負側候補が先になります。
-            SetInitialSpawnCandidate(entityManager, originChunk, originLocalX, originLocalY);
-            SetInitialSpawnCandidate(entityManager, negativeXChunk, 63, 0);
+            SetInitialSpawnCandidate(
+                entityManager,
+                originChunk,
+                catalogs.RuntimeIds.LandGround,
+                originLocalX,
+                originLocalY);
+            SetInitialSpawnCandidate(
+                entityManager,
+                negativeXChunk,
+                catalogs.RuntimeIds.LandGround,
+                63,
+                0);
 
             SystemHandle system = world.GetOrCreateSystem<InitialSpawnLocationSystem>();
 
@@ -936,6 +879,8 @@ namespace Farmware.WorldGeneration.Tests
         [Test]
         public void InitialSpawnLocationSystem_ExistingLocationStopsWithoutDuplicate()
         {
+            using TerrainGenerationTestCatalogSet catalogs =
+                TerrainGenerationTestCatalogSet.Create();
             using World world = new World("InitialSpawnLocationSystem Existing Location Test");
             EntityManager entityManager = world.EntityManager;
             Entity settingsEntity = entityManager.CreateEntity();
@@ -948,6 +893,7 @@ namespace Farmware.WorldGeneration.Tests
             entityManager.AddComponentData(
                 settingsEntity,
                 BiomeDefinitionCatalog.CreateDefault());
+            AddTerrainCatalogComponents(entityManager, settingsEntity, catalogs);
 
             SystemHandle system = world.GetOrCreateSystem<InitialSpawnLocationSystem>();
 
@@ -2270,15 +2216,16 @@ namespace Farmware.WorldGeneration.Tests
             EntityManager entityManager,
             Entity chunkEntity)
         {
-            DynamicBuffer<GeneratedTile> tiles = entityManager.GetBuffer<GeneratedTile>(chunkEntity);
+            DynamicBuffer<GeneratedTerrainCell> terrainCells =
+                entityManager.GetBuffer<GeneratedTerrainCell>(chunkEntity);
             DynamicBuffer<GeneratedResourceTile> resources =
                 entityManager.GetBuffer<GeneratedResourceTile>(chunkEntity);
-            tiles.ResizeUninitialized(WorldGridConstants.TilesPerChunk);
+            terrainCells.ResizeUninitialized(WorldGridConstants.TilesPerChunk);
             resources.ResizeUninitialized(WorldGridConstants.TilesPerChunk);
             for (int index = 0; index < WorldGridConstants.TilesPerChunk; index++)
             {
-                // 既定値は移動不能かつ資源なしなので、明示した候補以外が選ばれるのを防ぎます。
-                tiles[index] = default;
+                // 既定値は地面Blockなし・資源なしなので、明示した候補以外が選ばれるのを防ぎます。
+                terrainCells[index] = default;
                 resources[index] = default;
             }
         }
@@ -2288,22 +2235,23 @@ namespace Farmware.WorldGeneration.Tests
         /// </summary>
         /// <param name="entityManager">対象地形Bufferを書き込むテストWorldのManagerです。</param>
         /// <param name="chunkEntity">候補を持たせる完成済みチャンクEntityです。</param>
+        /// <param name="landGroundRuntimeId">通行可能な通常地面のRuntime IDです。</param>
         /// <param name="localX">チャンク内の水平座標です。範囲は0〜63です。</param>
         /// <param name="localY">チャンク内の垂直座標です。範囲は0〜63です。</param>
         private static void SetInitialSpawnCandidate(
             EntityManager entityManager,
             Entity chunkEntity,
+            DefinitionRuntimeId landGroundRuntimeId,
             int localX,
             int localY)
         {
             int index = (localY * WorldGridConstants.LogicalChunkSize) + localX;
-            DynamicBuffer<GeneratedTile> tiles = entityManager.GetBuffer<GeneratedTile>(chunkEntity);
-            tiles[index] = new GeneratedTile
+            DynamicBuffer<GeneratedTerrainCell> terrainCells =
+                entityManager.GetBuffer<GeneratedTerrainCell>(chunkEntity);
+            terrainCells[index] = new GeneratedTerrainCell
             {
                 Biome = BiomeId.TemperateGrassland,
-                Ground = GroundType.Land,
-                WaterSalinity = WaterSalinity.None,
-                MovementCost = 1
+                GroundBlockRuntimeId = landGroundRuntimeId
             };
         }
 
@@ -2451,21 +2399,15 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// GeneratedTileの全フィールドを個別に比較し、失敗した分類または気候値をTest Runnerへ明示します。
+        /// GeneratedTileの全フィールドを個別に比較し、失敗したBiomeまたは環境値をTest Runnerへ明示します。
         /// </summary>
         /// <param name="expected">期待するタイル値です。</param>
         /// <param name="actual">実際に生成されたタイル値です。</param>
         private static void AssertTileEqual(GeneratedTile expected, GeneratedTile actual)
         {
             Assert.That(actual.Biome, Is.EqualTo(expected.Biome));
-            Assert.That(actual.Ground, Is.EqualTo(expected.Ground));
-            Assert.That(actual.Soil, Is.EqualTo(expected.Soil));
-            Assert.That(actual.WaterSalinity, Is.EqualTo(expected.WaterSalinity));
-            Assert.That(actual.WaterBodyType, Is.EqualTo(expected.WaterBodyType));
             Assert.That(actual.ElevationClass, Is.EqualTo(expected.ElevationClass));
-            Assert.That(actual.GameplayFlags, Is.EqualTo(expected.GameplayFlags));
             Assert.That(actual.ResourceSuitability, Is.EqualTo(expected.ResourceSuitability));
-            Assert.That(actual.MovementCost, Is.EqualTo(expected.MovementCost));
             Assert.That(actual.Elevation, Is.EqualTo(expected.Elevation));
             Assert.That(actual.Temperature, Is.EqualTo(expected.Temperature));
             Assert.That(actual.Moisture, Is.EqualTo(expected.Moisture));
@@ -2483,7 +2425,7 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// Biome分類前の基礎タイルとECS公開後の最終タイルを比べ、C5-Cが環境・地質を変更せずBiomeと地面だけを完成させることを保証します。
+        /// Biome分類前の基礎タイルとECS公開後の最終タイルを比べ、最終化が環境・地質を変更せずBiomeだけを完成させることを保証します。
         /// </summary>
         /// <param name="baseTile">水文とBiomeの確定前に生成した基礎タイルです。</param>
         /// <param name="finalTile">ChunkGenerationSystemが水文完成後に公開した最終タイルです。</param>
@@ -2513,14 +2455,12 @@ namespace Farmware.WorldGeneration.Tests
                 finalTile.GeologyErosionResistance,
                 Is.EqualTo(baseTile.GeologyErosionResistance));
 
-            if (finalTile.WaterBodyType == WaterBodyType.Sea)
-            {
-                Assert.That(finalTile.Biome, Is.EqualTo(BiomeId.None));
-            }
-            else
-            {
-                Assert.That((int)finalTile.Biome, Is.InRange(BiomeStableIds.First, BiomeStableIds.Last));
-            }
+            Assert.That(
+                finalTile.Biome == BiomeId.None
+                || ((int)finalTile.Biome >= BiomeStableIds.First
+                    && (int)finalTile.Biome <= BiomeStableIds.Last),
+                Is.True,
+                "海セルはNone、陸上セルは固定範囲内のBiomeでなければなりません。");
         }
 
         /// <summary>

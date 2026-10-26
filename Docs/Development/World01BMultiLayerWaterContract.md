@@ -57,8 +57,8 @@ WORLD-01Aで合意した固定3層、地形由来の上下遮断、施設単位�
 | 沖合深水域 | `Water` | `Water` | `Water` |
 
 - 川、池、沿岸を含む自然水域にはUnderwaterが存在する。
-- DeepSeaは`WaterBodyType.Sea`のうち、広い自然水域の沖合として決定論的に選んだセルだけに生成する。
-- 川と池には自然DeepSeaを生成しない。
+- DeepSeaは、`GeneratedTerrainCell`が海水Liquidを持ち、海域を表す`BiomeId.None`であり、広い自然水域の沖合として決定論的に選んだセルだけに生成する。
+- 淡水Liquidの河道・湖・泉には自然DeepSeaを生成しない。
 - 沖合マスクはSeed、GeneratorVersion、保存した生成設定、Layer、絶対座標、用途別Saltから求め、ロード順や隣接チャンクの生成済み状態へ依存させない。
 - 沖合の具体的なノイズ、岸からの見かけの距離、閾値は、自然3層生成を接続する際に分布監査できる調整値として決める。
 

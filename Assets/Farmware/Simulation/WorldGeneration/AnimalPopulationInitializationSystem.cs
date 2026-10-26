@@ -37,6 +37,7 @@ namespace Farmware.WorldGeneration.Animals
 
             state.RequireForUpdate<AnimalPopulationSeed>();
             state.RequireForUpdate<AnimalSpeciesCatalog>();
+            state.RequireForUpdate<TerrainBlockCatalog>();
             state.RequireForUpdate<PersistentIdAllocatorState>();
             state.RequireForUpdate<SimulationTickState>();
         }
@@ -68,7 +69,7 @@ namespace Farmware.WorldGeneration.Animals
                      SystemAPI.Query<
                              RefRO<ChunkCoordinateComponent>,
                              RefRO<ChunkGenerationStatus>>()
-                         .WithAll<GeneratedTile, GeneratedResourceTile>()
+                         .WithAll<GeneratedTerrainCell, GeneratedResourceTile>()
                          .WithNone<AnimalPopulationRegionProcessed>()
                          .WithEntityAccess())
             {
@@ -107,6 +108,8 @@ namespace Farmware.WorldGeneration.Animals
                 SystemAPI.GetSingleton<AnimalPopulationSeed>();
             AnimalSpeciesCatalog catalog =
                 SystemAPI.GetSingleton<AnimalSpeciesCatalog>();
+            BuiltInTerrainBlockRuntimeIds terrainRuntimeIds =
+                SystemAPI.GetSingleton<TerrainBlockCatalog>().BuiltInRuntimeIds;
             ulong currentTick = SystemAPI.GetSingleton<SimulationTickState>().CurrentTick;
 
             using NativeList<AnimalSpawnCandidate> candidates =
@@ -125,8 +128,8 @@ namespace Farmware.WorldGeneration.Animals
                     continue;
                 }
 
-                DynamicBuffer<GeneratedTile> tiles =
-                    state.EntityManager.GetBuffer<GeneratedTile>(pending.ChunkEntity, true);
+                DynamicBuffer<GeneratedTerrainCell> terrainCells =
+                    state.EntityManager.GetBuffer<GeneratedTerrainCell>(pending.ChunkEntity, true);
                 DynamicBuffer<GeneratedResourceTile> resources =
                     state.EntityManager.GetBuffer<GeneratedResourceTile>(pending.ChunkEntity, true);
                 AnimalPopulationRegionState regionState =
@@ -139,8 +142,9 @@ namespace Farmware.WorldGeneration.Animals
                 if (!populationSeed.IsValid
                     || !AnimalPopulationGenerator.TryAppendInitialPopulation(
                         catalog.Value,
-                        tiles.AsNativeArray(),
+                        terrainCells.AsNativeArray(),
                         resources.AsNativeArray(),
+                        terrainRuntimeIds,
                         ref regionState,
                         candidates))
                 {

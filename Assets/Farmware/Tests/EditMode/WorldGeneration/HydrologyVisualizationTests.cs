@@ -498,10 +498,16 @@ namespace Farmware.WorldGeneration.Tests
                 WorldSeedUtility.FromString("derived-hydrology-map-viewer-test"),
                 WorldGenerationSettings.CurrentGeneratorVersion);
             RecordingProgress progress = new RecordingProgress();
+            Assert.That(
+                HydrologyDiagnosticTerrainCatalogs.TryCreate(
+                    out HydrologyDiagnosticTerrainCatalogs createdCatalogs),
+                Is.True);
+            using HydrologyDiagnosticTerrainCatalogs terrainCatalogs = createdCatalogs;
 
             WorldGenerationMapSampleResult result = Task.Run(
                     () => WorldGenerationMapSampler.Sample(
                         settings,
+                        terrainCatalogs,
                         WorldLayer.Surface,
                         60,
                         0,

@@ -25,7 +25,7 @@
 
 #### 用途
 
-- 上面16pxと断面8pxを結合した16×24の仮色土地Tile、16×16の仮色液体・資源Tileを生成または更新する。土地上面は安定`BiomeId` 1〜18に対応する18種類の仮色だけで塗り、未制作Biomeを別BiomeのTileへフォールバックさせない。草、葉、砂紋などの固有模様やSoilType別派生Tileは生成しない。旧7種の土地フォールバックと旧14枚の肥沃・砂質派生アセットが存在する場合は削除する。
+- 上面16pxと断面8pxを結合した16×24の仮色土地Tile、16×16の仮色液体・資源Tileを生成または更新する。土地上面は安定`BiomeId` 1〜18に対応する18種類の仮色だけで塗り、未制作Biomeを別BiomeのTileへフォールバックさせない。草、葉、砂紋などの固有模様や旧土壌分類別の派生Tileは生成しない。旧7種の土地フォールバックと旧14枚の肥沃・砂質派生アセットが存在する場合は削除する。
 - 上面16pxと側面12pxを結合した16×28フォールバック岩壁Tile、淡水・海水・マグマ各4枚の透明フレームとAnimatedTileを生成または更新する。フォールバックは構築確認用として維持し、本番用`terrain_rock_wall_01.png`を上書きしない。
 - 本番用`terrain_rock_wall_01.png`へPoint、PPU 16、Mip Maps Off、Compression None、Full Rect、Pivot Y `8/28`を設定し、専用Tileを作成または更新する。Sprite PivotはSprite Editor Data Provider経由で設定する。
 - 新18Biomeの仮色土地Spriteを同じTextureページへ収める`GroundTerrainAtlas.spriteatlasv2`、本番用岩壁を収める`RockWallAtlas.spriteatlasv2`、共通境界14 Spriteを収める`BoundaryHighlightAtlas.spriteatlasv2`を生成または更新し、現在のBuild Target向けにパックする。C6のBlock用本番素材が未制作の間だけ、18枚の仮色土地を表示契約とAtlas検証に使う。境界PNGの画素と14分割は専用の境界生成ツールが担当し、このツールはImport済みTextureの検証・Atlas登録・同一ページ検証を担当する。
@@ -121,7 +121,7 @@ Gameビューでは`CameraPanController`の表示原点を使い、CameraとGrid
 | --- | --- |
 | `Off` | 開発者用着色を解除した通常表示 |
 | `Biome` | 現行18種の論理バイオーム。中央HUDには最終選択理由、通常首位・次点、候補数、Score、Variation、両候補の8軸適性を表示 |
-| `Soil` | 通常表示へ出さない標準、肥沃、砂質の`SoilType` |
+| `Ground Block` | 完成済み自然生成セルが参照するGroundBlock Runtime ID |
 | `Elevation` | 標高の連続値 |
 | `Environment > Base Temperature` | 標高寒冷補正前の基礎気温 |
 | `Environment > Terrain Temperature` | 標高寒冷補正後にBiome分類へ渡す地形気温 |
@@ -137,8 +137,7 @@ Gameビューでは`CameraPanController`の表示原点を使い、CameraとGrid
 | `Geology > Flags` | カルスト適性、活動的火山適性、該当なし |
 | `Geology > Dominant Site` | 支配サイトのマクロセル座標から作る安定色 |
 | `Geology > Site Boundary` | 上下左右1タイルで支配サイトが変わるセル |
-| `Water Salinity` | 陸地、淡水、海水 |
-| `Water Body` | 陸地、川、池、海 |
+| `Liquid` | 液体なし、淡水、海水、マグマのLiquid Runtime ID |
 | `Rock Wall` | 非岩壁、露出面、内部影の濃度 |
 | `Magma` | 段階5の火山中核・追加活動度下限・形状密度をすべて満たす候補、最終マグマ本体、候補外 |
 | `Resources` | 配置なし、木、石、砂の最終配置 |
@@ -323,12 +322,12 @@ Farmwareのワールドは無限なので「全体」を有限画像へ収める
 - 実設定を取得できない場合は生成を停止し、別の既定値へフォールバックしない。
 - 初回はCanvasの両辺が有限値かつ64ポイント以上になるまで生成を待ち、未確定の`NaN`寸法から1×1画像を作らない。画像完成までは地図領域の中央と画面下部へ生成進捗の割合を表示する。連続環境軸・地質の通常モードと基礎水文は完成行数、`Terrain`、`Biome`、派生水文は処理時間の大半を占める完成チャンク数へ95%、色・Hoverコピーを作る画像行へ残り5%を割り当てる。完成チャンク使用モードはGate待機開始時に1%を通知し、16行未満の低解像度でも完成まで0%のままにしない。再生成時は前の画像を維持し、下部の進捗を更新する。Hover情報は初回からBiome選択診断を含む最大17行分の高さを確保し、完成後に情報欄が地図を縮めて重い完成チャンクを二度生成しないようにする。Window最小寸法は720×700ポイントとし、地図の最小240px、Hover診断280px、ヘッダー、操作欄、状態欄を同時に表示して、親Panelのクリップで地図や診断を欠けさせない。
 
-`Terrain`はC5-Cの完成チャンクを使い、18Biomeの仮色、淡水、海水、マグマ、岩壁を優先した最終地形を表示する。C6前のためSoilType別の本番Block差分は反映せず、土壌分布はPlayMode中の`Debug Visualization > Soil`で確認する。
+`Terrain`は完成チャンクの`GeneratedTerrainCell`を使い、Liquid、Wall、Groundの優先順と18Biome色から最終地形を表示する。Hoverには同じセルのGround、Wall、Liquid、TerrainSurface Runtime IDを表示し、環境タイルから旧地形分類を再構築しない。PlayModeでは`Debug Visualization > Ground Block`と`Liquid`でBlock参照を個別に確認できる。
 `Biome`は水域や障害物の下も含む論理バイオームを表示する。`Terrain`と`Biome`のHover／中央情報は、地上タイルについて製品最終化と同じ固定入力から得た最終選択理由、通常首位・次点、候補数、Score、Variation、両候補の8軸適性を表示する。最終IDと理由は2行、各候補の名前と順位値は2行、8軸適性は候補ごとに3軸・3軸・2軸の3行へ分ける。診断全体を常に12行とし、430px幅のGameビュー内容領域で右端を切らず、Map Viewerの自動折り返しに依存しない。GameビューのDebug Visualizationは全モード共通の右上1パネルを使い、内容が描画領域の高さを超える場合だけ右端の縦スクロールバーを表示して末尾まで確認する。高さが収まる場合はバー用の幅を予約しない。ゲーム側のホイール操作と競合させないため、HUDはマウスホイールを取得せず、表示中のバーをドラッグまたはクリックした場合だけ移動する。スクロール中は文字Styleを`Clip`とし、HUDの上下枠より各2px内側へ固定した明示クリップ範囲で文字と凡例を囲んで外へ描かない。モード変更時は先頭へ戻る。パネル高は実際に描く文字列の行数から求め、末尾には6pxの余白だけを設ける。Biomeでは18Biome凡例、`Geology`・`Volcanic`・`Coastal`を含む選択診断、資源・暫定土壌までの共通詳細を同じ順序で保持し、省略しない。海域は地上Biome選択の対象外と明示する。診断値は画像生成時にManaged値へコピーし、Pointer移動ごとに完成チャンクや分類を再実行しない。`Elevation`、`Base Temperature`、`Terrain Temperature`、`Base Moisture`、`Woody Vegetation Potential`、`Terrain Ruggedness`、`Coastal Influence`、`Volcanic Activity Potential`はGameビューのDebug Visualizationと同じRGBで連続環境軸を表示する。`Geology Class`、3基礎特性、`Geology Flags`、`Geology Dominant Site`、`Geology Site Boundary`もGameビューと同じ色定義を使う。`Geology Dominant Site`の凡例色は固定の分類色ではなく、サイト座標から生成される実際の色の例であるため、地図には凡例と異なる色も表示される。同じサイトは同じ色を保ち、正確な境界確認には`Geology Site Boundary`を使う。サイト境界は広域縮小でも確認できるよう、上下左右の隣接代表サンプルとのサイト差を表示するため、Gameビューの隣接1タイル判定より太く見える場合がある。
 
 Gameビューの開発者HUDは`OnGUI`内の`UNITY_EDITOR`条件で描画開始を製品版から除外する。一方、Map Viewerと共有する副作用のないBiome診断Formatterは、Playerにも含まれるPresentation Assembly内の呼び出し元と同じコンパイル範囲へ置き、非Editorコンパイルで未定義参照を作らない。
 
-C3基礎水文5モードはGameビューと同じRGBで、流向、終端、集水面積、渓流・河川、流域・湖を表示する。`Hydrology Lake`だけはC4-Cの水収支まで生成し、一時湖、恒久塩湖、閉鎖淡水湖、越流淡水湖をGameビューと同じ色で表示する。C4派生水文5モードはC4-E1aの完成チャンクをバックグラウンドで生成・再利用し、`Hydrology Groundwater`、`Hydrology Natural Soil Saturation`、`Hydrology Spring`、`Hydrology Natural Flooding`、`Hydrology Wetland Candidate`を表示する。RGBと分類条件はC4-E2のGameビュー色変換APIを共有する。完成チャンク生成はEditorプロセス内で同時に1要求へ制限し、連続操作で取消済み要求と最新要求の大容量Native配列が重複しないようにする。取消済み要求は実行中1チャンクの完成後に終了するため、最新要求の開始まで数秒待つ場合があるが、Editorメインスレッドは停止しない。生成中に前の画像を維持する場合、Hover診断もDropdownの新モードではなく画面へ適用済みの旧画像モードを参照し、未完成の派生水文を取得失敗として表示しない。完成チャンクのNative配列は画像生成後に破棄し、Hover／中央情報には生成時にManaged値へコピーした地下水、接続状態、自然飽和、泉、自然冠水、淡水接続、湿原資格、広域規模を表示するため、Pointer移動で重い再生成を行わない。現在降雨・灌水・排水・現在土壌水分・現在水位は表示しない。基礎水文のHoverと中央情報には固定水文セルの全診断値と最終湖区分を追加し、Lake凡例では打切り流域を`Truncated basin (not a fixed lake)`として固定湖候補と区別する。木、石、砂の資源分布は現時点では対象外である。
+C3基礎水文5モードはGameビューと同じRGBで、流向、終端、集水面積、渓流・河川、流域・湖を表示する。`Hydrology Lake`だけはC4-Cの水収支まで生成し、一時湖、恒久塩湖、閉鎖淡水湖、越流淡水湖をGameビューと同じ色で表示する。C4派生水文5モードはC4-E1aの完成チャンクをバックグラウンドで生成・再利用し、`Hydrology Groundwater`、`Hydrology Natural Soil Saturation`、`Hydrology Spring`、`Hydrology Natural Flooding`、`Hydrology Wetland Candidate`を表示する。RGBと分類条件はC4-E2のGameビュー色変換APIを共有する。完成チャンク生成はEditorプロセス内で同時に1要求へ制限し、連続操作で取消済み要求と最新要求の大容量Native配列が重複しないようにする。取消済み要求は実行中1チャンクの完成後に終了するため、最新要求の開始まで数秒待つ場合があるが、Editorメインスレッドは停止しない。完成Blockセルに必要なDefinition・Terrain・材質・Palette Blobは、Unity EntitiesのBlob完成処理が内部でMain Thread限定の`Allocator.Temp`を使うため、`Task.Run`へ入る前にEditorメインスレッドで1組だけ構築する。完成済みの読み取り専用Blobを同じ画像要求の全診断チャンクで共有し、ThreadPool処理の終了を待ってから破棄する。診断チャンクのNative配列は`Persistent`で所有し、画像生成終了時に破棄する。生成中に前の画像を維持する場合、Hover診断もDropdownの新モードではなく画面へ適用済みの旧画像モードを参照し、未完成の派生水文を取得失敗として表示しない。Hover／中央情報には生成時にManaged値へコピーした地下水、接続状態、自然飽和、泉、自然冠水、淡水接続、湿原資格、広域規模を表示するため、Pointer移動で重い再生成を行わない。現在降雨・灌水・排水・現在土壌水分・現在水位は表示しない。基礎水文のHoverと中央情報には固定水文セルの全診断値と最終湖区分を追加し、Lake凡例では打切り流域を`Truncated basin (not a fixed lake)`として固定湖候補と区別する。木、石、砂の資源分布は現時点では対象外である。
 
 #### 画面上部の入力欄・ボタン
 
@@ -356,7 +355,7 @@ C3基礎水文5モードはGameビューと同じRGBで、流向、終端、集�
 
 #### 確認内容
 
-1. 原点付近と既知の遠距離座標で、Map ViewerとGameビューのバイオーム・水域・マグマ・岩壁、8つの連続環境軸、地質7モード、C3基礎水文5モード、C4派生水文5モードが一致する。Biomeモードでは同じ地上タイルの最終理由、通常首位・次点、候補数、8軸適性が両画面で一致し、海域は対象外と表示される。同じBiome内では標準・肥沃・砂質の土地表示が同じであり、`Debug Visualization > Soil`へ切り替えた場合だけ3種類を別色で確認できる。サイト境界は、Gameビューでは隣接1タイル、Map Viewerでは隣接代表サンプルという縮尺差を踏まえて同じ支配サイト変化を示す。水文Lakeでは打切り流域と固定湖候補が別色になり、一時湖、恒久塩湖、閉鎖淡水湖、越流淡水湖の色・凡例・最終区分表示が両画面で一致する。派生水文では5つの凡例、色面、Hover／中央固定値が選択モードと一致する。
+1. 原点付近と既知の遠距離座標で、Map ViewerとGameビューのバイオーム・水域・マグマ・岩壁、8つの連続環境軸、地質7モード、C3基礎水文5モード、C4派生水文5モードが一致する。Biomeモードでは同じ地上タイルの最終理由、通常首位・次点、候補数、8軸適性が両画面で一致し、海域は対象外と表示される。同じBiome内で表層パレットのGround材質が切り替わる場所は、`Debug Visualization > Ground Block`のRuntime ID色で区別できる。サイト境界は、Gameビューでは隣接1タイル、Map Viewerでは隣接代表サンプルという縮尺差を踏まえて同じ支配サイト変化を示す。水文Lakeでは打切り流域と固定湖候補が別色になり、一時湖、恒久塩湖、閉鎖淡水湖、越流淡水湖の色・凡例・最終区分表示が両画面で一致する。派生水文では5つの凡例、色面、Hover／中央固定値が選択モードと一致する。
 2. `実設定を再読込`後のSeed、WorldSeed、GeneratorVersion、設定取得元が想定どおり表示される。
 3. 負座標への移動、ドラッグ、ホイール、＋・－Buttonで中心と縮尺が正しく変化する。＋・－ButtonではTexture解像度が奇数・偶数のどちらでも中心タイル座標を動かさない。再生成直後のHover情報は、偶数解像度でもSide Panelと同じ中心座標を示す。Windowを768ポイントより大きくした場合と、生成Textureの幅または高さが奇数になる大きさにした場合のどちらでも、カーソル下の座標、グリッド、原点印が地形とずれず、正方形のグリッドが維持される。基礎水文を通常サイズで表示し、中央以外へPointerを置いてホイールズームした場合も、64サンプルのTexture上でPointer下の代表タイルを維持する。派生水文では縮尺に応じた低解像度へ切り替わっても同じ地点を維持し、連続操作時は前の要求をキャンセルして最新画像だけを反映する。
 4. 同じSeed・座標・縮尺へ戻ると同じ画像になる。
@@ -594,7 +593,7 @@ Editorツールだけで検証を完了しない。対応する自動テスト�
 - 地形タイル試作工程の材質生成設定Inspectorは2.10節のとおり、`GroundTop`・`Face`・任意`FaceBoundaryOverlay`とWall暗色化だけを扱う方式へ更新済みである。専用`WallTop`、7外周部品、共通暗色内部、47枚の材質別Wall完成Spriteは削除した。WorldLayer・絶対座標・断面段・安定材質ID・用途別SaltによるRuntimeの決定論的な均等差分選択は、表示へ接続するC6-Dで実装する。
 - TERRAIN-01C3-D2では、生成済み固定水文セルの流向・下流座標・終端・辺数・集水面積・打切り・最遠寄与距離・流出・流域・湖をGameビューとMap Viewerへ接続した。海洋流出口は流向なしの`Marine`終端、4,096辺または4,096セルで確定できない結果は`LongDrainage`または打切り色として表示する。Level 0〜6集約SummaryとLevel 0〜12 Downstream Summaryの利用・分解・キャッシュ統計は固定生成結果ではない比較実装の内部診断なので、性能テストだけで記録し表示へ混ぜない。打切られた大規模閉鎖流域は固定湖候補と別色・別理由で表示する。
 - TERRAIN-01C5では、環境として自然な直接接続を認めるv0.48の方針に合わせ、安定`BiomeId` 1〜18、全18Biomeの153ペアの境界長・接触率、両側の気温・湿度・標高と差、植生・地質・火山段階・水文・海岸条件、最終選択理由を境界診断へ追加する。C5前の旧7種や旧IDを選べるモード、凡例、配色、中央情報は残さず、旧版データは表示で補完せず版不一致として拒否する。TERRAIN-01C1で削除した旧7Biome向けの`Biome Transition`を復活させず、第三Biome強制の仕様へ戻さない。新方式では橋不足や接続例への未記載を異常表示にせず、不正候補・必須ゲート違反と、景観品質の確認事項を区別する。湿原の専用Host許可・不許可とOverlay理由、火山中核の地質・活動度を表示し、周縁リングの欠落だけをエラーにしない。153ペア監査と最終選択理由はC5の更新予定であり、C1時点で実装済みとは扱わない。
-- TERRAIN-01C6では、最終Block・Liquid表示への置換と同時に、旧`GeneratedTile.WaterBodyType`、旧River・Pond生成、旧Biome直結配色を読むモード、凡例、中央情報、互換変換を削除する。廃止を決定した14形状の接続選択処理、Ground／Wall用Tilemap、白い境界Sprite、専用Atlas、Scene参照、専用テストも旧経路として同じ変更単位で削除し、空配列やフォールバックを残さない。Wall接続では材質IDを比較せず、連続したWall領域へサブチャンク単位の固定接地影を表示し、Wall前面段数だけ手前へ投影した設置面外周から動的影を作る。比較用の旧表示切替は残さず、新しい固定水文・有効地形だけを診断の入力にする。F4のタイル・サブチャンク・チャンク境界診断は地形アートとは別機能なので維持する。
+- TERRAIN-01C6-C3で最終Block・Liquid表示へ入力を統一し、旧水域分類、旧River・Pond生成、旧Biome直結配色を読むモード、凡例、中央情報、互換変換を削除した。C6-Dでは、廃止を決定した14形状の接続選択処理、Ground／Wall用Tilemap、白い境界Sprite、専用Atlas、Scene参照、専用テストも旧経路として同じ変更単位で削除し、空配列やフォールバックを残さない。Wall接続では材質IDを比較せず、連続したWall領域へサブチャンク単位の固定接地影を表示し、Wall前面段数だけ手前へ投影した設置面外周から動的影を作る。比較用の旧表示切替は残さず、固定水文・有効地形だけを診断の入力にする。F4のタイル・サブチャンク・チャンク境界診断は地形アートとは別機能なので維持する。
 - TERRAIN-01C／GATHER-01／AUTO-01D: 編集後の隣接差分、穴・液体、反応・保留キューに加え、`LooseSurface`／`GroundEmbedded`／`WallEmbedded`／`MassiveDeposit`の形態、Host、採掘済み差分、巨大鉱床の残量・占有を表示する。自然生成Block、配置済みBlock、クラフト用資源を区別し、元生成を現在地形と誤表示しない。
 - ECO-01／JOURNAL-01: 永続／匿名、地域会計、収容数・回復、証拠判定を確認可能にする。
 - DIVE-01／VEHICLE-01: 現在Layerと直下プレビュー、遷移失敗、高速先読み・生成待ちを診断する。

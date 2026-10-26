@@ -521,11 +521,28 @@ namespace Farmware.WorldGeneration.Editor
                     false);
             });
 
+            HydrologyDiagnosticTerrainCatalogs terrainCatalogs = null;
             try
             {
+                WorldGenerationMapSamplingPath samplingPath =
+                    WorldGenerationMapViewModeCatalog.Get(viewMode).SamplingPath;
+                bool requiresCompletedTerrain = samplingPath
+                    == WorldGenerationMapSamplingPath.CompletedTerrainChunk
+                    || samplingPath == WorldGenerationMapSamplingPath.CompletedHydrologyChunk;
+                if (requiresCompletedTerrain
+                    && layer == WorldLayer.Surface
+                    && !HydrologyDiagnosticTerrainCatalogs.TryCreate(out terrainCatalogs))
+                {
+                    throw new InvalidOperationException(
+                        "Map Viewer用の地形Definitionカタログを構築できませんでした。");
+                }
+
+                // BlobBuilderの完成処理はMain Thread限定なので上で先に完了させ、
+                // ThreadPool側には読み取り専用Blobだけを渡して重いチャンク生成を続けます。
                 WorldGenerationMapSampleResult result = await Task.Run(
                     () => WorldGenerationMapSampler.Sample(
                         renderSettings,
+                        terrainCatalogs,
                         layer,
                         centerTileX,
                         centerTileY,
@@ -580,6 +597,8 @@ namespace Farmware.WorldGeneration.Editor
             }
             finally
             {
+                // awaitによりThreadPool処理が終了した後なので、読み取り中のBlobを破棄しません。
+                terrainCatalogs?.Dispose();
                 // 完了後にキューから届く進捗通知が、完了表示やエラー表示を上書きしないようにします。
                 stopwatch.Stop();
             }
@@ -935,10 +954,17 @@ namespace Farmware.WorldGeneration.Editor
 
             // 完成チャンクを使った画像では、その場で基礎地形を再生成するとBiome=Noneへ戻ってしまいます。
             // 画像作成時のC5-C確定値を優先し、環境・地質など基礎生成だけのモードでのみ純粋Generatorを呼びます。
-            bool hasTile = displayedSample.TryGetFinalizedTerrainSample(
+            bool hasFinalizedTerrain = displayedSample.TryGetFinalizedTerrainSample(
                 worldTileX,
                 worldTileY,
-                out GeneratedTile tile);
+                out FinalizedTerrainMapSample finalizedTerrainSample);
+            GeneratedTile tile = hasFinalizedTerrain
+                ? finalizedTerrainSample.Tile
+                : default;
+            GeneratedTerrainCell terrainCell = hasFinalizedTerrain
+                ? finalizedTerrainSample.TerrainCell
+                : default;
+            bool hasTile = hasFinalizedTerrain;
             if (!hasTile)
             {
                 hasTile = DeterministicChunkGenerator.TryGenerateTile(
@@ -1058,7 +1084,9 @@ namespace Farmware.WorldGeneration.Editor
 
             hoverLabel.text =
                 $"{displayedSample.Layer} / Tile ({worldTileX}, {worldTileY}) / Chunk ({chunk.X}, {chunk.Y}) / "
-                + $"Biome {tile.Biome} / Ground {tile.Ground} / Soil {tile.Soil} / Water {tile.WaterBodyType}\n"
+                + $"Biome {tile.Biome} / GroundBlock {terrainCell.GroundBlockRuntimeId.Value} / "
+                + $"WallBlock {terrainCell.WallBlockRuntimeId.Value} / Liquid {terrainCell.LiquidRuntimeId.Value} / "
+                + $"Surface {terrainCell.TerrainSurfaceRuntimeId.Value}\n"
                 + $"Elevation {tile.Elevation} ({tile.ElevationClass}) / BaseTemp {tile.Temperature} / "
                 + $"TerrainTemp {tile.TerrainTemperature} / BaseMoisture {tile.Moisture}\n"
                 + $"Woody {tile.WoodyVegetationPotential} / Ruggedness {tile.TerrainRuggedness} / "
@@ -1487,7 +1515,7 @@ namespace Farmware.WorldGeneration.Editor
             if (selectedMode == WorldGenerationMapViewMode.Terrain)
             {
                 // TerrainではBiome以外に優先表示する水域・マグマ・岩壁だけを凡例へ追加します。
-                // SoilTypeは通常地形へ反映しないため、Editor専用Debug Visualization側だけで案内します。
+                // 地表Blockは現行の暫定通常地形色へ反映しないため、完成Block IDとして案内します。
                 AddLegendRow("Fresh Water", "legend-fresh-water");
                 AddLegendRow("Salt Water", "legend-salt-water");
                 AddLegendRow("Magma", "legend-magma");

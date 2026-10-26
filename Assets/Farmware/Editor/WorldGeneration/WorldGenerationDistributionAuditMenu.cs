@@ -46,13 +46,24 @@ namespace Farmware.WorldGeneration.Editor
                 BiomeDistributionAuditSettings settings =
                     BiomeDistributionAuditSettings.CreateDefault();
                 var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+                if (!HydrologyDiagnosticTerrainCatalogs.TryCreate(
+                        out HydrologyDiagnosticTerrainCatalogs terrainCatalogs))
+                {
+                    throw new InvalidOperationException(
+                        "Biome分布監査用の地形Definitionカタログを構築できませんでした。");
+                }
 
-                // 完成チャンク再構築はUnityEngine.Objectへ触れない純粋計算なので、Editorを固めないようThreadPoolで実行できます。
-                BiomeDistributionAuditResult result = await Task.Run(
-                    () => BiomeDistributionAnalyzer.Analyze(settings));
-                stopwatch.Stop();
-                LogReport(result.Report);
-                Debug.Log($"[Farmware] Biome分布・境界監査を完了しました。実行時間={stopwatch.Elapsed.TotalSeconds:F1}秒");
+                using (terrainCatalogs)
+                {
+                    // Blob完成処理はMain Threadで済ませ、読み取り専用カタログと重い有限生成だけをThreadPoolへ渡します。
+                    BiomeDistributionAuditResult result = await Task.Run(
+                        () => BiomeDistributionAnalyzer.Analyze(
+                            settings,
+                            terrainCatalogs));
+                    stopwatch.Stop();
+                    LogReport(result.Report);
+                    Debug.Log($"[Farmware] Biome分布・境界監査を完了しました。実行時間={stopwatch.Elapsed.TotalSeconds:F1}秒");
+                }
             }
             catch (Exception exception)
             {

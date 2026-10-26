@@ -1,4 +1,4 @@
-// このファイルは、生成済みタイルまたは変更後の有効セルと配置したい対象を組み合わせ、地形だけの配置可否を純粋計算します。
+// このファイルは、変更差分適用後の有効セルと配置したい対象を組み合わせ、地形だけの配置可否を純粋計算します。
 // 後続の建築Command、初期地点探索、開発者用可視化が同じ判定を共有し、BiomeやTilemapから可否を推測しないための境界です。
 
 using Farmware.Simulation;
@@ -51,7 +51,7 @@ namespace Farmware.WorldGeneration
     }
 
     /// <summary>
-    /// GeneratedTileへ記録済みの正方向属性から、通常設備・通常ベルト・橋の配置可否を判定します。
+    /// 地形Definitionへ記録済みの正方向属性から、通常設備・通常ベルト・橋の配置可否を判定します。
     /// Entity、Tilemap、生成データを変更しないため、Simulation、Presentation、テストから同じ結果を再利用できます。
     /// </summary>
     public static class TerrainPlacementRules
@@ -149,80 +149,6 @@ namespace Farmware.WorldGeneration
                 default:
                     return TerrainPlacementResult.UnsupportedPlacementKind;
             }
-        }
-
-        /// <summary>
-        /// 生成済みタイルへ対象を配置できるか、地形属性だけから判定します。
-        /// </summary>
-        /// <param name="tile">決定論的生成器または生成済みチャンクから読み取った基礎タイルです。</param>
-        /// <param name="placementKind">配置したい通常設備、通常ベルト、橋のいずれかです。</param>
-        /// <param name="hasHeatResistance">橋定義が耐熱性を持つ場合はtrueです。橋以外では参照しません。</param>
-        /// <returns>許可、地形不可、耐熱不足、未対応種別のいずれかです。</returns>
-        public static TerrainPlacementResult Evaluate(
-            in GeneratedTile tile,
-            TerrainPlacementKind placementKind,
-            bool hasHeatResistance = false)
-        {
-            return Evaluate(tile.GameplayFlags, placementKind, hasHeatResistance);
-        }
-
-        /// <summary>
-        /// タイルから取り出した配置属性へ対象を適用し、地形だけを理由とする配置可否を判定します。
-        /// Hot Pathでも使用できるよう、管理参照や文字列を使わず値型だけで完結させます。
-        /// </summary>
-        /// <param name="gameplayFlags">生成済みタイルが保持する正方向の配置属性です。</param>
-        /// <param name="placementKind">配置したい通常設備、通常ベルト、橋のいずれかです。</param>
-        /// <param name="hasHeatResistance">橋定義が耐熱性を持つ場合はtrueです。橋以外では参照しません。</param>
-        /// <returns>許可、地形不可、耐熱不足、未対応種別のいずれかです。</returns>
-        public static TerrainPlacementResult Evaluate(
-            TileGameplayFlags gameplayFlags,
-            TerrainPlacementKind placementKind,
-            bool hasHeatResistance = false)
-        {
-            switch (placementKind)
-            {
-                case TerrainPlacementKind.NormalEquipment:
-                    return EvaluateRequiredFlag(
-                        gameplayFlags,
-                        TileGameplayFlags.AllowsNormalEquipment);
-                case TerrainPlacementKind.NormalBelt:
-                    return EvaluateRequiredFlag(
-                        gameplayFlags,
-                        TileGameplayFlags.AllowsNormalBelt);
-                case TerrainPlacementKind.Bridge:
-                    // 橋を置けない地形では、耐熱性の有無を調べる前に地形不可として返します。
-                    if ((gameplayFlags & TileGameplayFlags.AllowsBridge) == 0)
-                    {
-                        return TerrainPlacementResult.TerrainDoesNotAllowPlacement;
-                    }
-
-                    // マグマのように耐熱性を要求する地形だけ、橋定義側の能力を追加で検証します。
-                    if ((gameplayFlags & TileGameplayFlags.RequiresHeatResistance) != 0
-                        && !hasHeatResistance)
-                    {
-                        return TerrainPlacementResult.HeatResistanceRequired;
-                    }
-
-                    return TerrainPlacementResult.Allowed;
-                default:
-                    // 予約値や破損した入力を許可へ倒すと未知の建築物を置けるため、明示的な未対応結果を返します。
-                    return TerrainPlacementResult.UnsupportedPlacementKind;
-            }
-        }
-
-        /// <summary>
-        /// 通常設備または通常ベルトに必要な1つの正方向属性を確認します。
-        /// </summary>
-        /// <param name="gameplayFlags">生成済みタイルが保持する配置属性です。</param>
-        /// <param name="requiredFlag">対象を許可するために必要な1つの属性です。</param>
-        /// <returns>必要属性があればAllowed、なければTerrainDoesNotAllowPlacementです。</returns>
-        private static TerrainPlacementResult EvaluateRequiredFlag(
-            TileGameplayFlags gameplayFlags,
-            TileGameplayFlags requiredFlag)
-        {
-            return (gameplayFlags & requiredFlag) != 0
-                ? TerrainPlacementResult.Allowed
-                : TerrainPlacementResult.TerrainDoesNotAllowPlacement;
         }
 
         /// <summary>地形定義属性版の必須flag判定です。</summary>

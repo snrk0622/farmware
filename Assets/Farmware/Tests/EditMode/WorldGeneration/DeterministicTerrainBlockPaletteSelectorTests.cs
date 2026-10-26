@@ -393,7 +393,7 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 陸上セルが旧GroundTypeを読まず、純粋パレット選択と同じGround IDおよび座標由来の自然Wall IDを直接保持することを保証します。
+        /// 陸上セルが廃止済みの地面分類を読まず、純粋パレット選択と同じGround IDおよび座標由来の自然Wall IDを直接保持することを保証します。
         /// </summary>
         [Test]
         public void TerrainCellFinalizer_LandUsesPaletteBlockIdsDirectly()
@@ -465,7 +465,7 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 河道セルがBlockを残さず淡水Definitionだけを持ち、旧WaterBodyTypeのRiver変換を必要としないことを保証します。
+        /// 河道セルがBlockを残さず淡水Definitionだけを持ち、廃止済みのRiver分類変換を必要としないことを保証します。
         /// </summary>
         [Test]
         public void TerrainCellFinalizer_StreamUsesFreshWaterLiquidWithoutBlocks()

@@ -88,12 +88,22 @@ namespace Farmware.WorldGeneration.Editor
             {
                 HydrologyDistributionAuditSettings settings =
                     DerivedHydrologyDistributionAnalyzer.CreateDefaultSettings();
+                if (!HydrologyDiagnosticTerrainCatalogs.TryCreate(
+                        out HydrologyDiagnosticTerrainCatalogs terrainCatalogs))
+                {
+                    throw new InvalidOperationException(
+                        "派生水文監査用の地形Definitionカタログを構築できませんでした。");
+                }
 
-                // 完成チャンク診断器はUnityEngine.ObjectやECS Worldへ触れずPersistent配列を自己破棄するため、
-                // 3チャンクの有限生成をThreadPoolへ渡してもEditorメインスレッドの操作を妨げません。
-                DerivedHydrologyDistributionAuditResult result = await Task.Run(
-                    () => DerivedHydrologyDistributionAnalyzer.Analyze(settings));
-                Debug.Log(result.Report);
+                using (terrainCatalogs)
+                {
+                    // Blob完成処理はMain Threadで済ませ、読み取り専用カタログと重い有限生成だけをThreadPoolへ渡します。
+                    DerivedHydrologyDistributionAuditResult result = await Task.Run(
+                        () => DerivedHydrologyDistributionAnalyzer.Analyze(
+                            settings,
+                            terrainCatalogs));
+                    Debug.Log(result.Report);
+                }
             }
             catch (Exception exception)
             {

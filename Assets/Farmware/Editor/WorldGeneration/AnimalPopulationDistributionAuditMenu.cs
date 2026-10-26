@@ -34,9 +34,22 @@ namespace Farmware.WorldGeneration.Editor
             {
                 AnimalPopulationDistributionAuditSettings settings =
                     AnimalPopulationDistributionAuditSettings.CreateDefault();
-                AnimalPopulationDistributionAuditResult result = await Task.Run(
-                    () => AnimalPopulationDistributionAnalyzer.Analyze(settings));
-                Debug.Log(result.Report);
+                if (!HydrologyDiagnosticTerrainCatalogs.TryCreate(
+                        out HydrologyDiagnosticTerrainCatalogs terrainCatalogs))
+                {
+                    throw new InvalidOperationException(
+                        "動物分布監査用の地形Definitionカタログを構築できませんでした。");
+                }
+
+                using (terrainCatalogs)
+                {
+                    // Blob完成処理はMain Threadで済ませ、読み取り専用カタログと重い有限生成だけをThreadPoolへ渡します。
+                    AnimalPopulationDistributionAuditResult result = await Task.Run(
+                        () => AnimalPopulationDistributionAnalyzer.Analyze(
+                            settings,
+                            terrainCatalogs));
+                    Debug.Log(result.Report);
+                }
             }
             catch (Exception exception)
             {

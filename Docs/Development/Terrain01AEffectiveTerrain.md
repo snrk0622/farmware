@@ -33,23 +33,13 @@
 | 海水 | Liquid | 橋を許可 |
 | マグマ | Liquid | 橋を許可し耐熱を要求 |
 
-各定義は変更禁止GUID、共通RuntimeId、硬度、回収Item参照、ルール属性を持つ。硬度と回収ItemはGATHER-01、表示参照と追加パレットはTERRAIN-01C6まで未接続であり、現在の0／Invalidをゲームバランスへ流用しない。
+各定義は変更禁止GUID、共通RuntimeId、硬度、回収Item参照、ルール属性を持つ。生成パレットと暫定表示参照はC6-C3までに接続済みである。硬度と回収ItemはGATHER-01で接続するため、現在の0／Invalidをゲームバランスへ流用しない。
 
 ## 3. 現行生成からの互換変換（C6-C1で廃止）
 
-以下はTERRAIN-01A実装時点の履歴である。C6-C1では、完成Biome・地質・固定水文から`GeneratedTerrainCell`のGroundBlock、WallBlock、Liquidを直接選ぶ純粋確定処理へ置換した。`BaseTerrainCell`と`EffectiveTerrainResolver.TryCreateBaseCell`は削除され、有効地形差分は新しい生成セルを直接基準にする。C6-C2ではECSチャンクBuffer、ストリーミング寿命、生成署名、状態ハッシュへ接続した。旧`GeneratedTile`利用側の一括削除はC6-C3で完了させる。
+以下はTERRAIN-01A実装からC6-C3までの更新履歴である。C6-C1では、完成Biome・地質・固定水文から`GeneratedTerrainCell`のGroundBlock、WallBlock、Liquidを直接選ぶ純粋確定処理へ置換した。`BaseTerrainCell`と`EffectiveTerrainResolver.TryCreateBaseCell`は削除され、有効地形差分は新しい生成セルを直接基準にする。C6-C2ではECSチャンクBuffer、ストリーミング寿命、生成署名、状態ハッシュへ接続した。C6-C3では環境タイルに残っていた旧地面・土壌・水域・配置・移動分類と利用側を削除し、生成、移動、配置、動物、初期スポーン、診断、表示の入力をBlockセルへ統一した。
 
-TERRAIN-01Aでは既存Surfaceの地形生成結果と署名を変えない。`EffectiveTerrainResolver.TryCreateBaseCell`が、`GeneratedTile`を次のようにBlock区画へ分ける。
-
-| 既存分類 | GroundBlock | WallBlock | Liquid |
-| --- | --- | --- | --- |
-| Land | 通常地面 | なし | なし |
-| RockWall | 通常地面 | 自然岩壁 | なし |
-| Water＋FreshWater | なし | なし | 淡水 |
-| Water＋SaltWater | なし | なし | 海水 |
-| Magma | なし | なし | マグマ |
-
-RockWallを地面＋壁に分けることで、後続の採掘で壁だけを除去し、Biomeと歩行可能な地面を残せる。TERRAIN-01C6で生成器がBlockを直接選ぶまで、旧`GroundType`を解釈するのはこの互換境界だけとする。
+自然岩壁はGroundBlockとWallBlockを同時に持つ。後続の採掘でWallBlockだけを除去しても、Biomeと歩行可能なGroundBlockを維持できる。水域とマグマはGroundBlockを持たず、Liquid Runtime IDから淡水・海水・マグマを識別する。
 
 ## 4. 疎な変更差分
 
@@ -90,7 +80,7 @@ AI確認結果:
 - Unity 6000.3.8f1、Entities 1.5.0でスクリプトコンパイル成功。
 - `EffectiveTerrainCellTests`: 13件成功。
 - 組み込み定義、岩壁除去、淡水変換、矛盾拒否、疎な差分の整列・削除、Layer分離、移動・建築の独立、耐熱条件、状態ハッシュの作成順非依存・Layer差・組み込みID対応破損の拒否、差分Owner／Bufferの片方だけが残る不完全状態の拒否を確認。
-- Inspector由来の地形4分類をTERRAIN-01C6まで拒否するBakerテスト: 4ケース成功。
+- Inspector由来の重複地形定義を拒否し、組み込みBlock定義だけを登録するBakerテスト: 4ケース成功。
 - 全EditMode: 390件中388件成功、2件スキップ、失敗0件。
 - 全PlayMode: 直前の全体確認で56件成功、失敗・スキップ0件。今回のレビュー修正はBakerと状態ハッシュのEditMode対象であり、修正後の全PlayModeは未実施。
 - `git diff --check`: エラーなし。
@@ -101,7 +91,7 @@ AI確認結果:
 
 ## 8. 人間確認
 
-人間確認完了。SampleSceneでSurface地形、資源、鶏、F3／F4、開発者可視化、Consoleに問題がないことを確認した。`Terrain Placement`は中央HUDに`Belt`がなく、凡例が`Equipment`、`Any Bridge`、`Heat Only`、`Blocked`の4分類であることも確認済み。変更差分の画面表示はTERRAIN-01C6まで未実装であり、今回の確認対象には含めていない。
+TERRAIN-01A時点の人間確認では、SampleSceneでSurface地形、資源、鶏、F3／F4、開発者可視化、Consoleに問題がないことを確認した。`Terrain Placement`は中央HUDに`Belt`がなく、凡例が`Equipment`、`Any Bridge`、`Heat Only`、`Blocked`の4分類であることも確認済み。変更差分の生成・状態ハッシュ接続はC6-C2で完了し、C6-C3のBlock入力へ移行した実表示は今回あらためて確認する。
 
 ## 9. 未実装・残る境界
 

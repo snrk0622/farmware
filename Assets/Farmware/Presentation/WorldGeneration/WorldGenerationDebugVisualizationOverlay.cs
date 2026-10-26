@@ -34,11 +34,8 @@ namespace Farmware.WorldGeneration.Presentation
         /// <summary>水域や現在土壌水分と独立した0〜65535の基礎湿度を茶から水色のグラデーションで表示します。</summary>
         BaseMoisture = 4,
 
-        /// <summary>水域を陸地・淡水・海水の固定色で表示します。</summary>
-        WaterSalinity = 5,
-
-        /// <summary>水域の生成由来を陸地・川・池・海の固定色で表示します。</summary>
-        WaterBody = 6,
+        /// <summary>Liquid区画をなし・淡水・海水・マグマの固定色で表示します。</summary>
+        Liquid = 5,
 
         /// <summary>標高寒冷補正後の0〜65535の地形気温を青から赤のグラデーションで表示します。</summary>
         TerrainTemperature = 7,
@@ -55,8 +52,8 @@ namespace Farmware.WorldGeneration.Presentation
         /// <summary>マグマ本体、淡水抑制用の火山影響域、それ以外を固定色で表示します。</summary>
         Magma = 11,
 
-        /// <summary>プレイヤー表示へ出さない標準・肥沃・砂質のSoilTypeを固定色で表示します。</summary>
-        Soil = 12,
+        /// <summary>GroundBlock Runtime IDを安定した疑似色で表示します。</summary>
+        GroundBlock = 12,
 
         /// <summary>通常設備・橋の配置可否と、橋の耐熱要件を地形契約ごとの固定色で表示します。</summary>
         TerrainPlacement = 13,
@@ -192,6 +189,9 @@ namespace Farmware.WorldGeneration.Presentation
 
         // 動物種の適格条件を読むSingleton Queryです。候補表示を選んだRepaintだけ参照します。
         private EntityQuery animalCatalogQuery;
+
+        // BlockセルのRuntime ID検証とLiquid種別判定に使う地形定義Singleton Queryです。
+        private EntityQuery terrainCatalogQuery;
 
         // 確定済み野生動物の整数タイル座標を読むQueryです。Simulation状態は変更しません。
         private EntityQuery animalPositionQuery;
@@ -419,21 +419,23 @@ namespace Farmware.WorldGeneration.Presentation
                 if (!TryEnsureQueries())
                 {
                     DrawInformationPanel(
-                        false,
-                        default,
-                        default,
-                        default,
-                        false,
-                        default,
-                        false,
-                        default,
-                        default,
-                        default,
-                        default,
-                        default,
-                        false,
-                        default,
-                        default);
+                        hasCenterTile: false,
+                        centerCoordinate: default,
+                        centerTile: default,
+                        centerTerrainCell: default,
+                        centerResource: default,
+                        hasCenterHydrologyCell: false,
+                        centerHydrologyCell: default,
+                        hasCenterHydrologyTile: false,
+                        centerHydrologyTile: default,
+                        centerSurfaceWaterTile: default,
+                        centerRockWallAppearance: default,
+                        centerRockWallShadowOpacity: default,
+                        settings: default,
+                        terrainCatalog: default,
+                        hasBiomeSettings: false,
+                        biomeSettings: default,
+                        resourceSettings: default);
                     return;
                 }
 
@@ -483,7 +485,7 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// 指定モード、GeneratedTile、岩壁影不透明度、資源、マグマ、動物候補・確定状態からGameビューへ重ねる色を純粋計算します。
+        /// 指定モード、環境タイル、Blockセル、資源、動物候補・確定状態からGameビューへ重ねる色を純粋計算します。
         /// PlayModeテストも同じ入口を使い、凡例と実描画の対応が変わっていないことを保証します。
         /// </summary>
         /// <param name="mode">色の意味を決める可視化モードです。</param>
@@ -495,6 +497,9 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="hasConfirmedAnimal">Animal Populationモードで、確定済み個体がこのタイルに存在するならtrueです。</param>
         /// <param name="geologySite">支配サイト表示へ使用する診断専用サイト情報です。他モードでは参照しません。</param>
         /// <param name="isGeologySiteBoundary">地質サイト境界表示で、支配サイトが上下左右のいずれかと異なる場合はtrueです。</param>
+        /// <param name="terrainCell">Biomeと4区画のRuntime IDを持つ自然生成Blockセルです。</param>
+        /// <param name="terrainCatalog">配置可否をDefinition属性から求める地形カタログです。</param>
+        /// <param name="terrainRuntimeIds">淡水、海水、マグマを識別する組み込みIDです。</param>
         /// <returns>IMGUIへ設定するRGBA色です。Noneの場合は完全な透明色です。</returns>
         public static Color GetVisualizationColor(
             WorldGenerationDebugVisualizationMode mode,
@@ -505,32 +510,37 @@ namespace Farmware.WorldGeneration.Presentation
             bool isAnimalCandidate = false,
             bool hasConfirmedAnimal = false,
             GeologySiteData geologySite = default,
-            bool isGeologySiteBoundary = false)
+            bool isGeologySiteBoundary = false,
+            GeneratedTerrainCell terrainCell = default,
+            BlobAssetReference<TerrainBlockCatalogBlob> terrainCatalog = default,
+            BuiltInTerrainBlockRuntimeIds terrainRuntimeIds = default)
         {
             switch (mode)
             {
                 case WorldGenerationDebugVisualizationMode.Biome:
                     return GetBiomeVisualizationColor(tile.Biome);
 
-                case WorldGenerationDebugVisualizationMode.Soil:
-                    // SoilTypeは通常の土地Spriteへ反映しないため、生成分布を検証するときだけ専用色で区別します。
-                    if (tile.Soil == SoilType.Fertile)
-                    {
-                        return new Color32(70, 180, 82, 238);
-                    }
-
-                    if (tile.Soil == SoilType.Sandy)
-                    {
-                        return new Color32(232, 190, 80, 238);
-                    }
-
-                    return tile.Soil == SoilType.Normal
-                        ? new Color32(150, 130, 105, 238)
+                case WorldGenerationDebugVisualizationMode.GroundBlock:
+                    return terrainCell.GroundBlockRuntimeId.IsValid
+                        ? GetRuntimeIdVisualizationColor(terrainCell.GroundBlockRuntimeId)
                         : new Color32(35, 35, 42, 210);
 
                 case WorldGenerationDebugVisualizationMode.TerrainPlacement:
+                    if (!terrainCatalog.IsCreated
+                        || EffectiveTerrainResolver.TryResolve(
+                            terrainCell,
+                            false,
+                            default,
+                            terrainCatalog,
+                            out EffectiveTerrainCell effectiveCell)
+                            != EffectiveTerrainResolveResult.Success)
+                    {
+                        return new Color32(42, 42, 50, 220);
+                    }
+
                     TerrainPlacementResult equipmentResult = TerrainPlacementRules.Evaluate(
-                        tile,
+                        effectiveCell,
+                        terrainCatalog,
                         TerrainPlacementKind.NormalEquipment);
                     if (equipmentResult == TerrainPlacementResult.Allowed)
                     {
@@ -539,7 +549,8 @@ namespace Farmware.WorldGeneration.Presentation
                     }
 
                     TerrainPlacementResult bridgeResult = TerrainPlacementRules.Evaluate(
-                        tile,
+                        effectiveCell,
+                        terrainCatalog,
                         TerrainPlacementKind.Bridge,
                         hasHeatResistance: false);
                     if (bridgeResult == TerrainPlacementResult.Allowed)
@@ -548,7 +559,8 @@ namespace Farmware.WorldGeneration.Presentation
                     }
 
                     TerrainPlacementResult heatResistantBridgeResult = TerrainPlacementRules.Evaluate(
-                        tile,
+                        effectiveCell,
+                        terrainCatalog,
                         TerrainPlacementKind.Bridge,
                         hasHeatResistance: true);
                     if (heatResistantBridgeResult == TerrainPlacementResult.Allowed)
@@ -665,41 +677,30 @@ namespace Farmware.WorldGeneration.Presentation
                         ? new Color32(250, 250, 250, 248)
                         : new Color32(28, 28, 34, 180);
 
-                case WorldGenerationDebugVisualizationMode.WaterSalinity:
-                    // 通常地形でも淡水と海水を見分けられますが、専用表示では地表色を消して境界判定だけを確認しやすくします。
-                    if (tile.WaterSalinity == Farmware.WorldGeneration.WaterSalinity.FreshWater)
+                case WorldGenerationDebugVisualizationMode.Liquid:
+                    // 通常地形でも液体種を見分けられますが、専用表示では地表色を消して境界判定だけを確認しやすくします。
+                    if (terrainCell.LiquidRuntimeId.IsValid
+                        && terrainCell.LiquidRuntimeId.Value == terrainRuntimeIds.FreshWater.Value)
                     {
                         return new Color32(64, 196, 230, 238);
                     }
 
-                    if (tile.WaterSalinity == Farmware.WorldGeneration.WaterSalinity.SaltWater)
+                    if (terrainCell.LiquidRuntimeId.IsValid
+                        && terrainCell.LiquidRuntimeId.Value == terrainRuntimeIds.SaltWater.Value)
                     {
                         return new Color32(39, 99, 210, 238);
                     }
 
-                    return new Color32(45, 45, 52, 210);
-
-                case WorldGenerationDebugVisualizationMode.WaterBody:
-                    // 淡水内の川と池を別色にし、川ノイズと池ノイズの生成結果が意図どおり分離されているか確認します。
-                    if (tile.WaterBodyType == Farmware.WorldGeneration.WaterBodyType.River)
+                    if (terrainCell.LiquidRuntimeId.IsValid
+                        && terrainCell.LiquidRuntimeId.Value == terrainRuntimeIds.Magma.Value)
                     {
-                        return new Color32(60, 210, 230, 238);
-                    }
-
-                    if (tile.WaterBodyType == Farmware.WorldGeneration.WaterBodyType.Pond)
-                    {
-                        return new Color32(58, 178, 136, 238);
-                    }
-
-                    if (tile.WaterBodyType == Farmware.WorldGeneration.WaterBodyType.Sea)
-                    {
-                        return new Color32(35, 89, 204, 238);
+                        return new Color32(255, 92, 18, 245);
                     }
 
                     return new Color32(45, 45, 52, 210);
 
                 case WorldGenerationDebugVisualizationMode.RockWall:
-                    if (tile.Ground != GroundType.RockWall)
+                    if (!terrainCell.WallBlockRuntimeId.IsValid)
                     {
                         return new Color32(24, 24, 30, 150);
                     }
@@ -716,7 +717,8 @@ namespace Farmware.WorldGeneration.Presentation
                         normalizedShadow);
 
                 case WorldGenerationDebugVisualizationMode.Magma:
-                    if (tile.Ground == GroundType.Magma)
+                    if (terrainCell.LiquidRuntimeId.IsValid
+                        && terrainCell.LiquidRuntimeId.Value == terrainRuntimeIds.Magma.Value)
                     {
                         return new Color32(255, 92, 18, 245);
                     }
@@ -1003,6 +1005,31 @@ namespace Farmware.WorldGeneration.Presentation
             }
         }
 
+        /// <summary>地形DefinitionのRuntime IDを、同じIDなら常に同じになる診断色へ変換します。</summary>
+        /// <param name="runtimeId">Bakerが解決した1始まりの実行時IDです。</param>
+        /// <returns>GroundBlockの分布を隣接セル間で比較する半透明RGBA色です。</returns>
+        public static Color GetRuntimeIdVisualizationColor(DefinitionRuntimeId runtimeId)
+        {
+            if (!runtimeId.IsValid)
+            {
+                return new Color32(35, 35, 42, 210);
+            }
+
+            unchecked
+            {
+                // Runtime IDの連番が似た色へ偏らないよう整数を混ぜ、RGBを暗過ぎない範囲へ収めます。
+                uint hash = (uint)runtimeId.Value * 0x9E3779B9u;
+                hash ^= hash >> 16;
+                hash *= 0x7FEB352Du;
+                hash ^= hash >> 15;
+                return new Color32(
+                    (byte)(72 + (hash & 0x9Fu)),
+                    (byte)(72 + ((hash >> 8) & 0x9Fu)),
+                    (byte)(72 + ((hash >> 16) & 0x9Fu)),
+                    238);
+            }
+        }
+
         /// <summary>
         /// 支配地質サイトのマクロセル座標を安定した疑似色へ変換します。
         /// 同じサイトは地質分類に関係なく同じ色になり、サイト境界を目視できます。
@@ -1062,6 +1089,7 @@ namespace Farmware.WorldGeneration.Presentation
                 ComponentType.ReadOnly<ChunkCoordinateComponent>(),
                 ComponentType.ReadOnly<ChunkGenerationStatus>(),
                 ComponentType.ReadOnly<GeneratedTile>(),
+                ComponentType.ReadOnly<GeneratedTerrainCell>(),
                 ComponentType.ReadOnly<GeneratedResourceTile>(),
                 ComponentType.ReadOnly<GeneratedHydrologyCell>(),
                 ComponentType.ReadOnly<GeneratedSurfaceWaterTile>(),
@@ -1073,6 +1101,8 @@ namespace Farmware.WorldGeneration.Presentation
                 ComponentType.ReadOnly<ResourceGenerationSettings>());
             animalCatalogQuery = entityManager.CreateEntityQuery(
                 ComponentType.ReadOnly<AnimalSpeciesCatalog>());
+            terrainCatalogQuery = entityManager.CreateEntityQuery(
+                ComponentType.ReadOnly<TerrainBlockCatalog>());
             animalPositionQuery = entityManager.CreateEntityQuery(
                 ComponentType.ReadOnly<WildAnimal>(),
                 ComponentType.ReadOnly<AnimalTilePosition>());
@@ -1104,6 +1134,7 @@ namespace Farmware.WorldGeneration.Presentation
                 : default;
             bool hasCenterTile = false;
             GeneratedTile centerTile = default;
+            GeneratedTerrainCell centerTerrainCell = default;
             GeneratedResourceTile centerResource = default;
             bool hasCenterHydrologyCell = false;
             GeneratedHydrologyCell centerHydrologyCell = default;
@@ -1128,6 +1159,13 @@ namespace Farmware.WorldGeneration.Presentation
             ResourceGenerationSettings resourceSettings = hasResourceSettings
                 ? resourceSettingsQuery.GetSingleton<ResourceGenerationSettings>()
                 : default;
+            bool hasTerrainCatalog = terrainCatalogQuery.CalculateEntityCount() == 1;
+            TerrainBlockCatalog terrainCatalog = hasTerrainCatalog
+                ? terrainCatalogQuery.GetSingleton<TerrainBlockCatalog>()
+                : default;
+            hasTerrainCatalog = hasTerrainCatalog
+                && terrainCatalog.Value.IsCreated
+                && terrainCatalog.BuiltInRuntimeIds.IsValid;
             BlobAssetReference<AnimalSpeciesCatalogBlob> animalCatalog = default;
             bool hasAnimalCatalog = currentMode
                     == WorldGenerationDebugVisualizationMode.AnimalPopulation
@@ -1189,6 +1227,8 @@ namespace Farmware.WorldGeneration.Presentation
 
                 DynamicBuffer<GeneratedTile> tiles =
                     entityManager.GetBuffer<GeneratedTile>(entities[entityIndex], true);
+                DynamicBuffer<GeneratedTerrainCell> terrainCells =
+                    entityManager.GetBuffer<GeneratedTerrainCell>(entities[entityIndex], true);
                 DynamicBuffer<GeneratedResourceTile> resources =
                     entityManager.GetBuffer<GeneratedResourceTile>(entities[entityIndex], true);
                 DynamicBuffer<GeneratedSurfaceWaterTile> surfaceWaterTiles =
@@ -1196,6 +1236,7 @@ namespace Farmware.WorldGeneration.Presentation
                 DynamicBuffer<GeneratedHydrologyTile> hydrologyTiles =
                     entityManager.GetBuffer<GeneratedHydrologyTile>(entities[entityIndex], true);
                 if (tiles.Length != WorldGridConstants.TilesPerChunk
+                    || terrainCells.Length != WorldGridConstants.TilesPerChunk
                     || resources.Length != WorldGridConstants.TilesPerChunk
                     || surfaceWaterTiles.Length != WorldGridConstants.TilesPerChunk
                     || hydrologyTiles.Length != WorldGridConstants.TilesPerChunk)
@@ -1224,6 +1265,7 @@ namespace Farmware.WorldGeneration.Presentation
                         int tileX = chunkMinimumX + localX;
                         int tileIndex = (localY * WorldGridConstants.LogicalChunkSize) + localX;
                         GeneratedTile tile = tiles[tileIndex];
+                        GeneratedTerrainCell terrainCell = terrainCells[tileIndex];
                         GeneratedResourceTile resource = resources[tileIndex];
                         GeneratedSurfaceWaterTile surfaceWaterTile = surfaceWaterTiles[tileIndex];
                         GeneratedHydrologyTile hydrologyTile = hydrologyTiles[tileIndex];
@@ -1248,7 +1290,12 @@ namespace Farmware.WorldGeneration.Presentation
                                 tileY);
                         }
                         bool isAnimalCandidate = hasAnimalCatalog
-                            && IsEligibleForAnyAnimalSpecies(tile, resource, animalCatalog);
+                            && hasTerrainCatalog
+                            && IsEligibleForAnyAnimalSpecies(
+                                terrainCell,
+                                resource,
+                                terrainCatalog.BuiltInRuntimeIds,
+                                animalCatalog);
                         bool hasConfirmedAnimal = currentMode
                                 == WorldGenerationDebugVisualizationMode.AnimalPopulation
                             && animalPositionCache.Contains(currentLayer, tileX, tileY);
@@ -1295,7 +1342,10 @@ namespace Farmware.WorldGeneration.Presentation
                                 isAnimalCandidate,
                                 hasConfirmedAnimal,
                                 geologySite,
-                                isGeologySiteBoundary);
+                                isGeologySiteBoundary,
+                                terrainCell,
+                                terrainCatalog.Value,
+                                terrainCatalog.BuiltInRuntimeIds);
                         GUI.DrawTexture(CalculateTileGuiRect(tileX, tileY), Texture2D.whiteTexture);
 
                         if (hasCenterCoordinate
@@ -1304,6 +1354,7 @@ namespace Farmware.WorldGeneration.Presentation
                         {
                             hasCenterTile = true;
                             centerTile = tile;
+                            centerTerrainCell = terrainCell;
                             centerResource = resource;
                             hasCenterHydrologyCell = hasHydrologyCell;
                             centerHydrologyCell = hydrologyCell;
@@ -1335,6 +1386,7 @@ namespace Farmware.WorldGeneration.Presentation
                 hasCenterTile,
                 centerTileCoordinate,
                 centerTile,
+                centerTerrainCell,
                 centerResource,
                 hasCenterHydrologyCell,
                 centerHydrologyCell,
@@ -1344,6 +1396,7 @@ namespace Farmware.WorldGeneration.Presentation
                 centerRockWallAppearance,
                 centerRockWallShadowOpacity,
                 settings,
+                terrainCatalog,
                 hasBiomeSettings,
                 biomeSettings,
                 resourceSettings);
@@ -1374,8 +1427,8 @@ namespace Farmware.WorldGeneration.Presentation
                     continue;
                 }
 
-                DynamicBuffer<GeneratedTile> tiles =
-                    entityManager.GetBuffer<GeneratedTile>(entities[entityIndex], true);
+                DynamicBuffer<GeneratedTerrainCell> tiles =
+                    entityManager.GetBuffer<GeneratedTerrainCell>(entities[entityIndex], true);
                 if (tiles.Length != WorldGridConstants.TilesPerChunk)
                 {
                     continue;
@@ -1586,19 +1639,25 @@ namespace Farmware.WorldGeneration.Presentation
         /// <summary>
         /// 1タイルが資源に予約されておらず、いずれかの動物種のBiome・Ground条件を満たすか確認します。
         /// </summary>
-        /// <param name="tile">生成済みの地形分類です。</param>
+        /// <param name="terrainCell">生成済みの自然Blockセルです。</param>
         /// <param name="resource">同じタイルの資源予約です。動物より優先するため非空セルを候補表示しません。</param>
+        /// <param name="terrainRuntimeIds">液体種を動物用地形Maskへ対応付ける組み込みIDです。</param>
         /// <param name="catalog">Bakerが検証した動物種定義Blobです。</param>
         /// <returns>少なくとも1種の配置候補ならtrueです。</returns>
         private static bool IsEligibleForAnyAnimalSpecies(
-            GeneratedTile tile,
+            GeneratedTerrainCell terrainCell,
             GeneratedResourceTile resource,
+            in BuiltInTerrainBlockRuntimeIds terrainRuntimeIds,
             BlobAssetReference<AnimalSpeciesCatalogBlob> catalog)
         {
             ref AnimalSpeciesCatalogBlob root = ref catalog.Value;
             for (int speciesIndex = 0; speciesIndex < root.Species.Length; speciesIndex++)
             {
-                if (AnimalPopulationGenerator.IsSpawnTileEligible(tile, resource, root.Species[speciesIndex]))
+                if (AnimalPopulationGenerator.IsSpawnTileEligible(
+                    terrainCell,
+                    resource,
+                    terrainRuntimeIds,
+                    root.Species[speciesIndex]))
                 {
                     return true;
                 }
@@ -1782,6 +1841,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="hasCenterTile">中央タイルを生成済みBufferから取得できた場合はtrueです。</param>
         /// <param name="centerCoordinate">Camera中央の整数タイル座標です。</param>
         /// <param name="centerTile">取得できた中央GeneratedTileです。</param>
+        /// <param name="centerTerrainCell">取得できた中央GeneratedTerrainCellです。</param>
         /// <param name="centerResource">取得できた中央GeneratedResourceTileです。</param>
         /// <param name="hasCenterHydrologyCell">中央タイルに対応する生成済み水文セルを取得できた場合はtrueです。</param>
         /// <param name="centerHydrologyCell">中央タイルを担当する8×8水文セルの固定生成結果です。</param>
@@ -1791,6 +1851,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="centerRockWallAppearance">完成した周囲チャンクを含む中央岩壁の露出分類です。</param>
         /// <param name="centerRockWallShadowOpacity">完成地形から求めた中央岩壁影の不透明度です。</param>
         /// <param name="settings">現在の生成閾値を保持するSingleton値です。</param>
+        /// <param name="terrainCatalog">中央BlockセルのDefinitionと組み込みLiquid IDを解決するカタログです。</param>
         /// <param name="hasBiomeSettings">製品分類Jobと同じBiome設定Singletonを取得できた場合はtrueです。</param>
         /// <param name="biomeSettings">Biomeモードの中央候補診断へ使う固定Definitionです。</param>
         /// <param name="resourceSettings">現在の資源最低間隔と群半径を保持するSingleton値です。</param>
@@ -1798,6 +1859,7 @@ namespace Farmware.WorldGeneration.Presentation
             bool hasCenterTile,
             Vector3Int centerCoordinate,
             GeneratedTile centerTile,
+            GeneratedTerrainCell centerTerrainCell,
             GeneratedResourceTile centerResource,
             bool hasCenterHydrologyCell,
             GeneratedHydrologyCell centerHydrologyCell,
@@ -1807,6 +1869,7 @@ namespace Farmware.WorldGeneration.Presentation
             RockWallAppearance centerRockWallAppearance,
             float centerRockWallShadowOpacity,
             WorldGenerationSettings settings,
+            TerrainBlockCatalog terrainCatalog,
             bool hasBiomeSettings,
             BiomeClassificationSettings biomeSettings,
             ResourceGenerationSettings resourceSettings)
@@ -1853,26 +1916,45 @@ namespace Farmware.WorldGeneration.Presentation
                     centerCoordinate.y);
                 string finalState = !rockWallInfo.FinalCandidate
                     ? "Outside"
-                    : centerTile.Ground == GroundType.Water
-                        ? "Water-suppressed"
-                        : centerTile.Ground == GroundType.Magma
+                    : centerTerrainCell.LiquidRuntimeId.Value
+                            == terrainCatalog.BuiltInRuntimeIds.Magma.Value
                             ? "Magma-suppressed"
+                        : centerTerrainCell.LiquidRuntimeId.IsValid
+                            ? "Liquid-suppressed"
                         : "Rock";
                 string resourceAnchor = resourceInfo.SelectedType == GeneratedResourceType.None
                     ? "None"
                     : $"({resourceInfo.AnchorTileX}, {resourceInfo.AnchorTileY})";
                 // 中央HUDも地図の色分けと同じ共通APIを使い、地形属性bitの直接表示と最終判定が食い違わないようにします。
-                TerrainPlacementResult equipmentPlacementResult = TerrainPlacementRules.Evaluate(
-                    centerTile,
-                    TerrainPlacementKind.NormalEquipment);
-                TerrainPlacementResult bridgePlacementResult = TerrainPlacementRules.Evaluate(
-                    centerTile,
-                    TerrainPlacementKind.Bridge,
-                    hasHeatResistance: false);
-                TerrainPlacementResult heatBridgePlacementResult = TerrainPlacementRules.Evaluate(
-                    centerTile,
-                    TerrainPlacementKind.Bridge,
-                    hasHeatResistance: true);
+                EffectiveTerrainCell centerEffectiveTerrain = default;
+                bool hasEffectiveTerrain = terrainCatalog.Value.IsCreated
+                    && EffectiveTerrainResolver.TryResolve(
+                        centerTerrainCell,
+                        false,
+                        default,
+                        terrainCatalog.Value,
+                        out centerEffectiveTerrain)
+                        == EffectiveTerrainResolveResult.Success;
+                TerrainPlacementResult equipmentPlacementResult = hasEffectiveTerrain
+                    ? TerrainPlacementRules.Evaluate(
+                        centerEffectiveTerrain,
+                        terrainCatalog.Value,
+                        TerrainPlacementKind.NormalEquipment)
+                    : TerrainPlacementResult.TerrainDefinitionIsInvalid;
+                TerrainPlacementResult bridgePlacementResult = hasEffectiveTerrain
+                    ? TerrainPlacementRules.Evaluate(
+                        centerEffectiveTerrain,
+                        terrainCatalog.Value,
+                        TerrainPlacementKind.Bridge,
+                        hasHeatResistance: false)
+                    : TerrainPlacementResult.TerrainDefinitionIsInvalid;
+                TerrainPlacementResult heatBridgePlacementResult = hasEffectiveTerrain
+                    ? TerrainPlacementRules.Evaluate(
+                        centerEffectiveTerrain,
+                        terrainCatalog.Value,
+                        TerrainPlacementKind.Bridge,
+                        hasHeatResistance: true)
+                    : TerrainPlacementResult.TerrainDefinitionIsInvalid;
                 bool hasGeologyDebugInfo = DeterministicGeologyGenerator.TryGenerate(
                     settings,
                     centerCoordinate.x,
@@ -1912,8 +1994,11 @@ namespace Farmware.WorldGeneration.Presentation
 
                 // 生密度・平滑化後・通路削り・連続影値を同時に表示し、生成規則変更時の食い違いをGameビューだけで診断できます。
                 centerInformation = $"Layer={currentLayer}  Tile ({centerCoordinate.x}, {centerCoordinate.y})  "
-                    + $"Biome={centerTile.Biome}  Ground={centerTile.Ground}  Soil={centerTile.Soil}\n"
-                    + $"Water={centerTile.WaterSalinity} / {centerTile.WaterBodyType}\n"
+                    + $"Biome={centerTerrainCell.Biome}  "
+                    + $"GroundBlock={centerTerrainCell.GroundBlockRuntimeId.Value}  "
+                    + $"WallBlock={centerTerrainCell.WallBlockRuntimeId.Value}\n"
+                    + $"Liquid={centerTerrainCell.LiquidRuntimeId.Value}  "
+                    + $"Surface={centerTerrainCell.TerrainSurfaceRuntimeId.Value}\n"
                     + $"Placement: Equipment={GetPlacementResultState(equipmentPlacementResult)}\n"
                     + $"Bridge={GetPlacementResultState(bridgePlacementResult)}  "
                     + $"HeatBridge={GetPlacementResultState(heatBridgePlacementResult)}\n"
@@ -1946,7 +2031,7 @@ namespace Farmware.WorldGeneration.Presentation
                     + $"Density={magmaDensity} / {settings.MagmaNoiseThreshold}\n"
                     + $"MagmaState: Eligible={(isMagmaEligible ? "Yes" : "No")}  "
                     + $"Candidate={(isMagmaCandidate ? "Yes" : "No")}  "
-                    + $"Magma={(centerTile.Ground == GroundType.Magma ? "Yes" : "No")}\n"
+                    + $"Magma={(centerTerrainCell.LiquidRuntimeId.Value == terrainCatalog.BuiltInRuntimeIds.Magma.Value ? "Yes" : "No")}\n"
                     + $"RockSettings: Mass={settings.RockWallMassCellSizeInTiles}  "
                     + $"Detail={settings.RockWallDetailCellSizeInTiles}  "
                     + $"Warp={settings.RockWallWarpAmplitudeInTiles}  "
@@ -2399,14 +2484,9 @@ namespace Farmware.WorldGeneration.Presentation
         /// <returns>開発者向けHUDへ表示する英語名です。</returns>
         private static string GetModeDisplayName(WorldGenerationDebugVisualizationMode mode)
         {
-            if (mode == WorldGenerationDebugVisualizationMode.WaterSalinity)
+            if (mode == WorldGenerationDebugVisualizationMode.Liquid)
             {
-                return "Water Salinity";
-            }
-
-            if (mode == WorldGenerationDebugVisualizationMode.WaterBody)
-            {
-                return "Water Body";
+                return "Liquid";
             }
 
             if (mode == WorldGenerationDebugVisualizationMode.RockWall)
@@ -2579,65 +2659,37 @@ namespace Farmware.WorldGeneration.Presentation
                             185f);
                     }
                     break;
-                case WorldGenerationDebugVisualizationMode.Soil:
+                case WorldGenerationDebugVisualizationMode.GroundBlock:
                     DrawLegendEntry(
                         ref nextX,
                         y,
-                        GetVisualizationColor(mode, new GeneratedTile { Soil = SoilType.None }),
+                        GetVisualizationColor(mode, default),
                         "None",
                         62f);
                     DrawLegendEntry(
                         ref nextX,
                         y,
-                        GetVisualizationColor(mode, new GeneratedTile { Soil = SoilType.Normal }),
-                        "Normal",
-                        76f);
-                    DrawLegendEntry(
-                        ref nextX,
-                        y,
-                        GetVisualizationColor(mode, new GeneratedTile { Soil = SoilType.Fertile }),
-                        "Fertile",
-                        74f);
-                    DrawLegendEntry(
-                        ref nextX,
-                        y,
-                        GetVisualizationColor(mode, new GeneratedTile { Soil = SoilType.Sandy }),
-                        "Sandy",
-                        72f);
+                        GetRuntimeIdVisualizationColor(new DefinitionRuntimeId(1)),
+                        "Runtime ID",
+                        92f);
                     break;
                 case WorldGenerationDebugVisualizationMode.TerrainPlacement:
                     DrawLegendEntry(
                         ref nextX,
                         y,
-                        GetVisualizationColor(
-                            mode,
-                            new GeneratedTile
-                            {
-                                GameplayFlags = TileGameplayFlags.AllowsNormalEquipment
-                            }),
+                        new Color32(72, 194, 92, 242),
                         "Equipment",
                         82f);
                     DrawLegendEntry(
                         ref nextX,
                         y,
-                        GetVisualizationColor(
-                            mode,
-                            new GeneratedTile
-                            {
-                                GameplayFlags = TileGameplayFlags.AllowsBridge
-                            }),
+                        new Color32(48, 146, 226, 242),
                         "Any Bridge",
                         84f);
                     DrawLegendEntry(
                         ref nextX,
                         y,
-                        GetVisualizationColor(
-                            mode,
-                            new GeneratedTile
-                            {
-                                GameplayFlags = TileGameplayFlags.AllowsBridge
-                                    | TileGameplayFlags.RequiresHeatResistance
-                            }),
+                        new Color32(238, 82, 38, 245),
                         "Heat Only",
                         78f);
                     DrawLegendEntry(
@@ -2756,76 +2808,31 @@ namespace Farmware.WorldGeneration.Presentation
                         GetVisualizationColor(mode, default, isGeologySiteBoundary: true),
                         "Boundary", 82f);
                     break;
-                case WorldGenerationDebugVisualizationMode.WaterSalinity:
+                case WorldGenerationDebugVisualizationMode.Liquid:
                     DrawLegendEntry(
                         ref nextX,
                         y,
-                        GetVisualizationColor(mode, new GeneratedTile()),
-                        "Land",
+                        new Color32(45, 45, 52, 210),
+                        "None",
                         64f);
                     DrawLegendEntry(
                         ref nextX,
                         y,
-                        GetVisualizationColor(
-                            mode,
-                            new GeneratedTile
-                            {
-                                WaterSalinity = Farmware.WorldGeneration.WaterSalinity.FreshWater
-                            }),
+                        new Color32(64, 196, 230, 238),
                         "Fresh Water",
                         104f);
                     DrawLegendEntry(
                         ref nextX,
                         y,
-                        GetVisualizationColor(
-                            mode,
-                            new GeneratedTile
-                            {
-                                WaterSalinity = Farmware.WorldGeneration.WaterSalinity.SaltWater
-                            }),
+                        new Color32(39, 99, 210, 238),
                         "Salt Water",
                         96f);
-                    break;
-                case WorldGenerationDebugVisualizationMode.WaterBody:
                     DrawLegendEntry(
                         ref nextX,
                         y,
-                        GetVisualizationColor(mode, new GeneratedTile()),
-                        "Land",
-                        64f);
-                    DrawLegendEntry(
-                        ref nextX,
-                        y,
-                        GetVisualizationColor(
-                            mode,
-                            new GeneratedTile
-                            {
-                                WaterBodyType = Farmware.WorldGeneration.WaterBodyType.River
-                            }),
-                        "River",
-                        68f);
-                    DrawLegendEntry(
-                        ref nextX,
-                        y,
-                        GetVisualizationColor(
-                            mode,
-                            new GeneratedTile
-                            {
-                                WaterBodyType = Farmware.WorldGeneration.WaterBodyType.Pond
-                            }),
-                        "Pond",
-                        66f);
-                    DrawLegendEntry(
-                        ref nextX,
-                        y,
-                        GetVisualizationColor(
-                            mode,
-                            new GeneratedTile
-                            {
-                                WaterBodyType = Farmware.WorldGeneration.WaterBodyType.Sea
-                            }),
-                        "Sea",
-                        58f);
+                        new Color32(255, 92, 18, 245),
+                        "Magma",
+                        72f);
                     break;
                 case WorldGenerationDebugVisualizationMode.RockWall:
                     DrawLegendEntry(
@@ -2839,8 +2846,12 @@ namespace Farmware.WorldGeneration.Presentation
                         y,
                         GetVisualizationColor(
                             mode,
-                            new GeneratedTile { Ground = GroundType.RockWall },
-                            0f),
+                            default,
+                            rockWallShadowOpacity: 0f,
+                            terrainCell: new GeneratedTerrainCell
+                            {
+                                WallBlockRuntimeId = new DefinitionRuntimeId(1)
+                            }),
                         "Exposed",
                         80f);
                     DrawLegendEntry(
@@ -2848,8 +2859,12 @@ namespace Farmware.WorldGeneration.Presentation
                         y,
                         GetVisualizationColor(
                             mode,
-                            new GeneratedTile { Ground = GroundType.RockWall },
-                            RockWallAppearanceUtility.MaximumShadowOpacity),
+                            default,
+                            rockWallShadowOpacity: RockWallAppearanceUtility.MaximumShadowOpacity,
+                            terrainCell: new GeneratedTerrainCell
+                            {
+                                WallBlockRuntimeId = new DefinitionRuntimeId(1)
+                            }),
                         "Deep shadow",
                         78f);
                     break;
@@ -2869,12 +2884,7 @@ namespace Farmware.WorldGeneration.Presentation
                     DrawLegendEntry(
                         ref nextX,
                         y,
-                        GetVisualizationColor(
-                            mode,
-                            new GeneratedTile { Ground = GroundType.Magma },
-                            0f,
-                            GeneratedResourceType.None,
-                            true),
+                        new Color32(255, 92, 18, 245),
                         "Magma",
                         72f);
                     break;
@@ -3471,6 +3481,7 @@ namespace Farmware.WorldGeneration.Presentation
                 biomeSettingsQuery.Dispose();
                 resourceSettingsQuery.Dispose();
                 animalCatalogQuery.Dispose();
+                terrainCatalogQuery.Dispose();
                 animalPositionQuery.Dispose();
             }
 

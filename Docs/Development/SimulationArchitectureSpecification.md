@@ -234,7 +234,7 @@ Chunk生成Jobは再利用枠の64件水文配列と8領域の上流候補Heap�
 
 TERRAIN-01C4-A1の`DeterministicSurfaceWaterPathGenerator`は、確定済み`GeneratedHydrologyCell`のD8辺を読み、各8×8担当範囲の最低標高Anchorと、隣接2範囲を合わせた最大16×16・256タイル内の河道中心線を純粋計算する。経路ごとの`NativeArray`は呼出し側が所有し、生成順、ロード済みチャンク、Transform、現在水位を入力にしない。
 
-C4-A2の`DeterministicSurfaceWaterGenerator`は、64×64タイルから逆算した実担当水文セル9×9と、その1セル外側までの河道供給元11×11から渓流中心線、河川の上下左右1タイル幅を生成し、海面未満を除外する。中心`-4〜+3`の担当規則により正側末尾4タイルは64件のローカル水文Buffer外にある9個目のセルが担当するため、河道と湖の走査範囲をBuffer寸法から推測しない。重なりの代表値は河川、流出寄与、供給元水文セルY、Xの順で決める一方、河道中心線フラグは重なった候補間の論理和として保持する。ローカルBuffer外の正側17セルは河道走査で得た基礎水文を固定長キャッシュから湖判定へ渡し、同じ閉鎖末端を一度だけ処理する。固定湖ごとにC3-D1の正規化済み流域集合を再構築し、末端Anchorから湖面標高未満の同一流域タイルだけを8近傍Flood Fillする。水文上は陸上でも末端Anchorだけが海面未満なら、海水で分断された別タイルを代替開始点にせず、その流域の湖候補だけを空として生成を継続する。結果は1論理チャンク4096件の`GeneratedSurfaceWaterTile` Bufferへ行優先で保持し、旧`GeneratedTile.WaterBodyType`、現在水位、Tilemapへ書き戻さない。最大4,096流域セル・262,144タイルの固定上限、座標検査、固定配列を使い、途中失敗時は4 Bufferのどれも公開しない。
+C4-A2の`DeterministicSurfaceWaterGenerator`は、64×64タイルから逆算した実担当水文セル9×9と、その1セル外側までの河道供給元11×11から渓流中心線、河川の上下左右1タイル幅を生成し、海面未満を除外する。中心`-4〜+3`の担当規則により正側末尾4タイルは64件のローカル水文Buffer外にある9個目のセルが担当するため、河道と湖の走査範囲をBuffer寸法から推測しない。重なりの代表値は河川、流出寄与、供給元水文セルY、Xの順で決める一方、河道中心線フラグは重なった候補間の論理和として保持する。ローカルBuffer外の正側17セルは河道走査で得た基礎水文を固定長キャッシュから湖判定へ渡し、同じ閉鎖末端を一度だけ処理する。固定湖ごとにC3-D1の正規化済み流域集合を再構築し、末端Anchorから湖面標高未満の同一流域タイルだけを8近傍Flood Fillする。水文上は陸上でも末端Anchorだけが海面未満なら、海水で分断された別タイルを代替開始点にせず、その流域の湖候補だけを空として生成を継続する。結果は1論理チャンク4096件の`GeneratedSurfaceWaterTile` Bufferへ行優先で保持し、現在水位やTilemapへ書き戻さない。最終Liquidは固定水文から`GeneratedTerrainCell`へ直接確定する。最大4,096流域セル・262,144タイルの固定上限、座標検査、固定配列を使い、途中失敗時は関連Bufferのどれも公開しない。
 
 C4-B2で地下水涵養も同時に生成する場合は、9×9交差セルごとの涵養有無をチャンク非依存にするため、河道供給元だけを2セル外側の13×13まで広げる。隣接セル内の中心線が担当範囲の端で終わると、河川の上下左右1タイル幅が供給元から2セル先へ入る可能性があるためである。追加Haloは涵養中間値の生成時だけ使い、表流水だけのC4-A2経路は11×11のままとする。
 
@@ -318,7 +318,7 @@ WORLD-01Cでセル・チャンク座標、ストリーミング要求、動物�
 
 不変の基礎生成、可変セル差分、現在の有効セル、表示キャッシュを分離する。地形型は固定Biome、GroundBlock、WallBlock、Liquid、Surfaceを混同しない。データの正はECS／保存差分にあり、TilemapやHaloへ変更内容を逆流させない。
 
-TERRAIN-01Aでは共通`DefinitionCatalog`へ`GroundBlock`、`WallBlock`、`Liquid`、`TerrainSurface`分類を追加し、通常地面、自然岩壁、淡水、海水、マグマの変更禁止GUIDを全Worldへ登録する。`TerrainBlockCatalogBlob`は共通RuntimeId、硬度、回収Item参照、移動・設置・水密・施設境界属性をRuntimeId順で保持する。現行`GeneratedTile`は互換変換で、Landを地面、RockWallを地面＋壁、Waterを地面なし＋水種別Liquid、Magmaを地面なし＋Magmaへ分解する。TERRAIN-01Bの採用済み構成に基づいて生成器がBlockを直接選ぶことと表示参照は、TERRAIN-01C6で接続する。
+TERRAIN-01Aでは共通`DefinitionCatalog`へ`GroundBlock`、`WallBlock`、`Liquid`、`TerrainSurface`分類を追加し、通常地面、自然岩壁、淡水、海水、マグマの変更禁止GUIDを全Worldへ登録した。`TerrainBlockCatalogBlob`は共通RuntimeId、硬度、回収Item参照、移動・設置・水密・施設境界属性をRuntimeId順で保持する。C6-C3以降は完成Biome・地質・固定水文から`GeneratedTerrainCell`のGround、Wall、Liquidを直接確定し、生成、移動、配置、動物、初期スポーン、診断、暫定表示が同じBlock参照を使う。環境・地質値を保持する`GeneratedTile`から物理地形を逆算しない。
 
 TERRAIN-01C以降の地形材質は、安定材質ID、共通`TerrainBlockItem`、Ground形態Definition、Wall形態Definitionを明示的な一対一組として登録する。Ground／Wall区画と形態別属性は統合せず、インベントリだけを材質Itemへ統一する。配置Commandは変更前の有効セルを読み、GroundがなければGround形態、GroundがありWallがなければWall形態を選ぶ。液体からGroundへの置換、Item消費、差分更新、占有・依存関係Dirtyは同じトランザクションで確定し、失敗時に部分変更しない。Wall採掘はGroundを維持し、Wallが残るセルのGround掘削は拒否する。WallはGround上にだけ存在でき、GroundなしのWallとLiquidとの重複を有効セル検証で拒否する。形態間の対応を命名規則やRuntimeIdの隣接から推測しない。
 

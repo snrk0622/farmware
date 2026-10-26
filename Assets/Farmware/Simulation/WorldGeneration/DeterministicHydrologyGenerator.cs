@@ -1557,6 +1557,10 @@ namespace Farmware.WorldGeneration
                         return WorldSeedUtility.Mix64(currentHash ^ 0xC6C2FA11ED000001UL);
                     }
 
+                    // ECS公開経路と同じBlockセル由来の暫定資源適性を混合し、署名だけが旧分類へ依存しないようにします。
+                    finalizedTile.ResourceSuitability =
+                        DeterministicTerrainCellFinalizer.ClassifyInterimResourceSuitability(
+                            terrainCell);
                     // using変数のNativeArrayはreadonly扱いになるため、既存の値コピー用ヘルパー経由で書き戻します。
                     SetTerrainTile(terrainTiles, tileIndex, finalizedTile);
                     currentHash = DeterministicChunkGenerator.HashTile(currentHash, finalizedTile);
