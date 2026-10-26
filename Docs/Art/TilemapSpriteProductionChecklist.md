@@ -30,7 +30,7 @@
 
 Editorの構築メニューが `Assets/Farmware/Art/WorldGeneration/Fallback/` へ生成する、上面をBiome別の仮色一色で塗った18種類の16×24土地Tile、3種類の16×16液体Tile、1種類の16×28岩壁Tile、3種類の資源Tile、淡水・海水・マグマの各4フレームAnimatedTileは表示を成立させるための仮素材である。新18Biome土地の本番素材はまだなく、SampleSceneと`GroundTerrainAtlas`は18枚の仮色Tileを一対一で参照する。未制作Biomeを旧草原・森林等の近似Tileへフォールバックしない。本書のチェックは、本番候補へ置き換えた素材から付け、仮素材が存在するだけではチェックしない。
 
-2026-10-26時点で、`ChunkTilemapPresenter`には上面16 pxと断面8 pxを結合した土地、上面16 pxと側面12 pxを結合した岩壁、土地より8 px下へ投影する静止液面・液面アニメーション、岩壁上資源を16×16サブチャンク単位で表示・消去する仕組みを実装済みである。C6-C3で表示入力は`GeneratedTerrainCell`のGround、Wall、Liquidへ統一した。C6-Dまで維持する暫定土地Tileは論理Biome色を使い、旧土壌分類別の派生を持たない。マップ全体の賑わいとバイオームらしさは、資源、植生、動物、地形障害物、プレイヤー配置物など、配置に意味を持つ別要素で表現する。断面は隣接判定で出し分けず、画面手前の一体型ブロックが奥側の断面を隠す。`Build Fallback Map Prototype`を実行すると必要レイヤーと仮素材を再生成し、本番用バイオーム土地と岩壁をSampleSceneへ再接続できる。
+2026-10-26時点で、`ChunkTilemapPresenter`には上面16 pxと断面8 pxを結合した土地、上面16 pxと側面12 pxを結合した岩壁、土地より8 px下へ投影する静止液面・液面アニメーション、岩壁上資源を16×16サブチャンク単位で表示・消去する旧Scene経路が残っている。C6-C3で表示入力は`GeneratedTerrainCell`のGround、Wall、Liquidへ統一した。C6-D2では、完全な41材質製品カタログと専用3 Tilemapを割り当てた場合だけ、同じDirtyサブチャンク、カリング、Floating Originへ16×16の`GroundTop`、Ground崖面3段、Wall前面2段、乾燥穴の48 px減衰と深部黒を接続する製品経路を追加した。SpriteとTintの組を共有Tileへキャッシュし、セルごとのSpriteやGameObjectは作らない。41材質SpriteとAtlasを製品Sceneへ割り当てるC6-D6まではSampleSceneを旧表示のまま維持し、不完全な製品カタログを暫定Biome Tileへフォールバックさせない。旧経路の断面は隣接判定で出し分けず、画面手前の一体型ブロックが奥側の断面を隠す。`Build Fallback Map Prototype`を実行すると旧経路に必要なレイヤーと仮素材を再生成し、仮色土地と岩壁をSampleSceneへ再接続できる。
 
 ### 1.1 チェック欄の意味
 
@@ -891,7 +891,7 @@ player_drone_idle_south.png
 equipment_starting_core_active.png
 ```
 
-現在の`ChunkTilemapPresenter`は、18Biomeの16×24仮色土地を`Ground Tilemap`、淡水・海水・マグマを`Liquid Base Tilemap`へ排他的に表示する。Biome配列は安定ID 1〜18順の18要素を必須とし、欠落時に他BiomeのTileを表示しない。静止液面と透明アニメーションは論理セルを変えず画面下へ8 px移動する。岩壁セルにもBiome由来の土地ブロックを残し、16×28岩壁を`Rock Wall Tilemap`へ同じ論理座標で重ねる。GroundとRock WallはIndividual ModeかつTop Left順でセルごとにYソートし、画面奥を先、手前を後に描いて奥側の断面・側面を手前ブロックで隠す。通常Resourceは直前方の岩壁有無から背面用と前面用の固定Tilemapへ振り分け、遠方座標でも手前岩壁との前後関係を維持する。岩壁の内部影と露出資源は岩壁上面に合わせて12 px上へ表示する。境界用Tilemapには再制作した14 Spriteを接続し、8近傍47状態の選択結果を20%のAlphaで描画する。
+製品カタログ未設定時の`ChunkTilemapPresenter`は、18Biomeの16×24仮色土地を`Ground Tilemap`、淡水・海水・マグマを`Liquid Base Tilemap`へ排他的に表示する。Biome配列は安定ID 1〜18順の18要素を必須とし、欠落時に他BiomeのTileを表示しない。静止液面と透明アニメーションは論理セルを変えず画面下へ8 px移動する。岩壁セルにもBiome由来の土地ブロックを残し、16×28岩壁を`Rock Wall Tilemap`へ同じ論理座標で重ねる。GroundとRock WallはIndividual ModeかつTop Left順でセルごとにYソートし、画面奥を先、手前を後に描いて奥側の断面・側面を手前ブロックで隠す。通常Resourceは直前方の岩壁有無から背面用と前面用の固定Tilemapへ振り分け、遠方座標でも手前岩壁との前後関係を維持する。岩壁の内部影と露出資源は岩壁上面に合わせて12 px上へ表示する。境界用Tilemapには再制作した14 Spriteを接続し、8近傍47状態の選択結果を20%のAlphaで描画する。この旧表示はC6-D6の製品Scene切替と回帰確認後に、旧境界素材・選択処理と同じ変更単位で削除する。
 
 Editor構築ツールとPlayerビルド前処理は、18Biomeの仮色土地PNGを`GroundTerrainAtlas`の1ページ、岩壁を`RockWallAtlas`、再制作した14境界Spriteを`BoundaryHighlightAtlas`へ自動登録・再パックする。境界生成ツールはPNGの実画素、14分割、安定Sprite IDを更新し、SampleScene構築は同じ14参照をPresenterへ保存する。各Atlasが複数ページへ分割された場合は、テストまたはビルドを失敗させる。C6でBlock用本番素材を導入する際は、仮色Packableを同じ変更単位で置換する。
 

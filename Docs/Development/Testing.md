@@ -336,6 +336,16 @@ Sprite Packer ModeがV2であること、土地Atlasが現行Biome仮色Texture�
 
 材質専用Sourceフォルダー配下のPNGだけを対象とし、他用途の画像を変更しないことを保証する。新規64×48 px PNGへSprite Multiple、Point、16 PPU、Clamp、非圧縮、Mip Mapなし、sRGB、Read/Write有効、`Full Rect`を適用し、16×16 pxの4列×3行を上段左から安定した名前で分割する。同じパスへ修正版PNGを書き戻して再Importした後は設定変更なしとなり、全12区画のSprite IDが維持されることを確認する。既存の境界なし材質は上2行の8区画も許可する。規約外寸法と8／12以外の既存分割はSerialized参照保護のため自動修復しない。
 
+#### `TerrainMaterialProductPresentationTests`
+
+C6-D2の製品上面・断面経路を、41材質の完成Spriteを製品Sceneへ割り当てる前に純粋分類とRuntime Asset契約へ分けて検証する。Wall前面が手前2セルだけ、Ground崖面が連続する乾燥穴3セルだけへ投影され、液体やWallを越えないこと、北側チャンク境界を越えて同じ完成地形を参照することを確認する。穴上端0 px、段境界16／32 px、下端48 pxのFace Alphaが1、2/3、1/3、0となり、段ごとに濃さが戻らないことも保証する。
+
+製品Resolverについては、GroundとWall上面が同じ`GroundTop` Spriteを選び、Wall上面だけへ0.85 Tintを掛けること、Ground／Wallの1段目が用途別境界合成済みSpriteを選ぶこと、通常`Face`を暗色化しないことを確認する。Runtime Tile Cacheは同じSprite・Tint組と深部黒Tileを再利用し、セル数に比例してUnity Objectを生成しない。乾燥崖Materialが検品用ではなく製品用`Farmware/Terrain/Dry Cliff Face` Shaderを参照することもAssetDatabaseから検証する。
+
+41材質カタログ、3つの製品Tilemap、Atlasを製品Sceneへ割り当てる作業はC6-D6で行う。このためC6-D2単独では既存SampleSceneを旧表示のまま維持し、製品Gameビューの色、重なり順、48 px勾配の最終目視はC6-D6の人間確認へ残す。C6-D2ではUnity Editorの再コンパイル、上記対象テスト、既存カタログテスト、完成地形近傍テスト、Consoleのエラー・警告を確認する。
+
+2026-10-26のC6-D2 AI確認では、Unity 6000.3.8f1 Editorの再コンパイルが警告0件・エラー0件、`TerrainMaterialProductPresentationTests` 7件、`TerrainMaterialPresentationCatalogTests` 9件、`TerrainNeighborHaloUtilityTests` 12件、`ChunkLocalTilemapPresentationTests` 21件がすべて成功した。PlayMode回帰の準備BufferとPresenter所有HaloをC6-C3以前の`GeneratedTile`から現行`GeneratedTerrainCell`へ更新し、Dirtyサブチャンク、チャンク単位カリング、Floating Origin、表示プールの既存契約を再確認した。Presentation、EditMode Test、PlayMode Test Assemblyの静的ビルドも警告0件・エラー0件で、最終Consoleはエラー0件・警告0件だった。製品Sceneの実Sprite、Sorting Order、48 px Shader描画の人間確認は、41材質とAtlasを接続するC6-D6へ残す。
+
 #### `TerrainTileArtInspectionMapBuilderTests`
 
 代表5材質の固定検品Sceneを開閉せず、構築に必要なAsset契約を検証する。`GrassLoam`、`DesertSand`、`Sandstone`、`Granite`、`Basalt`の固定順と、各材質の可変長`GroundTop`・通常`Face`・全`Face×FaceBoundaryOverlay`合成結果を、固定差分数ではなく現在の登録数から保証する。境界なし材質の生成結果0枚も正常な契約として扱う。代表材質パネルは最小横8×奥行7セル、Wall前面2段、Wallの左右・奥・手前に各2セル以上の同一材質Groundを固定契約とする。同一材質のGround、暗色化Wall上面、1段目境界合成結果または通常Face、2段目通常Face、固定接地影、設置面起点の動的影の順で重ねる。動的影用`Shadow Caster 2D`はWall上面からFace 2段分手前へ置き、材質パネルごとに`Composite Shadow Caster 2D`を1個、真上と左手前のPoint Light 2Dを各1個、Scene全体にGlobal Light 2Dを1個配置することも固定契約として確認する。実景検品穴は`GrassLoam`を使い、横3×手前方向10セル、Ground崖面3段、Wall前面2段、Underwaterプレビュー開始位置が0始まり3（4段目）、水面上端のクリップが3 pxであることを固定契約として確認する。Wall折れ目影は前面2段の32pxを対象に、上端Alpha 35%、2段目開始の16px地点で連続減衰中、31px地点と到達後で0%となり、負の画素行を拒否することを検証する。1段目と2段目のMaterialには開始行0px／16pxを保存し、段境界でAlphaが濃く戻らないことを保証する。乾燥崖は上端のFace可視Alpha 100%、24 px地点50%、48 px地点0%とし、到達後のClampと負の画素深度拒否を検証する。淡水・海水の連続`Liquid深度Overlay`は、Underwater床ありでクリップ後45 px・最大Alpha 50%、床なしでクリップ後93 px・最大Alpha 100%とし、上端、到達点、到達後のClamp、負の画素深度拒否を検証する。連続深度Shader、水際波線Shader、Wall折れ目影Shader、乾燥崖用1種類、水深用3種類、波線用4種類、折れ目影用2種類の生成MaterialをAssetとして再読込できることも保証する。波線は太さ1 px、2色、奥辺48 px、左右辺157 pxを固定契約とし、置換した旧飛沫Animation資産を受理しない。淡水・海水・マグマのFallback Sprite 3枚とUnderwater配置物の仮Spriteも検証する。比較Sceneで使用する暗色化係数0.85、0.70、0.55も固定契約として検証する。固定接地影と`Shadow Caster 2D`による動的影は、代表材質パネルと専用Wall影比較Sceneの両方で扱う。本番Runtimeのサブチャンク輪郭生成と差分選択は現段階の検品Sceneテストに含めない。

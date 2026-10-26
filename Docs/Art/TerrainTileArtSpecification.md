@@ -101,6 +101,20 @@ ECSの`GroundBlockRuntimeId`と`WallBlockRuntimeId`は、41材質Blobから表�
 
 差分選択の初期Versionは1とする。ワールドシード、固定Version、WorldLayer、絶対X/Y、安定材質ID、断面段、`GroundTop`・`Face`・境界ごとの固定Saltを64bitで混合し、候補数による剰余から添字を得る。候補ごとのWeightは持たず、同一配列内の候補を同じ規則で扱う。チャンク座標、表示原点、ロード順、再描画順、Job完了順、`UnityEngine.Random`には依存しない。境界合成結果はFace候補を外側、境界候補を内側にした`faceIndex×B + boundaryIndex`の順で格納し、Editor生成とRuntime参照で同じ添字を使う。
 
+### 3.5 製品Runtimeでの上面・断面配置
+
+`ChunkTilemapPresenter`は、製品表示カタログ、Ground崖面、Wall前面、乾燥穴深部黒の3 Tilemapがすべて設定され、ECS側の41材質カタログとワールド生成設定を各1件取得できた場合だけ製品経路を有効にする。カタログやScene参照が不完全な状態で、旧Biome Tile、別材質、仮Spriteへフォールバックして表示を混在させない。41材質の完成SpriteとAtlasを製品Sceneへ割り当てる作業はC6-D6で行い、それまでは既存Sceneの旧表示を維持する。
+
+製品経路は、完成済みの中心チャンクと周囲8チャンクから次の表示を分類し、既存のDirtyな16×16サブチャンク反映、チャンク単位カリング、Floating Originへ接続する。
+
+- Groundセルは材質の`GroundTop`を上面へ置く。乾燥穴では奥側の最初のGroundセルを投影元とし、手前へ`Face`を3段まで置く。1段目だけGround用境界合成済みSpriteを使う。
+- Wallセルは同じ材質の`GroundTop`を上面へ置き、`DarkenWallSurface`が有効なら`WallDarkenFactor`をTile Tintへ乗算する。Wallの手前2セルには同じWall材質の`Face`を置き、1段目だけWall用境界合成済みSpriteを使う。`Face`本体へWall上面の暗色化を掛けない。
+- Ground崖面は液体、Wall、または別の非空地形を越えて投影しない。Wall前面はGround崖面より優先し、異材質Wall同士もWall領域として扱う。
+- 乾燥穴の全セルへ完全な黒い下地を置き、その前へ3段のGround崖面を置く。製品用`Farmware/Terrain/Dry Cliff Face` Shaderは各段の開始Alphaを1、2/3、1/3として受け取り、セル内のワールドYから1 px単位で減衰を続け、穴上端から48 pxで0にする。TilemapのTransformは整数セル境界を維持し、Ground崖面より黒下地を後ろへ描画する。
+- Tileはセルごとに生成せず、選択済みSpriteと8 bit Tintの組ごとに1個を共有する。深部黒も1個のTile、Sprite、Textureを共有し、Presenter終了またはWorld切替時にPresenterが破棄する。
+
+淡水・海水・マグマの深度、上端クリップ、水際波線、反射はC6-D3、Wallの32 px折れ目影、固定接地影、動的影はC6-D4の責務とする。C6-D2の上面・断面配置は後続表現の下地であり、論理Liquid量、通行、採掘、WorldLayer、生成済み地形Bufferを変更しない。
+
 ## 4. 手描き制作の基準
 
 ### 4.1 制作ツール

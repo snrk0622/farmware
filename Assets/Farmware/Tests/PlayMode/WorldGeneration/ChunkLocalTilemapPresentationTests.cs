@@ -521,10 +521,10 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     Y = y
                 });
             manager.SetComponentData(entity, new ChunkGenerationStatus { Phase = phase });
-            manager.AddBuffer<GeneratedTile>(entity).ResizeUninitialized(WorldGridConstants.TilesPerChunk);
+            manager.AddBuffer<GeneratedTerrainCell>(entity).ResizeUninitialized(WorldGridConstants.TilesPerChunk);
             manager.AddBuffer<GeneratedResourceTile>(entity).ResizeUninitialized(WorldGridConstants.TilesPerChunk);
-            // 分類処理の入力を未初期化メモリに依存させず、資源なし・既定値の4096セルにそろえます。
-            DynamicBuffer<GeneratedTile> terrain = manager.GetBuffer<GeneratedTile>(entity);
+            // 現行Presenterが読むBlock・Liquid地形Bufferをゼロ初期化し、分類結果を未初期化メモリへ依存させません。
+            DynamicBuffer<GeneratedTerrainCell> terrain = manager.GetBuffer<GeneratedTerrainCell>(entity);
             DynamicBuffer<GeneratedResourceTile> resources = manager.GetBuffer<GeneratedResourceTile>(entity);
             for (int index = 0; index < WorldGridConstants.TilesPerChunk; index++)
             {
@@ -553,15 +553,15 @@ namespace Farmware.WorldGeneration.PlayModeTests
         public void TerrainNeighborHalo_PresenterLifetime_ReusesUntilDestroyed()
         {
             FieldInfo field = Field("terrainNeighborHaloBuffer");
-            var halo = (Unity.Collections.NativeArray<GeneratedTile>)field.GetValue(presenter);
+            var halo = (Unity.Collections.NativeArray<GeneratedTerrainCell>)field.GetValue(presenter);
             Assert.That(halo.IsCreated, Is.True);
             Assert.That(halo.Length, Is.EqualTo(TerrainNeighborHaloUtility.TileCount));
             presenter.enabled = false;
             presenter.enabled = true;
-            halo = (Unity.Collections.NativeArray<GeneratedTile>)field.GetValue(presenter);
+            halo = (Unity.Collections.NativeArray<GeneratedTerrainCell>)field.GetValue(presenter);
             Assert.That(halo.IsCreated, Is.True);
             Object.DestroyImmediate(gridObject);
-            halo = (Unity.Collections.NativeArray<GeneratedTile>)field.GetValue(presenter);
+            halo = (Unity.Collections.NativeArray<GeneratedTerrainCell>)field.GetValue(presenter);
             Assert.That(halo.IsCreated, Is.False, "OnDestroyでPresenter所有の外周配列を解放する必要があります。");
         }
 

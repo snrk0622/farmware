@@ -119,6 +119,18 @@ namespace Farmware.WorldGeneration.Presentation
         [Tooltip("すべての岩壁へ16×28の一体型ブロックを描画する専用Tilemapです。Transformは移動せず、Sprite Pivotで12pxの高さを表します。")]
         [SerializeField] private Tilemap rockWallTilemap;
 
+        // 製品カタログ経路で、乾燥穴へ投影したGround崖面3段だけを描画します。
+        [Tooltip("製品材質のGround崖面3段を描画するTilemapです。Farmware/Terrain/Dry Cliff Face Materialを設定し、48px連続減衰を適用してください。")]
+        [SerializeField] private Tilemap groundFaceTilemap;
+
+        // 製品カタログ経路で、Wall領域の手前へ投影した前面2段だけを描画します。
+        [Tooltip("製品材質のWall前面2段を描画するTilemapです。Face本体は暗色化せず、1段目だけWall用境界合成済みSpriteを使用します。")]
+        [SerializeField] private Tilemap wallFaceTilemap;
+
+        // 乾燥穴の全セルへ黒い下地を置き、3段目の減衰後と4段目以降を完全な暗黒にします。
+        [Tooltip("製品材質の乾燥穴へ完全な黒い下地を描画するTilemapです。Ground Faceより後ろのSorting Orderへ設定してください。")]
+        [SerializeField] private Tilemap dryCliffDeepBlackTilemap;
+
         // 岩壁上に生成された資源だけを上面と同じ高さへ持ち上げ、側面へ埋まる表示を防ぎます。
         [Tooltip("露出した岩壁上の資源を岩壁上面と同じ12px上へ表示する専用Tilemapです。ゲーム状態の正には使用しません。")]
         [SerializeField] private Tilemap rockWallResourceTilemap;
@@ -143,6 +155,10 @@ namespace Farmware.WorldGeneration.Presentation
         [Min(0)]
         [Tooltip("消去済みチャンク表示を再利用する空きプールの上限（チャンク数）です。小さくするとメモリを減らせますが、再作成が増えます。")]
         [SerializeField] private int maximumPooledChunkPresentations = 8;
+
+        // 41材質を完全登録した場合だけ製品上面・断面経路を有効にします。未完成中は旧Presenterを変更しません。
+        [Tooltip("41材質を完全登録した製品表示カタログです。未設定なら旧表示を維持し、設定時は不足や不正値をフォールバックせず拒否します。")]
+        [SerializeField] private TerrainMaterialPresentationCatalog materialPresentationCatalog;
 
         // Inspectorの要求と実際にセルを書いた方式を区別し、切替前の方式で古い表示を消去します。
         private bool chunkLocalTilemapsAreActive;
@@ -225,8 +241,29 @@ namespace Farmware.WorldGeneration.Presentation
         // Liquid Runtime IDを淡水・海水・マグマ表示へ対応付けるSingleton Queryです。
         private EntityQuery terrainCatalogQuery;
 
+        // 41材質のGround／Wall Runtime IDと安定材質IDの対応を取得するSingleton Queryです。
+        private EntityQuery terrainMaterialCatalogQuery;
+
+        // 表示差分の決定論的選択へ使う保存済みWorldSeedを取得するSingleton Queryです。
+        private EntityQuery worldGenerationSettingsQuery;
+
         // 現在Worldのカタログから毎フレーム取得し、サブチャンク分類中に同じ組み込みIDを再利用します。
         private BuiltInTerrainBlockRuntimeIds terrainRuntimeIds;
+
+        // 現在Worldの41材質Blobから一度だけ構築し、セル分類中のRuntime ID解決に再利用します。
+        private TerrainMaterialPresentationRuntimeLookup materialRuntimeLookup;
+
+        // 現在Worldで固定された64bit Seedです。表示原点や描画順を候補選択へ混ぜないために保持します。
+        private ulong presentationWorldSeed;
+
+        // SpriteとTintごとのTileを共有し、セル単位のScriptableObject生成を防ぎます。
+        private TerrainMaterialRuntimeTileCache materialTileCache;
+
+        // 製品カタログ、Runtime検索表、WorldSeedの初期化を現在World向けに完了した場合はtrueです。
+        private bool materialPresentationIsReady;
+
+        // 不完全な製品設定を毎フレームConsoleへ繰り返さないため、最初の拒否理由を報告済みか保持します。
+        private bool materialPresentationFailureWasLogged;
 
         // Queryを現在のWorld向けに作成済みかを示し、未初期化のEntityQueryを使用しないために保持します。
         private bool queriesAreCreated;
@@ -287,6 +324,15 @@ namespace Farmware.WorldGeneration.Presentation
 
         // 岩壁セルだけへ一体型ブロックTileを置く256要素の再利用配列です。下層の土地はGround Tilemapへ残します。
         private TileBase[] rockWallSubChunkTileBuffer;
+
+        // 製品Ground崖面を投影先セルへ置く256要素の再利用配列です。
+        private TileBase[] groundFaceSubChunkTileBuffer;
+
+        // 製品Wall前面を投影先セルへ置く256要素の再利用配列です。
+        private TileBase[] wallFaceSubChunkTileBuffer;
+
+        // 乾燥穴の深部黒をFaceより後ろへ置く256要素の再利用配列です。
+        private TileBase[] dryCliffDeepBlackSubChunkTileBuffer;
 
         // 露出した岩壁上の資源だけを12px上へ描画する256要素の再利用配列です。
         private TileBase[] rockWallResourceSubChunkTileBuffer;
@@ -437,6 +483,42 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
+        /// Editor構築ツールまたはテストから、41材質の製品上面・断面表示を設定します。
+        /// 全参照が設定された場合だけ新経路を有効にし、不完全なカタログを旧Biome Tileへ代替しません。
+        /// </summary>
+        /// <param name="catalog">41材質を完全登録した製品表示カタログです。</param>
+        /// <param name="groundFaces">乾燥崖3段と48px連続減衰を描画するTilemapです。</param>
+        /// <param name="wallFaces">Wall前面2段を描画するTilemapです。</param>
+        /// <param name="deepBlack">乾燥穴の黒い下地を描画するTilemapです。</param>
+        public void ConfigureTerrainMaterialPresentation(
+            TerrainMaterialPresentationCatalog catalog,
+            Tilemap groundFaces,
+            Tilemap wallFaces,
+            Tilemap deepBlack)
+        {
+            bool configurationChanged = materialPresentationCatalog != catalog
+                || groundFaceTilemap != groundFaces
+                || wallFaceTilemap != wallFaces
+                || dryCliffDeepBlackTilemap != deepBlack;
+            if (!configurationChanged)
+            {
+                return;
+            }
+
+            // PlayMode中の設定変更では旧Tilemap群を同じフレームに消し、旧表示と製品表示を重ねません。
+            if (Application.isPlaying)
+            {
+                ClearAllPresentedChunksImmediately();
+            }
+
+            materialPresentationCatalog = catalog;
+            groundFaceTilemap = groundFaces;
+            wallFaceTilemap = wallFaces;
+            dryCliffDeepBlackTilemap = deepBlack;
+            ResetMaterialPresentationState(disposeTileCache: true);
+        }
+
+        /// <summary>
         /// Editor構築ツールまたはテストから、通常土地・岩壁の境界レイヤーと14基本Spriteを設定します。
         /// 配列は呼び出し元と共有せず、PlayMode中なら回転済みの実行時Tileを直ちに作り直します。
         /// </summary>
@@ -486,6 +568,9 @@ namespace Farmware.WorldGeneration.Presentation
             liquidBaseSubChunkTileBuffer = new TileBase[tileCount];
             liquidAnimationSubChunkTileBuffer = new TileBase[tileCount];
             rockWallSubChunkTileBuffer = new TileBase[tileCount];
+            groundFaceSubChunkTileBuffer = new TileBase[tileCount];
+            wallFaceSubChunkTileBuffer = new TileBase[tileCount];
+            dryCliffDeepBlackSubChunkTileBuffer = new TileBase[tileCount];
             rockWallResourceSubChunkTileBuffer = new TileBase[tileCount];
             landBoundaryHighlightSubChunkTileBuffer = new TileBase[tileCount];
             rockWallBoundaryHighlightSubChunkTileBuffer = new TileBase[tileCount];
@@ -656,13 +741,26 @@ namespace Farmware.WorldGeneration.Presentation
                     ConfigureChunkLocalPresentation(useChunkLocalTilemaps);
                 }
 
+                bool usesProductMaterialPresentation = materialPresentationCatalog != null;
+                bool missingRequiredProductLayer = usesProductMaterialPresentation
+                    && (groundFaceTilemap == null
+                        || wallFaceTilemap == null
+                        || dryCliffDeepBlackTilemap == null);
                 if (targetTilemap == null
                     || liquidBaseTilemap == null
                     || resourceTilemap == null
                     || resourceBehindRockWallTilemap == null
-                    || landBoundaryHighlightTilemap == null
-                    || rockWallBoundaryHighlightTilemap == null)
+                    || missingRequiredProductLayer
+                    || (!usesProductMaterialPresentation
+                        && (landBoundaryHighlightTilemap == null
+                            || rockWallBoundaryHighlightTilemap == null)))
                 {
+                    if (missingRequiredProductLayer)
+                    {
+                        LogMaterialPresentationFailureOnce(
+                            "製品材質表示にはGround Face、Wall Face、乾燥穴深部黒の3 Tilemapが必要です。");
+                    }
+
                     return;
                 }
 
@@ -685,6 +783,12 @@ namespace Farmware.WorldGeneration.Presentation
                     .GetSingleton<TerrainBlockCatalog>()
                     .BuiltInRuntimeIds;
                 if (!terrainRuntimeIds.IsValid)
+                {
+                    return;
+                }
+
+                if (usesProductMaterialPresentation
+                    && !TryPrepareMaterialPresentation())
                 {
                     return;
                 }
@@ -985,8 +1089,93 @@ namespace Farmware.WorldGeneration.Presentation
                 entityManager.CreateEntityQuery(ComponentType.ReadOnly<ChunkStreamingSettings>());
             terrainCatalogQuery =
                 entityManager.CreateEntityQuery(ComponentType.ReadOnly<TerrainBlockCatalog>());
+            terrainMaterialCatalogQuery =
+                entityManager.CreateEntityQuery(ComponentType.ReadOnly<TerrainBlockMaterialCatalog>());
+            worldGenerationSettingsQuery =
+                entityManager.CreateEntityQuery(ComponentType.ReadOnly<WorldGenerationSettings>());
+            ResetMaterialPresentationState(disposeTileCache: true);
             queriesAreCreated = true;
             return true;
+        }
+
+        /// <summary>
+        /// 現在Worldの41材質BlobとWorldSeedを製品カタログへ接続し、セル走査前に一度だけ検証します。
+        /// </summary>
+        /// <returns>フォールバックなしで全材質を解決できる場合はtrueです。</returns>
+        private bool TryPrepareMaterialPresentation()
+        {
+            if (materialPresentationIsReady)
+            {
+                return true;
+            }
+
+            if (materialPresentationCatalog == null)
+            {
+                return false;
+            }
+
+            if (!materialPresentationCatalog.TryInitialize(out string catalogError))
+            {
+                LogMaterialPresentationFailureOnce(catalogError);
+                return false;
+            }
+
+            if (terrainMaterialCatalogQuery.CalculateEntityCount() != 1
+                || worldGenerationSettingsQuery.CalculateEntityCount() != 1)
+            {
+                LogMaterialPresentationFailureOnce(
+                    "製品材質表示には地形材質カタログとワールド生成設定が各1件必要です。");
+                return false;
+            }
+
+            TerrainBlockMaterialCatalog runtimeCatalog =
+                terrainMaterialCatalogQuery.GetSingleton<TerrainBlockMaterialCatalog>();
+            if (!TerrainMaterialPresentationRuntimeLookup.TryCreate(
+                    runtimeCatalog.Value,
+                    out materialRuntimeLookup,
+                    out string runtimeError))
+            {
+                LogMaterialPresentationFailureOnce(runtimeError);
+                return false;
+            }
+
+            presentationWorldSeed = worldGenerationSettingsQuery
+                .GetSingleton<WorldGenerationSettings>()
+                .WorldSeed;
+            if (materialTileCache == null)
+            {
+                materialTileCache = new TerrainMaterialRuntimeTileCache();
+            }
+            materialPresentationIsReady = true;
+            return true;
+        }
+
+        /// <summary>製品材質表示の初期化状態を破棄し、Worldまたは設定変更後に再検証できる状態へ戻します。</summary>
+        /// <param name="disposeTileCache">生成済みRuntime Tileも破棄する場合はtrueです。</param>
+        private void ResetMaterialPresentationState(bool disposeTileCache)
+        {
+            materialPresentationIsReady = false;
+            materialPresentationFailureWasLogged = false;
+            materialRuntimeLookup = null;
+            presentationWorldSeed = 0UL;
+            if (disposeTileCache && materialTileCache != null)
+            {
+                materialTileCache.Dispose();
+                materialTileCache = null;
+            }
+        }
+
+        /// <summary>不完全な製品設定を最初の1回だけConsoleへ報告し、毎フレームの同文エラーを防ぎます。</summary>
+        /// <param name="reason">人間がカタログまたはScene参照を修正できる具体的な拒否理由です。</param>
+        private void LogMaterialPresentationFailureOnce(string reason)
+        {
+            if (materialPresentationFailureWasLogged)
+            {
+                return;
+            }
+
+            materialPresentationFailureWasLogged = true;
+            Debug.LogError($"地形材質の製品表示を開始できません。{reason}", this);
         }
 
         /// <summary>
@@ -1237,7 +1426,8 @@ namespace Farmware.WorldGeneration.Presentation
                     coordinate,
                     progress.NextSubChunkIndex,
                     terrainCells,
-                    resources);
+                    resources,
+                    preparedNeighborhood);
                 progress.NextSubChunkIndex++;
                 remainingBudget--;
 
@@ -1301,11 +1491,13 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="subChunkIndex">行優先の0〜15サブチャンク番号です。</param>
         /// <param name="terrainCells">4096件の自然生成BlockセルBufferです。</param>
         /// <param name="resources">地形と同じ行優先4096件の生成済み資源Bufferです。</param>
+        /// <param name="terrainNeighborhood">中心と周囲8チャンクの完成地形です。最大3段の断面投影に使用します。</param>
         private void ApplySubChunk(
             ChunkCoordinate coordinate,
             int subChunkIndex,
             DynamicBuffer<GeneratedTerrainCell> terrainCells,
-            DynamicBuffer<GeneratedResourceTile> resources)
+            DynamicBuffer<GeneratedResourceTile> resources,
+            in CompletedChunkTerrainNeighborhood terrainNeighborhood)
         {
             int subChunkX = subChunkIndex % WorldGridConstants.SubChunksPerAxis;
             int subChunkY = subChunkIndex / WorldGridConstants.SubChunksPerAxis;
@@ -1331,51 +1523,67 @@ namespace Farmware.WorldGeneration.Presentation
                             terrainNeighborHaloBuffer);
                         bool isLiquid = terrainCell.LiquidRuntimeId.IsValid;
 
-                        BoundaryHighlightSelection landBoundarySelection = default;
-                        BoundaryHighlightSelection rockWallBoundarySelection = default;
-                        if (terrainCell.GroundBlockRuntimeId.IsValid
-                            || terrainCell.WallBlockRuntimeId.IsValid)
+                        groundFaceSubChunkTileBuffer[destinationIndex] = null;
+                        wallFaceSubChunkTileBuffer[destinationIndex] = null;
+                        dryCliffDeepBlackSubChunkTileBuffer[destinationIndex] = null;
+
+                        bool isRockWall = terrainCell.WallBlockRuntimeId.IsValid;
+                        if (materialPresentationIsReady)
                         {
-                            // 内部は現在のECS Buffer、外周は同じ反映バッチで一度だけ生成した値を読み、ロード順へ依存しません。
-                            TerrainNeighborTiles neighbors = GetTerrainNeighborTiles(
+                            // 製品経路は上面・断面・深部黒を分離し、境界あり1段目も合成済みSprite 1枚として選びます。
+                            ClassifyProductMaterialTiles(
+                                coordinate,
                                 tileLocalX,
                                 tileLocalY,
-                                terrainCells,
-                                terrainNeighborHaloBuffer);
-                            if (!terrainCell.WallBlockRuntimeId.IsValid)
+                                destinationIndex,
+                                terrainCell,
+                                terrainNeighborhood);
+                            landBoundaryHighlightSubChunkTileBuffer[destinationIndex] = null;
+                            rockWallBoundaryHighlightSubChunkTileBuffer[destinationIndex] = null;
+                        }
+                        else
+                        {
+                            BoundaryHighlightSelection landBoundarySelection = default;
+                            BoundaryHighlightSelection rockWallBoundarySelection = default;
+                            if (terrainCell.GroundBlockRuntimeId.IsValid
+                                || terrainCell.WallBlockRuntimeId.IsValid)
                             {
-                                landBoundarySelection =
-                                    TerrainBoundaryHighlightUtility.SelectLand(terrainCell, neighbors);
+                                // 内部は現在のECS Buffer、外周は同じ反映バッチで一度だけ生成した値を読み、ロード順へ依存しません。
+                                TerrainNeighborTiles neighbors = GetTerrainNeighborTiles(
+                                    tileLocalX,
+                                    tileLocalY,
+                                    terrainCells,
+                                    terrainNeighborHaloBuffer);
+                                if (!isRockWall)
+                                {
+                                    landBoundarySelection =
+                                        TerrainBoundaryHighlightUtility.SelectLand(terrainCell, neighbors);
+                                }
+                                else
+                                {
+                                    rockWallBoundarySelection =
+                                        TerrainBoundaryHighlightUtility.SelectRockWall(terrainCell, neighbors);
+                                }
                             }
-                            else
-                            {
-                                rockWallBoundarySelection =
-                                    TerrainBoundaryHighlightUtility.SelectRockWall(terrainCell, neighbors);
-                            }
+
+                            // 全41材質と製品Sceneを接続するまでは、既存の一体型土地・岩壁表示を維持します。
+                            subChunkTileBuffer[destinationIndex] = isLiquid
+                                ? null
+                                : SelectLandTile(terrainCell);
+                            rockWallSubChunkTileBuffer[destinationIndex] = isRockWall
+                                ? rockWallTile
+                                : null;
+                            landBoundaryHighlightSubChunkTileBuffer[destinationIndex] =
+                                SelectBoundaryHighlightTile(landBoundarySelection);
+                            rockWallBoundaryHighlightSubChunkTileBuffer[destinationIndex] =
+                                SelectBoundaryHighlightTile(rockWallBoundarySelection);
                         }
 
-                        // 土地Spriteは上面と断面を一体化し、液体だけを別Tilemapで8px下へ投影します。
-                        // Individual ModeとTop Left順により、画面奥の行から先に描きます。
-                        // 画面手前の土地ブロックを後から重ねることで、奥側の不要な断面を自然に隠します。
-                        subChunkTileBuffer[destinationIndex] = isLiquid
-                            ? null
-                            : SelectLandTile(terrainCell);
                         liquidBaseSubChunkTileBuffer[destinationIndex] = isLiquid
                             ? SelectLiquidBaseTile(terrainCell)
                             : null;
                         liquidAnimationSubChunkTileBuffer[destinationIndex] =
                             SelectLiquidAnimationTile(terrainCell);
-
-                        // 岩壁セルにもBiome由来の16×24土地ブロックを残し、その上へ16×28岩壁ブロックを重ねます。
-                        // 岩壁SpriteのPivotが側面12px分の高さを表すため、Tilemap Transform自体は基準面から動かしません。
-                        bool isRockWall = terrainCell.WallBlockRuntimeId.IsValid;
-                        rockWallSubChunkTileBuffer[destinationIndex] = isRockWall
-                            ? rockWallTile
-                            : null;
-                        landBoundaryHighlightSubChunkTileBuffer[destinationIndex] =
-                            SelectBoundaryHighlightTile(landBoundarySelection);
-                        rockWallBoundaryHighlightSubChunkTileBuffer[destinationIndex] =
-                            SelectBoundaryHighlightTile(rockWallBoundarySelection);
 
                         // 内部影に覆われる資源アイコンだけを隠します。ECSの資源データと露出面の表示は維持します。
                         TileBase selectedResource =
@@ -1432,6 +1640,22 @@ namespace Farmware.WorldGeneration.Presentation
                     WriteSubChunkLayer(coordinate, rockWallTilemap, bounds, rockWallSubChunkTileBuffer);
                 }
 
+                WriteSubChunkLayer(
+                    coordinate,
+                    groundFaceTilemap,
+                    bounds,
+                    groundFaceSubChunkTileBuffer);
+                WriteSubChunkLayer(
+                    coordinate,
+                    wallFaceTilemap,
+                    bounds,
+                    wallFaceSubChunkTileBuffer);
+                WriteSubChunkLayer(
+                    coordinate,
+                    dryCliffDeepBlackTilemap,
+                    bounds,
+                    dryCliffDeepBlackSubChunkTileBuffer);
+
                 if (rockWallResourceTilemap != null)
                 {
                     WriteSubChunkLayer(coordinate, rockWallResourceTilemap, bounds, rockWallResourceSubChunkTileBuffer);
@@ -1444,6 +1668,158 @@ namespace Farmware.WorldGeneration.Presentation
                     bounds,
                     rockWallBoundaryHighlightSubChunkTileBuffer);
             }
+        }
+
+        /// <summary>
+        /// 1セル分の製品上面、Ground崖面、Wall前面、乾燥穴の黒下地を再利用Tileへ分類します。
+        /// </summary>
+        /// <param name="chunkCoordinate">絶対座標へ戻す対象論理チャンクです。</param>
+        /// <param name="localX">チャンク内の表示対象Xです。</param>
+        /// <param name="localY">チャンク内の表示対象Yです。</param>
+        /// <param name="destinationIndex">256要素の再利用配列へ書く位置です。</param>
+        /// <param name="terrainCell">現在表示セルの完成済み地形です。</param>
+        /// <param name="terrainNeighborhood">最大3段奥の投影元を含む完成地形近傍です。</param>
+        private void ClassifyProductMaterialTiles(
+            ChunkCoordinate chunkCoordinate,
+            int localX,
+            int localY,
+            int destinationIndex,
+            GeneratedTerrainCell terrainCell,
+            in CompletedChunkTerrainNeighborhood terrainNeighborhood)
+        {
+            subChunkTileBuffer[destinationIndex] = null;
+            rockWallSubChunkTileBuffer[destinationIndex] = null;
+
+            if (!WorldGrid.TryToWorldTileCoordinate(
+                    chunkCoordinate.X,
+                    chunkCoordinate.Y,
+                    localX,
+                    localY,
+                    out int worldX,
+                    out int worldY))
+            {
+                return;
+            }
+
+            var currentCoordinate = new WorldTileCoordinate(
+                chunkCoordinate.Layer,
+                worldX,
+                worldY);
+            bool isWall = terrainCell.WallBlockRuntimeId.IsValid;
+            bool isLiquid = terrainCell.LiquidRuntimeId.IsValid;
+
+            if (isWall)
+            {
+                if (TerrainMaterialProductTileResolver.TryResolveTop(
+                        materialPresentationCatalog,
+                        materialRuntimeLookup,
+                        presentationWorldSeed,
+                        currentCoordinate,
+                        terrainCell.WallBlockRuntimeId,
+                        forWall: true,
+                        out TerrainMaterialProductTileSelection wallTop))
+                {
+                    rockWallSubChunkTileBuffer[destinationIndex] =
+                        materialTileCache.GetOrCreate(wallTop);
+                }
+            }
+            else if (!isLiquid && terrainCell.GroundBlockRuntimeId.IsValid)
+            {
+                if (TerrainMaterialProductTileResolver.TryResolveTop(
+                        materialPresentationCatalog,
+                        materialRuntimeLookup,
+                        presentationWorldSeed,
+                        currentCoordinate,
+                        terrainCell.GroundBlockRuntimeId,
+                        forWall: false,
+                        out TerrainMaterialProductTileSelection groundTop))
+                {
+                    subChunkTileBuffer[destinationIndex] =
+                        materialTileCache.GetOrCreate(groundTop);
+                }
+            }
+
+            bool isDryVoid = TerrainMaterialVerticalProjectionUtility.IsDryVoid(terrainCell);
+            dryCliffDeepBlackSubChunkTileBuffer[destinationIndex] = isDryVoid
+                ? materialTileCache.GetOrCreateDeepBlackTile()
+                : null;
+
+            // Wall前面はGroundや乾燥穴の上にも投影できるため、同じセルでGround崖面より優先します。
+            if (TerrainMaterialVerticalProjectionUtility.TryProjectWallFace(
+                    terrainNeighborhood,
+                    localX,
+                    localY,
+                    out TerrainMaterialFaceProjection wallProjection)
+                && TryCreateFaceSourceCoordinate(
+                    chunkCoordinate,
+                    wallProjection,
+                    out WorldTileCoordinate wallSourceCoordinate)
+                && TerrainMaterialProductTileResolver.TryResolveFace(
+                    materialPresentationCatalog,
+                    materialRuntimeLookup,
+                    presentationWorldSeed,
+                    wallSourceCoordinate,
+                    wallProjection.SourceCell.WallBlockRuntimeId,
+                    wallProjection.FaceDepth,
+                    forWall: true,
+                    out TerrainMaterialProductTileSelection wallFace))
+            {
+                wallFaceSubChunkTileBuffer[destinationIndex] =
+                    materialTileCache.GetOrCreate(wallFace);
+                return;
+            }
+
+            if (TerrainMaterialVerticalProjectionUtility.TryProjectGroundFace(
+                    terrainNeighborhood,
+                    localX,
+                    localY,
+                    out TerrainMaterialFaceProjection groundProjection)
+                && TryCreateFaceSourceCoordinate(
+                    chunkCoordinate,
+                    groundProjection,
+                    out WorldTileCoordinate groundSourceCoordinate)
+                && TerrainMaterialProductTileResolver.TryResolveFace(
+                    materialPresentationCatalog,
+                    materialRuntimeLookup,
+                    presentationWorldSeed,
+                    groundSourceCoordinate,
+                    groundProjection.SourceCell.GroundBlockRuntimeId,
+                    groundProjection.FaceDepth,
+                    forWall: false,
+                    out TerrainMaterialProductTileSelection groundFace))
+            {
+                groundFaceSubChunkTileBuffer[destinationIndex] =
+                    materialTileCache.GetOrCreate(groundFace);
+            }
+        }
+
+        /// <summary>チャンク外を含む投影元ローカル座標を、レイヤー付き絶対座標へ安全に変換します。</summary>
+        /// <param name="chunkCoordinate">表示対象の中心論理チャンクです。</param>
+        /// <param name="projection">中心基準の投影元ローカル座標です。</param>
+        /// <param name="sourceCoordinate">成功時に決定論的Sprite選択へ使う絶対座標を受け取ります。</param>
+        /// <returns>int座標域の内側ならtrueです。</returns>
+        private static bool TryCreateFaceSourceCoordinate(
+            ChunkCoordinate chunkCoordinate,
+            TerrainMaterialFaceProjection projection,
+            out WorldTileCoordinate sourceCoordinate)
+        {
+            sourceCoordinate = default;
+            if (!WorldGrid.TryToWorldTileCoordinate(
+                    chunkCoordinate.X,
+                    chunkCoordinate.Y,
+                    projection.SourceLocalX,
+                    projection.SourceLocalY,
+                    out int worldX,
+                    out int worldY))
+            {
+                return false;
+            }
+
+            sourceCoordinate = new WorldTileCoordinate(
+                chunkCoordinate.Layer,
+                worldX,
+                worldY);
+            return true;
         }
 
         /// <summary>
@@ -1550,6 +1926,21 @@ namespace Farmware.WorldGeneration.Presentation
                 if (rockWallTilemap != null)
                 {
                     rockWallTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
+                }
+
+                if (groundFaceTilemap != null)
+                {
+                    groundFaceTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
+                }
+
+                if (wallFaceTilemap != null)
+                {
+                    wallFaceTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
+                }
+
+                if (dryCliffDeepBlackTilemap != null)
+                {
+                    dryCliffDeepBlackTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
                 }
 
                 if (rockWallResourceTilemap != null)
@@ -1683,13 +2074,14 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// 新しい表示単位を作るときだけ、Scene上の9レイヤーを固定順で取得します。毎フレームの反映・消去では配列を作りません。
+        /// 新しい表示単位を作るときだけ、Scene上の旧9レイヤーと製品断面3レイヤーを固定順で取得します。毎フレームの反映・消去では配列を作りません。
         /// </summary>
         /// <returns>表示設定の見本です。セル内容はコピーしません。</returns>
         private Tilemap[] GetTilemapTemplates()
         {
             return new[] { targetTilemap, liquidBaseTilemap, resourceTilemap, resourceBehindRockWallTilemap,
-                liquidAnimationTilemap, rockWallTilemap, rockWallResourceTilemap,
+                liquidAnimationTilemap, rockWallTilemap, groundFaceTilemap, wallFaceTilemap,
+                dryCliffDeepBlackTilemap, rockWallResourceTilemap,
                 landBoundaryHighlightTilemap, rockWallBoundaryHighlightTilemap };
         }
 
@@ -2443,10 +2835,13 @@ namespace Farmware.WorldGeneration.Presentation
                 observerQuery.Dispose();
                 streamingSettingsQuery.Dispose();
                 terrainCatalogQuery.Dispose();
+                terrainMaterialCatalogQuery.Dispose();
+                worldGenerationSettingsQuery.Dispose();
             }
 
             queriesAreCreated = false;
             presentationWorld = null;
+            ResetMaterialPresentationState(disposeTileCache: true);
         }
 
         /// <summary>
