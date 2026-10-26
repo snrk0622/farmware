@@ -1,4 +1,4 @@
-// このファイルは、GrassLoam固定検品マップの素材契約、3段の崖勾配、連続水深、U字の仮波線、Wall上面暗化を検証します。
+// このファイルは、代表5材質の固定順・可変長素材契約・同一地面上の2段Wall・固定接地影・動的影検品レイアウトと、GrassLoamを使う3段の崖勾配、連続水深、U字の仮波線、Wall上面暗化、8pxのWall折れ目影を検証します。
 // Scene自体は開閉せず、現在のUnity Editor作業状態を変えないAsset検証と固定値確認だけを実行します。
 
 using Farmware.WorldGeneration.Authoring;
@@ -10,7 +10,7 @@ using UnityEngine;
 namespace Farmware.WorldGeneration.Tests
 {
     /// <summary>
-    /// 固定検品マップがGroundTop共有Wall、境界合成Sprite、3種類の仮液体を要求することを保証します。
+    /// 固定検品マップが代表5材質の全差分と、GrassLoamの境界合成Sprite、3種類の仮液体を要求することを保証します。
     /// </summary>
     public sealed class TerrainTileArtInspectionMapBuilderTests
     {
@@ -35,13 +35,37 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 横3×手前方向10セルの穴、3段の崖、45px／93pxの連続水深勾配、3px低い水面、Wall前面2段を保証します。
+        /// 代表材質の周囲Ground付きパッチ、Wall前面2段、C案と同じ影条件、横3×手前方向10セルの穴、3段の崖、45px／93pxの連続水深勾配、3px低い水面を保証します。
         /// </summary>
         [Test]
         public void InspectionDepths_UseConfiguredHoleWallAndLiquidValues()
         {
             Assert.That(TerrainTileArtInspectionMapBuilder.GroundFaceDepth, Is.EqualTo(3));
             Assert.That(TerrainTileArtInspectionMapBuilder.WallFaceDepth, Is.EqualTo(2));
+            Assert.That(
+                TerrainTileArtInspectionMapBuilder.RepresentativeGroundPatchMinimumWidth,
+                Is.EqualTo(8));
+            Assert.That(
+                TerrainTileArtInspectionMapBuilder.RepresentativeGroundPatchHeight,
+                Is.EqualTo(7));
+            Assert.That(
+                TerrainTileArtInspectionMapBuilder.RepresentativeGroundSideMargin,
+                Is.EqualTo(2));
+            Assert.That(
+                TerrainTileArtInspectionMapBuilder.RepresentativeGroundFrontMargin,
+                Is.EqualTo(2));
+            Assert.That(
+                TerrainTileArtInspectionMapBuilder.RepresentativeGroundBackMargin,
+                Is.EqualTo(2));
+            Assert.That(
+                TerrainTileArtInspectionMapBuilder.RepresentativeWallTopLocalY,
+                Is.EqualTo(4));
+            Assert.That(
+                TerrainTileArtInspectionMapBuilder.RepresentativePointLightsPerPanel,
+                Is.EqualTo(TerrainWallShadowComparisonMapBuilder.PointLightsPerPanel));
+            Assert.That(
+                TerrainWallShadowComparisonMapBuilder.DynamicShadowCasterOffsetYInTiles,
+                Is.EqualTo(-TerrainTileArtInspectionMapBuilder.WallFaceDepth));
             Assert.That(TerrainTileArtInspectionMapBuilder.InspectionHoleWidth, Is.EqualTo(3));
             Assert.That(TerrainTileArtInspectionMapBuilder.InspectionHoleDepth, Is.EqualTo(10));
             Assert.That(
@@ -72,6 +96,43 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(
                 TerrainTileArtInspectionMapBuilder.WaterEdgeWaveColorCount,
                 Is.EqualTo(2));
+            Assert.That(
+                TerrainTileArtInspectionMapBuilder.WallFoldShadowFadePixels,
+                Is.EqualTo(8));
+            Assert.That(
+                TerrainTileArtInspectionMapBuilder.WallFoldShadowTopAlpha,
+                Is.EqualTo(0.35f));
+
+            // 折れ目影は上端を最も濃くし、8px目で完全透過へ到達して、それより下のFaceを暗くしません。
+            Assert.That(
+                TerrainTileArtInspectionMapBuilder.GetWallFoldShadowAlpha(0),
+                Is.EqualTo(0.35f));
+            Assert.That(
+                TerrainTileArtInspectionMapBuilder.GetWallFoldShadowAlpha(1),
+                Is.EqualTo(0.30f).Within(0.0001f));
+            Assert.That(
+                TerrainTileArtInspectionMapBuilder.GetWallFoldShadowAlpha(2),
+                Is.EqualTo(0.25f).Within(0.0001f));
+            Assert.That(
+                TerrainTileArtInspectionMapBuilder.GetWallFoldShadowAlpha(3),
+                Is.EqualTo(0.20f).Within(0.0001f));
+            Assert.That(
+                TerrainTileArtInspectionMapBuilder.GetWallFoldShadowAlpha(4),
+                Is.EqualTo(0.15f).Within(0.0001f));
+            Assert.That(
+                TerrainTileArtInspectionMapBuilder.GetWallFoldShadowAlpha(5),
+                Is.EqualTo(0.10f).Within(0.0001f));
+            Assert.That(
+                TerrainTileArtInspectionMapBuilder.GetWallFoldShadowAlpha(6),
+                Is.EqualTo(0.05f).Within(0.0001f));
+            Assert.That(
+                TerrainTileArtInspectionMapBuilder.GetWallFoldShadowAlpha(7),
+                Is.EqualTo(0f));
+            Assert.That(
+                TerrainTileArtInspectionMapBuilder.GetWallFoldShadowAlpha(8),
+                Is.EqualTo(0f));
+            Assert.Throws<System.ArgumentOutOfRangeException>(() =>
+                TerrainTileArtInspectionMapBuilder.GetWallFoldShadowAlpha(-1));
 
             // 乾燥崖はFaceが上端で完全表示され、3タイル下の48px地点で完全に黒へ溶けます。
             Assert.That(
@@ -170,7 +231,83 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// Scene再構築で生成した連続深度Shader、波線Shader、8種類のMaterialを再読込できることを保証します。
+        /// 代表5材質が固定順で読み込まれ、各材質の可変長GroundTop・Face・境界枚数を省略せず返すことを保証します。
+        /// </summary>
+        [Test]
+        public void ValidateRepresentativeMaterials_ReturnsAllConfiguredVariantsInStableOrder()
+        {
+            TerrainTileArtGenerationSettings settings =
+                AssetDatabase.LoadAssetAtPath<TerrainTileArtGenerationSettings>(
+                    TerrainTileArtInspectionMapBuilder.SettingsAssetPath);
+            Assert.That(settings, Is.Not.Null);
+
+            string[] expectedMaterialIds =
+            {
+                "GrassLoam",
+                "DesertSand",
+                "Sandstone",
+                "Granite",
+                "Basalt"
+            };
+            Assert.That(
+                TerrainTileArtInspectionMapBuilder.RepresentativeMaterialCount,
+                Is.EqualTo(expectedMaterialIds.Length));
+
+            TerrainTileArtInspectionMaterialSummary[] summaries =
+                TerrainTileArtInspectionMapBuilder.ValidateRepresentativeMaterialAssets();
+            Assert.That(summaries, Has.Length.EqualTo(expectedMaterialIds.Length));
+
+            for (int expectedIndex = 0;
+                 expectedIndex < expectedMaterialIds.Length;
+                 expectedIndex++)
+            {
+                string expectedMaterialId = expectedMaterialIds[expectedIndex];
+                Assert.That(
+                    TerrainTileArtInspectionMapBuilder.GetRepresentativeMaterialId(
+                        expectedIndex),
+                    Is.EqualTo(expectedMaterialId));
+                Assert.That(summaries[expectedIndex].MaterialId, Is.EqualTo(expectedMaterialId));
+
+                // 設定側の可変長配列と比較し、Scene用検証が4枚などの固定数へ丸めていないことを確認します。
+                TerrainMaterialArtSource material = null;
+                for (int materialIndex = 0;
+                     materialIndex < settings.Materials.Length;
+                     materialIndex++)
+                {
+                    TerrainMaterialArtSource candidate = settings.Materials[materialIndex];
+                    if (candidate != null && candidate.MaterialId == expectedMaterialId)
+                    {
+                        material = candidate;
+                        break;
+                    }
+                }
+
+                Assert.That(material, Is.Not.Null);
+                int expectedBoundaryCount =
+                    material.FaceSprites.Length * material.FaceBoundaryOverlays.Length;
+                Assert.That(
+                    summaries[expectedIndex].GroundTopCount,
+                    Is.EqualTo(material.GroundTopSprites.Length));
+                Assert.That(
+                    summaries[expectedIndex].FaceCount,
+                    Is.EqualTo(material.FaceSprites.Length));
+                Assert.That(
+                    summaries[expectedIndex].GroundBoundaryCount,
+                    Is.EqualTo(expectedBoundaryCount));
+                Assert.That(
+                    summaries[expectedIndex].WallBoundaryCount,
+                    Is.EqualTo(expectedBoundaryCount));
+            }
+
+            Assert.Throws<System.ArgumentOutOfRangeException>(() =>
+                TerrainTileArtInspectionMapBuilder.GetRepresentativeMaterialId(-1));
+            Assert.Throws<System.ArgumentOutOfRangeException>(() =>
+                TerrainTileArtInspectionMapBuilder.GetRepresentativeMaterialId(
+                    expectedMaterialIds.Length));
+        }
+
+        /// <summary>
+        /// Scene再構築で生成した連続深度Shader、波線Shader、折れ目影Shader、9種類のMaterialを再読込できることを保証します。
         /// </summary>
         [Test]
         public void GeneratedLiquidPreviewAssets_ArePersistentAndComplete()
@@ -183,6 +320,10 @@ namespace Farmware.WorldGeneration.Tests
                 TerrainTileArtInspectionMapBuilder.AnimatedWaterEdgeWaveShaderPath);
             Assert.That(waveShader, Is.Not.Null);
             Assert.That(ShaderUtil.ShaderHasError(waveShader), Is.False);
+            Shader wallFoldShadowShader = AssetDatabase.LoadAssetAtPath<Shader>(
+                TerrainTileArtInspectionMapBuilder.WallFoldShadowShaderPath);
+            Assert.That(wallFoldShadowShader, Is.Not.Null);
+            Assert.That(ShaderUtil.ShaderHasError(wallFoldShadowShader), Is.False);
 
             string folder = TerrainTileArtInspectionMapBuilder.GeneratedPreviewAssetFolder;
             Material dryCliffFade = AssetDatabase.LoadAssetAtPath<Material>(
@@ -216,6 +357,13 @@ namespace Farmware.WorldGeneration.Tests
                 AssetDatabase.LoadAssetAtPath<Material>(
                     $"{folder}/SaltWaterEdgeWaveVertical.mat"),
                 Is.Not.Null);
+            Material wallFoldShadow = AssetDatabase.LoadAssetAtPath<Material>(
+                $"{folder}/WallFoldShadow.mat");
+            Assert.That(wallFoldShadow, Is.Not.Null);
+            Assert.That(wallFoldShadow.shader, Is.EqualTo(wallFoldShadowShader));
+            Assert.That(wallFoldShadow.GetFloat("_TopAlpha"), Is.EqualTo(0.35f));
+            Assert.That(wallFoldShadow.GetFloat("_FadePixelCount"), Is.EqualTo(8f));
+            Assert.That(wallFoldShadow.GetFloat("_SpritePixelHeight"), Is.EqualTo(16f));
 
             // 旧飛沫方式を同時に残すと二重表示になるため、置換後は旧Animation資産を受理しません。
             Assert.That(

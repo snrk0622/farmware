@@ -92,6 +92,96 @@ namespace Farmware.WorldGeneration.Editor
     }
 
     /// <summary>
+    /// 折れ目影と境界ハイライトを、それ以外の条件を揃えて比較するSceneの固定件数です。
+    /// 自動テストでは、片方の補助表現だけを差し替えた公平な比較になっていることを確認します。
+    /// </summary>
+    public readonly struct TerrainWallEdgeCueComparisonSummary
+    {
+        /// <summary>横並びにする比較パネル数です。</summary>
+        public int PanelCount { get; }
+
+        /// <summary>8px、16px、32pxのいずれかの折れ目影を表示するパネル数です。</summary>
+        public int FoldShadowPanelCount { get; }
+
+        /// <summary>1px境界ハイライトを表示するパネル数です。</summary>
+        public int HighlightPanelCount { get; }
+
+        /// <summary>1パネルへ配置するWallセル数です。</summary>
+        public int WallCellCountPerPanel { get; }
+
+        /// <summary>1パネルで手前向きに露出するFace列数です。</summary>
+        public int ExposedFaceColumnCountPerPanel { get; }
+
+        /// <summary>Wall前面を縦へ反復する段数です。</summary>
+        public int FaceDepth { get; }
+
+        /// <summary>1パネルへ配置するFace Spriteの合計数です。</summary>
+        public int FaceSpriteCountPerPanel { get; }
+
+        /// <summary>折れ目影パネルへ配置する影Sprite数です。</summary>
+        public int FoldShadowSpriteCount { get; }
+
+        /// <summary>境界ハイライトパネルへ配置するハイライトSprite数です。</summary>
+        public int HighlightSpriteCount { get; }
+
+        /// <summary>両パネルへ配置する固定接地影Sprite数です。</summary>
+        public int ContactShadowSpriteCount { get; }
+
+        /// <summary>両パネルへ配置するShadow Caster 2D数です。</summary>
+        public int ShadowCasterCount { get; }
+
+        /// <summary>両パネルへ配置するComposite Shadow Caster 2D数です。</summary>
+        public int CompositeShadowCasterCount { get; }
+
+        /// <summary>同じ相対位置へ配置するPoint Light 2D数です。</summary>
+        public int PointLightCount { get; }
+
+        /// <summary>比較Sceneの固定件数を保存します。</summary>
+        /// <param name="panelCount">比較パネル数です。</param>
+        /// <param name="foldShadowPanelCount">折れ目影パネル数です。</param>
+        /// <param name="highlightPanelCount">境界ハイライトパネル数です。</param>
+        /// <param name="wallCellCountPerPanel">1パネルのWallセル数です。</param>
+        /// <param name="exposedFaceColumnCountPerPanel">1パネルの露出Face列数です。</param>
+        /// <param name="faceDepth">Wall前面の反復段数です。</param>
+        /// <param name="faceSpriteCountPerPanel">1パネルのFace Sprite合計数です。</param>
+        /// <param name="foldShadowSpriteCount">折れ目影Sprite数です。</param>
+        /// <param name="highlightSpriteCount">境界ハイライトSprite数です。</param>
+        /// <param name="contactShadowSpriteCount">固定接地影Sprite数です。</param>
+        /// <param name="shadowCasterCount">Shadow Caster 2D数です。</param>
+        /// <param name="compositeShadowCasterCount">Composite Shadow Caster 2D数です。</param>
+        /// <param name="pointLightCount">Point Light 2D数です。</param>
+        public TerrainWallEdgeCueComparisonSummary(
+            int panelCount,
+            int foldShadowPanelCount,
+            int highlightPanelCount,
+            int wallCellCountPerPanel,
+            int exposedFaceColumnCountPerPanel,
+            int faceDepth,
+            int faceSpriteCountPerPanel,
+            int foldShadowSpriteCount,
+            int highlightSpriteCount,
+            int contactShadowSpriteCount,
+            int shadowCasterCount,
+            int compositeShadowCasterCount,
+            int pointLightCount)
+        {
+            PanelCount = panelCount;
+            FoldShadowPanelCount = foldShadowPanelCount;
+            HighlightPanelCount = highlightPanelCount;
+            WallCellCountPerPanel = wallCellCountPerPanel;
+            ExposedFaceColumnCountPerPanel = exposedFaceColumnCountPerPanel;
+            FaceDepth = faceDepth;
+            FaceSpriteCountPerPanel = faceSpriteCountPerPanel;
+            FoldShadowSpriteCount = foldShadowSpriteCount;
+            HighlightSpriteCount = highlightSpriteCount;
+            ContactShadowSpriteCount = contactShadowSpriteCount;
+            ShadowCasterCount = shadowCasterCount;
+            CompositeShadowCasterCount = compositeShadowCasterCount;
+            PointLightCount = pointLightCount;
+        }
+    }
+
+    /// <summary>
     /// GrassLoamの同一Wall形状を、ハイライトあり、動的影のみ、固定接地影ありの3条件で横並びにします。
     /// 各WallセルのShadow Caster 2Dをパネル単位のComposite Shadow Caster 2Dへまとめ、共有辺へ影を出さない構成を検品します。
     /// </summary>
@@ -100,6 +190,10 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>比較Sceneの保存先です。</summary>
         public const string InspectionScenePath =
             "Assets/Scenes/Development/TerrainWallShadowComparison.unity";
+
+        /// <summary>折れ目影と境界ハイライトだけを差し替える比較Sceneの保存先です。</summary>
+        public const string EdgeCueComparisonScenePath =
+            "Assets/Scenes/Development/TerrainWallEdgeCueComparison.unity";
 
         /// <summary>Point Light 2Dの影の濃さです。0は影なし、1は最大です。</summary>
         public const float PointLightShadowIntensity = 0.9f;
@@ -113,7 +207,7 @@ namespace Farmware.WorldGeneration.Editor
         /// </summary>
         public const float PointLightOuterRadius = 8f;
 
-        /// <summary>3つの比較パネルへ共通して使う低い環境光の強さです。</summary>
+        /// <summary>同じScene内の全比較パネルへ共通して使う低い環境光の強さです。</summary>
         public const float GlobalLightIntensity = 0.35f;
 
         /// <summary>URP 2D Rendererが提供する既定Lit Sprite Materialのパスです。</summary>
@@ -124,8 +218,21 @@ namespace Farmware.WorldGeneration.Editor
         private const string SpriteUnlitMaterialPath =
             "Packages/com.unity.render-pipelines.universal/Runtime/Materials/Sprite-Unlit-Default.mat";
 
-        /// <summary>FaceBoundary合成済みのWall前面で優先して使う生成物名です。</summary>
-        private const string PreferredWallFaceFileName = "GrassLoam_WallFace_f00_b00.png";
+        /// <summary>8px折れ目影を描く基準検品用Materialの保存先です。</summary>
+        private const string WallFoldShadowMaterialPath =
+            "Assets/Farmware/Art/WorldGeneration/Generated/Inspection/WallFoldShadow.mat";
+
+        /// <summary>16px折れ目影を描く検品用Materialの保存先です。</summary>
+        private const string WallFoldShadow16MaterialPath =
+            "Assets/Farmware/Art/WorldGeneration/Generated/Inspection/WallFoldShadow16px.mat";
+
+        /// <summary>32px折れ目影の1段目を描く検品用Materialの保存先です。</summary>
+        private const string WallFoldShadow32TopMaterialPath =
+            "Assets/Farmware/Art/WorldGeneration/Generated/Inspection/WallFoldShadow32pxTop.mat";
+
+        /// <summary>32px折れ目影の2段目を描く検品用Materialの保存先です。</summary>
+        private const string WallFoldShadow32BottomMaterialPath =
+            "Assets/Farmware/Art/WorldGeneration/Generated/Inspection/WallFoldShadow32pxBottom.mat";
 
         /// <summary>Pixel Perfect CameraとSprite Importで共有する1Unit当たりの画素数です。</summary>
         private const int AssetsPixelsPerUnit = 16;
@@ -190,9 +297,28 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>固定接地影を表示する比較パネル数です。</summary>
         private const int ContactShadowPanelCount = 1;
 
+        /// <summary>補助表現だけを差し替える専用比較のパネル数です。1材質につき折れ目影3種と境界ハイライト1種を置きます。</summary>
+        private const int EdgeCuePanelCount = 4;
+
+        /// <summary>比較する折れ目影の深さです。単位はピクセルです。</summary>
+        private static readonly int[] EdgeCueFoldDepthsPixels = { 8, 16, 32 };
+
+        /// <summary>1枚のFace Spriteが縦方向に持つ画素数です。</summary>
+        private const int FaceSpriteHeightPixels = 16;
+
+        /// <summary>補助表現比較へ並べる代表材質数です。</summary>
+        private static int EdgeCueMaterialCount =>
+            TerrainTileArtInspectionMapBuilder.RepresentativeMaterialCount;
+
+        /// <summary>補助表現比較で同じ材質の4方式を離すY間隔です。</summary>
+        private const float EdgeCueRowSpacing = 11f;
+
+        /// <summary>代表5材質を左から右へ並べるX間隔です。</summary>
+        private const float EdgeCueMaterialSpacing = 8f;
+
         /// <summary>
         /// 外角、内角、細い先端、広い連続面を同時に確認するWallセル配置です。
-        /// 同じ配列を3つのパネルへ使い、ハイライトや接地影以外の形状差が比較へ混ざらないようにします。
+        /// 同じ配列を各比較パネルへ使い、補助表現以外の形状差が比較へ混ざらないようにします。
         /// </summary>
         private static readonly Vector2Int[] WallCells =
         {
@@ -308,6 +434,59 @@ namespace Farmware.WorldGeneration.Editor
             BuildAndOpenScene(LoadAndValidateAssets());
         }
 
+        /// <summary>
+        /// 未保存Sceneを保護してから、折れ目影と境界ハイライトの専用比較Sceneを再構築して開きます。
+        /// Ground、Wall暗化、Face、固定接地影、動的影、照明は両パネルで共通にします。
+        /// </summary>
+        [MenuItem("Farmware/World Generation/Open Wall Edge Cue Comparison")]
+        public static void BuildAndOpenEdgeCueComparisonFromMenu()
+        {
+            InspectionAssets[] assets;
+            Material[,] wallFoldShadowMaterials;
+            try
+            {
+                assets = LoadAndValidateRepresentativeAssets();
+                wallFoldShadowMaterials = EnsureEdgeCueFoldShadowMaterials();
+            }
+            catch (Exception exception)
+            {
+                Debug.LogException(exception);
+                EditorUtility.DisplayDialog(
+                    "Wall境界補助比較Sceneを構築できません",
+                    exception.Message,
+                    "閉じる");
+                return;
+            }
+
+            if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
+            {
+                return;
+            }
+
+            SceneSetup[] originalSetup = EditorSceneManager.GetSceneManagerSetup();
+            try
+            {
+                BuildAndOpenEdgeCueComparisonScene(assets, wallFoldShadowMaterials);
+            }
+            catch (Exception exception)
+            {
+                EditorSceneManager.RestoreSceneManagerSetup(originalSetup);
+                Debug.LogException(exception);
+                EditorUtility.DisplayDialog(
+                    "Wall境界補助比較Sceneを構築できません",
+                    exception.Message,
+                    "閉じる");
+            }
+        }
+
+        /// <summary>CLIや自動処理から、折れ目影と境界ハイライトの専用比較Sceneを再構築する入口です。</summary>
+        public static void ExecuteEdgeCueComparison()
+        {
+            BuildAndOpenEdgeCueComparisonScene(
+                LoadAndValidateRepresentativeAssets(),
+                EnsureEdgeCueFoldShadowMaterials());
+        }
+
         /// <summary>Sceneを変更せず、固定比較レイアウトと必要Assetを検証します。</summary>
         /// <returns>3つのパネル、Face、Shadow Caster、Light、固定接地影の固定件数です。</returns>
         public static TerrainWallShadowComparisonSummary ValidateAssetsAndLayout()
@@ -332,10 +511,171 @@ namespace Farmware.WorldGeneration.Editor
                     * ContactShadowPanelCount);
         }
 
+        /// <summary>Sceneを変更せず、補助表現だけを差し替える専用比較のAssetと固定件数を検証します。</summary>
+        /// <returns>代表5材質×4方式のFace、折れ目影、境界ハイライト、接地影、動的影、Lightの固定件数です。</returns>
+        public static TerrainWallEdgeCueComparisonSummary ValidateEdgeCueAssetsAndLayout()
+        {
+            LoadAndValidateRepresentativeAssets();
+            LoadAndValidateEdgeCueFoldShadowMaterials();
+
+            HashSet<Vector2Int> wallCells = BuildWallCellSet();
+            int exposedFaceColumnCount = CountExposedSouthFaces(wallCells);
+            int faceSpriteCount = exposedFaceColumnCount * WallFaceDepth;
+            int contactShadowSourceCount = WallCells.Length + exposedFaceColumnCount;
+            int foldShadowSpritesPerMaterial = 0;
+            for (int index = 0; index < EdgeCueFoldDepthsPixels.Length; index++)
+            {
+                // 8pxと16pxは1段目だけ、32pxは2段へ影Spriteを置くため、深度から必要段数を算出します。
+                int foldFaceStageCount = Mathf.CeilToInt(
+                    EdgeCueFoldDepthsPixels[index] / (float)FaceSpriteHeightPixels);
+                foldShadowSpritesPerMaterial +=
+                    exposedFaceColumnCount * foldFaceStageCount;
+            }
+
+            return new TerrainWallEdgeCueComparisonSummary(
+                EdgeCuePanelCount * EdgeCueMaterialCount,
+                foldShadowPanelCount:
+                    EdgeCueFoldDepthsPixels.Length * EdgeCueMaterialCount,
+                highlightPanelCount: EdgeCueMaterialCount,
+                WallCells.Length,
+                exposedFaceColumnCount,
+                WallFaceDepth,
+                faceSpriteCount,
+                foldShadowSpritesPerMaterial * EdgeCueMaterialCount,
+                CountHighlightedCells(wallCells) * EdgeCueMaterialCount,
+                contactShadowSourceCount * 2 * EdgeCuePanelCount * EdgeCueMaterialCount,
+                WallCells.Length * EdgeCuePanelCount * EdgeCueMaterialCount,
+                EdgeCuePanelCount * EdgeCueMaterialCount,
+                EdgeCuePanelCount * EdgeCueMaterialCount * PointLightsPerPanel);
+        }
+
+        /// <summary>比較用の8px／16px／32px折れ目影Materialを作成または更新します。</summary>
+        /// <returns>折れ目影案の番号とFace段番号で参照できる検証済みMaterial配列です。</returns>
+        private static Material[,] EnsureEdgeCueFoldShadowMaterials()
+        {
+            Material baseMaterial =
+                TerrainTileArtInspectionMapBuilder.EnsureWallFoldShadowPreviewMaterial();
+            Material[,] materials = new Material[
+                EdgeCueFoldDepthsPixels.Length,
+                WallFaceDepth];
+
+            for (int foldIndex = 0; foldIndex < EdgeCueFoldDepthsPixels.Length; foldIndex++)
+            {
+                int fadePixelCount = EdgeCueFoldDepthsPixels[foldIndex];
+                int requiredStageCount = Mathf.CeilToInt(
+                    fadePixelCount / (float)FaceSpriteHeightPixels);
+                for (int stageIndex = 0; stageIndex < requiredStageCount; stageIndex++)
+                {
+                    string assetPath = GetEdgeCueFoldShadowMaterialPath(
+                        fadePixelCount,
+                        stageIndex);
+                    Material material = AssetDatabase.LoadAssetAtPath<Material>(assetPath);
+                    if (material == null)
+                    {
+                        // 8px基準Materialは既存ツールが作成済みです。それ以外だけ複製して個別Assetとして保存します。
+                        material = new Material(baseMaterial.shader);
+                        material.CopyPropertiesFromMaterial(baseMaterial);
+                        AssetDatabase.CreateAsset(material, assetPath);
+                    }
+
+                    // Scene保存後も深度設定が残るよう、PropertyBlockではなく永続Materialへ値を保存します。
+                    material.SetFloat("_FadePixelCount", fadePixelCount);
+                    material.SetFloat(
+                        "_StartPixelRow",
+                        stageIndex * FaceSpriteHeightPixels);
+                    EditorUtility.SetDirty(material);
+                    materials[foldIndex, stageIndex] = material;
+                }
+            }
+
+            AssetDatabase.SaveAssets();
+            return materials;
+        }
+
+        /// <summary>保存済みの比較用折れ目影Materialを読み込み、深度と開始行を検証します。</summary>
+        /// <returns>折れ目影案の番号とFace段番号で参照できる検証済みMaterial配列です。</returns>
+        private static Material[,] LoadAndValidateEdgeCueFoldShadowMaterials()
+        {
+            Material[,] materials = new Material[
+                EdgeCueFoldDepthsPixels.Length,
+                WallFaceDepth];
+            for (int foldIndex = 0; foldIndex < EdgeCueFoldDepthsPixels.Length; foldIndex++)
+            {
+                int fadePixelCount = EdgeCueFoldDepthsPixels[foldIndex];
+                int requiredStageCount = Mathf.CeilToInt(
+                    fadePixelCount / (float)FaceSpriteHeightPixels);
+                for (int stageIndex = 0; stageIndex < requiredStageCount; stageIndex++)
+                {
+                    string assetPath = GetEdgeCueFoldShadowMaterialPath(
+                        fadePixelCount,
+                        stageIndex);
+                    Material material = AssetDatabase.LoadAssetAtPath<Material>(assetPath);
+                    if (material == null)
+                    {
+                        throw new InvalidOperationException(
+                            $"Wall折れ目影Materialを読み込めません: {assetPath}");
+                    }
+
+                    float expectedStartPixelRow = stageIndex * FaceSpriteHeightPixels;
+                    if (!Mathf.Approximately(
+                            material.GetFloat("_FadePixelCount"),
+                            fadePixelCount)
+                        || !Mathf.Approximately(
+                            material.GetFloat("_StartPixelRow"),
+                            expectedStartPixelRow))
+                    {
+                        throw new InvalidOperationException(
+                            $"Wall折れ目影Materialの深度設定が不正です: {assetPath}");
+                    }
+
+                    materials[foldIndex, stageIndex] = material;
+                }
+            }
+
+            return materials;
+        }
+
+        /// <summary>折れ目影の深度とFace段から、永続Materialの保存先を返します。</summary>
+        /// <param name="fadePixelCount">折れ目影が完全透過へ到達する深度です。単位はピクセルです。</param>
+        /// <param name="stageIndex">0始まりのFace段番号です。</param>
+        /// <returns>Unityプロジェクト内のMaterial Assetパスです。</returns>
+        private static string GetEdgeCueFoldShadowMaterialPath(
+            int fadePixelCount,
+            int stageIndex)
+        {
+            if (fadePixelCount == 8 && stageIndex == 0)
+            {
+                return WallFoldShadowMaterialPath;
+            }
+
+            if (fadePixelCount == 16 && stageIndex == 0)
+            {
+                return WallFoldShadow16MaterialPath;
+            }
+
+            if (fadePixelCount == 32 && stageIndex == 0)
+            {
+                return WallFoldShadow32TopMaterialPath;
+            }
+
+            if (fadePixelCount == 32 && stageIndex == 1)
+            {
+                return WallFoldShadow32BottomMaterialPath;
+            }
+
+            throw new ArgumentOutOfRangeException(
+                nameof(fadePixelCount),
+                fadePixelCount,
+                $"未対応の折れ目影Material指定です: stageIndex={stageIndex}");
+        }
+
         /// <summary>GrassLoam、共通境界Sprite、URP 2D Lit Materialを読み込み、Scene構築前に検証します。</summary>
         /// <returns>Sceneへそのまま配置できる検証済みAssetです。</returns>
-        private static InspectionAssets LoadAndValidateAssets()
+        private static InspectionAssets LoadAndValidateAssets(string materialId = null)
         {
+            string resolvedMaterialId = string.IsNullOrEmpty(materialId)
+                ? TerrainTileArtInspectionMapBuilder.InspectedMaterialId
+                : materialId;
             TerrainTileArtGenerationSettings settings =
                 AssetDatabase.LoadAssetAtPath<TerrainTileArtGenerationSettings>(
                     TerrainTileArtInspectionMapBuilder.SettingsAssetPath);
@@ -347,13 +687,13 @@ namespace Farmware.WorldGeneration.Editor
 
             TerrainMaterialArtSource material = FindMaterial(
                 settings,
-                TerrainTileArtInspectionMapBuilder.InspectedMaterialId);
+                resolvedMaterialId);
             if (material == null
                 || material.GroundTopSprites == null
                 || material.GroundTopSprites.Length == 0)
             {
                 throw new InvalidOperationException(
-                    $"{TerrainTileArtInspectionMapBuilder.InspectedMaterialId}のGroundTop Spriteを読み込めません。");
+                    $"{resolvedMaterialId}のGroundTop Spriteを読み込めません。");
             }
 
             for (int index = 0; index < material.GroundTopSprites.Length; index++)
@@ -365,7 +705,9 @@ namespace Farmware.WorldGeneration.Editor
                 }
             }
 
-            Sprite wallFirstFaceSprite = LoadPreferredWallFace(material);
+            Sprite wallFirstFaceSprite = LoadPreferredWallFace(
+                material,
+                resolvedMaterialId);
             Sprite wallRepeatingFaceSprite = LoadRequiredRepeatingFace(material);
             Sprite[] boundarySprites = TerrainBoundaryHighlightArtGenerator.LoadRequiredSprites();
             Material spriteLitMaterial = AssetDatabase.LoadAssetAtPath<Material>(
@@ -403,16 +745,20 @@ namespace Farmware.WorldGeneration.Editor
                 new Color(darkenFactor, darkenFactor, darkenFactor, 1f));
         }
 
-        /// <summary>GrassLoamの生成済みWall用1段目Faceを読み、なければ通常Faceへ戻します。</summary>
-        /// <param name="material">GrassLoamの手描き入力と生成記録です。</param>
+        /// <summary>指定材質の生成済みWall用1段目Faceを読み、なければ通常Faceへ戻します。</summary>
+        /// <param name="material">対象材質の手描き入力と生成記録です。</param>
+        /// <param name="materialId">生成物名の接頭辞に使う安定材質IDです。</param>
         /// <returns>比較SceneでWallの手前へ表示するSpriteです。</returns>
-        private static Sprite LoadPreferredWallFace(TerrainMaterialArtSource material)
+        private static Sprite LoadPreferredWallFace(
+            TerrainMaterialArtSource material,
+            string materialId)
         {
+            string preferredWallFaceFileName = $"{materialId}_WallFace_f00_b00.png";
             IReadOnlyList<string> generatedPaths = material.LastGeneratedAssetPaths;
             for (int index = 0; index < generatedPaths.Count; index++)
             {
                 string path = generatedPaths[index];
-                if (!path.EndsWith(PreferredWallFaceFileName, StringComparison.Ordinal))
+                if (!path.EndsWith(preferredWallFaceFileName, StringComparison.Ordinal))
                 {
                     continue;
                 }
@@ -431,7 +777,8 @@ namespace Farmware.WorldGeneration.Editor
                 return material.FaceSprites[0];
             }
 
-            throw new InvalidOperationException("GrassLoamのWall前面へ使えるFace Spriteがありません。");
+            throw new InvalidOperationException(
+                $"{materialId}のWall前面へ使えるFace Spriteがありません。");
         }
 
         /// <summary>
@@ -449,7 +796,22 @@ namespace Farmware.WorldGeneration.Editor
                 return material.FaceSprites[0];
             }
 
-            throw new InvalidOperationException("GrassLoamの2段目以降へ使うFace Spriteがありません。");
+            throw new InvalidOperationException("Wall前面2段目以降へ使うFace Spriteがありません。");
+        }
+
+        /// <summary>代表5材質を固定順で読み込み、比較Sceneへ使える状態か検証します。</summary>
+        /// <returns>左から右へ並べる代表5材質の検証済みAssetです。</returns>
+        private static InspectionAssets[] LoadAndValidateRepresentativeAssets()
+        {
+            InspectionAssets[] assets = new InspectionAssets[EdgeCueMaterialCount];
+            for (int index = 0; index < assets.Length; index++)
+            {
+                string materialId =
+                    TerrainTileArtInspectionMapBuilder.GetRepresentativeMaterialId(index);
+                assets[index] = LoadAndValidateAssets(materialId);
+            }
+
+            return assets;
         }
 
         /// <summary>設定のMaterials配列から安定材質IDが一致する要素を探します。</summary>
@@ -522,26 +884,175 @@ namespace Farmware.WorldGeneration.Editor
             SceneView.lastActiveSceneView?.FrameSelected();
         }
 
-        /// <summary>Pixel Perfect Cameraを原点へ配置し、3つの比較パネルを同時に表示します。</summary>
-        private static void CreateCamera()
+        /// <summary>
+        /// 代表5材質を横へ並べ、4行の折れ目影8px／16px／32px／境界ハイライト1pxだけを差し替えます。
+        /// 各材質は最大横5セルの同じ13セルWall形状を使い、接地影、動的影、Face段数、Wall暗化、光源を揃えます。
+        /// </summary>
+        /// <param name="representativeAssets">代表5材質の検証済みSprite、Material、Wall暗化色です。</param>
+        /// <param name="wallFoldShadowMaterials">深度とFace段ごとの設定を保存した折れ目影の検品用Material配列です。</param>
+        private static void BuildAndOpenEdgeCueComparisonScene(
+            InspectionAssets[] representativeAssets,
+            Material[,] wallFoldShadowMaterials)
+        {
+            if (representativeAssets == null
+                || representativeAssets.Length != EdgeCueMaterialCount)
+            {
+                throw new ArgumentException(
+                    $"代表材質は{EdgeCueMaterialCount}件必要です。",
+                    nameof(representativeAssets));
+            }
+
+            if (wallFoldShadowMaterials == null
+                || wallFoldShadowMaterials.GetLength(0) != EdgeCueFoldDepthsPixels.Length
+                || wallFoldShadowMaterials.GetLength(1) != WallFaceDepth)
+            {
+                throw new ArgumentException(
+                    "折れ目影Material配列の寸法が比較条件と一致しません。",
+                    nameof(wallFoldShadowMaterials));
+            }
+
+            // 現在SceneのGameObjectをInspectorが保持したままSceneを破棄すると、Unity Editor内部でnull参照のSerializedObject例外が出ます。
+            // 比較Sceneの内容とは無関係なConsoleエラーを残さないよう、Scene切替前に現在の選択だけを解除します。
+            Selection.activeObject = null;
+            Scene scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            scene.name = "TerrainWallEdgeCueComparison";
+            CreateCamera(orthographicSize: 24.5f, referenceResolutionX: 720, referenceResolutionY: 720);
+
+            GameObject root = new GameObject("Wall Edge Cue Comparison");
+            CreateGlobalLight(root);
+            float[] rowCenters = CreateCenteredRowCoordinates(EdgeCuePanelCount, EdgeCueRowSpacing);
+            float[] materialCenters = new float[representativeAssets.Length];
+            for (int index = 0; index < representativeAssets.Length; index++)
+            {
+                // 5列を原点中心へ左右対称に並べ、各材質の4方式比較で視線を縦へ移すだけにします。
+                float centerX =
+                    (index - ((representativeAssets.Length - 1) * 0.5f))
+                    * EdgeCueMaterialSpacing;
+                materialCenters[index] = centerX;
+                string materialId =
+                    TerrainTileArtInspectionMapBuilder.GetRepresentativeMaterialId(index);
+                for (int foldIndex = 0; foldIndex < EdgeCueFoldDepthsPixels.Length; foldIndex++)
+                {
+                    // A～C行は影の深さだけを変え、32pxでは2段Faceをまたぐ連続グラデーションを確認します。
+                    int foldDepthPixels = EdgeCueFoldDepthsPixels[foldIndex];
+                    char rowName = (char)('A' + foldIndex);
+                    CreateComparisonPanel(
+                        root,
+                        representativeAssets[index],
+                        $"{materialId} {rowName} Fold Shadow {foldDepthPixels}px",
+                        centerX,
+                        showHighlight: false,
+                        showContactShadow: true,
+                        foldShadowDepthPixels: foldDepthPixels,
+                        wallFoldShadowMaterials: GetFoldShadowStageMaterials(
+                            wallFoldShadowMaterials,
+                            foldIndex),
+                        panelLabel: $"{materialId}\nFold {foldDepthPixels}px",
+                        centerY: rowCenters[foldIndex]);
+                }
+
+                CreateComparisonPanel(
+                    root,
+                    representativeAssets[index],
+                    $"{materialId} D Boundary Highlight 1px",
+                    centerX,
+                    showHighlight: true,
+                    showContactShadow: true,
+                    foldShadowDepthPixels: 0,
+                    wallFoldShadowMaterials: null,
+                    panelLabel: $"{materialId}\nHighlight 1px",
+                    centerY: rowCenters[EdgeCuePanelCount - 1]);
+            }
+
+            CreateEdgeCueSynchronizedPointLights(
+                root,
+                materialCenters,
+                rowCenters);
+            CreateEdgeCueInstructionLabel(root);
+            ValidateBuiltEdgeCueComparisonScene(root);
+
+            EnsureAssetFolder("Assets/Scenes/Development");
+            if (!EditorSceneManager.SaveScene(scene, EdgeCueComparisonScenePath))
+            {
+                throw new InvalidOperationException(
+                    $"Wall境界補助比較Sceneを保存できませんでした: {EdgeCueComparisonScenePath}");
+            }
+
+            Selection.activeGameObject = root.transform
+                .Find("Synchronized Lights (Move This)")
+                ?.gameObject;
+            SceneView.lastActiveSceneView?.FrameSelected();
+        }
+
+        /// <summary>指定行数の中心座標を原点の上下へ等間隔に並べます。</summary>
+        /// <param name="rowCount">作る比較行の数です。</param>
+        /// <param name="spacing">隣接行の中心間隔です。単位はUnity Unitです。</param>
+        /// <returns>上から下の順に並んだ各行のY座標です。</returns>
+        private static float[] CreateCenteredRowCoordinates(int rowCount, float spacing)
+        {
+            if (rowCount <= 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(rowCount),
+                    rowCount,
+                    "比較行数は1以上である必要があります。");
+            }
+
+            float[] coordinates = new float[rowCount];
+            for (int index = 0; index < rowCount; index++)
+            {
+                // 偶数行でも全体の中心がY=0になるよう、行番号を中央からの相対値へ変換します。
+                coordinates[index] =
+                    (((rowCount - 1) * 0.5f) - index) * spacing;
+            }
+
+            return coordinates;
+        }
+
+        /// <summary>全折れ目影Material配列から、1つの深度案が各Face段で使うMaterialを取り出します。</summary>
+        /// <param name="allMaterials">深度案とFace段を軸に持つMaterial配列です。</param>
+        /// <param name="foldIndex">取り出す折れ目影案の番号です。</param>
+        /// <returns>0始まりのFace段番号で参照できるMaterial配列です。</returns>
+        private static Material[] GetFoldShadowStageMaterials(
+            Material[,] allMaterials,
+            int foldIndex)
+        {
+            Material[] stageMaterials = new Material[WallFaceDepth];
+            for (int stageIndex = 0; stageIndex < WallFaceDepth; stageIndex++)
+            {
+                // 8px／16px案の2段目は使わないためnullのままですが、32px案は両段にMaterialを持ちます。
+                stageMaterials[stageIndex] = allMaterials[foldIndex, stageIndex];
+            }
+
+            return stageMaterials;
+        }
+
+        /// <summary>Pixel Perfect Cameraを原点へ配置し、指定した比較範囲を同時に表示します。</summary>
+        /// <param name="orthographicSize">縦方向に表示する範囲の半分です。単位はUnity Unitです。</param>
+        /// <param name="referenceResolutionX">Pixel Perfectの基準横解像度です。単位はピクセルです。</param>
+        /// <param name="referenceResolutionY">Pixel Perfectの基準縦解像度です。単位はピクセルです。</param>
+        private static void CreateCamera(
+            float orthographicSize = 5.2f,
+            int referenceResolutionX = ReferenceResolutionX,
+            int referenceResolutionY = ReferenceResolutionY)
         {
             GameObject cameraObject = new GameObject("Main Camera");
             cameraObject.tag = "MainCamera";
             Camera camera = cameraObject.AddComponent<Camera>();
             camera.orthographic = true;
-            camera.orthographicSize = 5.2f;
+            camera.orthographicSize = orthographicSize;
             camera.clearFlags = CameraClearFlags.SolidColor;
             camera.backgroundColor = new Color32(22, 25, 30, 255);
             cameraObject.transform.position = new Vector3(0f, 0f, -10f);
 
             PixelPerfectCamera pixelPerfect = cameraObject.AddComponent<PixelPerfectCamera>();
             pixelPerfect.assetsPPU = AssetsPixelsPerUnit;
-            pixelPerfect.refResolutionX = ReferenceResolutionX;
-            pixelPerfect.refResolutionY = ReferenceResolutionY;
+            pixelPerfect.refResolutionX = referenceResolutionX;
+            pixelPerfect.refResolutionY = referenceResolutionY;
             pixelPerfect.cropFrame = PixelPerfectCamera.CropFrame.Windowbox;
         }
 
-        /// <summary>影の外側も読める最低限の明るさを、3つの比較パネルへ共通して与えます。</summary>
+        /// <summary>影の外側も読める最低限の明るさを、同じScene内の全比較パネルへ共通して与えます。</summary>
         /// <param name="root">比較Sceneの親GameObjectです。</param>
         private static void CreateGlobalLight(GameObject root)
         {
@@ -553,23 +1064,68 @@ namespace Farmware.WorldGeneration.Editor
             light.shadowsEnabled = false;
         }
 
-        /// <summary>Ground、暗化Wall、Face、任意の境界ハイライト、結合Shadow Casterを1パネルへ作ります。</summary>
-        /// <param name="root">3つの比較パネルをまとめる親です。</param>
+        /// <summary>Ground、暗化Wall、Face、任意の境界ハイライトまたは折れ目影、結合Shadow Casterを1パネルへ作ります。</summary>
+        /// <param name="root">比較パネルをまとめる親です。</param>
         /// <param name="assets">配置するSpriteとMaterialです。</param>
         /// <param name="panelName">HierarchyとGameビューへ表示する比較条件名です。</param>
         /// <param name="centerX">パネル中心のX座標です。単位はUnity Unitです。</param>
         /// <param name="showHighlight">境界ハイライトを表示する場合はtrueです。</param>
         /// <param name="showContactShadow">2段Wall向けに左右対称へ広げた固定接地影を表示する場合はtrueです。</param>
+        /// <param name="foldShadowDepthPixels">Wall前面上端から連続して減衰させる折れ目影の深さです。0なら表示しません。</param>
+        /// <param name="wallFoldShadowMaterials">Face段ごとの折れ目影Materialです。深さ0の場合はnullを許可します。</param>
+        /// <param name="panelLabel">Gameビューへ表示する任意の見出しです。nullの場合はHierarchy名を使います。</param>
+        /// <param name="centerY">パネル中心のY座標です。単位はUnity Unitです。</param>
         private static void CreateComparisonPanel(
             GameObject root,
             InspectionAssets assets,
             string panelName,
             float centerX,
             bool showHighlight,
-            bool showContactShadow)
+            bool showContactShadow,
+            int foldShadowDepthPixels = 0,
+            Material[] wallFoldShadowMaterials = null,
+            string panelLabel = null,
+            float centerY = 0f)
         {
+            if (foldShadowDepthPixels < 0
+                || foldShadowDepthPixels > WallFaceDepth * FaceSpriteHeightPixels)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(foldShadowDepthPixels),
+                    foldShadowDepthPixels,
+                    $"折れ目影の深さは0～{WallFaceDepth * FaceSpriteHeightPixels}pxで指定してください。");
+            }
+
+            int requiredFoldStageCount = Mathf.CeilToInt(
+                foldShadowDepthPixels / (float)FaceSpriteHeightPixels);
+            if (foldShadowDepthPixels > 0
+                && (wallFoldShadowMaterials == null
+                    || wallFoldShadowMaterials.Length < requiredFoldStageCount))
+            {
+                throw new ArgumentException(
+                    "折れ目影を表示する比較パネルには、使用するFace段数分のMaterialが必要です。",
+                    nameof(wallFoldShadowMaterials));
+            }
+
+            for (int stageIndex = 0; stageIndex < requiredFoldStageCount; stageIndex++)
+            {
+                if (wallFoldShadowMaterials[stageIndex] == null)
+                {
+                    throw new ArgumentException(
+                        $"折れ目影Materialが未設定です: stageIndex={stageIndex}",
+                        nameof(wallFoldShadowMaterials));
+                }
+            }
+
             GameObject panel = CreateChild(root, panelName);
-            CreateLabel(panel, panelName, new Vector3(centerX, 5.3f, 0f), 100);
+            string displayLabel = string.IsNullOrEmpty(panelLabel)
+                ? panelName
+                : panelLabel;
+            CreateLabel(
+                panel,
+                displayLabel,
+                new Vector3(centerX, centerY + 5.3f, 0f),
+                100);
 
             for (int y = 0; y < GroundHeight; y++)
             {
@@ -582,7 +1138,7 @@ namespace Farmware.WorldGeneration.Editor
                         panel,
                         $"Ground_{localX:+00;-00;00}_{localY:+00;-00;00}",
                         assets.GroundTopSprites[variant],
-                        new Vector3(centerX + localX, localY, 0f),
+                        new Vector3(centerX + localX, centerY + localY, 0f),
                         Color.white,
                         0,
                         assets.SpriteLitMaterial);
@@ -600,7 +1156,10 @@ namespace Farmware.WorldGeneration.Editor
             {
                 Vector2Int cell = WallCells[index];
                 int variant = StableVariantIndex(cell.x + 20, cell.y + 20, assets.GroundTopSprites.Length);
-                Vector3 position = new Vector3(centerX + cell.x, cell.y, -0.1f);
+                Vector3 position = new Vector3(
+                    centerX + cell.x,
+                    centerY + cell.y,
+                    -0.1f);
                 if (showContactShadow)
                 {
                     CreateContactShadow(
@@ -667,6 +1226,26 @@ namespace Farmware.WorldGeneration.Editor
                             Color.white,
                             30,
                             assets.SpriteLitMaterial);
+
+                        int foldStageStartPixel =
+                            (faceStage - 1) * FaceSpriteHeightPixels;
+                        if (foldShadowDepthPixels > foldStageStartPixel)
+                        {
+                            // 32px影は2段目へ続くため、各Face段の開始画素行をShaderへ渡します。
+                            // 深度全体で同じ式を使い、段の境目でAlphaが濃く戻らない連続グラデーションにします。
+                            CreateSpriteObject(
+                                panel,
+                                $"Fold Shadow {foldShadowDepthPixels}px_"
+                                    + $"{cell.x:+00;-00;00}_{cell.y:+00;-00;00}_Stage_{faceStage:00}",
+                                faceSprite,
+                                new Vector3(
+                                    facePosition.x,
+                                    facePosition.y,
+                                    -0.31f),
+                                Color.white,
+                                31,
+                                wallFoldShadowMaterials[faceStage - 1]);
+                        }
                     }
                 }
             }
@@ -820,6 +1399,55 @@ namespace Farmware.WorldGeneration.Editor
                 FrontLeftLightIntensity);
         }
 
+        /// <summary>
+        /// 代表5材質の4方式へ、同じ相対位置の上方主光と左手前検証光を作ります。
+        /// 共通親を動かせば全パネルの光源が同量だけ移動し、材質と補助表現による見え方を同条件で確認できます。
+        /// </summary>
+        /// <param name="root">比較Sceneの親GameObjectです。</param>
+        /// <param name="materialCenters">代表5材質のパネル中心X座標です。</param>
+        /// <param name="rowCenters">8px、16px、32px、境界ハイライト各行の中心Y座標です。</param>
+        private static void CreateEdgeCueSynchronizedPointLights(
+            GameObject root,
+            float[] materialCenters,
+            float[] rowCenters)
+        {
+            if (rowCenters == null || rowCenters.Length != EdgeCuePanelCount)
+            {
+                throw new ArgumentException(
+                    $"比較行座標は{EdgeCuePanelCount}件必要です。",
+                    nameof(rowCenters));
+            }
+
+            GameObject lightsRoot = CreateChild(root, "Synchronized Lights (Move This)");
+            GameObject topLights = CreateChild(lightsRoot, "Top Lights");
+            GameObject frontLeftLights = CreateChild(lightsRoot, "Front Left Lights (Toggle This)");
+
+            for (int index = 0; index < materialCenters.Length; index++)
+            {
+                // 4方式へ同じ相対座標の2灯を置き、照明条件が補助表現の差へ混ざらないようにします。
+                string materialId =
+                    TerrainTileArtInspectionMapBuilder.GetRepresentativeMaterialId(index);
+                for (int rowIndex = 0; rowIndex < rowCenters.Length; rowIndex++)
+                {
+                    string cueName = rowIndex < EdgeCueFoldDepthsPixels.Length
+                        ? $"Fold {EdgeCueFoldDepthsPixels[rowIndex]}px"
+                        : "Highlight 1px";
+                    CreatePointLight(
+                        topLights,
+                        $"{materialId} {cueName} Top Light 2D",
+                        materialCenters[index],
+                        rowCenters[rowIndex] + 3f,
+                        1f);
+                    CreatePointLight(
+                        frontLeftLights,
+                        $"{materialId} {cueName} Front Left Light 2D",
+                        materialCenters[index] - 2.5f,
+                        rowCenters[rowIndex] - 3.5f,
+                        FrontLeftLightIntensity);
+                }
+            }
+        }
+
         /// <summary>1パネルを照らし、WallのComposite輪郭から動的影を投影するPoint Light 2Dを作ります。</summary>
         /// <param name="parent">同期移動させるLightの共通親です。</param>
         /// <param name="name">Hierarchyへ表示するLight名です。</param>
@@ -855,6 +1483,17 @@ namespace Farmware.WorldGeneration.Editor
                 root,
                 "Move or Toggle Synchronized Lights in Scene View",
                 new Vector3(0f, -6.1f, 0f),
+                100);
+        }
+
+        /// <summary>補助表現以外を共通化した比較であることをGameビュー下部へ表示します。</summary>
+        /// <param name="root">比較Sceneの親GameObjectです。</param>
+        private static void CreateEdgeCueInstructionLabel(GameObject root)
+        {
+            CreateLabel(
+                root,
+                "Rows: Fold 8px / Fold 16px / Fold 32px / Highlight 1px / Same Wall + Face x2 + Shadows + Lights",
+                new Vector3(0f, -22.5f, 0f),
                 100);
         }
 
@@ -915,6 +1554,161 @@ namespace Farmware.WorldGeneration.Editor
             }
         }
 
+        /// <summary>専用比較Sceneで、代表5材質の4方式が補助表現以外のComponent数を共有することを確認します。</summary>
+        /// <param name="root">構築直後の比較Sceneルートです。</param>
+        private static void ValidateBuiltEdgeCueComparisonScene(GameObject root)
+        {
+            TerrainWallEdgeCueComparisonSummary summary = ValidateEdgeCueAssetsAndLayout();
+            ShadowCaster2D[] casters = root.GetComponentsInChildren<ShadowCaster2D>(true);
+            CompositeShadowCaster2D[] composites =
+                root.GetComponentsInChildren<CompositeShadowCaster2D>(true);
+            Light2D[] lights = root.GetComponentsInChildren<Light2D>(true);
+            Collider2D[] colliders = root.GetComponentsInChildren<Collider2D>(true);
+            int panelCount = CountDirectComparisonPanels(root.transform);
+            int foldShadowSpriteCount = CountNamedDescendants(root.transform, "Fold Shadow");
+            int highlightSpriteCount = CountNamedDescendants(root.transform, "Boundary Highlight");
+            int contactShadowSpriteCount = CountAllContactShadowSprites(root.transform);
+
+            if (panelCount != summary.PanelCount)
+            {
+                throw new InvalidOperationException(
+                    $"比較パネル数が不正です: expected={summary.PanelCount}, actual={panelCount}");
+            }
+
+            if (casters.Length != summary.ShadowCasterCount)
+            {
+                throw new InvalidOperationException(
+                    $"Shadow Caster 2D数が不正です: expected={summary.ShadowCasterCount}, actual={casters.Length}");
+            }
+
+            if (composites.Length != summary.CompositeShadowCasterCount)
+            {
+                throw new InvalidOperationException(
+                    $"Composite Shadow Caster 2D数が不正です: expected={summary.CompositeShadowCasterCount}, actual={composites.Length}");
+            }
+
+            // Global Light 1個と、代表5材質×4方式それぞれの上方光・左手前光を要求します。
+            if (lights.Length != summary.PointLightCount + 1)
+            {
+                throw new InvalidOperationException(
+                    $"Light 2D数が不正です: expected={summary.PointLightCount + 1}, actual={lights.Length}");
+            }
+
+            if (colliders.Length != 0)
+            {
+                throw new InvalidOperationException(
+                    "Wall境界補助比較SceneへCollider2Dを追加してはいけません。");
+            }
+
+            if (foldShadowSpriteCount != summary.FoldShadowSpriteCount)
+            {
+                throw new InvalidOperationException(
+                    $"折れ目影Sprite数が不正です: expected={summary.FoldShadowSpriteCount}, actual={foldShadowSpriteCount}");
+            }
+
+            if (highlightSpriteCount != summary.HighlightSpriteCount)
+            {
+                throw new InvalidOperationException(
+                    $"境界ハイライトSprite数が不正です: expected={summary.HighlightSpriteCount}, actual={highlightSpriteCount}");
+            }
+
+            if (contactShadowSpriteCount != summary.ContactShadowSpriteCount)
+            {
+                throw new InvalidOperationException(
+                    $"固定接地影Sprite数が不正です: expected={summary.ContactShadowSpriteCount}, actual={contactShadowSpriteCount}");
+            }
+
+            for (int index = 0; index < casters.Length; index++)
+            {
+                if (!casters[index].castsShadows || casters[index].selfShadows)
+                {
+                    throw new InvalidOperationException(
+                        $"Shadow Caster 2DはCastShadow専用である必要があります: index={index}");
+                }
+            }
+        }
+
+        /// <summary>指定パネルの固定接地影Groupに含まれるSpriteRenderer数を返します。</summary>
+        /// <param name="panel">固定接地影Groupを直接の子に持つ比較パネルです。</param>
+        /// <returns>左右へ広げた固定接地影Spriteの合計数です。</returns>
+        private static int CountContactShadowSprites(Transform panel)
+        {
+            Transform contactShadowRoot = panel.Find("Symmetric Contact Shadows");
+            return contactShadowRoot == null
+                ? 0
+                : contactShadowRoot.GetComponentsInChildren<SpriteRenderer>(true).Length;
+        }
+
+        /// <summary>比較Scene直下から、代表材質の折れ目影3種／境界ハイライトパネル数を数えます。</summary>
+        /// <param name="root">比較Sceneルートです。</param>
+        /// <returns>4方式を合計した比較パネル数です。</returns>
+        private static int CountDirectComparisonPanels(Transform root)
+        {
+            int count = 0;
+            for (int index = 0; index < root.childCount; index++)
+            {
+                string childName = root.GetChild(index).name;
+                if (childName.EndsWith("A Fold Shadow 8px", StringComparison.Ordinal)
+                    || childName.EndsWith(
+                        "B Fold Shadow 16px",
+                        StringComparison.Ordinal)
+                    || childName.EndsWith(
+                        "C Fold Shadow 32px",
+                        StringComparison.Ordinal)
+                    || childName.EndsWith(
+                        "D Boundary Highlight 1px",
+                        StringComparison.Ordinal))
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        /// <summary>全比較パネルの固定接地影Groupに含まれるSpriteRenderer数を合計します。</summary>
+        /// <param name="root">代表5材質×4方式を含む比較Sceneルートです。</param>
+        /// <returns>全パネルの固定接地影Sprite合計数です。</returns>
+        private static int CountAllContactShadowSprites(Transform root)
+        {
+            Transform[] descendants = root.GetComponentsInChildren<Transform>(true);
+            int count = 0;
+            for (int index = 0; index < descendants.Length; index++)
+            {
+                Transform descendant = descendants[index];
+                if (string.Equals(
+                    descendant.name,
+                    "Symmetric Contact Shadows",
+                    StringComparison.Ordinal))
+                {
+                    count += descendant.GetComponentsInChildren<SpriteRenderer>(true).Length;
+                }
+            }
+
+            return count;
+        }
+
+        /// <summary>子孫から、指定接頭辞で始まる名前のGameObject数を数えます。</summary>
+        /// <param name="parent">検索する親Transformです。</param>
+        /// <param name="namePrefix">比較対象とするGameObject名の接頭辞です。</param>
+        /// <returns>親自身を除く一致数です。</returns>
+        private static int CountNamedDescendants(Transform parent, string namePrefix)
+        {
+            Transform[] descendants = parent.GetComponentsInChildren<Transform>(true);
+            int count = 0;
+            for (int index = 0; index < descendants.Length; index++)
+            {
+                Transform descendant = descendants[index];
+                if (descendant != parent
+                    && descendant.name.StartsWith(namePrefix, StringComparison.Ordinal))
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
         /// <summary>固定配列から重複のないWallセル集合を作ります。</summary>
         /// <returns>8近傍判定と露出Face判定へ使うWallセル集合です。</returns>
         private static HashSet<Vector2Int> BuildWallCellSet()
@@ -931,6 +1725,28 @@ namespace Farmware.WorldGeneration.Editor
             for (int index = 0; index < WallCells.Length; index++)
             {
                 if (!wallCells.Contains(WallCells[index] + Vector2Int.down))
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        /// <summary>固定Wall形状のうち、14形状ルールが境界ハイライトを選ぶセル数を数えます。</summary>
+        /// <param name="wallCells">Wall領域に属するセル集合です。</param>
+        /// <returns>境界ハイライトパネルへ配置されるSprite数です。</returns>
+        private static int CountHighlightedCells(HashSet<Vector2Int> wallCells)
+        {
+            int count = 0;
+            for (int index = 0; index < WallCells.Length; index++)
+            {
+                BoundaryNeighborConnection connections = BuildConnections(
+                    wallCells,
+                    WallCells[index]);
+                BoundaryHighlightSelection selection =
+                    TerrainBoundaryHighlightUtility.SelectForConnections(connections);
+                if (selection.HasHighlight)
                 {
                     count++;
                 }

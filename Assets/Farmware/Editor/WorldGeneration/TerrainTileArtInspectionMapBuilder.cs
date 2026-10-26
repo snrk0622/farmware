@@ -1,5 +1,5 @@
-// このファイルは、GrassLoamの地形材質Spriteと仮の液体表現を固定配置した検品Sceneを再現可能に構築します。
-// 地形Simulationには接続せず、3段で黒へ溶ける崖、4段目からの海中床、連続水深、低い水面、U字の水際波線をGameビューで確認するEditor専用ツールです。
+// このファイルは、代表5材質の地形SpriteとGrassLoamを使った仮の液体表現を固定配置した検品Sceneを再現可能に構築します。
+// 地形Simulationには接続せず、材質差分、Wall暗化、Wall折れ目影、固定接地影、動的影、3段で黒へ溶ける崖、4段目からの海中床、連続水深、低い水面、U字の水際波線をGameビューで確認するEditor専用ツールです。
 
 using System;
 using System.Collections.Generic;
@@ -56,7 +56,49 @@ namespace Farmware.WorldGeneration.Editor
     }
 
     /// <summary>
-    /// GrassLoamの反復、Ground上へ重ねたWall、断面段数、Ground／Wall境界、液体被覆を固定配置します。
+    /// 代表材質1種類について、固定検品Sceneへ読み込めた用途別Sprite数を表します。
+    /// 材質ごとの可変長配列を固定枚数へ丸めず、設定に登録された候補をそのまま検証するために使用します。
+    /// </summary>
+    public readonly struct TerrainTileArtInspectionMaterialSummary
+    {
+        /// <summary>検品対象を識別する安定材質IDを返します。</summary>
+        public string MaterialId { get; }
+
+        /// <summary>読み込めたGroundTop差分数を返します。</summary>
+        public int GroundTopCount { get; }
+
+        /// <summary>読み込めた通常Face差分数を返します。</summary>
+        public int FaceCount { get; }
+
+        /// <summary>読み込めたGround用FaceBoundary合成結果数を返します。</summary>
+        public int GroundBoundaryCount { get; }
+
+        /// <summary>読み込めたWall用FaceBoundary合成結果数を返します。</summary>
+        public int WallBoundaryCount { get; }
+
+        /// <summary>代表材質1種類の検品結果を、安定IDと用途別Sprite数で保持します。</summary>
+        /// <param name="materialId">設定に登録された安定材質IDです。</param>
+        /// <param name="groundTopCount">GroundTop差分数です。</param>
+        /// <param name="faceCount">通常Face差分数です。</param>
+        /// <param name="groundBoundaryCount">Ground用境界合成結果数です。</param>
+        /// <param name="wallBoundaryCount">Wall用境界合成結果数です。</param>
+        public TerrainTileArtInspectionMaterialSummary(
+            string materialId,
+            int groundTopCount,
+            int faceCount,
+            int groundBoundaryCount,
+            int wallBoundaryCount)
+        {
+            MaterialId = materialId;
+            GroundTopCount = groundTopCount;
+            FaceCount = faceCount;
+            GroundBoundaryCount = groundBoundaryCount;
+            WallBoundaryCount = wallBoundaryCount;
+        }
+    }
+
+    /// <summary>
+    /// 代表5材質のGroundTop・Wall上面・Faceと、GrassLoamの断面段数、Ground／Wall境界、液体被覆を固定配置します。
     /// Wall上面は専用Spriteを使わず、GroundTopと同じSpriteへ材質設定のTintを掛けます。
     /// </summary>
     public static class TerrainTileArtInspectionMapBuilder
@@ -75,6 +117,17 @@ namespace Farmware.WorldGeneration.Editor
 
         /// <summary>固定検品の対象とする安定材質IDです。</summary>
         public const string InspectedMaterialId = "GrassLoam";
+
+        // 材質構造の違いを比較する代表5材質です。
+        // 配列順はSceneの左から右へ対応し、テストと人間確認で同じ配置を再現します。
+        private static readonly string[] RepresentativeMaterialIds =
+        {
+            "GrassLoam",
+            "DesertSand",
+            "Sandstone",
+            "Granite",
+            "Basalt"
+        };
 
         /// <summary>淡水の仮表示に使う既存Fallback Spriteです。</summary>
         public const string FreshWaterPlaceholderPath =
@@ -100,7 +153,19 @@ namespace Farmware.WorldGeneration.Editor
         public const string AnimatedWaterEdgeWaveShaderPath =
             "Assets/Farmware/Shaders/Development/AnimatedWaterEdgeWave.shader";
 
-        /// <summary>検品用に自動生成する深度勾配と水際波線のMaterialをまとめるフォルダーです。</summary>
+        /// <summary>Wall上面と前面の折れ目へ8pxの共通陰影を描く検品用Shaderです。</summary>
+        public const string WallFoldShadowShaderPath =
+            "Assets/Farmware/Shaders/Development/WallFoldShadow.shader";
+
+        /// <summary>Light 2DとShadow Caster 2Dの影響を受けるURP 2D Lit Materialです。</summary>
+        private const string SpriteLitMaterialPath =
+            "Packages/com.unity.render-pipelines.universal/Runtime/Materials/Sprite-Lit-Default.mat";
+
+        /// <summary>照明で濃度を変えない固定接地影へ使うURP 2D Unlit Materialです。</summary>
+        private const string SpriteUnlitMaterialPath =
+            "Packages/com.unity.render-pipelines.universal/Runtime/Materials/Sprite-Unlit-Default.mat";
+
+        /// <summary>検品用に自動生成する深度勾配、水際波線、Wall折れ目影のMaterialをまとめるフォルダーです。</summary>
         public const string GeneratedPreviewAssetFolder =
             "Assets/Farmware/Art/WorldGeneration/Generated/Inspection";
 
@@ -112,6 +177,12 @@ namespace Farmware.WorldGeneration.Editor
 
         /// <summary>本番想定のWall前面を縦へ反復して確認する段数です。</summary>
         public const int WallFaceDepth = 2;
+
+        /// <summary>Wall前面1段目の上端から折れ目影が完全透過になるまでの画素数です。</summary>
+        public const int WallFoldShadowFadePixels = 8;
+
+        /// <summary>Wall折れ目影の最上段へ掛ける黒のAlpha初期値です。</summary>
+        public const float WallFoldShadowTopAlpha = 0.35f;
 
         /// <summary>実景検品用の穴を横へ掘るセル数です。</summary>
         public const int InspectionHoleWidth = 3;
@@ -148,14 +219,51 @@ namespace Farmware.WorldGeneration.Editor
 
         // Pixel Perfect Cameraと全Spriteで共有する基準値です。
         private const int AssetsPixelsPerUnit = 16;
-        private const int ReferenceResolutionX = 480;
-        private const int ReferenceResolutionY = 270;
+        private const int ReferenceResolutionX = 720;
+        private const int ReferenceResolutionY = 360;
 
         // GroundTop反復感を見る矩形と、Wallパッチの寸法です。
         private const int GroundRepeatWidth = 12;
         private const int GroundRepeatHeight = 7;
         private const int WallPatchWidth = 5;
         private const int WallPatchHeight = 3;
+
+        // 代表5材質は、同じ材質のGroundの上へ暗化Wall上面とFace 2段を重ねた小型検品パネルで表示します。
+        // 切り離したSprite行ではなく、実際の地面とWallの重なり方で色と立体感を確認します。
+        private const float RepresentativeMaterialSpacing = 9f;
+
+        /// <summary>Wallの左右へ露出させる同一材質Groundの幅です。単位は16px論理セルです。</summary>
+        public const int RepresentativeGroundSideMargin = 2;
+
+        /// <summary>Wall前面より手前へ露出させる同一材質Groundの奥行きです。単位は16px論理セルです。</summary>
+        public const int RepresentativeGroundFrontMargin = 2;
+
+        /// <summary>Wall上面より奥へ露出させる同一材質Groundの奥行きです。単位は16px論理セルです。</summary>
+        public const int RepresentativeGroundBackMargin = 2;
+
+        /// <summary>代表材質パネルの最小横幅です。単位は16px論理セルです。</summary>
+        public const int RepresentativeGroundPatchMinimumWidth =
+            4 + (RepresentativeGroundSideMargin * 2);
+
+        /// <summary>代表材質パネルのGroundを奥から手前へ並べる行数です。</summary>
+        public const int RepresentativeGroundPatchHeight =
+            RepresentativeGroundFrontMargin
+            + WallFaceDepth
+            + 1
+            + RepresentativeGroundBackMargin;
+
+        /// <summary>Groundパッチ下端を0としたWall上面の行位置です。</summary>
+        public const int RepresentativeWallTopLocalY =
+            RepresentativeGroundFrontMargin + WallFaceDepth;
+
+        /// <summary>代表パネル1つへ置く上方主光と左手前検証光の合計数です。</summary>
+        public const int RepresentativePointLightsPerPanel = 2;
+
+        /// <summary>代表材質パネルの中心Y座標です。単位はUnity Unitです。</summary>
+        private const float RepresentativePanelCenterY = 7.75f;
+
+        // 代表材質パネルは上へ拡張し、穴検品との間へ0.5セルの隙間を残します。
+        private const float HoleInspectionCenterY = -1.75f;
 
         // 検品に読み込む仮液体は淡水、海水、マグマの3種類です。
         private const int LiquidPlaceholderCount = 3;
@@ -182,6 +290,9 @@ namespace Farmware.WorldGeneration.Editor
         public static int WallSurfaceDarkenComparisonCount =>
             WallSurfaceDarkenComparisonFactors.Length;
 
+        /// <summary>固定検品Sceneへ左から右の順で配置する代表材質数を返します。</summary>
+        public static int RepresentativeMaterialCount => RepresentativeMaterialIds.Length;
+
         /// <summary>穴の4段目以降へ何を表示するかを表します。</summary>
         private enum HoleDepthPreviewKind
         {
@@ -198,9 +309,15 @@ namespace Farmware.WorldGeneration.Editor
             Magma
         }
 
-        /// <summary>Scene構築中だけ保持するGrassLoam素材一式です。</summary>
-        private sealed class InspectionAssets
+        /// <summary>Scene構築中だけ保持する、代表材質1種類の検証済み素材です。</summary>
+        private sealed class InspectionMaterialAssets
         {
+            /// <summary>設定とHierarchy名に使う安定材質IDです。</summary>
+            public string MaterialId { get; }
+
+            /// <summary>Inspectorで確認しやすい日本語名です。</summary>
+            public string JapaneseName { get; }
+
             /// <summary>GroundとWall上面で共有する差分です。</summary>
             public Sprite[] GroundTopSprites { get; }
 
@@ -212,6 +329,56 @@ namespace Farmware.WorldGeneration.Editor
 
             /// <summary>Wall用境界合成結果です。</summary>
             public Sprite[] WallBoundarySprites { get; }
+
+            /// <summary>Wall上面へ掛けるRGB乗算係数です。</summary>
+            public float WallDarkenFactor { get; }
+
+            /// <summary>代表材質1種類の入力・生成SpriteとWall暗化値をまとめます。</summary>
+            /// <param name="materialId">安定材質IDです。</param>
+            /// <param name="japaneseName">Inspector表示用の日本語名です。</param>
+            /// <param name="groundTopSprites">GroundとWall上面で共有する差分です。</param>
+            /// <param name="faceSprites">Ground崖面とWall前面で共有する通常Faceです。</param>
+            /// <param name="groundBoundarySprites">Ground用境界合成結果です。</param>
+            /// <param name="wallBoundarySprites">Wall用境界合成結果です。</param>
+            /// <param name="wallDarkenFactor">Wall上面のRGB乗算係数です。</param>
+            public InspectionMaterialAssets(
+                string materialId,
+                string japaneseName,
+                Sprite[] groundTopSprites,
+                Sprite[] faceSprites,
+                Sprite[] groundBoundarySprites,
+                Sprite[] wallBoundarySprites,
+                float wallDarkenFactor)
+            {
+                MaterialId = materialId;
+                JapaneseName = japaneseName;
+                GroundTopSprites = groundTopSprites;
+                FaceSprites = faceSprites;
+                GroundBoundarySprites = groundBoundarySprites;
+                WallBoundarySprites = wallBoundarySprites;
+                WallDarkenFactor = wallDarkenFactor;
+            }
+        }
+
+        /// <summary>Scene構築中だけ保持する代表5材質とGrassLoam液体検品素材一式です。</summary>
+        private sealed class InspectionAssets
+        {
+            /// <summary>Scene上部へ左から右の順で配置する代表5材質です。</summary>
+            public InspectionMaterialAssets[] RepresentativeMaterials { get; }
+
+            /// <summary>GroundとWall上面で共有する差分です。</summary>
+            public Sprite[] GroundTopSprites => RepresentativeMaterials[0].GroundTopSprites;
+
+            /// <summary>Ground崖面とWall前面で共有する通常Faceです。</summary>
+            public Sprite[] FaceSprites => RepresentativeMaterials[0].FaceSprites;
+
+            /// <summary>Ground用境界合成結果です。</summary>
+            public Sprite[] GroundBoundarySprites =>
+                RepresentativeMaterials[0].GroundBoundarySprites;
+
+            /// <summary>Wall用境界合成結果です。</summary>
+            public Sprite[] WallBoundarySprites =>
+                RepresentativeMaterials[0].WallBoundarySprites;
 
             /// <summary>淡水の半透明な深度被覆へ一時利用するFallback Spriteです。</summary>
             public Sprite FreshWaterPlaceholder { get; }
@@ -225,44 +392,44 @@ namespace Farmware.WorldGeneration.Editor
             /// <summary>海中床の配置物が地上から見えることを示す仮Spriteです。</summary>
             public Sprite UnderwaterObjectPlaceholder { get; }
 
+            /// <summary>代表材質パネルでLight 2Dと動的影を受けるURP 2D Lit Materialです。</summary>
+            public Material SpriteLitMaterial { get; }
+
+            /// <summary>代表材質パネルの固定接地影を照明から独立させるURP 2D Unlit Materialです。</summary>
+            public Material SpriteUnlitMaterial { get; }
+
             /// <summary>Wall上面へ掛けるRGB乗算係数です。</summary>
-            public float WallDarkenFactor { get; }
+            public float WallDarkenFactor => RepresentativeMaterials[0].WallDarkenFactor;
 
             /// <summary>検証済み素材と壁暗化設定をScene構築用にまとめます。</summary>
-            /// <param name="groundTopSprites">GroundとWall上面で共有する差分です。</param>
-            /// <param name="faceSprites">共通Face差分です。</param>
-            /// <param name="groundBoundarySprites">Ground用境界合成結果です。</param>
-            /// <param name="wallBoundarySprites">Wall用境界合成結果です。</param>
+            /// <param name="representativeMaterials">検証済みの代表5材質です。</param>
             /// <param name="freshWaterPlaceholder">淡水の仮Spriteです。</param>
             /// <param name="saltWaterPlaceholder">海水の仮Spriteです。</param>
             /// <param name="magmaPlaceholder">マグマの仮Spriteです。</param>
             /// <param name="underwaterObjectPlaceholder">海中床の仮配置物Spriteです。</param>
-            /// <param name="wallDarkenFactor">Wall上面のRGB乗算係数です。</param>
+            /// <param name="spriteLitMaterial">代表材質のGround、Wall、Faceへ使うLit Materialです。</param>
+            /// <param name="spriteUnlitMaterial">固定接地影へ使うUnlit Materialです。</param>
             public InspectionAssets(
-                Sprite[] groundTopSprites,
-                Sprite[] faceSprites,
-                Sprite[] groundBoundarySprites,
-                Sprite[] wallBoundarySprites,
+                InspectionMaterialAssets[] representativeMaterials,
                 Sprite freshWaterPlaceholder,
                 Sprite saltWaterPlaceholder,
                 Sprite magmaPlaceholder,
                 Sprite underwaterObjectPlaceholder,
-                float wallDarkenFactor)
+                Material spriteLitMaterial,
+                Material spriteUnlitMaterial)
             {
-                GroundTopSprites = groundTopSprites;
-                FaceSprites = faceSprites;
-                GroundBoundarySprites = groundBoundarySprites;
-                WallBoundarySprites = wallBoundarySprites;
+                RepresentativeMaterials = representativeMaterials;
                 FreshWaterPlaceholder = freshWaterPlaceholder;
                 SaltWaterPlaceholder = saltWaterPlaceholder;
                 MagmaPlaceholder = magmaPlaceholder;
                 UnderwaterObjectPlaceholder = underwaterObjectPlaceholder;
-                WallDarkenFactor = wallDarkenFactor;
+                SpriteLitMaterial = spriteLitMaterial;
+                SpriteUnlitMaterial = spriteUnlitMaterial;
             }
         }
 
         /// <summary>
-        /// Scene構築時に自動生成する連続深度Materialと、水際の仮波線Materialをまとめます。
+        /// Scene構築時に自動生成する連続深度、水際の仮波線、Wall折れ目影のMaterialをまとめます。
         /// 完成アートとは分離し、検品用素材を本番の材質入力として誤利用しないようにします。
         /// </summary>
         private sealed class GeneratedPreviewAssets
@@ -291,6 +458,9 @@ namespace Farmware.WorldGeneration.Editor
             /// <summary>海水の左右辺へ使う縦方向の2色波線Materialです。</summary>
             public Material SaltWaterVerticalWaveMaterial { get; }
 
+            /// <summary>Wall前面1段目の上端8pxへ共通して重ねる折れ目影Materialです。</summary>
+            public Material WallFoldShadowMaterial { get; }
+
             /// <summary>生成済みの検品用表示素材をScene構築へ渡します。</summary>
             /// <param name="dryCliffFadeMaterial">乾燥崖の黒勾配Materialです。</param>
             /// <param name="freshWaterWithFloorMaterial">淡水・海中床あり用Materialです。</param>
@@ -300,6 +470,7 @@ namespace Farmware.WorldGeneration.Editor
             /// <param name="freshWaterVerticalWaveMaterial">淡水の左右辺用波線Materialです。</param>
             /// <param name="saltWaterHorizontalWaveMaterial">海水の奥辺用波線Materialです。</param>
             /// <param name="saltWaterVerticalWaveMaterial">海水の左右辺用波線Materialです。</param>
+            /// <param name="wallFoldShadowMaterial">Wall前面1段目へ重ねる折れ目影Materialです。</param>
             public GeneratedPreviewAssets(
                 Material dryCliffFadeMaterial,
                 Material freshWaterWithFloorMaterial,
@@ -308,7 +479,8 @@ namespace Farmware.WorldGeneration.Editor
                 Material freshWaterHorizontalWaveMaterial,
                 Material freshWaterVerticalWaveMaterial,
                 Material saltWaterHorizontalWaveMaterial,
-                Material saltWaterVerticalWaveMaterial)
+                Material saltWaterVerticalWaveMaterial,
+                Material wallFoldShadowMaterial)
             {
                 DryCliffFadeMaterial = dryCliffFadeMaterial;
                 FreshWaterWithFloorMaterial = freshWaterWithFloorMaterial;
@@ -318,10 +490,11 @@ namespace Farmware.WorldGeneration.Editor
                 FreshWaterVerticalWaveMaterial = freshWaterVerticalWaveMaterial;
                 SaltWaterHorizontalWaveMaterial = saltWaterHorizontalWaveMaterial;
                 SaltWaterVerticalWaveMaterial = saltWaterVerticalWaveMaterial;
+                WallFoldShadowMaterial = wallFoldShadowMaterial;
             }
         }
 
-        /// <summary>未保存Sceneを保護したうえで、GrassLoam固定検品Sceneを再構築して開きます。</summary>
+        /// <summary>未保存Sceneを保護したうえで、代表5材質の固定検品Sceneを再構築して開きます。</summary>
         [MenuItem("Farmware/World Generation/Open Terrain Tile Inspection Map")]
         public static void BuildAndOpenFromMenu()
         {
@@ -360,6 +533,19 @@ namespace Farmware.WorldGeneration.Editor
             return WallSurfaceDarkenComparisonFactors[index];
         }
 
+        /// <summary>固定検品Sceneの指定位置へ配置する代表材質IDを返します。</summary>
+        /// <param name="index">左から数える0始まりの配置位置です。</param>
+        /// <returns>設定アセット内の材質を特定する安定IDです。</returns>
+        public static string GetRepresentativeMaterialId(int index)
+        {
+            if (index < 0 || index >= RepresentativeMaterialIds.Length)
+            {
+                throw new ArgumentOutOfRangeException(nameof(index));
+            }
+
+            return RepresentativeMaterialIds[index];
+        }
+
         /// <summary>GrassLoamの入力と生成物を読み、Sceneを変更せず枚数だけ返します。</summary>
         /// <returns>検証済みの用途別Sprite数です。</returns>
         public static TerrainTileArtInspectionAssetSummary ValidateGrassLoamAssets()
@@ -371,6 +557,29 @@ namespace Farmware.WorldGeneration.Editor
                 assets.GroundBoundarySprites.Length,
                 assets.WallBoundarySprites.Length,
                 LiquidPlaceholderCount);
+        }
+
+        /// <summary>代表5材質の入力と生成物を読み、Sceneを変更せず用途別枚数を返します。</summary>
+        /// <returns>左から右の固定配置順に並んだ代表材質の検証結果です。</returns>
+        public static TerrainTileArtInspectionMaterialSummary[]
+            ValidateRepresentativeMaterialAssets()
+        {
+            InspectionAssets assets = LoadAndValidateAssets();
+            TerrainTileArtInspectionMaterialSummary[] summaries =
+                new TerrainTileArtInspectionMaterialSummary[
+                    assets.RepresentativeMaterials.Length];
+            for (int index = 0; index < assets.RepresentativeMaterials.Length; index++)
+            {
+                InspectionMaterialAssets material = assets.RepresentativeMaterials[index];
+                summaries[index] = new TerrainTileArtInspectionMaterialSummary(
+                    material.MaterialId,
+                    material.GroundTopSprites.Length,
+                    material.FaceSprites.Length,
+                    material.GroundBoundarySprites.Length,
+                    material.WallBoundarySprites.Length);
+            }
+
+            return summaries;
         }
 
         /// <summary>水面上端からの画素深度に対応する連続青OverlayのAlphaを返します。</summary>
@@ -419,6 +628,28 @@ namespace Farmware.WorldGeneration.Editor
             return 1f - Mathf.Clamp01(depthFromGridTopPixels / DryCliffFadePixels);
         }
 
+        /// <summary>Wall前面1段目の上端から数えた画素行に対応する折れ目影Alphaを返します。</summary>
+        /// <param name="pixelRowFromTop">上端を0とする0以上の画素行です。</param>
+        /// <returns>上端で初期Alpha、8px目で0になり、それより下も0となるAlphaです。</returns>
+        public static float GetWallFoldShadowAlpha(int pixelRowFromTop)
+        {
+            if (pixelRowFromTop < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(pixelRowFromTop));
+            }
+
+            // 8pxの範囲内で最後の行を完全透過にするため、0～7行を「行数-1」で割ります。
+            // Shaderと同じ式を公開しておくことで、検品用見た目の調整値をEditModeテストで固定できます。
+            if (pixelRowFromTop >= WallFoldShadowFadePixels)
+            {
+                return 0f;
+            }
+
+            float fadeDenominator = Mathf.Max(WallFoldShadowFadePixels - 1, 1);
+            float fade = 1f - Mathf.Clamp01(pixelRowFromTop / fadeDenominator);
+            return WallFoldShadowTopAlpha * fade;
+        }
+
         /// <summary>メニュー操作時だけ未保存Sceneを確認してから構築を実行します。</summary>
         /// <param name="comparisonOnly">暗化比較Sceneを作る場合はtrueです。</param>
         private static void BuildFromMenu(bool comparisonOnly)
@@ -459,7 +690,7 @@ namespace Farmware.WorldGeneration.Editor
             }
         }
 
-        /// <summary>設定アセットから対象材質と生成済み境界Spriteを読み込み、件数と参照を検証します。</summary>
+        /// <summary>設定アセットから代表5材質と生成済み境界Spriteを読み込み、件数と参照を検証します。</summary>
         /// <returns>Scene構築へそのまま使える検証済み素材です。</returns>
         private static InspectionAssets LoadAndValidateAssets()
         {
@@ -471,19 +702,73 @@ namespace Farmware.WorldGeneration.Editor
                     $"地形タイル生成設定が見つかりません: {SettingsAssetPath}");
             }
 
-            TerrainMaterialArtSource material = FindMaterial(settings, InspectedMaterialId);
-            if (material == null)
+            InspectionMaterialAssets[] representativeMaterials =
+                new InspectionMaterialAssets[RepresentativeMaterialIds.Length];
+            for (int materialIndex = 0;
+                 materialIndex < RepresentativeMaterialIds.Length;
+                 materialIndex++)
             {
-                throw new InvalidOperationException(
-                    $"Materialsに{InspectedMaterialId}がありません。");
+                // 一部の材質だけを黙って省略すると比較結果を誤認するため、5材質をすべて必須入力として検証します。
+                representativeMaterials[materialIndex] = LoadAndValidateMaterialAssets(
+                    settings,
+                    RepresentativeMaterialIds[materialIndex]);
             }
 
-            TerrainTileArtValidationReport report =
-                TerrainTileArtGenerator.ValidateMaterial(settings, FindMaterialIndex(settings, material));
+            // 液体専用の完成アートは後続制作のため、現段階では既存Fallbackを仮Spriteとして使います。
+            // 3種類を明示的に検証し、欠けたままSceneを作って比較結果を誤認しないようにします。
+            Sprite freshWaterPlaceholder = LoadRequiredSprite(FreshWaterPlaceholderPath, "淡水");
+            Sprite saltWaterPlaceholder = LoadRequiredSprite(SaltWaterPlaceholderPath, "海水");
+            Sprite magmaPlaceholder = LoadRequiredSprite(MagmaPlaceholderPath, "マグマ");
+            Sprite underwaterObjectPlaceholder = LoadRequiredSprite(
+                UnderwaterObjectPlaceholderPath,
+                "海中床の配置物");
+            Material spriteLitMaterial = AssetDatabase.LoadAssetAtPath<Material>(
+                SpriteLitMaterialPath);
+            if (spriteLitMaterial == null)
+            {
+                throw new InvalidOperationException(
+                    $"URP 2D Lit Materialを読み込めません: {SpriteLitMaterialPath}");
+            }
+
+            Material spriteUnlitMaterial = AssetDatabase.LoadAssetAtPath<Material>(
+                SpriteUnlitMaterialPath);
+            if (spriteUnlitMaterial == null)
+            {
+                throw new InvalidOperationException(
+                    $"URP 2D Unlit Materialを読み込めません: {SpriteUnlitMaterialPath}");
+            }
+
+            return new InspectionAssets(
+                representativeMaterials,
+                freshWaterPlaceholder,
+                saltWaterPlaceholder,
+                magmaPlaceholder,
+                underwaterObjectPlaceholder,
+                spriteLitMaterial,
+                spriteUnlitMaterial);
+        }
+
+        /// <summary>代表材質1種類の設定、入力Sprite、境界合成結果を検証して読み込みます。</summary>
+        /// <param name="settings">材質配列を保持する生成設定です。</param>
+        /// <param name="materialId">読み込む代表材質の安定IDです。</param>
+        /// <returns>Sceneへ配置できる検証済み材質素材です。</returns>
+        private static InspectionMaterialAssets LoadAndValidateMaterialAssets(
+            TerrainTileArtGenerationSettings settings,
+            string materialId)
+        {
+            TerrainMaterialArtSource material = FindMaterial(settings, materialId);
+            if (material == null)
+            {
+                throw new InvalidOperationException($"Materialsに{materialId}がありません。");
+            }
+
+            TerrainTileArtValidationReport report = TerrainTileArtGenerator.ValidateMaterial(
+                settings,
+                FindMaterialIndex(settings, material));
             if (report.HasErrors)
             {
                 throw new InvalidOperationException(
-                    "GrassLoamの生成入力が不正です。先に生成設定Inspectorで検証してください。\n- "
+                    $"{materialId}の生成入力が不正です。先に生成設定Inspectorで検証してください。\n- "
                     + string.Join("\n- ", report.Errors));
             }
 
@@ -514,37 +799,26 @@ namespace Farmware.WorldGeneration.Editor
             if (groundBoundary.Count != expectedBoundaryCount)
             {
                 throw new InvalidOperationException(
-                    $"Ground境界生成物は{expectedBoundaryCount}枚必要ですが、{groundBoundary.Count}枚でした。対象材質を再生成してください。");
+                    $"{materialId}のGround境界生成物は{expectedBoundaryCount}枚必要ですが、{groundBoundary.Count}枚でした。対象材質を再生成してください。");
             }
 
             if (material.DarkenWallSurface && wallBoundary.Count != expectedBoundaryCount)
             {
                 throw new InvalidOperationException(
-                    $"Wall境界生成物は{expectedBoundaryCount}枚必要ですが、{wallBoundary.Count}枚でした。対象材質を再生成してください。");
+                    $"{materialId}のWall境界生成物は{expectedBoundaryCount}枚必要ですが、{wallBoundary.Count}枚でした。対象材質を再生成してください。");
             }
 
             // 暗化なしではWallがGround境界を再利用するため、Scene側も同じ参照を使います。
             Sprite[] wallBoundarySprites = material.DarkenWallSurface
                 ? wallBoundary.ToArray()
                 : groundBoundary.ToArray();
-
-            // 液体専用の完成アートは後続制作のため、現段階では既存Fallbackを仮Spriteとして使います。
-            // 3種類を明示的に検証し、欠けたままSceneを作って比較結果を誤認しないようにします。
-            Sprite freshWaterPlaceholder = LoadRequiredSprite(FreshWaterPlaceholderPath, "淡水");
-            Sprite saltWaterPlaceholder = LoadRequiredSprite(SaltWaterPlaceholderPath, "海水");
-            Sprite magmaPlaceholder = LoadRequiredSprite(MagmaPlaceholderPath, "マグマ");
-            Sprite underwaterObjectPlaceholder = LoadRequiredSprite(
-                UnderwaterObjectPlaceholderPath,
-                "海中床の配置物");
-            return new InspectionAssets(
+            return new InspectionMaterialAssets(
+                material.MaterialId,
+                material.JapaneseName,
                 material.GroundTopSprites,
                 material.FaceSprites,
                 groundBoundary.ToArray(),
                 wallBoundarySprites,
-                freshWaterPlaceholder,
-                saltWaterPlaceholder,
-                magmaPlaceholder,
-                underwaterObjectPlaceholder,
                 material.DarkenWallSurface ? material.WallDarkenFactor : 1f);
         }
 
@@ -564,7 +838,7 @@ namespace Farmware.WorldGeneration.Editor
             return sprite;
         }
 
-        /// <summary>連続深度Materialと、奥・左右へ使う2色の仮波線Materialを生成または更新します。</summary>
+        /// <summary>連続深度、奥・左右へ使う2色の仮波線、Wall折れ目影のMaterialを生成または更新します。</summary>
         /// <returns>Sceneへ永続参照できる生成済みAsset一式です。</returns>
         private static GeneratedPreviewAssets EnsureGeneratedPreviewAssets()
         {
@@ -574,6 +848,9 @@ namespace Farmware.WorldGeneration.Editor
                 ImportAssetOptions.ForceUpdate);
             AssetDatabase.ImportAsset(
                 AnimatedWaterEdgeWaveShaderPath,
+                ImportAssetOptions.ForceUpdate);
+            AssetDatabase.ImportAsset(
+                WallFoldShadowShaderPath,
                 ImportAssetOptions.ForceUpdate);
             Shader depthShader = AssetDatabase.LoadAssetAtPath<Shader>(
                 ContinuousDepthOverlayShaderPath);
@@ -589,6 +866,14 @@ namespace Farmware.WorldGeneration.Editor
             {
                 throw new InvalidOperationException(
                     $"水際波線Shaderを読み込めません: {AnimatedWaterEdgeWaveShaderPath}");
+            }
+
+            Shader wallFoldShadowShader = AssetDatabase.LoadAssetAtPath<Shader>(
+                WallFoldShadowShaderPath);
+            if (wallFoldShadowShader == null)
+            {
+                throw new InvalidOperationException(
+                    $"Wall折れ目影Shaderを読み込めません: {WallFoldShadowShaderPath}");
             }
 
             Material dryCliffFade = EnsureContinuousDepthMaterial(
@@ -645,6 +930,9 @@ namespace Farmware.WorldGeneration.Editor
                 new Color32(78, 135, 205, 255),
                 new Color32(157, 201, 237, 255),
                 verticalWaveLengthPixels);
+            Material wallFoldShadow = EnsureWallFoldShadowMaterial(
+                wallFoldShadowShader,
+                GeneratedPreviewAssetFolder + "/WallFoldShadow.mat");
             AssetDatabase.SaveAssets();
 
             return new GeneratedPreviewAssets(
@@ -655,7 +943,32 @@ namespace Farmware.WorldGeneration.Editor
                 freshHorizontalWave,
                 freshVerticalWave,
                 saltHorizontalWave,
-                saltVerticalWave);
+                saltVerticalWave,
+                wallFoldShadow);
+        }
+
+        /// <summary>Wall暗化比較Sceneだけで使う折れ目影Materialを、液体用Assetへ依存せず生成または更新します。</summary>
+        /// <returns>Sceneへ永続参照できる折れ目影Materialです。</returns>
+        public static Material EnsureWallFoldShadowPreviewMaterial()
+        {
+            EnsureAssetFolder(GeneratedPreviewAssetFolder);
+            AssetDatabase.ImportAsset(
+                WallFoldShadowShaderPath,
+                ImportAssetOptions.ForceUpdate);
+            Shader shader = AssetDatabase.LoadAssetAtPath<Shader>(WallFoldShadowShaderPath);
+            if (shader == null)
+            {
+                throw new InvalidOperationException(
+                    $"Wall折れ目影Shaderを読み込めません: {WallFoldShadowShaderPath}");
+            }
+
+            // 暗化比較Sceneは水・崖を表示しないため、液体用ShaderやMaterialを要求しません。
+            // 必要な共通影だけを確定し、比較ツールの入力範囲をWall素材へ限定します。
+            Material material = EnsureWallFoldShadowMaterial(
+                shader,
+                GeneratedPreviewAssetFolder + "/WallFoldShadow.mat");
+            AssetDatabase.SaveAssets();
+            return material;
         }
 
         /// <summary>指定色・開始位置・到達距離・最大Alphaを持つ連続深度Materialを生成または更新します。</summary>
@@ -735,6 +1048,40 @@ namespace Farmware.WorldGeneration.Editor
             return material;
         }
 
+        /// <summary>Wall前面1段目の上端8pxへ掛ける共通折れ目影Materialを生成または更新します。</summary>
+        /// <param name="shader">画素行単位のAlpha勾配を描く検品用Shaderです。</param>
+        /// <param name="assetPath">Materialの保存先です。</param>
+        /// <returns>AssetDatabaseへ保存済みのMaterialです。</returns>
+        private static Material EnsureWallFoldShadowMaterial(
+            Shader shader,
+            string assetPath)
+        {
+            Material material = AssetDatabase.LoadAssetAtPath<Material>(assetPath);
+            if (material == null)
+            {
+                material = new Material(shader)
+                {
+                    name = Path.GetFileNameWithoutExtension(assetPath)
+                };
+                AssetDatabase.CreateAsset(material, assetPath);
+            }
+            else
+            {
+                material.shader = shader;
+            }
+
+            // 折れ目影は材質色を持たず、黒のAlphaだけを8画素で減衰させます。
+            // Sprite寸法は生成設定の16pxを参照し、Shader側のマジックナンバーと食い違わないようにします。
+            material.SetColor("_ShadowColor", Color.black);
+            material.SetFloat("_TopAlpha", WallFoldShadowTopAlpha);
+            material.SetFloat("_FadePixelCount", WallFoldShadowFadePixels);
+            material.SetFloat(
+                "_SpritePixelHeight",
+                TerrainTileArtGenerationSettings.TileSizeInPixels);
+            EditorUtility.SetDirty(material);
+            return material;
+        }
+
         /// <summary>指定した材質IDをMaterials配列から探します。</summary>
         /// <param name="settings">検索対象の設定アセットです。</param>
         /// <param name="materialId">探す安定材質IDです。</param>
@@ -777,15 +1124,20 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>空SceneへCameraと検品Spriteを配置し、用途別パスへ保存します。</summary>
-        /// <param name="assets">検証済みのGrassLoam素材です。</param>
+        /// <param name="assets">検証済みの代表5材質とGrassLoam液体検品素材です。</param>
         /// <param name="comparisonOnly">暗化比較だけを配置する場合はtrueです。</param>
         private static void BuildAndOpenScene(InspectionAssets assets, bool comparisonOnly)
         {
-            // 検品Sceneだけが利用する深度・波線Materialを、Scene参照を作る前にAssetとして確定します。
+            // 検品Sceneだけが利用する深度・波線・折れ目影Materialを、Scene参照を作る前にAssetとして確定します。
             // 一時的なメモリObjectをSceneへ保存すると再起動後に参照が外れるため、AssetDatabase経由で永続化します。
+            // Wall暗化比較では折れ目影だけを生成し、固定検品では深度・波線を含む一式を生成します。
+            // これにより、Wallだけの比較が無関係な液体Shaderの欠落で実行不能になることを避けます。
             GeneratedPreviewAssets previewAssets = comparisonOnly
                 ? null
                 : EnsureGeneratedPreviewAssets();
+            Material wallFoldShadowMaterial = comparisonOnly
+                ? EnsureWallFoldShadowPreviewMaterial()
+                : previewAssets.WallFoldShadowMaterial;
             Scene scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
             scene.name = comparisonOnly
                 ? "TerrainWallSurfaceDarkenComparison"
@@ -794,14 +1146,30 @@ namespace Farmware.WorldGeneration.Editor
             GameObject root = new GameObject("Terrain Tile Art Inspection");
             if (comparisonOnly)
             {
-                CreateDarkenComparison(root, assets);
+                CreateDarkenComparison(root, assets, wallFoldShadowMaterial);
             }
             else
             {
+                // C案と同じ低い環境光を代表材質パネルへ与え、Point Lightの外側も完全な黒にならないようにします。
+                // 液体検品はUnlitまたは専用Shaderのままなので、代表パネル用照明から表示契約を分離できます。
+                CreateRepresentativeGlobalLight(root);
+
+                // 各代表材質について、同じGroundの上へ暗化Wall上面とFace 2段を重ねます。
+                // 実景に近い重なり方にすることで、Wall上面、折れ目影、Face、固定接地影、動的影の関係をひとつのパネルで読めるようにします。
+                CreateRepresentativeMaterialWallPanels(
+                    root,
+                    assets.RepresentativeMaterials,
+                    wallFoldShadowMaterial,
+                    assets.SpriteLitMaterial,
+                    assets.SpriteUnlitMaterial);
+
                 // 地面の中を掘った横3×手前方向10セルの穴を横1列へ並べ、5条件を同じ深度で比較します。
-                // Wallの暗化・接地影・動的影は専用比較Sceneで検証済みなので、このSceneは穴と深度表現へ集中させます。
+                // 穴は代表材質パネルと独立したUnlit表示とし、深度表現の色が検証用Lightで変化しないようにします。
                 CreateHoleInspectionGrid(root, assets, previewAssets);
                 CreateBoundaryRows(root, assets);
+                ValidateRepresentativePanelLighting(
+                    root,
+                    assets.RepresentativeMaterials);
             }
 
             string scenePath = comparisonOnly
@@ -851,11 +1219,13 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="assets">配置するSprite一式です。</param>
         /// <param name="darkenFactor">Wall上面へ掛けるRGB乗算係数です。</param>
         /// <param name="horizontalOffset">比較Scene内での水平移動量です。</param>
+        /// <param name="wallFoldShadowMaterial">Wall前面1段目へ重ねる共通折れ目影です。</param>
         private static void CreateGroundAndWallInspection(
             GameObject root,
             InspectionAssets assets,
             float darkenFactor,
-            float horizontalOffset)
+            float horizontalOffset,
+            Material wallFoldShadowMaterial)
         {
             GameObject group = CreateChild(root, $"Ground and Wall x{darkenFactor:0.00}");
             for (int y = 0; y < GroundRepeatHeight; y++)
@@ -911,7 +1281,8 @@ namespace Farmware.WorldGeneration.Editor
                                     group,
                                     $"WallFaceContactShadow_{x:D2}",
                                     face,
-                                    facePosition);
+                                    facePosition,
+                                    assets.SpriteUnlitMaterial);
                             }
 
                             CreateSpriteObject(
@@ -921,9 +1292,331 @@ namespace Farmware.WorldGeneration.Editor
                                 facePosition,
                                 Color.white,
                                 20);
+
+                            if (faceStage == 1)
+                            {
+                                // 上面と前面の明度が近い材質でも立ち上がりを読めるよう、1段目の上端だけへ共通影を重ねます。
+                                // Face自体や2段目以降は暗化せず、材質本来の断面色と模様を維持します。
+                                CreateSpriteObject(
+                                    group,
+                                    $"WallFoldShadow_{x:D2}",
+                                    face,
+                                    facePosition,
+                                    Color.white,
+                                    21,
+                                    wallFoldShadowMaterial);
+                            }
                         }
                     }
                 }
+            }
+        }
+
+        /// <summary>代表材質パネルの外側も読める最低限の環境光を作ります。</summary>
+        /// <param name="root">固定検品Sceneの親GameObjectです。</param>
+        private static void CreateRepresentativeGlobalLight(GameObject root)
+        {
+            GameObject lightObject = CreateChild(root, "Representative Global Light 2D");
+            Light2D light = lightObject.AddComponent<Light2D>();
+            light.lightType = Light2D.LightType.Global;
+            light.intensity = TerrainWallShadowComparisonMapBuilder.GlobalLightIntensity;
+            light.color = Color.white;
+            light.shadowsEnabled = false;
+        }
+
+        /// <summary>
+        /// 代表5材質のそれぞれに、周囲へ同じ材質のGroundを広げ、中央へWall上面とFace 2段を重ねた検品パネルを作ります。
+        /// 切り離したSprite行では分かりにくい、GroundとWallの明度差、折れ目影、Faceの縦接続、固定接地影、動的影を同時に確認できます。
+        /// </summary>
+        /// <param name="root">固定検品Scene内の全表示をまとめる親です。</param>
+        /// <param name="materials">左から右の固定順で検証済みの代表材質です。</param>
+        /// <param name="wallFoldShadowMaterial">Wall前面1段目の上端へ重ねる共通折れ目影です。</param>
+        /// <param name="spriteLitMaterial">Ground、Wall、Faceへ使うURP 2D Lit Materialです。</param>
+        /// <param name="spriteUnlitMaterial">固定接地影へ使うURP 2D Unlit Materialです。</param>
+        private static void CreateRepresentativeMaterialWallPanels(
+            GameObject root,
+            InspectionMaterialAssets[] materials,
+            Material wallFoldShadowMaterial,
+            Material spriteLitMaterial,
+            Material spriteUnlitMaterial)
+        {
+            GameObject group = CreateChild(root, "Representative Material Wall Panels");
+            GameObject lightsGroup = CreateChild(group, "Representative Panel Lights");
+            for (int materialIndex = 0; materialIndex < materials.Length; materialIndex++)
+            {
+                InspectionMaterialAssets material = materials[materialIndex];
+                float centerX =
+                    (materialIndex - ((materials.Length - 1) * 0.5f))
+                    * RepresentativeMaterialSpacing;
+                string displayName = string.IsNullOrWhiteSpace(material.JapaneseName)
+                    ? material.MaterialId
+                    : $"{material.MaterialId} {material.JapaneseName}";
+                GameObject materialGroup = CreateChild(group, displayName);
+                Color wallTint = new Color(
+                    material.WallDarkenFactor,
+                    material.WallDarkenFactor,
+                    material.WallDarkenFactor,
+                    1f);
+
+                // Wall幅はGroundTopとFaceの長い方に合わせ、現在登録されている差分を横一列で省略しません。
+                // その左右へ必ず2セルずつGroundを足し、「Sprite見本」ではなく地面の中央にWallが立つ配置にします。
+                int wallWidth = Mathf.Max(
+                    material.GroundTopSprites.Length,
+                    material.FaceSprites.Length);
+                int panelWidth = Mathf.Max(
+                    RepresentativeGroundPatchMinimumWidth,
+                    wallWidth + (RepresentativeGroundSideMargin * 2));
+                int wallStartLocalX = (panelWidth - wallWidth) / 2;
+
+                for (int localY = 0;
+                     localY < RepresentativeGroundPatchHeight;
+                     localY++)
+                {
+                    for (int localX = 0; localX < panelWidth; localX++)
+                    {
+                        int groundVariant = StableVariantIndex(
+                            localX + (materialIndex * 31),
+                            localY + (materialIndex * 17),
+                            material.GroundTopSprites.Length);
+                        Vector3 groundPosition = CalculatePanelCellPosition(
+                            centerX,
+                            RepresentativePanelCenterY,
+                            panelWidth,
+                            RepresentativeGroundPatchHeight,
+                            localX,
+                            localY,
+                            0f);
+                        CreateSpriteObject(
+                            materialGroup,
+                            $"{material.MaterialId}_Ground_{localX:D2}_{localY:D2}",
+                            material.GroundTopSprites[groundVariant],
+                            groundPosition,
+                            Color.white,
+                            0,
+                            spriteLitMaterial);
+                    }
+                }
+
+                GameObject shadowCasterRoot = CreateChild(
+                    materialGroup,
+                    "Composite Ground Contact Shadow Casters");
+                shadowCasterRoot.AddComponent<CompositeShadowCaster2D>();
+                GameObject contactShadowRoot = CreateChild(
+                    materialGroup,
+                    "Symmetric Contact Shadows");
+
+                for (int wallX = 0; wallX < wallWidth; wallX++)
+                {
+                    int localX = wallStartLocalX + wallX;
+                    int groundVariant = wallX % material.GroundTopSprites.Length;
+                    Vector3 wallTopPosition = CalculatePanelCellPosition(
+                        centerX,
+                        RepresentativePanelCenterY,
+                        panelWidth,
+                        RepresentativeGroundPatchHeight,
+                        localX,
+                        RepresentativeWallTopLocalY,
+                        -0.1f);
+
+                    // Wall上面は下地と同じGroundTop差分を使い、表示色だけを材質設定の係数で暗くします。
+                    CreateSpriteObject(
+                        materialGroup,
+                        $"{material.MaterialId}_WallTop_{localX:D2}",
+                        material.GroundTopSprites[groundVariant],
+                        wallTopPosition,
+                        wallTint,
+                        80,
+                        spriteLitMaterial);
+
+                    // 表示Spriteへ直接Casterを付けると上面から影が伸びるため、Face 2段分だけ手前へ移した透明な代理輪郭を作ります。
+                    // 材質パネル単位のCompositeへまとめ、横に連続するWallセルの共有辺から不要な影を出しません。
+                    CreateRepresentativeDynamicShadowCaster(
+                        shadowCasterRoot,
+                        $"{material.MaterialId}_GroundContactCaster_{wallX:D2}",
+                        material.GroundTopSprites[groundVariant],
+                        wallTopPosition,
+                        spriteLitMaterial);
+
+                    for (int faceStage = 1; faceStage <= WallFaceDepth; faceStage++)
+                    {
+                        // 1段目は実装予定と同じWall用境界合成結果を優先し、境界のない材質では通常Faceを使います。
+                        // 2段目は境界を繰り返さず、必ず通常Faceを縦接続します。
+                        Sprite faceSprite = faceStage == 1
+                            && material.WallBoundarySprites.Length > 0
+                                ? material.WallBoundarySprites[
+                                    wallX % material.WallBoundarySprites.Length]
+                                : material.FaceSprites[
+                                    wallX % material.FaceSprites.Length];
+                        Vector3 facePosition = new Vector3(
+                            wallTopPosition.x,
+                            wallTopPosition.y - faceStage,
+                            -0.2f);
+
+                        // 根元の位置を同じGround上で読めるよう、採用済みC案の固定接地影を最下段だけに作ります。
+                        if (faceStage == WallFaceDepth)
+                        {
+                            CreateContactShadow(
+                                contactShadowRoot,
+                                $"{material.MaterialId}_ContactShadow_{wallX:D2}",
+                                faceSprite,
+                                facePosition,
+                                spriteUnlitMaterial);
+                        }
+
+                        CreateSpriteObject(
+                            materialGroup,
+                            $"{material.MaterialId}_WallFace_{wallX:D2}_Stage_{faceStage:D2}",
+                            faceSprite,
+                            facePosition,
+                            Color.white,
+                            80,
+                            spriteLitMaterial);
+
+                        if (faceStage == 1)
+                        {
+                            // 折れ目影はWall上面に接する1段目だけへ重ね、2段目のFace本体は元色を保ちます。
+                            CreateSpriteObject(
+                                materialGroup,
+                                $"{material.MaterialId}_WallFoldShadow_{wallX:D2}",
+                                faceSprite,
+                                new Vector3(
+                                    facePosition.x,
+                                    facePosition.y,
+                                    -0.21f),
+                                Color.white,
+                                81,
+                                wallFoldShadowMaterial);
+                        }
+                    }
+                }
+
+                // C案と同じ上方主光と左手前検証光を材質ごとに置き、固定接地影と光源追従する投影影を同時に確認します。
+                CreateRepresentativePanelLight(
+                    lightsGroup,
+                    $"{material.MaterialId}_Top Light 2D",
+                    centerX,
+                    RepresentativePanelCenterY + 3f,
+                    1f);
+                CreateRepresentativePanelLight(
+                    lightsGroup,
+                    $"{material.MaterialId}_Front Left Light 2D",
+                    centerX - 2.5f,
+                    RepresentativePanelCenterY - 3.5f,
+                    TerrainWallShadowComparisonMapBuilder.FrontLeftLightIntensity);
+            }
+        }
+
+        /// <summary>Wall最下段Faceの根元を起点にする透明な動的影用Shadow Caster 2Dを作ります。</summary>
+        /// <param name="parent">材質パネル内でCasterを結合するCompositeの親です。</param>
+        /// <param name="name">Hierarchyへ表示する代理Caster名です。</param>
+        /// <param name="sourceSprite">Wall上面と同じ不透明輪郭を持つSpriteです。</param>
+        /// <param name="wallTopPosition">対応するWall上面のワールド座標です。</param>
+        /// <param name="spriteLitMaterial">透明な代理Spriteへ使うURP 2D Lit Materialです。</param>
+        private static void CreateRepresentativeDynamicShadowCaster(
+            GameObject parent,
+            string name,
+            Sprite sourceSprite,
+            Vector3 wallTopPosition,
+            Material spriteLitMaterial)
+        {
+            Vector3 contactPosition = new Vector3(
+                wallTopPosition.x,
+                wallTopPosition.y
+                    + TerrainWallShadowComparisonMapBuilder.DynamicShadowCasterOffsetYInTiles,
+                wallTopPosition.z);
+
+            // 完全透明のRendererは輪郭だけをShadow Casterへ提供します。
+            // Collider2Dを追加しないため、検品用の動的影が地形判定へ混ざることはありません。
+            GameObject casterObject = new GameObject(name);
+            casterObject.transform.SetParent(parent.transform, false);
+            casterObject.transform.position = contactPosition;
+            SpriteRenderer renderer = casterObject.AddComponent<SpriteRenderer>();
+            renderer.sprite = sourceSprite;
+            renderer.color = Color.clear;
+            renderer.sortingOrder = -100;
+            renderer.sharedMaterial = spriteLitMaterial;
+            ShadowCaster2D caster = casterObject.AddComponent<ShadowCaster2D>();
+            caster.castingOption = ShadowCaster2D.ShadowCastingOptions.CastShadow;
+            caster.trimEdge = 0f;
+        }
+
+        /// <summary>C案と同じ設定で、代表材質パネル1つを照らすPoint Light 2Dを作ります。</summary>
+        /// <param name="parent">5材質のLightをまとめる親です。</param>
+        /// <param name="name">Hierarchyへ表示するLight名です。</param>
+        /// <param name="x">Light中心のX座標です。単位はUnity Unitです。</param>
+        /// <param name="y">Light中心のY座標です。単位はUnity Unitです。</param>
+        /// <param name="intensity">主光または左手前検証光の強度です。</param>
+        private static void CreateRepresentativePanelLight(
+            GameObject parent,
+            string name,
+            float x,
+            float y,
+            float intensity)
+        {
+            GameObject lightObject = CreateChild(parent, name);
+            lightObject.transform.position = new Vector3(x, y, -1f);
+            Light2D light = lightObject.AddComponent<Light2D>();
+            light.lightType = Light2D.LightType.Point;
+            light.intensity = intensity;
+            light.color = new Color(1f, 0.96f, 0.88f, 1f);
+            light.pointLightInnerRadius = 0.75f;
+            light.pointLightOuterRadius =
+                TerrainWallShadowComparisonMapBuilder.PointLightOuterRadius;
+            light.falloffIntensity = 0.5f;
+            light.shadowsEnabled = true;
+            light.shadowIntensity =
+                TerrainWallShadowComparisonMapBuilder.PointLightShadowIntensity;
+            light.shadowSoftness =
+                TerrainWallShadowComparisonMapBuilder.PointLightShadowSoftness;
+        }
+
+        /// <summary>代表材質パネルがC案と同じ動的影Component構成を持ち、物理Colliderを追加していないことを検証します。</summary>
+        /// <param name="root">構築直後の固定検品Sceneルートです。</param>
+        /// <param name="materials">各パネルのWall幅を計算する代表材質です。</param>
+        private static void ValidateRepresentativePanelLighting(
+            GameObject root,
+            InspectionMaterialAssets[] materials)
+        {
+            int expectedCasterCount = 0;
+            for (int materialIndex = 0; materialIndex < materials.Length; materialIndex++)
+            {
+                // Wall幅は生成処理と同じくGroundTopとFaceの長い方です。
+                // 検証側でも同じ契約から算出し、可変長配列を固定4枚へ暗黙に丸めません。
+                expectedCasterCount += Mathf.Max(
+                    materials[materialIndex].GroundTopSprites.Length,
+                    materials[materialIndex].FaceSprites.Length);
+            }
+
+            ShadowCaster2D[] casters = root.GetComponentsInChildren<ShadowCaster2D>(true);
+            CompositeShadowCaster2D[] composites =
+                root.GetComponentsInChildren<CompositeShadowCaster2D>(true);
+            Light2D[] lights = root.GetComponentsInChildren<Light2D>(true);
+            Collider2D[] colliders = root.GetComponentsInChildren<Collider2D>(true);
+            int expectedLightCount = 1
+                + (materials.Length * RepresentativePointLightsPerPanel);
+
+            if (casters.Length != expectedCasterCount)
+            {
+                throw new InvalidOperationException(
+                    $"代表材質パネルのShadow Caster 2D数が不正です: expected={expectedCasterCount}, actual={casters.Length}");
+            }
+
+            if (composites.Length != materials.Length)
+            {
+                throw new InvalidOperationException(
+                    $"代表材質パネルのComposite Shadow Caster 2D数が不正です: expected={materials.Length}, actual={composites.Length}");
+            }
+
+            if (lights.Length != expectedLightCount)
+            {
+                throw new InvalidOperationException(
+                    $"代表材質パネルのLight 2D数が不正です: expected={expectedLightCount}, actual={lights.Length}");
+            }
+
+            if (colliders.Length != 0)
+            {
+                throw new InvalidOperationException(
+                    "代表材質パネルの影検品へCollider2Dを追加してはいけません。");
             }
         }
 
@@ -945,7 +1638,7 @@ namespace Farmware.WorldGeneration.Editor
                 previewAssets,
                 "Dry Hole",
                 -12f,
-                0.5f,
+                HoleInspectionCenterY,
                 null,
                 null,
                 null,
@@ -957,7 +1650,7 @@ namespace Farmware.WorldGeneration.Editor
                 previewAssets,
                 "FreshWater Underwater Floor",
                 -6f,
-                0.5f,
+                HoleInspectionCenterY,
                 assets.FreshWaterPlaceholder,
                 previewAssets.FreshWaterWithFloorMaterial,
                 previewAssets.FreshWaterHorizontalWaveMaterial,
@@ -969,7 +1662,7 @@ namespace Farmware.WorldGeneration.Editor
                 previewAssets,
                 "SaltWater Underwater Floor",
                 0f,
-                0.5f,
+                HoleInspectionCenterY,
                 assets.SaltWaterPlaceholder,
                 previewAssets.SaltWaterWithFloorMaterial,
                 previewAssets.SaltWaterHorizontalWaveMaterial,
@@ -981,7 +1674,7 @@ namespace Farmware.WorldGeneration.Editor
                 previewAssets,
                 "Open Underwater Hides DeepSea",
                 6f,
-                0.5f,
+                HoleInspectionCenterY,
                 assets.SaltWaterPlaceholder,
                 previewAssets.SaltWaterWithoutFloorMaterial,
                 previewAssets.SaltWaterHorizontalWaveMaterial,
@@ -993,7 +1686,7 @@ namespace Farmware.WorldGeneration.Editor
                 previewAssets,
                 "Magma Hole",
                 12f,
-                0.5f,
+                HoleInspectionCenterY,
                 assets.MagmaPlaceholder,
                 null,
                 null,
@@ -1408,11 +2101,13 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="name">Hierarchyへ表示する影の基底名です。</param>
         /// <param name="sourceSprite">不透明形状を影へ転用する最下段Faceです。</param>
         /// <param name="sourcePosition">最下段Faceのワールド座標です。</param>
+        /// <param name="spriteUnlitMaterial">照明の影響を受けないURP 2D Unlit Materialです。</param>
         private static void CreateContactShadow(
             GameObject parent,
             string name,
             Sprite sourceSprite,
-            Vector3 sourcePosition)
+            Vector3 sourcePosition,
+            Material spriteUnlitMaterial)
         {
             // 左右に1pxずらした同一形状を2枚重ね、真上基準の光でも片側へ偏らない接地点を作ります。
             // 比較専用Sceneと同じ公開定数を参照し、採用値が2つの検品Sceneで食い違わないようにします。
@@ -1436,7 +2131,8 @@ namespace Farmware.WorldGeneration.Editor
                         0f,
                         0f,
                         TerrainWallShadowComparisonMapBuilder.ContactShadowLayerOpacity),
-                    15);
+                    15,
+                    spriteUnlitMaterial);
             }
         }
 
@@ -1453,14 +2149,14 @@ namespace Farmware.WorldGeneration.Editor
                     group,
                     $"GroundBoundary_{index:D2}",
                     assets.GroundBoundarySprites[index],
-                    new Vector3(x, -7f, -0.1f),
+                    new Vector3(x, -7.3f, -0.1f),
                     Color.white,
                     30);
                 CreateSpriteObject(
                     group,
                     $"WallBoundary_{index:D2}",
                     assets.WallBoundarySprites[index],
-                    new Vector3(x, -8.2f, -0.1f),
+                    new Vector3(x, -8.3f, -0.1f),
                     Color.white,
                     30);
             }
@@ -1469,7 +2165,11 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>3種類の壁暗化係数を同じ小型配置で横並びにします。</summary>
         /// <param name="root">検品オブジェクトの親です。</param>
         /// <param name="assets">配置するGroundTopとFaceです。</param>
-        private static void CreateDarkenComparison(GameObject root, InspectionAssets assets)
+        /// <param name="wallFoldShadowMaterial">Wall前面1段目へ重ねる共通折れ目影です。</param>
+        private static void CreateDarkenComparison(
+            GameObject root,
+            InspectionAssets assets,
+            Material wallFoldShadowMaterial)
         {
             for (int index = 0; index < WallSurfaceDarkenComparisonFactors.Length; index++)
             {
@@ -1478,7 +2178,8 @@ namespace Farmware.WorldGeneration.Editor
                     root,
                     assets,
                     WallSurfaceDarkenComparisonFactors[index],
-                    offset);
+                    offset,
+                    wallFoldShadowMaterial);
             }
         }
 
@@ -1525,6 +2226,33 @@ namespace Farmware.WorldGeneration.Editor
             Color color,
             int sortingOrder)
         {
+            CreateSpriteObject(
+                parent,
+                name,
+                sprite,
+                position,
+                color,
+                sortingOrder,
+                null);
+        }
+
+        /// <summary>指定Sprite、Tint、描画順、任意Materialを持つSpriteRendererを作ります。</summary>
+        /// <param name="parent">親Groupです。</param>
+        /// <param name="name">Hierarchyへ表示する名前です。</param>
+        /// <param name="sprite">描画するSpriteです。</param>
+        /// <param name="position">ワールド座標です。</param>
+        /// <param name="color">SpriteRendererへ設定する乗算色です。</param>
+        /// <param name="sortingOrder">同じSorting Layer内の描画順です。</param>
+        /// <param name="material">専用Shaderを使う場合の共有Materialです。nullなら既定Sprite Materialを使います。</param>
+        private static void CreateSpriteObject(
+            GameObject parent,
+            string name,
+            Sprite sprite,
+            Vector3 position,
+            Color color,
+            int sortingOrder,
+            Material material)
+        {
             GameObject gameObject = new GameObject(name);
             gameObject.transform.SetParent(parent.transform, false);
             gameObject.transform.position = position;
@@ -1532,6 +2260,10 @@ namespace Farmware.WorldGeneration.Editor
             renderer.sprite = sprite;
             renderer.color = color;
             renderer.sortingOrder = sortingOrder;
+            if (material != null)
+            {
+                renderer.sharedMaterial = material;
+            }
         }
 
         /// <summary>Assets配下のフォルダー階層を不足分だけ作ります。</summary>

@@ -404,8 +404,9 @@ Projectビューの`Create > Farmware > Terrain Tile Art Generation Settings`か
 
 #### 用途
 
-`TerrainTileArtGenerationSettings`に登録した`GrassLoam`、その設定から生成済みの完成PNG、既存Fallbackの仮液体Spriteを読み、次の検品項目を480×270・16 PPUのPixel Perfect Camera内へ固定配置する。
+`TerrainTileArtGenerationSettings`に登録した代表5材質（`GrassLoam`、`DesertSand`、`Sandstone`、`Granite`、`Basalt`）、`GrassLoam`から生成済みの境界合成PNG、既存Fallbackの仮液体Spriteを読み、次の検品項目を720×360・16 PPUのPixel Perfect Camera内へ固定配置する。
 
+- Scene上部へ代表5材質を固定順で横に並べ、各材質を最小横8×奥行7セルの同一材質Groundパネルで表示する。Wallの左右・奥・手前へ同じ材質のGroundを各2セル以上露出させ、中央へ同じ`GroundTop`を暗色化したWall上面、Wall用境界合成結果または通常`Face`の1段目、通常`Face`の2段目を重ねる。1段目の上端8pxには共通折れ目影を35%・30%・25%・20%・15%・10%・5%・0%で減衰させ、2段目の根元には固定接地影を重ねる。各Wall列の動的影用`Shadow Caster 2D`はWall上面から2段手前の設置面に置き、パネルごとのGround接地輪郭を`Composite Shadow Caster 2D`でまとめる。弱いGlobal Light 2D、真上の主光、左手前の検証光は`Open Wall Shadow Comparison`のCと同じ値を使う。パネル幅は`GroundTop`と`Face`の配列長に合わせ、登録差分を省略しない。
 - 1セル幅の`GroundTop`で囲んだ横3×手前方向10セルの穴を横1列へ配置する。左から乾燥、淡水＋Underwater床、海水＋Underwater床、Underwater床なし、マグマとし、単独の縦見本ではなく地面を掘った状況で比較する。
 - 全条件で1段目だけGround用境界合成結果、2～3段目は通常`Face`を使う。乾燥穴は全段の黒い下地へ黒Overlayを1枚重ね、穴上端の可視Alpha 100%から48 px地点の0%まで連続的に`Face`が暗黒へ溶け、4段目以降は完全な暗黒だけになることを確認する。
 - 全登録`Face`×全登録`FaceBoundaryOverlay`の組合せを、Ground用とWall用で別々に並べた一覧。現行`GrassLoam`では4×4の各16枚であり、Wall用だけ境界Overlayが暗色化され、`Face`本体は変わらないことを比較する。
@@ -413,24 +414,26 @@ Projectビューの`Create > Farmware > Terrain Tile Art Generation Settings`か
 - 淡水・海水は穴全体を覆う1枚のShader描画面を使い、上端3 pxだけをクリップして`GroundTop`より低い水面を表す。Underwater床ありでは4段目から元色の仮`GroundTop`と代表物を水越しに表示し、青Overlayを実表示深度45 pxでAlpha 50%まで連続変化させる。床なしではDeepSeaの内容を描画せず、現在材質の`Face`を6段目まで下地として続け、青Overlayを実表示深度93 pxでAlpha 100%まで連続変化させる。水域へ黒OverlayやRGB暗化は重ねない。マグマ穴は全段Alpha 100%で重ね、1段目から背後を隠す。
 - 水際は画面手前辺を除き、奥・左・右のGround接触位置へ太さ1 pxの仮波線をU字状に配置する。専用Shaderが2色の2px帯を毎秒8px、整数Pixel単位で流す。Play Modeで流れ、3 px低い水面への追従、手前辺に線がないことを確認する。仮配色の品質は完成素材の合否判定に含めない。
 
-メニュー実行前に、設定アセット、`GrassLoam`の入力、Ground用境界16枚、暗化有効時のWall用境界16枚、全入力の16×16 px・Import設定、淡水・海水・マグマの仮Fallback Sprite、連続深度Shader、水際波線Shaderを検証する。実行時に乾燥崖用1種類、水深用3種類、水際波線用4種類の計8 Materialを`Assets/Farmware/Art/WorldGeneration/Generated/Inspection/`へ再現可能に生成する。不足があればSceneを閉じず、先にInspectorから`GrassLoam`を再生成または不足Assetを復元するよう案内する。
+メニュー実行前に、設定アセット、代表5材質の全入力と可変配列、各材質の必要な境界生成物、全入力の16×16 px・Import設定、淡水・海水・マグマの仮Fallback Sprite、連続深度Shader、水際波線Shader、Wall折れ目影Shaderを検証する。境界なし材質は生成PNG 0枚を正常として扱い、`GrassLoam`はGround用境界16枚と暗化有効時のWall用境界16枚を要求する。実行時に乾燥崖用1種類、水深用3種類、水際波線用4種類、Wall折れ目影用1種類の計9 Materialを`Assets/Farmware/Art/WorldGeneration/Generated/Inspection/`へ再現可能に生成する。不足があればSceneを閉じず、先にInspectorから対象材質を再生成または不足Assetを復元するよう案内する。
 
 未保存Sceneがある場合は保存確認を表示し、キャンセル時は何も変更しない。続行時は固定検品Sceneを新規構築して同じパスへ保存し、そのSceneを開いたままにする。これは生成物なのでSceneへ手修正を加えず、素材または配置規則を変えた場合はメニューを再実行する。
 
 #### 確認手順
 
-1. `TerrainTileArtGenerationSettings`のInspectorで`GrassLoam`が「生成済み」になっていることを確認する。
-2. メニューを実行し、Gameビューを480×270またはその整数倍にする。
-3. Hierarchyの`Excavated Holes Width3 Depth10`と`Face Boundary Rows`を順に確認する。
-4. 5つの穴がすべて横3×手前方向10セルで、外周が1セル幅の`GroundTop`として連続して見えることを確認する。
-5. 左端の乾燥穴で、GrassLoam断面が穴上端では元の明るさで、下へ向かってセル境界の段差なく暗くなり、48 px（3段目下端）で可視Alpha 0%、4段目以降で完全な暗黒になることを確認する。
-6. 左から2番目の淡水穴と3番目の海水穴で、水面がGroundTopより3 px低く、4段目からUnderwater床と代表物が水越しに見え、青Overlayがタイル境界で段差を作らずAlpha 50%へ連続変化することを確認する。
-7. 左から4番目のUnderwater床なし穴ではDeepSeaの内容が見えず、現在材質の`Face`が青Overlay越しに続き、6段目で青Overlay Alpha 100%へ到達することを確認する。右端のマグマ穴では1段目から背後が透けないことを確認する。仮Spriteと仮波線の配色そのものは採否判定へ含めない。
-8. Play Modeで淡水・海水3区画の奥・左・右辺にある1px波線の2色帯がPixel単位で流れ、手前辺には波線が表示されないことを確認する。
+1. `TerrainTileArtGenerationSettings`のInspectorで代表5材質が登録済みで、境界のある`GrassLoam`が「生成済み」になっていることを確認する。境界なし材質は生成PNGがなくてもよい。
+2. メニューを実行し、Gameビューを720×360またはその整数倍にする。
+3. Hierarchyの`Representative Material Wall Panels`を開き、左から`GrassLoam`、`DesertSand`、`Sandstone`、`Granite`、`Basalt`の順であることを確認する。各材質でWallの左右・奥・手前へ同じGroundが各2セル以上広がり、中央の暗化Wall上面とFace 2段に対して、登録した`GroundTop`と`Face`の全差分が横方向で省略されないことを確認する。
+4. 上部の5パネルを見比べ、同じ材質のGroundとWall上面を暗化だけで読み分けられること、1段目の上端8pxで黒い折れ目影が35%から0%へ緩やかに薄くなること、1段目と2段目の`Face`が自然に縦接続することを確認する。さらに、2段目の根元に固定接地影が見え、動的影がWall上面ではなく同じ根元から同材質Groundへ伸びることを確認する。必要なら`Representative Panel Lights`のPoint Light 2Dを一時的に移動または無効化し、固定接地影は変化せず動的影だけが追従することを確認する。
+5. Hierarchyの`Excavated Holes Width3 Depth10`と`Face Boundary Rows`を順に確認する。
+6. 5つの穴がすべて横3×手前方向10セルで、外周が1セル幅の`GroundTop`として連続して見えることを確認する。
+7. 左端の乾燥穴で、GrassLoam断面が穴上端では元の明るさで、下へ向かってセル境界の段差なく暗くなり、48 px（3段目下端）で可視Alpha 0%、4段目以降で完全な暗黒になることを確認する。
+8. 左から2番目の淡水穴と3番目の海水穴で、水面がGroundTopより3 px低く、4段目からUnderwater床と代表物が水越しに見え、青Overlayがタイル境界で段差を作らずAlpha 50%へ連続変化することを確認する。
+9. 左から4番目のUnderwater床なし穴ではDeepSeaの内容が見えず、現在材質の`Face`が青Overlay越しに続き、6段目で青Overlay Alpha 100%へ到達することを確認する。右端のマグマ穴では1段目から背後が透けないことを確認する。仮Spriteと仮波線の配色そのものは採否判定へ含めない。
+10. Play Modeで淡水・海水3区画の奥・左・右辺にある1px波線の2色帯がPixel単位で流れ、手前辺には波線が表示されないことを確認する。
 
 #### 現段階で対象外の確認
 
-この固定Sceneは`GrassLoam`単一材質のアート試作を対象とし、異材質Wall境界、チャンク境界、完成版Liquid・水際波線の配色、Runtimeの本番差分選択は扱わない。黒・青Overlayの色と仮波線の2色は比較用の暫定値である。旧共通境界ハイライトとの比較記録は`Open Boundary Highlight Inspection Map`、Wall暗色化は`Open Wall Surface Darken Comparison`、採用した固定接地影＋動的影は`Open Wall Shadow Comparison`で確認し、残りは本番表示を接続する後続工程で追加する。
+この固定Sceneは代表5材質を周囲まで同一材質のGroundが広がる2段Wall実景パネルとして重ね、比較Scene Cと同じ固定接地影＋動的影を各材質で確認する。加えて`GrassLoam`の穴表現を対象とする。異材質Wallの連続接続、チャンク境界、代表4材質を使った穴、完成版Liquid・水際波線の配色、Runtimeの本番差分選択は扱わない。黒・青Overlayの色と仮波線の2色は比較用の暫定値である。旧共通境界ハイライトとの比較記録は`Open Boundary Highlight Inspection Map`、Wall暗色化は`Open Wall Surface Darken Comparison`、複雑なWall形状でのA／B／C比較記録は`Open Wall Shadow Comparison`で確認し、残りは本番表示を接続する後続工程で追加する。
 
 ### 2.12 Open Water Reflection Comparison
 
@@ -464,14 +467,14 @@ Projectビューの`Create > Farmware > Terrain Tile Art Generation Settings`か
 
 #### 用途
 
-`GrassLoam`の`GroundTop`を地面とWall上面で共有し、Wall上面全体を暗化した場合の視認性を比較する。比較の結果、暗化係数0.85を採用した。現行Sceneは暗化係数とFaceだけを比較し、採用した固定接地影＋動的影は`Open Wall Shadow Comparison`で確認する。
+`GrassLoam`の`GroundTop`を地面とWall上面で共有し、Wall上面全体を暗化した場合の視認性を比較する。比較の結果、暗化係数0.85を採用した。現行Sceneは暗化係数、2段のFace、1段目上端8pxの共通折れ目影を比較し、採用した固定接地影＋動的影は`Open Wall Shadow Comparison`で確認する。折れ目影の8pxは試作Sceneの再現用初期値であり、本番Presentationでは全材質共通の設定値として調整余地を残す。
 
-各比較領域では全面へ通常の`GroundTop`を描画し、固定Wall形状のセルだけ、直下のGroundと同じSprite参照をWall層へ重ねる。Wall層の`SpriteRenderer.color`へRGB係数を乗算し、左から0.85、0.70、0.55の3条件を同じ差分配置で並べる。手前が空いているWallには通常`Face`を1段だけGroundより手前へ重ね、上面の区別と立体感を同時に比較する。未制作の内角Sprite、47接続の生成PNG、入力Fingerprintには依存しないため、Wall方式の変更前でも実行できる。
+各比較領域では全面へ通常の`GroundTop`を描画し、固定Wall形状のセルだけ、直下のGroundと同じSprite参照をWall層へ重ねる。Wall層の`SpriteRenderer.color`へRGB係数を乗算し、左から0.85、0.70、0.55の3条件を同じ差分配置で並べる。手前が空いているWallには`Face`を2段重ね、1段目だけ上端8pxの共通折れ目影を追加して、上面の区別と立体感を同時に比較する。未制作の内角Sprite、47接続の生成PNG、入力Fingerprintには依存しないため、Wall方式の変更前でも実行できる。
 
 #### 確認手順
 
 1. メニューを実行し、Gameビューを480×270またはその整数倍にする。
-2. 左0.85、中央0.70、右0.55を見比べ、GroundとWallの境界、Wall内部の模様、Faceとのつながりを確認する。
+2. 左0.85、中央0.70、右0.55を見比べ、GroundとWallの境界、Wall内部の模様、上面から1段目`Face`へ続く8px折れ目影、2段目`Face`とのつながりを確認する。
 3. 暗い洞窟背景でもWall形状を読めるか、0.55で材質色が失われないか、0.85でGroundと混同しないかを確認する。
 4. 続けて`Open Wall Shadow Comparison`を実行し、同じWall形状に対する「旧ハイライト＋動的影」「動的影のみ」「左右対称の固定接地影＋動的影」を比較する。2026-10-25の人間確認では右端のCを採用した。
 
@@ -507,7 +510,7 @@ Runtimeの8近傍47状態と同じ特徴マスクから、旧方式の全材質�
 
 #### 用途
 
-同じ`GrassLoam`のGround、0.85暗化Wall、通常`Face`、Wall形状、Light 2D条件を3区画へ複製し、左から「旧境界ハイライト＋Shadow Caster 2D」「Shadow Caster 2Dのみ」「左右対称の固定接地影＋Shadow Caster 2D」を比較する。2026-10-25の人間確認で右端のCを採用し、製品表示では境界ハイライトを廃止する。本番想定に合わせ、露出するWall前面は16×16 pxの2段にする。1段目だけにWall用`FaceBoundaryOverlay`合成結果、2段目に通常`Face`を使う。動的影用CasterはWall上面から2段分手前へ移した設置面に置き、最下段Faceの根元を影の起点にする。比較SceneのGlobal Light強度0.35、上方Point Light強度1.0、左手前検証用Point Light強度0.65、半径8.0、影強度0.9、影の柔らかさ0.05は製品版の最終照明値ではない。
+同じ`GrassLoam`のGround、0.85暗化Wall、通常`Face`、Wall形状、Light 2D条件を3区画へ複製し、左から「旧境界ハイライト＋Shadow Caster 2D」「Shadow Caster 2Dのみ」「左右対称の固定接地影＋Shadow Caster 2D」を比較する。2026-10-25の人間確認では、固定接地影と動的影を組み合わせる右端のCを採用した。境界ハイライトと折れ目影の最終選択は、この履歴Sceneではなく`Open Wall Edge Cue Comparison`で行う。本番想定に合わせ、露出するWall前面は16×16 pxの2段にする。1段目だけにWall用`FaceBoundaryOverlay`合成結果、2段目に通常`Face`を使う。動的影用CasterはWall上面から2段分手前へ移した設置面に置き、最下段Faceの根元を影の起点にする。比較SceneのGlobal Light強度0.35、上方Point Light強度1.0、左手前検証用Point Light強度0.65、半径8.0、影強度0.9、影の柔らかさ0.05は製品版の最終照明値ではない。
 
 各区画では、13 Wallセルを2段分手前へ移した設置面位置へ透明な代理Spriteを置き、それぞれの`ShadowCaster2D`を区画ごとの`CompositeShadowCaster2D`へまとめる。表示用Wall上面にはCasterを付けない。これによりWall同士の共有辺を内部影として残さず、材質IDではなく連続したWall領域の設置面外周を比較できる。検品Sceneでは形状を読みやすくするためセル単位のGameObjectを使うが、本番実装はこの構成を流用せず、Dirtyな16×16サブチャンクとHaloから設置面の結合輪郭を再構築する。`Collider2D`と`Rigidbody2D`は追加せず、物理判定と描画用の影を分離する。
 
@@ -521,6 +524,30 @@ Runtimeの8近傍47状態と同じ特徴マスクから、旧方式の全材質�
 4. 暗い位置と明るい位置の両方で右のC区画を確認する。C採用後の再確認では、固定接地影が動的影と競合せず、旧ハイライトなしでもGroundとWallを即座に識別できることを確認する。
 5. このSceneで方式を決めた後、本番表示では異材質Wall、サブチャンク境界、Dirty更新、アンロード・再利用、Floating Originでも結合輪郭と影が残留しないことを別途確認する。
 
+### 2.16 Open Wall Edge Cue Comparison
+
+- メニュー: `Farmware > World Generation > Open Wall Edge Cue Comparison`
+- 実装: `TerrainWallShadowComparisonMapBuilder`
+- PlayMode: 必要。EditModeで比較Sceneを構築した後、PlayModeのGameビューで共通の動的影も確認する。
+- 出力: `Assets/Scenes/Development/TerrainWallEdgeCueComparison.unity`
+- 生成Material: `WallFoldShadow.mat`、`WallFoldShadow16px.mat`、`WallFoldShadow32pxTop.mat`、`WallFoldShadow32pxBottom.mat`。32px用は2段目の開始画素行を16pxとして保存し、Sceneを開き直しても連続勾配を維持する。
+
+#### 用途
+
+代表5材質`GrassLoam`・`DesertSand`・`Sandstone`・`Granite`・`Basalt`を5列へ並べ、各材質の4行で補助表現だけを比較する。上から8px折れ目影、16px折れ目影、32px折れ目影、旧14形状の1px境界ハイライトとする。折れ目影はWall前面上端のAlpha 35%から指定深度の最終画素行で0%へ減衰し、32pxは2段の`Face`をまたいでもAlphaをリセットしない。各区画には1セル幅へ縮めない最大横5セル・13セル構成のWallを使い、同じ材質のGround、0.85暗化Wall、2段`Face`、固定接地影、設置面起点の動的影、Global／上方／左手前Lightを4行で共通化する。複数の補助表現を同時に使う区画は作らない。
+
+2026-10-26の人間確認では、16px折れ目影を最有力、8pxを代替候補とした。32pxは線形勾配自体は成立するものの、2段の`Face`全体へ黒が重なって全体暗化に見えるため優先度を下げた。1px境界ハイライトは補助表現だけが目立つため不向きと判断した。16pxの最終採用までは4方式を比較記録として維持し、採用後に不採用方式の生成物と専用経路を削除する。
+
+各パネルは同じ13 Wallセル、露出Face 5列、Face 2段、固定接地影36枚、Shadow Caster 2D 13個、Composite Shadow Caster 2D 1個、Point Light 2D 2個を持つ。8px／16px行は各露出列の1段目へ折れ目影を1枚、32px行は1段目と2段目へ各1枚置く。境界ハイライト行には完全接続セルを除くハイライトを各12枚置く。これにより、WallとGroundの識別性、Wall上面とFaceの折れ目、明るい場所での補助表現の目立ち方を、材質構造と補助表現以外の条件差なしで判断できる。
+
+#### 確認手順
+
+1. メニューを実行し、Gameビューを720×720または整数倍にしてPlayModeへ入る。
+2. 5列の各材質について、上から`Fold 8px`、`Fold 16px`、`Fold 32px`、`Highlight 1px`の4行で、外周、内角、最大横5セルの広いWall、Wall上面とFaceの接続を比較する。
+3. 暗い位置と明るい位置の両方で、GroundとWallを即座に識別できるか、補助表現だけが浮いて見えないかを確認する。
+4. `Synchronized Lights (Move This)`を動かし、両パネルの動的影が同じ方向・距離で追従することを確認する。固定接地影、折れ目影、境界ハイライトは光源移動に追従しない。
+5. 現在の最有力である16pxと代替候補8pxを最終比較する。16pxを採用するまでは比較記録を維持し、確定後に32px用Material、旧境界ハイライト素材・Atlas・選択処理などの不採用経路を削除する。
+
 ## 3. 変更時の選び方
 
 | 変更内容 | 最低限確認するEditorツール |
@@ -533,11 +560,12 @@ Runtimeの8近傍47状態と同じ特徴マスクから、旧方式の全材質�
 | 地下水、自然飽和、最終湖区分、泉、自然冠水、湿原の分布 | Analyze Derived Hydrology Distribution、Map Viewer、Debug Visualization |
 | 広域形状、特定Seed・遠距離座標の探索 | Map Viewer |
 | 地形タイル試作工程の材質Sprite入力、境界合成、均等差分選択、Wall暗色化 | Terrain Tile Art Generation Settings Inspector |
-| `GrassLoam`の反復、Ground／Wall共通上面、Wall暗色化、通常Face、Ground／Wall用境界合成のGameビュー検品 | Open Terrain Tile Inspection Map |
+| 代表5材質の同一地面上2段Wall、Ground／Wall共通上面、Wall暗色化、8px共通折れ目影、通常Face、固定接地影、Ground／Wall用境界合成のGameビュー検品 | Open Terrain Tile Inspection Map |
 | 水面反射なし／あり、垂直面反射Proxyの深さ・縦圧縮・Alpha・整数Pixel変位の比較 | Open Water Reflection Comparison |
 | GroundTopをWall上面へ再利用した場合の暗化係数とGround上への重なり比較 | Open Wall Surface Darken Comparison |
 | 共通境界14 Spriteの再生成、Atlas登録、Ground／Wall各47状態の外周・内角確認 | Generate Boundary Highlight Art、Open Boundary Highlight Inspection Map |
 | Wallの動的影、結合輪郭、採用した固定接地影と旧ハイライトの比較記録 | Open Wall Shadow Comparison |
+| 8px／16px／32px折れ目影と1px境界ハイライトを、それ以外のWall条件を揃えて比較 | Open Wall Edge Cue Comparison |
 | 生成規則と表示の両方 | Analyze Distribution、Map Viewer、Debug Visualization |
 
 Editorツールだけで検証を完了しない。対応する自動テストは[テスト](./Testing.md)に従って実行し、見た目に関係する変更はGameビューでも確認する。
@@ -548,7 +576,7 @@ Editorツールだけで検証を完了しない。対応する自動テスト�
 
 - WORLD-01CでLayerキーをビューア・中央情報・可視化の検索へ接続済み。Map Viewerの`Layer`欄、または`Farmware > World Generation > Debug Visualization > Layer`からSurface／Underwater／Deep Seaを選ぶ。Surface以外の自然生成はTERRAIN-01Cまで未接続のため、Map Viewerは暗色と未接続メッセージ、Gameビュー可視化は空表示を返す。
 - TERRAIN-01AではBlock定義と有効セルAPIをSimulationへ追加するが、色判定は既存`GeneratedTile`互換のままとする。仕様転換に合わせて`Terrain Placement`からベルト固有のHUDと凡例だけを除き、差分込み表示、Blockパレット、自然生成と実ワールドの表示切替はTERRAIN-01Cで追加する。
-- TERRAIN-01Bで採用したバイオーム構成と安定ID方針に基づき、TERRAIN-01C1〜C5で環境軸・地質・水文・Biome診断、TERRAIN-01C6でBlockパレットと変更後地形、TERRAIN-01C7で完成タイル上のBiome・水系・Block景観比較、TERRAIN-01C8で資源診断、TERRAIN-01Dでスポーン許可・探索失敗理由を追加する。地形タイル試作工程では[地形タイル表現仕様](../Art/TerrainTileArtSpecification.md)に従い、16×16 `GroundTop`、材質ごとに任意の透明な16×16 `FaceBoundaryOverlay`、Ground崖面とWall前面で共用する16×16 `Face`を代表5材質で手制作・試作してから量産する。Wall上面は同じ材質の`GroundTop`を共有し、通常材質では表示時に`WallDarkenFactor` 0.85を乗算する。Wallの識別には`Face`、左右各1px・手前3px・各レイヤーAlpha 22%の固定接地影、設置面起点の動的影を使い、14形状境界ハイライトは製品表示から廃止する。Wall同士は材質を問わず接続扱いとする。断面は1段目から`Face`を使い、境界ありではGround用に元色Overlay、Wall用に同じ係数で暗色化したOverlayを`Face`へ事前合成する。`Face`自体は暗色化しない。各部位は全候補を均等確率で選ぶ可変長配列とし、個別Weightや出現率Override、固定差分数は設けない。全`Face`差分は相互接続可能とする。淡水・海水では通常断面または直下床へ半透明の青い`Liquid深度Overlay`を重ね、上端3 pxをクリップして1 px単位の連続Alpha勾配を作る。直下床ありは45 pxでAlpha 50%、床なしは現在材質の`Face`を背後へ続けて93 pxでAlpha 100%へ到達させ、黒暗化は使わない。乾燥崖は穴上端から48 pxかけて`Face`の可視Alphaを100%から0%へ連続変化させ、4段目以降を完全な暗黒とする。淡水・海水は画面手前を除く奥・左・右の接触辺へ1 px・2色の波線を整数Pixel単位で流す。マグマは接触する最初の段から不透明にして背後の断面を隠す。動的な影は`Light 2D`と、Wall領域からサブチャンク単位で作る`Shadow Caster 2D`で表現する。DeepSeaの内容をSurfaceへ透視させず、液体専用断面も作らない。細道の要否は試作後に別途判断する。Map Viewerの18Biome識別と自然生成・実ワールド差分の明示は、最終BiomeとBlockを接続するC5・C6で更新する。C7では同じSeed・範囲の変更前後を比較できる出力を維持し、Biome分類、水文、Blockのどの入力を調整したかを個別モードで判別できるようにする。
+- TERRAIN-01Bで採用したバイオーム構成と安定ID方針に基づき、TERRAIN-01C1〜C5で環境軸・地質・水文・Biome診断、TERRAIN-01C6でBlockパレットと変更後地形、TERRAIN-01C7で完成タイル上のBiome・水系・Block景観比較、TERRAIN-01C8で資源診断、TERRAIN-01Dでスポーン許可・探索失敗理由を追加する。地形タイル試作工程では[地形タイル表現仕様](../Art/TerrainTileArtSpecification.md)に従い、16×16 `GroundTop`、材質ごとに任意の透明な16×16 `FaceBoundaryOverlay`、Ground崖面とWall前面で共用する16×16 `Face`を代表5材質で手制作・試作してから量産する。Wall上面は同じ材質の`GroundTop`を共有し、通常材質では表示時に`WallDarkenFactor` 0.85を乗算する。Wallの識別には`Face`、左右各1px・手前3px・各レイヤーAlpha 22%の固定接地影、設置面起点の動的影を使い、追加の補助表現は8px／16px／32px折れ目影と1px・14形状境界ハイライトを専用Sceneで比較して1種類だけ採用する。Wall同士は材質を問わず接続扱いとする。断面は1段目から`Face`を使い、境界ありではGround用に元色Overlay、Wall用に同じ係数で暗色化したOverlayを`Face`へ事前合成する。`Face`自体は暗色化しない。各部位は全候補を均等確率で選ぶ可変長配列とし、個別Weightや出現率Override、固定差分数は設けない。全`Face`差分は相互接続可能とする。淡水・海水では通常断面または直下床へ半透明の青い`Liquid深度Overlay`を重ね、上端3 pxをクリップして1 px単位の連続Alpha勾配を作る。直下床ありは45 pxでAlpha 50%、床なしは現在材質の`Face`を背後へ続けて93 pxでAlpha 100%へ到達させ、黒暗化は使わない。乾燥崖は穴上端から48 pxかけて`Face`の可視Alphaを100%から0%へ連続変化させ、4段目以降を完全な暗黒とする。淡水・海水は画面手前を除く奥・左・右の接触辺へ1 px・2色の波線を整数Pixel単位で流す。マグマは接触する最初の段から不透明にして背後の断面を隠す。動的な影は`Light 2D`と、Wall領域からサブチャンク単位で作る`Shadow Caster 2D`で表現する。DeepSeaの内容をSurfaceへ透視させず、液体専用断面も作らない。細道の要否は試作後に別途判断する。Map Viewerの18Biome識別と自然生成・実ワールド差分の明示は、最終BiomeとBlockを接続するC5・C6で更新する。C7では同じSeed・範囲の変更前後を比較できる出力を維持し、Biome分類、水文、Blockのどの入力を調整したかを個別モードで判別できるようにする。
 - 41材質の`GroundTop`色・使用比率・模様方針は、地形タイル表現仕様第7章の確定値として扱う。Wall上面は同じ`GroundTop` Spriteを参照し、通常材質では表示時にsRGB各成分へ0.85を乗算する。Alphaと使用比率は変更しない。Wall用`FaceBoundaryOverlay`の不透明画素にも同じ係数を使い、Ground用Overlayと`Face`は変更しない。`FaceBoundaryOverlay`と`Face`の元パレットは`GrassLoam`の試作を人間確認後、同じ明度関係を残り40材質へ適用して確定する。
 - 地形タイル試作工程の材質生成設定Inspectorは2.10節のとおり、`GroundTop`・`Face`・任意`FaceBoundaryOverlay`とWall暗色化だけを扱う方式へ更新済みである。専用`WallTop`、7外周部品、共通暗色内部、47枚の材質別Wall完成Spriteは削除した。WorldLayer・絶対座標・断面段・安定材質ID・用途別SaltによるRuntimeの決定論的な均等差分選択は、表示へ接続するC6-Dで実装する。
 - TERRAIN-01C3-D2では、生成済み固定水文セルの流向・下流座標・終端・辺数・集水面積・打切り・最遠寄与距離・流出・流域・湖をGameビューとMap Viewerへ接続した。海洋流出口は流向なしの`Marine`終端、4,096辺または4,096セルで確定できない結果は`LongDrainage`または打切り色として表示する。Level 0〜6集約SummaryとLevel 0〜12 Downstream Summaryの利用・分解・キャッシュ統計は固定生成結果ではない比較実装の内部診断なので、性能テストだけで記録し表示へ混ぜない。打切られた大規模閉鎖流域は固定湖候補と別色・別理由で表示する。

@@ -260,6 +260,31 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(TerrainWallShadowComparisonMapBuilder.ContactShadowLayerOpacity, Is.EqualTo(0.22f));
         }
 
+        /// <summary>
+        /// 折れ目影8／16／32pxと境界ハイライトの専用比較が代表5材質×4方式を使い、補助表現以外のFace、接地影、動的影、照明を同数に揃えることを確認します。
+        /// </summary>
+        [Test]
+        public void WallEdgeCueComparison_ChangesOnlyFoldShadowAndBoundaryHighlight()
+        {
+            // Assetを読み込んで固定件数を算出し、Sceneを開かなくても比較条件の崩れを検出します。
+            TerrainWallEdgeCueComparisonSummary summary =
+                TerrainWallShadowComparisonMapBuilder.ValidateEdgeCueAssetsAndLayout();
+
+            Assert.That(summary.PanelCount, Is.EqualTo(20));
+            Assert.That(summary.FoldShadowPanelCount, Is.EqualTo(15));
+            Assert.That(summary.HighlightPanelCount, Is.EqualTo(5));
+            Assert.That(summary.WallCellCountPerPanel, Is.EqualTo(13));
+            Assert.That(summary.ExposedFaceColumnCountPerPanel, Is.EqualTo(5));
+            Assert.That(summary.FaceDepth, Is.EqualTo(2));
+            Assert.That(summary.FaceSpriteCountPerPanel, Is.EqualTo(10));
+            Assert.That(summary.FoldShadowSpriteCount, Is.EqualTo(100));
+            Assert.That(summary.HighlightSpriteCount, Is.EqualTo(60));
+            Assert.That(summary.ContactShadowSpriteCount, Is.EqualTo(720));
+            Assert.That(summary.ShadowCasterCount, Is.EqualTo(260));
+            Assert.That(summary.CompositeShadowCasterCount, Is.EqualTo(20));
+            Assert.That(summary.PointLightCount, Is.EqualTo(40));
+        }
+
         /// <summary>内角が仕様どおり角の1画素だけになり、隣接画素へ伸びないことを確認します。</summary>
         [Test]
         public void InnerCorner_UsesSinglePixel()
