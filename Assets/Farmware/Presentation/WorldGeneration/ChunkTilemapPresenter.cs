@@ -1,4 +1,4 @@
-// このファイルは、ECSで生成済みの地形・資源チャンクデータを、製品用の上面・断面・液体深度・水際・反射を含む複数Tilemapへ16×16サブチャンク単位で反映・消去します。
+// このファイルは、ECSで生成済みの地形・資源チャンクデータを、製品用の上面・断面・液体深度・水際・反射・Wall影を含む複数Tilemapへ16×16サブチャンク単位で反映・消去します。
 // 既定のチャンク別ローカルTilemapを自動原点変更で再利用し、比較・診断用に旧共有Tilemap方式へ切り替えられます。
 // Tilemapは表示専用キャッシュであり、地形はGeneratedTerrainCell、資源はGeneratedResourceTileを正として参照します。
 // 分類用の外周1セルは反映バッチごとに同期Burstでまとめ、同じ隣接地形の重複生成を減らします。
@@ -79,6 +79,10 @@ namespace Farmware.WorldGeneration.Presentation
         private static readonly ProfilerMarker RockWallShadowRepositionProfilerMarker =
             new ProfilerMarker("Farmware.WorldGeneration.RockWallShadowReposition");
 
+        // Dirtyサブチャンクの露出Wall根元を横連続区間へ圧縮し、動的影Casterへ反映する時間です。
+        private static readonly ProfilerMarker TerrainWallDynamicShadowUpdateProfilerMarker =
+            new ProfilerMarker("Farmware.WorldGeneration.TerrainWallDynamicShadowUpdate");
+
         // 比較方式で、タイル内容を変更せず既存表示ルートだけを移動した時間です。
         private static readonly ProfilerMarker ChunkTilemapRepositionProfilerMarker =
             new ProfilerMarker("Farmware.WorldGeneration.ChunkTilemapReposition");
@@ -146,6 +150,22 @@ namespace Farmware.WorldGeneration.Presentation
         // 製品カタログ経路で、Wall領域の手前へ投影した前面2段だけを描画します。
         [Tooltip("製品材質のWall前面2段を描画するTilemapです。Face本体は暗色化せず、1段目だけWall用境界合成済みSpriteを使用します。")]
         [SerializeField] private Tilemap wallFaceTilemap;
+
+        // Wall上面と前面の結合シルエットを左1px・手前3pxへ複製し、光源に依存しない接地点を描きます。
+        [Tooltip("製品Wallの固定接地影を左1px・手前3pxへ表示するTilemapです。TerrainWallContactShadow Materialを設定し、Wall本体より後ろへ描画してください。")]
+        [SerializeField] private Tilemap wallContactShadowLeftTilemap;
+
+        // Wall上面と前面の結合シルエットを右1px・手前3pxへ複製し、左右対称の接地点を描きます。
+        [Tooltip("製品Wallの固定接地影を右1px・手前3pxへ表示するTilemapです。TerrainWallContactShadow Materialを設定し、Wall本体より後ろへ描画してください。")]
+        [SerializeField] private Tilemap wallContactShadowRightTilemap;
+
+        // Wall前面1段目へ32px連続折れ目影の0〜15pxを重ねます。
+        [Tooltip("製品Wall前面1段目の32px折れ目影Tilemapです。TerrainWallFoldShadowTop Materialを設定してください。")]
+        [SerializeField] private Tilemap wallFoldShadowTopTilemap;
+
+        // Wall前面2段目へ32px連続折れ目影の16〜31pxを重ねます。
+        [Tooltip("製品Wall前面2段目の32px折れ目影Tilemapです。TerrainWallFoldShadowBottom Materialを設定してください。")]
+        [SerializeField] private Tilemap wallFoldShadowBottomTilemap;
 
         // 乾燥穴の全セルへ黒い下地を置き、3段目の減衰後と4段目以降を完全な暗黒にします。
         [Tooltip("製品材質の乾燥穴へ完全な黒い下地を描画するTilemapです。Ground Faceより後ろのSorting Orderへ設定してください。")]
@@ -376,6 +396,38 @@ namespace Farmware.WorldGeneration.Presentation
         // 製品Wall前面を投影先セルへ置く256要素の再利用配列です。
         private TileBase[] wallFaceSubChunkTileBuffer;
 
+        // Wallと最下段Faceの結合シルエットを左側固定接地影へ渡す256要素の再利用配列です。
+        private TileBase[] wallContactShadowLeftSubChunkTileBuffer;
+
+        // Wallと最下段Faceの結合シルエットを右側固定接地影へ渡す256要素の再利用配列です。
+        private TileBase[] wallContactShadowRightSubChunkTileBuffer;
+
+        // Wall前面1段目だけを32px折れ目影の上半分へ渡す256要素の再利用配列です。
+        private TileBase[] wallFoldShadowTopSubChunkTileBuffer;
+
+        // Wall前面2段目だけを32px折れ目影の下半分へ渡す256要素の再利用配列です。
+        private TileBase[] wallFoldShadowBottomSubChunkTileBuffer;
+
+        // 現在反映中の16×16サブチャンクについて、手前にFaceが露出するWall根元だけを保持する再利用配列です。
+        private bool[] wallDynamicShadowRootMaskBuffer;
+
+        // Wallマスクから作った横連続区間をサブチャンク間で再利用し、Dirty反映ごとのList生成を避けます。
+        private readonly List<TerrainWallShadowRun> wallDynamicShadowRunBuffer =
+            new List<TerrainWallShadowRun>(WorldGridConstants.SubChunkSize * WorldGridConstants.SubChunkSize);
+
+        // 論理チャンクごとのComposite Shadow Casterを保持し、カリング・Floating Originと同じ寿命で管理します。
+        private readonly Dictionary<ChunkCoordinate, TerrainWallDynamicShadowChunkPresentation>
+            wallDynamicShadowByCoordinate =
+                new Dictionary<ChunkCoordinate, TerrainWallDynamicShadowChunkPresentation>();
+
+        // 画面外になった動的影を全破棄せず、上限付きで次のチャンク表示へ再利用します。
+        private readonly Stack<TerrainWallDynamicShadowChunkPresentation>
+            pooledWallDynamicShadowPresentations =
+                new Stack<TerrainWallDynamicShadowChunkPresentation>();
+
+        // Runtimeで矩形Casterの透明SpriteRendererへ設定する1×1 Unit Spriteです。このPresenterだけが所有します。
+        private Sprite generatedWallDynamicShadowUnitSprite;
+
         // 乾燥穴の深部黒をFaceより後ろへ置く256要素の再利用配列です。
         private TileBase[] dryCliffDeepBlackSubChunkTileBuffer;
 
@@ -564,6 +616,41 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
+        /// Editor構築ツールまたはテストから、製品Wallの固定接地影と32px折れ目影に使う4レイヤーを設定します。
+        /// 動的影Casterは光源を参照せず、製品材質経路が有効な場合に手前へ露出したWall根元から自動生成します。
+        /// </summary>
+        /// <param name="contactLeft">左1px・手前3pxの固定接地影Tilemapです。</param>
+        /// <param name="contactRight">右1px・手前3pxの固定接地影Tilemapです。</param>
+        /// <param name="foldTop">32px折れ目影の0〜15pxを描くTilemapです。</param>
+        /// <param name="foldBottom">32px折れ目影の16〜31pxを描くTilemapです。</param>
+        public void ConfigureTerrainWallShadowPresentation(
+            Tilemap contactLeft,
+            Tilemap contactRight,
+            Tilemap foldTop,
+            Tilemap foldBottom)
+        {
+            bool configurationChanged = wallContactShadowLeftTilemap != contactLeft
+                || wallContactShadowRightTilemap != contactRight
+                || wallFoldShadowTopTilemap != foldTop
+                || wallFoldShadowBottomTilemap != foldBottom;
+            if (!configurationChanged)
+            {
+                return;
+            }
+
+            // PlayMode中の差し替えでは旧TilemapとCasterを先に消し、部分設定の影を新しい地形へ重ねません。
+            if (Application.isPlaying)
+            {
+                ClearAllPresentedChunksImmediately();
+            }
+
+            wallContactShadowLeftTilemap = contactLeft;
+            wallContactShadowRightTilemap = contactRight;
+            wallFoldShadowTopTilemap = foldTop;
+            wallFoldShadowBottomTilemap = foldBottom;
+        }
+
+        /// <summary>
         /// Editor構築ツールまたはテストから、製品Liquid表示カタログと専用5レイヤーを設定します。
         /// 全参照が揃うまで既存の基礎液面・全面アニメーションを維持し、新旧Liquid表現を同時に描きません。
         /// </summary>
@@ -664,6 +751,11 @@ namespace Farmware.WorldGeneration.Presentation
             rockWallSubChunkTileBuffer = new TileBase[tileCount];
             groundFaceSubChunkTileBuffer = new TileBase[tileCount];
             wallFaceSubChunkTileBuffer = new TileBase[tileCount];
+            wallContactShadowLeftSubChunkTileBuffer = new TileBase[tileCount];
+            wallContactShadowRightSubChunkTileBuffer = new TileBase[tileCount];
+            wallFoldShadowTopSubChunkTileBuffer = new TileBase[tileCount];
+            wallFoldShadowBottomSubChunkTileBuffer = new TileBase[tileCount];
+            wallDynamicShadowRootMaskBuffer = new bool[tileCount];
             dryCliffDeepBlackSubChunkTileBuffer = new TileBase[tileCount];
             rockWallResourceSubChunkTileBuffer = new TileBase[tileCount];
             landBoundaryHighlightSubChunkTileBuffer = new TileBase[tileCount];
@@ -671,8 +763,31 @@ namespace Farmware.WorldGeneration.Presentation
             terrainNeighborHaloBuffer = new NativeArray<GeneratedTerrainCell>(TerrainNeighborHaloUtility.TileCount,
                 Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
             AllocateRockWallShadowBuffers();
+            EnsureWallDynamicShadowUnitSprite();
             EnsureFreshWaterFallbackTile();
             RebuildBoundaryHighlightTiles();
+        }
+
+        /// <summary>
+        /// 動的影Casterの透明SpriteRendererが1×1 Unity Unitの矩形輪郭を持つよう、共有Spriteを1枚だけ作ります。
+        /// </summary>
+        private void EnsureWallDynamicShadowUnitSprite()
+        {
+            if (generatedWallDynamicShadowUnitSprite != null)
+            {
+                return;
+            }
+
+            Texture2D texture = Texture2D.whiteTexture;
+            generatedWallDynamicShadowUnitSprite = Sprite.Create(
+                texture,
+                new Rect(0f, 0f, texture.width, texture.height),
+                new Vector2(0.5f, 0.5f),
+                texture.width,
+                0,
+                SpriteMeshType.FullRect);
+            generatedWallDynamicShadowUnitSprite.name = "Generated Terrain Wall Shadow Unit Sprite";
+            generatedWallDynamicShadowUnitSprite.hideFlags = HideFlags.DontSave;
         }
 
         /// <summary>
@@ -982,7 +1097,8 @@ namespace Farmware.WorldGeneration.Presentation
             bool hadPresentedContent = displayedCoordinates.Count > 0
                 || applyProgressByCoordinate.Count > 0
                 || pendingClearCoordinates.Count > 0
-                || rockWallShadowByCoordinate.Count > 0;
+                || rockWallShadowByCoordinate.Count > 0
+                || wallDynamicShadowByCoordinate.Count > 0;
             if (hadPresentedContent)
             {
                 bool isAutomaticRebase = cameraPanController != null
@@ -1000,6 +1116,15 @@ namespace Farmware.WorldGeneration.Presentation
                                 foreach (KeyValuePair<ChunkCoordinate, ChunkLocalTilemapPresentation> pair in chunkLocalPresentations)
                                 {
                                     pair.Value.Reposition(CalculateRockWallShadowMinimumCell(pair.Key, currentOrigin));
+                                }
+
+                                foreach (KeyValuePair<ChunkCoordinate, TerrainWallDynamicShadowChunkPresentation> pair in
+                                         wallDynamicShadowByCoordinate)
+                                {
+                                    // Casterはチャンク内ローカル形状なので、原点変更ではルート位置だけを動かして再利用します。
+                                    pair.Value.Reposition(
+                                        targetTilemap.CellToLocal(
+                                            CalculateRockWallShadowMinimumCell(pair.Key, currentOrigin)));
                                 }
                             }
 
@@ -1136,6 +1261,7 @@ namespace Farmware.WorldGeneration.Presentation
         {
             DisposeQueries();
             DestroyAllRockWallShadows();
+            DestroyAllWallDynamicShadowPresentations();
             DestroyChunkLocalPresentations();
             DestroyGeneratedBoundaryHighlightTiles();
 
@@ -1163,6 +1289,13 @@ namespace Farmware.WorldGeneration.Presentation
             {
                 DestroyUnityObject(generatedFreshWaterFallbackTile);
                 generatedFreshWaterFallbackTile = null;
+            }
+
+            // Texture2D.whiteTextureはUnity共有物なので破棄せず、そこから作ったSpriteだけを所有者として破棄します。
+            if (generatedWallDynamicShadowUnitSprite != null)
+            {
+                DestroyUnityObject(generatedWallDynamicShadowUnitSprite);
+                generatedWallDynamicShadowUnitSprite = null;
             }
         }
 
@@ -1664,6 +1797,8 @@ namespace Farmware.WorldGeneration.Presentation
             int subChunkY = subChunkIndex / WorldGridConstants.SubChunksPerAxis;
             int localStartX = subChunkX * WorldGridConstants.SubChunkSize;
             int localStartY = subChunkY * WorldGridConstants.SubChunkSize;
+            bool wallShadowPresentationIsConfigured =
+                HasCompleteTerrainWallShadowConfiguration();
 
             using (SubChunkClassificationProfilerMarker.Auto())
             {
@@ -1686,6 +1821,11 @@ namespace Farmware.WorldGeneration.Presentation
 
                         groundFaceSubChunkTileBuffer[destinationIndex] = null;
                         wallFaceSubChunkTileBuffer[destinationIndex] = null;
+                        wallContactShadowLeftSubChunkTileBuffer[destinationIndex] = null;
+                        wallContactShadowRightSubChunkTileBuffer[destinationIndex] = null;
+                        wallFoldShadowTopSubChunkTileBuffer[destinationIndex] = null;
+                        wallFoldShadowBottomSubChunkTileBuffer[destinationIndex] = null;
+                        wallDynamicShadowRootMaskBuffer[destinationIndex] = false;
                         dryCliffDeepBlackSubChunkTileBuffer[destinationIndex] = null;
                         liquidDepthWithFloorSubChunkTileBuffer[destinationIndex] = null;
                         liquidDepthWithoutFloorSubChunkTileBuffer[destinationIndex] = null;
@@ -1697,13 +1837,36 @@ namespace Farmware.WorldGeneration.Presentation
                         if (materialPresentationIsReady)
                         {
                             // 製品経路は上面・断面・深部黒を分離し、境界あり1段目も合成済みSprite 1枚として選びます。
-                            ClassifyProductMaterialTiles(
+                            int wallFaceDepth = ClassifyProductMaterialTiles(
                                 coordinate,
                                 tileLocalX,
                                 tileLocalY,
                                 destinationIndex,
                                 terrainCell,
                                 terrainNeighborhood);
+
+                            if (wallShadowPresentationIsConfigured)
+                            {
+                                // 左右の固定影は同じ結合シルエットを別Tilemapへ渡し、Scene側の±1px・手前3px Transformで表示します。
+                                // Wall上面とFace投影先は同時に成立しないため、nullでない方を1セルのシルエットとして使用できます。
+                                TileBase wallSilhouetteTile = rockWallSubChunkTileBuffer[destinationIndex]
+                                    ?? wallFaceSubChunkTileBuffer[destinationIndex];
+                                wallContactShadowLeftSubChunkTileBuffer[destinationIndex] = wallSilhouetteTile;
+                                wallContactShadowRightSubChunkTileBuffer[destinationIndex] = wallSilhouetteTile;
+
+                                // 折れ目影は段別Materialで開始行0／16を固定し、段境界でAlphaが濃く戻らないようにします。
+                                if (wallFaceDepth == 0)
+                                {
+                                    wallFoldShadowTopSubChunkTileBuffer[destinationIndex] =
+                                        wallFaceSubChunkTileBuffer[destinationIndex];
+                                }
+                                else if (wallFaceDepth == 1)
+                                {
+                                    wallFoldShadowBottomSubChunkTileBuffer[destinationIndex] =
+                                        wallFaceSubChunkTileBuffer[destinationIndex];
+                                }
+
+                            }
                             landBoundaryHighlightSubChunkTileBuffer[destinationIndex] = null;
                             rockWallBoundaryHighlightSubChunkTileBuffer[destinationIndex] = null;
                         }
@@ -1870,6 +2033,26 @@ namespace Farmware.WorldGeneration.Presentation
                     wallFaceSubChunkTileBuffer);
                 WriteSubChunkLayer(
                     coordinate,
+                    wallContactShadowLeftTilemap,
+                    bounds,
+                    wallContactShadowLeftSubChunkTileBuffer);
+                WriteSubChunkLayer(
+                    coordinate,
+                    wallContactShadowRightTilemap,
+                    bounds,
+                    wallContactShadowRightSubChunkTileBuffer);
+                WriteSubChunkLayer(
+                    coordinate,
+                    wallFoldShadowTopTilemap,
+                    bounds,
+                    wallFoldShadowTopSubChunkTileBuffer);
+                WriteSubChunkLayer(
+                    coordinate,
+                    wallFoldShadowBottomTilemap,
+                    bounds,
+                    wallFoldShadowBottomSubChunkTileBuffer);
+                WriteSubChunkLayer(
+                    coordinate,
                     dryCliffDeepBlackTilemap,
                     bounds,
                     dryCliffDeepBlackSubChunkTileBuffer);
@@ -1886,6 +2069,40 @@ namespace Farmware.WorldGeneration.Presentation
                     bounds,
                     rockWallBoundaryHighlightSubChunkTileBuffer);
             }
+
+            if (materialPresentationIsReady && wallShadowPresentationIsConfigured)
+            {
+                using (TerrainWallDynamicShadowUpdateProfilerMarker.Auto())
+                {
+                    // 全Wallを2段手前へ投影すると奥側Casterが手前のWall上面を自己遮蔽するため、
+                    // 完成済み南隣を含めてFaceが露出する前縁だけを根元として抽出します。
+                    TerrainWallShadowUtility.FillExposedSouthRootMask(
+                        terrainNeighborhood,
+                        localStartX,
+                        localStartY,
+                        wallDynamicShadowRootMaskBuffer);
+                    TerrainWallShadowUtility.BuildHorizontalRuns(
+                        wallDynamicShadowRootMaskBuffer,
+                        localStartX,
+                        localStartY,
+                        wallDynamicShadowRunBuffer);
+                    GetOrCreateWallDynamicShadowPresentation(coordinate)
+                        .UpdateSubChunk(subChunkIndex, wallDynamicShadowRunBuffer);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 固定接地影と折れ目影の4レイヤーがすべて揃い、動的影Casterを同じ製品経路で公開できるか確認します。
+        /// </summary>
+        /// <returns>部分設定を混在させずWall影一式を表示できる場合はtrueです。</returns>
+        private bool HasCompleteTerrainWallShadowConfiguration()
+        {
+            return targetTilemap != null
+                && wallContactShadowLeftTilemap != null
+                && wallContactShadowRightTilemap != null
+                && wallFoldShadowTopTilemap != null
+                && wallFoldShadowBottomTilemap != null;
         }
 
         /// <summary>
@@ -1897,7 +2114,8 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="destinationIndex">256要素の再利用配列へ書く位置です。</param>
         /// <param name="terrainCell">現在表示セルの完成済み地形です。</param>
         /// <param name="terrainNeighborhood">最大3段奥の投影元を含む完成地形近傍です。</param>
-        private void ClassifyProductMaterialTiles(
+        /// <returns>Wall前面なら0〜1の段数、それ以外は-1です。</returns>
+        private int ClassifyProductMaterialTiles(
             ChunkCoordinate chunkCoordinate,
             int localX,
             int localY,
@@ -1916,7 +2134,7 @@ namespace Farmware.WorldGeneration.Presentation
                     out int worldX,
                     out int worldY))
             {
-                return;
+                return -1;
             }
 
             var currentCoordinate = new WorldTileCoordinate(
@@ -1984,7 +2202,7 @@ namespace Farmware.WorldGeneration.Presentation
             {
                 wallFaceSubChunkTileBuffer[destinationIndex] =
                     materialTileCache.GetOrCreate(wallFace);
-                return;
+                return wallProjection.FaceDepth;
             }
 
             if (TerrainMaterialVerticalProjectionUtility.TryProjectGroundFace(
@@ -2009,6 +2227,8 @@ namespace Farmware.WorldGeneration.Presentation
                 groundFaceSubChunkTileBuffer[destinationIndex] =
                     materialTileCache.GetOrCreate(groundFace);
             }
+
+            return -1;
         }
 
         /// <summary>
@@ -2330,6 +2550,7 @@ namespace Farmware.WorldGeneration.Presentation
             {
                 // Tilemap消去を分割している間に古い影だけが残らないよう、チャンク影は消去開始時にまとめて外します。
                 DestroyRockWallShadow(coordinate);
+                ReleaseWallDynamicShadowPresentation(coordinate);
             }
 
             using (SubChunkTilemapClearProfilerMarker.Auto())
@@ -2414,6 +2635,26 @@ namespace Farmware.WorldGeneration.Presentation
                 if (wallFaceTilemap != null)
                 {
                     wallFaceTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
+                }
+
+                if (wallContactShadowLeftTilemap != null)
+                {
+                    wallContactShadowLeftTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
+                }
+
+                if (wallContactShadowRightTilemap != null)
+                {
+                    wallContactShadowRightTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
+                }
+
+                if (wallFoldShadowTopTilemap != null)
+                {
+                    wallFoldShadowTopTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
+                }
+
+                if (wallFoldShadowBottomTilemap != null)
+                {
+                    wallFoldShadowBottomTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
                 }
 
                 if (dryCliffDeepBlackTilemap != null)
@@ -2520,6 +2761,7 @@ namespace Farmware.WorldGeneration.Presentation
             }
 
             DestroyAllRockWallShadows();
+            DestroyAllWallDynamicShadowPresentations();
             // 即時消去は方式切替・テレポート・World切替に限ります。空きプールも破棄して設定やWorldを持ち越しません。
             DestroyChunkLocalPresentations();
             ResetPresentationCaches();
@@ -2559,6 +2801,8 @@ namespace Farmware.WorldGeneration.Presentation
         {
             return new[] { targetTilemap, liquidBaseTilemap, resourceTilemap, resourceBehindRockWallTilemap,
                 liquidAnimationTilemap, rockWallTilemap, groundFaceTilemap, wallFaceTilemap,
+                wallContactShadowLeftTilemap, wallContactShadowRightTilemap,
+                wallFoldShadowTopTilemap, wallFoldShadowBottomTilemap,
                 dryCliffDeepBlackTilemap, liquidDepthWithFloorTilemap,
                 liquidDepthWithoutFloorTilemap, underwaterFloorPreviewTilemap,
                 waterReflectionTilemap, liquidEdgeWaveTilemap, rockWallResourceTilemap,
@@ -2633,6 +2877,78 @@ namespace Farmware.WorldGeneration.Presentation
             while (pooledChunkLocalPresentations.Count > 0)
             {
                 pooledChunkLocalPresentations.Pop().Destroy();
+            }
+        }
+
+        /// <summary>
+        /// 論理チャンク用の動的影表示を取得し、再利用時も現在のFloating Origin位置へルートを合わせます。
+        /// </summary>
+        /// <param name="coordinate">影を表示する論理チャンク座標です。</param>
+        /// <returns>現在チャンクへ貸し出した動的影表示です。</returns>
+        private TerrainWallDynamicShadowChunkPresentation GetOrCreateWallDynamicShadowPresentation(
+            ChunkCoordinate coordinate)
+        {
+            if (!wallDynamicShadowByCoordinate.TryGetValue(
+                    coordinate,
+                    out TerrainWallDynamicShadowChunkPresentation presentation))
+            {
+                EnsureWallDynamicShadowUnitSprite();
+                presentation = pooledWallDynamicShadowPresentations.Count > 0
+                    ? pooledWallDynamicShadowPresentations.Pop()
+                    : new TerrainWallDynamicShadowChunkPresentation(
+                        targetTilemap.transform,
+                        generatedWallDynamicShadowUnitSprite,
+                        targetTilemap.gameObject.layer);
+                wallDynamicShadowByCoordinate.Add(coordinate, presentation);
+            }
+
+            presentation.Reposition(
+                targetTilemap.CellToLocal(
+                    CalculateRockWallShadowMinimumCell(coordinate, presentedDisplayOrigin)));
+            presentation.Root.SetActive(true);
+            return presentation;
+        }
+
+        /// <summary>
+        /// 画面外になったチャンクの動的影を非表示にし、上限内なら次のチャンクへ再利用します。
+        /// </summary>
+        /// <param name="coordinate">貸し出しを終了する論理チャンク座標です。</param>
+        private void ReleaseWallDynamicShadowPresentation(ChunkCoordinate coordinate)
+        {
+            if (!wallDynamicShadowByCoordinate.Remove(
+                    coordinate,
+                    out TerrainWallDynamicShadowChunkPresentation presentation))
+            {
+                return;
+            }
+
+            presentation.Clear();
+            if (pooledWallDynamicShadowPresentations.Count
+                < Mathf.Max(0, maximumPooledChunkPresentations))
+            {
+                pooledWallDynamicShadowPresentations.Push(presentation);
+            }
+            else
+            {
+                presentation.Destroy();
+            }
+        }
+
+        /// <summary>
+        /// Component無効化、World切替、破棄時に、貸し出し中とプール内の動的影GameObjectをすべて破棄します。
+        /// </summary>
+        private void DestroyAllWallDynamicShadowPresentations()
+        {
+            foreach (TerrainWallDynamicShadowChunkPresentation presentation in
+                     wallDynamicShadowByCoordinate.Values)
+            {
+                presentation.Destroy();
+            }
+
+            wallDynamicShadowByCoordinate.Clear();
+            while (pooledWallDynamicShadowPresentations.Count > 0)
+            {
+                pooledWallDynamicShadowPresentations.Pop().Destroy();
             }
         }
 

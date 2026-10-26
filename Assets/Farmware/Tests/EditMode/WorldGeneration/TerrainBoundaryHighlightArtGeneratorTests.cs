@@ -248,11 +248,24 @@ namespace Farmware.WorldGeneration.Tests
                 TerrainWallShadowComparisonMapBuilder.DynamicShadowCasterOffsetYInTiles,
                 Is.EqualTo(-summary.FaceDepth));
             Assert.That(summary.FaceSpriteCountPerPanel, Is.EqualTo(10));
-            Assert.That(summary.ShadowCasterCount, Is.EqualTo(39));
+            Assert.That(summary.ShadowCasterCount, Is.EqualTo(15));
+            Assert.That(
+                summary.ShadowCasterCount,
+                Is.EqualTo(summary.ExposedFaceColumnCountPerPanel * summary.PanelCount),
+                "全Wallセルではなく、Faceが露出する前縁だけへCasterを作る必要があります。");
             Assert.That(summary.CompositeShadowCasterCount, Is.EqualTo(3));
-            Assert.That(summary.PointLightCount, Is.EqualTo(6));
+            Assert.That(summary.PointLightCount, Is.EqualTo(12));
             Assert.That(summary.ContactShadowSpriteCount, Is.EqualTo(36));
             Assert.That(TerrainWallShadowComparisonMapBuilder.PointLightsPerPanel, Is.EqualTo(2));
+            Assert.That(
+                TerrainWallShadowComparisonMapBuilder.PointLightComponentsPerPosition,
+                Is.EqualTo(2),
+                "各光源位置はGround用影あり灯とWall用影なし灯の1組で構成する必要があります。");
+            Assert.That(
+                SortingLayer.NameToID(TerrainWallShadowUtility.WallSortingLayerName),
+                Is.Not.EqualTo(SortingLayer.NameToID(
+                    TerrainWallShadowUtility.GroundShadowReceiverSortingLayerName)));
+            TerrainWallShadowComparisonMapBuilder.ValidateTerrainWallSortingLayerConfiguration();
             Assert.That(TerrainWallShadowComparisonMapBuilder.PointLightOuterRadius, Is.EqualTo(8f));
             Assert.That(TerrainWallShadowComparisonMapBuilder.FrontLeftLightIntensity, Is.EqualTo(0.65f));
             Assert.That(TerrainWallShadowComparisonMapBuilder.ContactShadowHorizontalSpreadPixels, Is.EqualTo(1));
@@ -280,9 +293,13 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(summary.FoldShadowSpriteCount, Is.EqualTo(100));
             Assert.That(summary.HighlightSpriteCount, Is.EqualTo(60));
             Assert.That(summary.ContactShadowSpriteCount, Is.EqualTo(720));
-            Assert.That(summary.ShadowCasterCount, Is.EqualTo(260));
+            Assert.That(summary.ShadowCasterCount, Is.EqualTo(100));
+            Assert.That(
+                summary.ShadowCasterCount,
+                Is.EqualTo(summary.ExposedFaceColumnCountPerPanel * summary.PanelCount),
+                "補助表現比較でも奥側Wallへ自己影Casterを残してはいけません。");
             Assert.That(summary.CompositeShadowCasterCount, Is.EqualTo(20));
-            Assert.That(summary.PointLightCount, Is.EqualTo(40));
+            Assert.That(summary.PointLightCount, Is.EqualTo(80));
         }
 
         /// <summary>内角が仕様どおり角の1画素だけになり、隣接画素へ伸びないことを確認します。</summary>

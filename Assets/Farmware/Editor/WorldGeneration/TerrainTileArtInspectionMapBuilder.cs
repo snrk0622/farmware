@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using Farmware.WorldGeneration.Authoring;
+using Farmware.WorldGeneration.Presentation;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -266,6 +267,13 @@ namespace Farmware.WorldGeneration.Editor
 
         /// <summary>代表パネル1つへ置く上方主光と左手前検証光の合計数です。</summary>
         public const int RepresentativePointLightsPerPanel = 2;
+
+        /// <summary>
+        /// 物理的な光源位置1か所を構成するLight 2D数です。
+        /// Ground用の影あり灯とWall用の影なし灯を重ね、Wall自身の影がWall上へ投影されることを防ぎます。
+        /// </summary>
+        public const int RepresentativeLightComponentsPerPosition =
+            TerrainWallShadowComparisonMapBuilder.PointLightComponentsPerPosition;
 
         /// <summary>代表材質パネルの中心Y座標です。単位はUnity Unitです。</summary>
         private const float RepresentativePanelCenterY = 7.75f;
@@ -766,6 +774,10 @@ namespace Farmware.WorldGeneration.Editor
         /// <returns>Scene構築へそのまま使える検証済み素材です。</returns>
         private static InspectionAssets LoadAndValidateAssets()
         {
+            // Wallを専用受影面へ分離できない状態でSceneを生成すると、Wall自身の投影影がWall上へ重なります。
+            // 素材を読み込む前にSorting Layer契約を検証し、見た目だけでは気づきにくい設定欠落を止めます。
+            TerrainWallShadowComparisonMapBuilder.ValidateTerrainWallSortingLayerConfiguration();
+
             TerrainTileArtGenerationSettings settings =
                 AssetDatabase.LoadAssetAtPath<TerrainTileArtGenerationSettings>(SettingsAssetPath);
             if (settings == null)
@@ -1456,7 +1468,9 @@ namespace Farmware.WorldGeneration.Editor
                         assets.GroundTopSprites[variant],
                         new Vector3(worldX, worldY, -0.1f),
                         wallTint,
-                        10);
+                        10,
+                        null,
+                        TerrainWallShadowUtility.WallSortingLayerName);
 
                     if (y == 0)
                     {
@@ -1490,7 +1504,9 @@ namespace Farmware.WorldGeneration.Editor
                                 face,
                                 facePosition,
                                 Color.white,
-                                20);
+                                20,
+                                null,
+                                TerrainWallShadowUtility.WallSortingLayerName);
 
                             // 採用した32px影はFace 2段をまたぐため、各段へ開始行の異なるMaterialを重ねます。
                             // Face Sprite自体は暗化せず、段境界で影が濃く戻らない連続グラデーションだけを追加します。
@@ -1501,7 +1517,8 @@ namespace Farmware.WorldGeneration.Editor
                                 facePosition,
                                 Color.white,
                                 21,
-                                wallFoldShadowMaterials[faceStage - 1]);
+                                wallFoldShadowMaterials[faceStage - 1],
+                                TerrainWallShadowUtility.WallSortingLayerName);
                         }
                     }
                 }
@@ -1623,7 +1640,8 @@ namespace Farmware.WorldGeneration.Editor
                         wallTopPosition,
                         wallTint,
                         80,
-                        spriteLitMaterial);
+                        spriteLitMaterial,
+                        TerrainWallShadowUtility.WallSortingLayerName);
 
                     // 表示Spriteへ直接Casterを付けると上面から影が伸びるため、Face 2段分だけ手前へ移した透明な代理輪郭を作ります。
                     // 材質パネル単位のCompositeへまとめ、横に連続するWallセルの共有辺から不要な影を出しません。
@@ -1667,7 +1685,8 @@ namespace Farmware.WorldGeneration.Editor
                             facePosition,
                             Color.white,
                             80,
-                            spriteLitMaterial);
+                            spriteLitMaterial,
+                            TerrainWallShadowUtility.WallSortingLayerName);
 
                         // 採用した32px影は2段を1本の勾配として扱います。
                         // 2段目には開始行16pxのMaterialを使い、段境界でAlphaが上端値へ戻らないようにします。
@@ -1681,7 +1700,8 @@ namespace Farmware.WorldGeneration.Editor
                                 -0.21f),
                             Color.white,
                             81,
-                            wallFoldShadowMaterials[faceStage - 1]);
+                            wallFoldShadowMaterials[faceStage - 1],
+                            TerrainWallShadowUtility.WallSortingLayerName);
                     }
                 }
 
@@ -1735,7 +1755,10 @@ namespace Farmware.WorldGeneration.Editor
             caster.trimEdge = 0f;
         }
 
-        /// <summary>C案と同じ設定で、代表材質パネル1つを照らすPoint Light 2Dを作ります。</summary>
+        /// <summary>
+        /// C案と同じ位置へ、Ground用の影あり灯とWall用の影なし灯を重ねて作ります。
+        /// 2灯は同じ色、半径、強度を共有するため、1つの光に見えながらWall自身の投影影だけをWallから除外できます。
+        /// </summary>
         /// <param name="parent">5材質のLightをまとめる親です。</param>
         /// <param name="name">Hierarchyへ表示するLight名です。</param>
         /// <param name="x">Light中心のX座標です。単位はUnity Unitです。</param>
@@ -1750,7 +1773,35 @@ namespace Farmware.WorldGeneration.Editor
         {
             GameObject lightObject = CreateChild(parent, name);
             lightObject.transform.position = new Vector3(x, y, -1f);
-            Light2D light = lightObject.AddComponent<Light2D>();
+            Light2D groundShadowLight = lightObject.AddComponent<Light2D>();
+            ConfigureRepresentativePanelLight(
+                groundShadowLight,
+                intensity,
+                true,
+                TerrainWallShadowUtility.GroundShadowReceiverSortingLayerName);
+
+            // Light2Dは同じGameObjectへ複数追加できないため、同期するWall灯を子GameObjectへ置きます。
+            // Transformは親から継承されるので、Sceneビューで親を動かすだけで2灯を同時に移動できます。
+            GameObject wallLightObject = CreateChild(lightObject, "Wall Illumination Light 2D");
+            Light2D wallIlluminationLight = wallLightObject.AddComponent<Light2D>();
+            ConfigureRepresentativePanelLight(
+                wallIlluminationLight,
+                intensity,
+                false,
+                TerrainWallShadowUtility.WallSortingLayerName);
+        }
+
+        /// <summary>代表材質パネルのPoint Lightへ、共通の見た目と受影面の役割を設定します。</summary>
+        /// <param name="light">設定対象のPoint Light 2Dです。</param>
+        /// <param name="intensity">主光または左手前検証光の強度です。</param>
+        /// <param name="shadowsEnabled">Ground用ならtrue、Wall照明用ならfalseです。</param>
+        /// <param name="targetSortingLayerName">この灯りだけを受けるSorting Layer名です。</param>
+        private static void ConfigureRepresentativePanelLight(
+            Light2D light,
+            float intensity,
+            bool shadowsEnabled,
+            string targetSortingLayerName)
+        {
             light.lightType = Light2D.LightType.Point;
             light.intensity = intensity;
             light.color = new Color(1f, 0.96f, 0.88f, 1f);
@@ -1758,11 +1809,15 @@ namespace Farmware.WorldGeneration.Editor
             light.pointLightOuterRadius =
                 TerrainWallShadowComparisonMapBuilder.PointLightOuterRadius;
             light.falloffIntensity = 0.5f;
-            light.shadowsEnabled = true;
+            light.shadowsEnabled = shadowsEnabled;
             light.shadowIntensity =
                 TerrainWallShadowComparisonMapBuilder.PointLightShadowIntensity;
             light.shadowSoftness =
                 TerrainWallShadowComparisonMapBuilder.PointLightShadowSoftness;
+            light.targetSortingLayers = new[]
+            {
+                SortingLayer.NameToID(targetSortingLayerName)
+            };
         }
 
         /// <summary>代表材質パネルがC案と同じ動的影Component構成を持ち、物理Colliderを追加していないことを検証します。</summary>
@@ -1788,7 +1843,9 @@ namespace Farmware.WorldGeneration.Editor
             Light2D[] lights = root.GetComponentsInChildren<Light2D>(true);
             Collider2D[] colliders = root.GetComponentsInChildren<Collider2D>(true);
             int expectedLightCount = 1
-                + (materials.Length * RepresentativePointLightsPerPanel);
+                + (materials.Length
+                    * RepresentativePointLightsPerPanel
+                    * RepresentativeLightComponentsPerPosition);
 
             if (casters.Length != expectedCasterCount)
             {
@@ -1808,10 +1865,68 @@ namespace Farmware.WorldGeneration.Editor
                     $"代表材質パネルのLight 2D数が不正です: expected={expectedLightCount}, actual={lights.Length}");
             }
 
+            ValidateSeparatedRepresentativePointLights(
+                lights,
+                materials.Length * RepresentativePointLightsPerPanel);
+
             if (colliders.Length != 0)
             {
                 throw new InvalidOperationException(
                     "代表材質パネルの影検品へCollider2Dを追加してはいけません。");
+            }
+        }
+
+        /// <summary>代表パネルのPoint LightがGround影灯とWall照明灯へ同数に分離されていることを確認します。</summary>
+        /// <param name="lights">Global Lightを含む検品Scene内の全Light 2Dです。</param>
+        /// <param name="expectedPositionCount">代表5材質に置く物理的な光源位置の合計です。</param>
+        private static void ValidateSeparatedRepresentativePointLights(
+            Light2D[] lights,
+            int expectedPositionCount)
+        {
+            int groundLayerId = SortingLayer.NameToID(
+                TerrainWallShadowUtility.GroundShadowReceiverSortingLayerName);
+            int wallLayerId = SortingLayer.NameToID(
+                TerrainWallShadowUtility.WallSortingLayerName);
+            int groundShadowLightCount = 0;
+            int wallIlluminationLightCount = 0;
+
+            for (int index = 0; index < lights.Length; index++)
+            {
+                Light2D light = lights[index];
+                if (light.lightType != Light2D.LightType.Point)
+                {
+                    continue;
+                }
+
+                int[] targetLayers = light.targetSortingLayers;
+                if (targetLayers == null || targetLayers.Length != 1)
+                {
+                    throw new InvalidOperationException(
+                        $"代表パネルのPoint Lightは受影面1種類だけを対象にしてください: {light.name}");
+                }
+
+                if (light.shadowsEnabled && targetLayers[0] == groundLayerId)
+                {
+                    groundShadowLightCount++;
+                    continue;
+                }
+
+                if (!light.shadowsEnabled && targetLayers[0] == wallLayerId)
+                {
+                    wallIlluminationLightCount++;
+                    continue;
+                }
+
+                throw new InvalidOperationException(
+                    $"代表パネルのPoint Lightの影または対象Sorting Layerが不正です: {light.name}");
+            }
+
+            if (groundShadowLightCount != expectedPositionCount
+                || wallIlluminationLightCount != expectedPositionCount)
+            {
+                throw new InvalidOperationException(
+                    "代表パネルはGround用影ありLightとWall用影なしLightを光源位置ごとに1組必要とします。"
+                    + $" expected={expectedPositionCount}, ground={groundShadowLightCount}, wall={wallIlluminationLightCount}");
             }
         }
 
@@ -2306,6 +2421,7 @@ namespace Farmware.WorldGeneration.Editor
         {
             // 左右に1pxずらした同一形状を2枚重ね、真上基準の光でも片側へ偏らない接地点を作ります。
             // 比較専用Sceneと同じ公開定数を参照し、採用値が2つの検品Sceneで食い違わないようにします。
+            // 接地影はWallの背後へ潜り込ませる地面側の表現なので、Wall専用LayerではなくDefaultへ置きます。
             for (int horizontalSign = -1; horizontalSign <= 1; horizontalSign += 2)
             {
                 Vector3 pixelOffset = new Vector3(
@@ -2327,7 +2443,8 @@ namespace Farmware.WorldGeneration.Editor
                         0f,
                         TerrainWallShadowComparisonMapBuilder.ContactShadowLayerOpacity),
                     15,
-                    spriteUnlitMaterial);
+                    spriteUnlitMaterial,
+                    TerrainWallShadowUtility.GroundShadowReceiverSortingLayerName);
             }
         }
 
@@ -2353,7 +2470,9 @@ namespace Farmware.WorldGeneration.Editor
                     assets.WallBoundarySprites[index],
                     new Vector3(x, -8.3f, -0.1f),
                     Color.white,
-                    30);
+                    30,
+                    null,
+                    TerrainWallShadowUtility.WallSortingLayerName);
             }
         }
 
@@ -2451,10 +2570,11 @@ namespace Farmware.WorldGeneration.Editor
                 position,
                 color,
                 sortingOrder,
+                null,
                 null);
         }
 
-        /// <summary>指定Sprite、Tint、描画順、任意Materialを持つSpriteRendererを作ります。</summary>
+        /// <summary>指定Sprite、Tint、描画順、任意Material／Sorting Layerを持つSpriteRendererを作ります。</summary>
         /// <param name="parent">親Groupです。</param>
         /// <param name="name">Hierarchyへ表示する名前です。</param>
         /// <param name="sprite">描画するSpriteです。</param>
@@ -2462,6 +2582,7 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="color">SpriteRendererへ設定する乗算色です。</param>
         /// <param name="sortingOrder">同じSorting Layer内の描画順です。</param>
         /// <param name="material">専用Shaderを使う場合の共有Materialです。nullなら既定Sprite Materialを使います。</param>
+        /// <param name="sortingLayerName">受影面を分離するSorting Layer名です。nullならDefaultを維持します。</param>
         private static void CreateSpriteObject(
             GameObject parent,
             string name,
@@ -2469,7 +2590,8 @@ namespace Farmware.WorldGeneration.Editor
             Vector3 position,
             Color color,
             int sortingOrder,
-            Material material)
+            Material material,
+            string sortingLayerName = null)
         {
             GameObject gameObject = new GameObject(name);
             gameObject.transform.SetParent(parent.transform, false);
@@ -2478,6 +2600,11 @@ namespace Farmware.WorldGeneration.Editor
             renderer.sprite = sprite;
             renderer.color = color;
             renderer.sortingOrder = sortingOrder;
+            if (!string.IsNullOrEmpty(sortingLayerName))
+            {
+                renderer.sortingLayerName = sortingLayerName;
+            }
+
             if (material != null)
             {
                 renderer.sharedMaterial = material;

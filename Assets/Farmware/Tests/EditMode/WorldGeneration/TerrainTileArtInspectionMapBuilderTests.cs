@@ -64,6 +64,9 @@ namespace Farmware.WorldGeneration.Tests
                 TerrainTileArtInspectionMapBuilder.RepresentativePointLightsPerPanel,
                 Is.EqualTo(TerrainWallShadowComparisonMapBuilder.PointLightsPerPanel));
             Assert.That(
+                TerrainTileArtInspectionMapBuilder.RepresentativeLightComponentsPerPosition,
+                Is.EqualTo(TerrainWallShadowComparisonMapBuilder.PointLightComponentsPerPosition));
+            Assert.That(
                 TerrainWallShadowComparisonMapBuilder.DynamicShadowCasterOffsetYInTiles,
                 Is.EqualTo(-TerrainTileArtInspectionMapBuilder.WallFaceDepth));
             Assert.That(TerrainTileArtInspectionMapBuilder.InspectionHoleWidth, Is.EqualTo(3));

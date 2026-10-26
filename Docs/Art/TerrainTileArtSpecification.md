@@ -113,7 +113,15 @@ ECSの`GroundBlockRuntimeId`と`WallBlockRuntimeId`は、41材質Blobから表�
 - 乾燥穴の全セルへ完全な黒い下地を置き、その前へ3段のGround崖面を置く。製品用`Farmware/Terrain/Dry Cliff Face` Shaderは各段の開始Alphaを1、2/3、1/3として受け取り、セル内のワールドYから1 px単位で減衰を続け、穴上端から48 pxで0にする。TilemapのTransformは整数セル境界を維持し、Ground崖面より黒下地を後ろへ描画する。
 - Tileはセルごとに生成せず、選択済みSpriteと8 bit Tintの組ごとに1個を共有する。深部黒も1個のTile、Sprite、Textureを共有し、Presenter終了またはWorld切替時にPresenterが破棄する。
 
-淡水・海水・マグマの深度、上端クリップ、水際波線、反射はC6-D3、Wallの32 px折れ目影、固定接地影、動的影はC6-D4の責務とする。C6-D2の上面・断面配置は後続表現の下地であり、論理Liquid量、通行、採掘、WorldLayer、生成済み地形Bufferを変更しない。
+淡水・海水・マグマの深度、上端クリップ、水際波線、反射はC6-D3、Wallの32 px折れ目影、固定接地影、動的影はC6-D4で製品Presentationへ実装した。41材質Sprite、Atlas、製品SceneのTilemap参照と最終Sorting OrderはC6-D6で接続する。C6-D2の上面・断面配置と後続Overlayは、論理Liquid量、通行、採掘、WorldLayer、生成済み地形Bufferを変更しない。
+
+### 3.6 製品RuntimeでのWall影
+
+固定接地影は、Wall上面または最下段Faceの不透明シルエットを左右2枚の専用Unlit Tilemapへ渡す。2枚のTilemapは製品Scene接続時に、それぞれXを-1 px／+1 px、Yを手前へ3 pxずらし、共通の`Farmware/Terrain/Wall Contact Shadow` Materialで各Alpha 22%にする。折れ目影はWall前面1段目と2段目を別Tilemapへ分類し、共通の`Farmware/Terrain/Wall Fold Shadow` Shaderへ開始行0 px／16 pxを渡す。上端Alpha 35%から31 px目の0%まで連続減衰し、段境界で濃さを戻さない。
+
+動的影は、現在の有効地形から「Wallであり、画面手前側の南隣がWallではない」露出前縁だけを材質IDなしの根元マスクへ変換し、Dirtyな16×16サブチャンクごとに同一行の連続根元を1本の矩形Casterへ圧縮する。南隣は完成済みHaloを含めて判定し、チャンク境界でも内部Wallを前縁と誤認しない。全Wallを2タイル手前へ複写すると奥側Casterが手前のWall上面へ重なって自己影を作るため、Casterは露出前縁だけをWall上面から2タイル手前へ移し、最下段Faceの根元を起点にする。Casterは論理チャンク単位の`Composite Shadow Caster 2D`配下で再利用する。チャンクが画面外へ出た場合は上限付きプールへ返し、Floating Originでは形状を再生成せずルート位置だけを更新する。材質IDを影入力へ含めないため、異材質Wallの共有辺で区間を分断しない。ColliderやRigidbodyは付けず、Simulationの衝突・通行・保存状態から分離する。
+
+動的影の製品Runtimeは特定の`Light 2D`参照を保持しない。Wall上面・前面・折れ目影は`TerrainWall` Sorting Layer、影を受けるGroundとWall背後へ潜り込む固定接地影は`Default` Sorting Layerへ分離する。Development検品Sceneの各局所光位置には、`Default`だけを照らす影ありPoint Light 2Dと、同じTransform・色・半径・強度で`TerrainWall`だけを照らす影なしPoint Light 2Dを1組として置く。これによりWallは局所光を受け続ける一方、Wall自身のCasterが作る投影影はGroundだけに落ち、Wall上へ重ならない。親Transformを移動すれば2灯が同期する。C6-D4ではこの組を仮の確認光として使い、固定接地影は光源移動で変わらず、動的影だけが追従することを確認する。この仮ライトの強度、半径、色、位置、個数は製品仕様ではなく、TIME-01BでWorldClock環境光と正式な局所光へ削除または置換できる。TIME-01Bで置換する場合も、Wallを照らす灯りでは影を無効にし、Groundへ投影する灯りだけで地形Casterを評価する受影面分離の契約は維持する。引き継ぐ対象は材質に依存しない地形Casterと受影面分離の契約であり、仮ライト設定ではない。
 
 ## 4. 手描き制作の基準
 
@@ -143,7 +151,7 @@ ECSの`GroundBlockRuntimeId`と`WallBlockRuntimeId`は、41材質Blobから表�
 - Wall上面の暗色化は、Wall表示レイヤーが参照する`GroundTop` Sprite全体へ同じ`WallDarkenFactor`を乗算する。Alpha、Ground表示、Ground用`FaceBoundaryOverlay`、`Face`は変更しない。Wall用`FaceBoundaryOverlay`の不透明画素には同じ有効状態と係数を使う。
 - Wall折れ目影は暗色化済み`WallTop`の下、Wall前面2段へ描画する。`FaceBoundaryOverlay`合成済みSpriteまたは通常`Face`の上へ共通Shaderで重ね、1段目を開始行0px、2段目を開始行16pxとして32pxの連続勾配にする。3段目以降、Ground崖面、水中へ続くGround断面には重ねない。折れ目影の勾配を材質パレットへ焼き込まない。
 - Ground用の形状境界ハイライトは製品表示へ使わない。Wall用についても、14基本Spriteと90度回転による47状態の1px境界ハイライト案は専用比較で不向きと判断した。GroundとLiquidの境界は各Base SpriteとLiquid表現で読み分け、Wallは0.85暗色化、`Face`、固定接地影、動的影へ、正式採用した32px折れ目影だけを追加する。比較した8px／16px折れ目影と1px境界ハイライトは併用しない。
-- Wall領域の投影影は`Shadow Caster 2D`で表現する。Caster形状は表示中のWall上面ではなく、Wall前面の表示段数だけ手前へ移した設置面を起点にする。現在の有効地形からサブチャンク単位で結合し、タイルごとのGameObjectやCasterを作らない。材質境界では分割せず、設置面へ投影したWall領域の外周だけを影輪郭にする。
+- Wall領域の投影影は`Shadow Caster 2D`で表現する。Caster形状は表示中の全Wall上面ではなく、画面手前側にFaceが露出するWall前縁だけを前面の表示段数だけ手前へ移し、最下段Face根元を起点にする。現在の有効地形と南隣Haloからサブチャンク単位で結合し、タイルごとのGameObjectやCasterを作らない。材質境界では分割せず、奥側Wallから複写したCasterでWall上面を自己遮蔽しない。
 - `FaceBoundaryOverlay`は左右方向に並べた際、表層の厚さや境界線の高さが不自然に途切れないようにする。透明部分では下の`Face`をそのまま見せ、不透明画素だけで必要な範囲を覆う。
 - `Face`は、配列内の任意差分同士を上下左右へ隣接させても破綻しないようにする。境界を横断する地層や割れを描く場合は、全差分で接続座標と幅を共通化するか、外周をまたがせない。接続グループは初期仕様へ追加せず、相互接続では表現できない材質が実際に生じた場合だけ後続で検討する。
 - どの差分同士でも完全に大模様を接続するのではなく、接続を必要とする模様を限定する。小石や斑晶などの独立模様は外周をまたがせない。
@@ -302,7 +310,9 @@ ECSの`GroundBlockRuntimeId`と`WallBlockRuntimeId`は、41材質Blobから表�
 | 8 | `GroundTop`を再利用して0.85暗色化したWall上面 |
 | 9 | Surface、資源、配置物 |
 
-Wall上面には2D Lightの影響を受けるLit系Materialを使用する。Wall領域をWall前面の表示段数だけ手前へ投影し、その設置面外周からサブチャンク単位の`Shadow Caster 2D`形状を作る。動的な投影影はWall上面ではなく、最下段Faceの根元から伸ばす。固定接地影は環境光で消えないUnlit表示とし、WallとFaceの結合シルエットからサブチャンク単位で作る。2段Wallの採用値は、同じ不透明形状を左右各1px・手前3pxへずらした2レイヤー、各レイヤーAlpha 22%とする。中央の重なりは約39%、左右外縁は22%となる。材質別Spriteやセル別GameObjectは作らない。
+Wall上面には2D Lightの影響を受けるLit系Materialを使用する。画面手前側にFaceが露出するWall前縁だけを、Wall前面の表示段数だけ手前へ投影し、最下段Face根元からサブチャンク単位の`Shadow Caster 2D`形状を作る。南隣Wallの有無は完成済みHaloを参照し、全Wallの投影によるWall上面の自己遮蔽を避ける。固定接地影は環境光で消えないUnlit表示とし、WallとFaceの結合シルエットからサブチャンク単位で作る。2段Wallの採用値は、同じ不透明形状を左右各1px・手前3pxへずらした2レイヤー、各レイヤーAlpha 22%とする。中央の重なりは約39%、左右外縁は22%となる。材質別Spriteやセル別GameObjectは作らない。
+
+C6-D4の確認用`Light 2D`はDevelopment Sceneだけの仮配置である。各局所光位置は、`Default`用の影あり灯と`TerrainWall`用の影なし灯を同じ親Transformへ置く1組であり、Wallを照らしつつ投影影をGroundだけへ落とす。影Runtimeはライトを名前やSerialized参照で取得せず、製品の環境光・局所光はTIME-01Bで置換する。したがって、検品Sceneの照明値を製品Sceneへコピーしない。ただし、正式照明でもWallとGroundの受影面を分離し、Wall自身の影をWall上へ投影しない契約は維持する。
 
 表示側は有効地形を参照し、変更セルを含むDirtyサブチャンクと必要な外周Haloだけを再構築する。Tilemap全走査や全チャンク再描画を行わない。
 
