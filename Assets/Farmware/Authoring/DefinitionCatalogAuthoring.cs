@@ -1,17 +1,18 @@
-// このファイルは、Inspectorの地形以外の静的定義・動物種固有値と組み込み地形定義をECS用カタログへ変換します。
-// MonoBehaviourは入力だけを保持し、Bakerが検証済みの連続IDと用途別Blob AssetをSimulationへ渡します。
+// このファイルは、Inspectorの地形以外の静的定義・動物種固有値と、組み込み地形・材質パレットをECS用カタログへ変換します。
+// MonoBehaviourは編集可能な入力だけを保持し、Bakerが検証済みの連続IDと用途別Blob AssetをSimulationへ渡します。
 
 using System;
 using System.Collections.Generic;
 using Farmware.Simulation;
 using Farmware.Simulation.Animals;
+using Farmware.WorldGeneration;
 using Unity.Entities;
 using UnityEngine;
 
 namespace Farmware.Authoring
 {
     /// <summary>
-    /// アイテム、設備、施設、レシピ、動物種のInspector定義と、組み込み地形4分類を用途別Blob AssetへまとめるAuthoring用MonoBehaviourです。
+    /// アイテム、設備、施設、レシピ、動物種のInspector定義と、組み込み地形・固定材質パレットを用途別Blob AssetへまとめるAuthoring用MonoBehaviourです。
     /// SceneまたはSubSceneへ1件だけ配置し、実行中のゲーム状態ではなく編集可能な定義表の入力として使用します。
     /// </summary>
     [DisallowMultipleComponent]
@@ -316,6 +317,7 @@ namespace Farmware.Authoring
 
                 BlobAssetReference<TerrainBlockCatalogBlob> terrainCatalog = default;
                 BlobAssetReference<TerrainBlockMaterialCatalogBlob> materialCatalog = default;
+                BlobAssetReference<TerrainBlockPaletteCatalogBlob> blockPaletteCatalog = default;
                 BuiltInTerrainBlockRuntimeIds terrainRuntimeIds = default;
                 bool terrainDefinitionsCreated =
                     BuiltInTerrainBlockDefinitions.TryCreateTerrainDefinitions(
@@ -331,13 +333,21 @@ namespace Farmware.Authoring
                         catalog,
                         TerrainBlockMaterialDefinitions.CreateDefault(),
                         out materialCatalog);
-                bool legacyIdsResolved = materialCatalogCreated
+                bool blockPaletteCatalogCreated = materialCatalogCreated
+                    && TerrainBlockPaletteCatalogBuilder.TryBuild(
+                        terrainCatalog,
+                        materialCatalog,
+                        TerrainBlockPaletteDefinitions.CreateBiomeSurfaceDefaults(),
+                        TerrainBlockPaletteDefinitions.CreateGeologyDefaults(),
+                        out blockPaletteCatalog);
+                bool legacyIdsResolved = blockPaletteCatalogCreated
                     && BuiltInTerrainBlockDefinitions.TryResolveRuntimeIds(
                         catalog,
                         out terrainRuntimeIds);
                 if (!terrainDefinitionsCreated
                     || !terrainCatalogCreated
                     || !materialCatalogCreated
+                    || !blockPaletteCatalogCreated
                     || !legacyIdsResolved)
                 {
                     // どのBlobもまだBakerへ登録していないため、失敗時はこの処理が作成済みBlobの所有権を解放します。
@@ -351,10 +361,15 @@ namespace Farmware.Authoring
                         materialCatalog.Dispose();
                     }
 
+                    if (blockPaletteCatalog.IsCreated)
+                    {
+                        blockPaletteCatalog.Dispose();
+                    }
+
                     animalCatalog.Dispose();
                     catalog.Dispose();
                     throw new InvalidOperationException(
-                        "組み込み地形定義または41材質対応を共通DefinitionCatalogへ接続できませんでした。");
+                        "組み込み地形定義、41材質対応、または固定Blockパレットを共通DefinitionCatalogへ接続できませんでした。");
                 }
 
                 // Bakerへ登録して差分Bake時の参照数を正しく管理し、手動Disposeによる二重解放を避けます。
@@ -362,6 +377,7 @@ namespace Farmware.Authoring
                 AddBlobAsset(ref animalCatalog, out _);
                 AddBlobAsset(ref terrainCatalog, out _);
                 AddBlobAsset(ref materialCatalog, out _);
+                AddBlobAsset(ref blockPaletteCatalog, out _);
                 Entity entity = GetEntity(TransformUsageFlags.None);
                 AddComponent(entity, new DefinitionCatalog
                 {
@@ -379,6 +395,10 @@ namespace Farmware.Authoring
                 AddComponent(entity, new TerrainBlockMaterialCatalog
                 {
                     Value = materialCatalog
+                });
+                AddComponent(entity, new TerrainBlockPaletteCatalog
+                {
+                    Value = blockPaletteCatalog
                 });
             }
 

@@ -226,6 +226,10 @@ ECS Bufferでは差分をLocalTileIndex昇順に挿入し、自然状態へ戻�
 
 C6-B1の初回41材質について、安定材質ID 1〜41、共通Item・Ground形態・Wall形態の全123 GUIDが有効かつ一意であることを保証する。本番Bakerと同じ順序で共通Definition、87件の地形Definition、解決済み材質Blobを構築し、各材質のItem／Ground／Wall分類、GroundとWallが同じ回収Itemを指すこと、自然Wallが移動遮断・水密属性を持つことを確認する。材質入力の逆順でも安定ID検索結果が変わらず、ID重複、GUID重複、行欠落、予約ID・範囲外IDを拒否する。
 
+#### `TerrainBlockPaletteDefinitionTests`
+
+C6-B2の18Biome表層Groundパレットと8地質の露出基盤Ground・自然Wallパレットについて、確定表の材質順と重み、全26行の安定ID、行内材質の一意性、各パレットの重み合計256を保証する。本番Bakerと同じ共通Definition・地形・41材質カタログへ接続してRuntime Blobを構築し、全Ground候補が`GroundBlock`、全Wall候補が移動遮断・水密属性を持つ`WallBlock`へ解決されることを確認する。入力行を逆順にしても安定ID順の検索結果が変わらず、重み合計違反、行内材質重複、安定行ID重複、予約ID、Range外参照を拒否する。
+
 #### `WorldGenerationDistributionAuditTests`
 
 Editorの分布監査と同じAnalyzerを小さな固定サンプルで2回実行し、バイオーム・基礎地形・土壌・水域の集計漏れがないことと、署名・レポートが決定論的に一致することを保証する。
@@ -355,7 +359,7 @@ C6-Dで採用方式の本番接続と製品回帰テストが成功した後は�
 
 #### `WorldGenerationScenePlayModeTests`
 
-`SampleScene_StreamsAndDeterministicallyRegeneratesTerrainTiles`は、保存された既定ONを確認し、見本Tilemapではなく実際のチャンク内Tilemapのセルを読む。初期表示、岩壁と下層土地、資源、正負の遠方、アンロード、帰還時の決定論、液面、F3/F4・開発者可視化の既存契約を維持する。さらに、実際のDefault Worldで非0の`AnimalPopulationSeed`、地域状態、共通永続ID・種類・整数位置・群れID・外見差分を持つ野生動物Entityが作られ、`Animal Population`可視化が候補・確定位置Queryを例外なく描画できることを確認する。C6-B1以降は同じSubScene Bakerが`TerrainBlockMaterialCatalog`を1件公開し、代表`GrassLoam`の共通Item・Ground・Wall実行時IDがすべて有効であることも確認する。実際の生成設定と個体座標を照合して資源予約との重複がないこと、候補表示が木のセルを除外し資源なしの草原陸地を受理することも確認する。`SampleScene_SharedModeStreamsAndRegeneratesTerrainTiles`も同じ検証経路をOFFで実行し、旧共有方式の回帰を残す。テスト内の反射は表示参照と候補判定の読取検証に限り、未割当表示をテストから生成しない。
+`SampleScene_StreamsAndDeterministicallyRegeneratesTerrainTiles`は、保存された既定ONを確認し、見本Tilemapではなく実際のチャンク内Tilemapのセルを読む。初期表示、岩壁と下層土地、資源、正負の遠方、アンロード、帰還時の決定論、液面、F3/F4・開発者可視化の既存契約を維持する。さらに、実際のDefault Worldで非0の`AnimalPopulationSeed`、地域状態、共通永続ID・種類・整数位置・群れID・外見差分を持つ野生動物Entityが作られ、`Animal Population`可視化が候補・確定位置Queryを例外なく描画できることを確認する。C6-B1以降は同じSubScene Bakerが`TerrainBlockMaterialCatalog`を1件公開し、代表`GrassLoam`の共通Item・Ground・Wall実行時IDがすべて有効であることも確認する。C6-B2以降は`TerrainBlockPaletteCatalog`も1件公開し、温帯草原の先頭候補が重み160の`GrassLoam` Ground、火山岩地質の自然Wall先頭候補が重み128の`Basalt` Wallであり、後者が移動遮断・水密属性を持つことを確認する。実際の生成設定と個体座標を照合して資源予約との重複がないこと、候補表示が木のセルを除外し資源なしの草原陸地を受理することも確認する。`SampleScene_SharedModeStreamsAndRegeneratesTerrainTiles`も同じ検証経路をOFFで実行し、旧共有方式の回帰を残す。テスト内の反射は表示参照と候補判定の読取検証に限り、未割当表示をテストから生成しない。
 
 | 分類 | 用途 |
 | --- | --- |
