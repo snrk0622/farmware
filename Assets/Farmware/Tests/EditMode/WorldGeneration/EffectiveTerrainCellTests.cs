@@ -22,25 +22,33 @@ namespace Farmware.WorldGeneration.Tests
         private BuiltInTerrainBlockRuntimeIds runtimeIds;
 
         /// <summary>
-        /// 組み込み5定義だけの共通カタログと地形カタログを構築します。
+        /// 暫定5地形と41材質を含む共通カタログ・地形カタログを構築します。
         /// </summary>
         [SetUp]
         public void SetUp()
         {
             DefinitionBuildEntry[] definitions =
-                BuiltInTerrainBlockDefinitions.CreateCommonDefinitions(0);
+                BuiltInTerrainBlockDefinitions.CreateCommonDefinitions(
+                    0,
+                    out DefinitionBuildReference[] references);
             Assert.That(
                 DefinitionCatalogBuilder.TryBuild(
                     definitions,
-                    System.Array.Empty<DefinitionBuildReference>(),
+                    references,
                     out definitionCatalog,
                     out DefinitionCatalogValidationError definitionError),
                 Is.True,
                 $"共通定義を構築できませんでした: {definitionError.Code}");
             Assert.That(
+                BuiltInTerrainBlockDefinitions.TryCreateTerrainDefinitions(
+                    definitionCatalog,
+                    out TerrainBlockDefinitionBuildEntry[] terrainDefinitions),
+                Is.True,
+                "41材質を含む地形入力を解決できませんでした。");
+            Assert.That(
                 TerrainBlockCatalogBuilder.TryBuild(
                     definitionCatalog,
-                    BuiltInTerrainBlockDefinitions.CreateTerrainDefinitions(),
+                    terrainDefinitions,
                     out terrainCatalog),
                 Is.True,
                 "地形定義を構築できませんでした。");

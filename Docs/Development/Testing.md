@@ -218,9 +218,13 @@ MAP-02Aの純粋な座標変換について、表示原点が相対セル`(0, 0)
 
 #### `EffectiveTerrainCellTests`
 
-TERRAIN-01Aの通常地面、自然岩壁、淡水、海水、マグマを共通Definition GUIDと地形固有Blobへ構築し、RuntimeIdから分類・属性を取得できることを確認する。現行Surface生成との互換変換では、岩壁を地面＋壁へ分け、壁の明示除去後もBiomeと地面を維持する。淡水は地面なし＋Liquidになり、地面と液体の重複は拒否する。
+TERRAIN-01Aの通常地面、自然岩壁、淡水、海水、マグマに加え、C6-Bの41材質Definitionを共通Definition GUIDと地形固有Blobへ構築し、RuntimeIdから分類・属性を取得できることを確認する。現行Surface生成との互換変換では、岩壁を地面＋壁へ分け、壁の明示除去後もBiomeと地面を維持する。淡水は地面なし＋Liquidになり、地面と液体の重複は拒否する。
 
 ECS Bufferでは差分をLocalTileIndex昇順に挿入し、自然状態へ戻したセルの要素を削除する。同じX/YでもSurface所有者の差分をUnderwaterへ適用せず、水域は泳げれば移動可能でも通常設備は配置不可になること、マグマの移動・橋が耐熱能力を要求することを保証する。地形状態ハッシュはEntity作成順を変えても一致し、同じチャンクX/YでもLayerが変われば異なる値になり、固定GUIDと組み込みRuntimeIdの対応、または`TerrainChunkDeltaOwner`と`TerrainCellDelta` Bufferの一対一対応が破損していれば拒否することを確認する。`DefinitionCatalogAuthoring`はTERRAIN-01CまでInspector由来の地形4分類を組み込み定義と併存させず、具体的なBake理由を返すこともEditModeで確認する。
+
+#### `TerrainBlockMaterialDefinitionTests`
+
+C6-B1の初回41材質について、安定材質ID 1〜41、共通Item・Ground形態・Wall形態の全123 GUIDが有効かつ一意であることを保証する。本番Bakerと同じ順序で共通Definition、87件の地形Definition、解決済み材質Blobを構築し、各材質のItem／Ground／Wall分類、GroundとWallが同じ回収Itemを指すこと、自然Wallが移動遮断・水密属性を持つことを確認する。材質入力の逆順でも安定ID検索結果が変わらず、ID重複、GUID重複、行欠落、予約ID・範囲外IDを拒否する。
 
 #### `WorldGenerationDistributionAuditTests`
 
@@ -351,7 +355,7 @@ C6-Dで採用方式の本番接続と製品回帰テストが成功した後は�
 
 #### `WorldGenerationScenePlayModeTests`
 
-`SampleScene_StreamsAndDeterministicallyRegeneratesTerrainTiles`は、保存された既定ONを確認し、見本Tilemapではなく実際のチャンク内Tilemapのセルを読む。初期表示、岩壁と下層土地、資源、正負の遠方、アンロード、帰還時の決定論、液面、F3/F4・開発者可視化の既存契約を維持する。さらに、実際のDefault Worldで非0の`AnimalPopulationSeed`、地域状態、共通永続ID・種類・整数位置・群れID・外見差分を持つ野生動物Entityが作られ、`Animal Population`可視化が候補・確定位置Queryを例外なく描画できることを確認する。実際の生成設定と個体座標を照合して資源予約との重複がないこと、候補表示が木のセルを除外し資源なしの草原陸地を受理することも確認する。`SampleScene_SharedModeStreamsAndRegeneratesTerrainTiles`も同じ検証経路をOFFで実行し、旧共有方式の回帰を残す。テスト内の反射は表示参照と候補判定の読取検証に限り、未割当表示をテストから生成しない。
+`SampleScene_StreamsAndDeterministicallyRegeneratesTerrainTiles`は、保存された既定ONを確認し、見本Tilemapではなく実際のチャンク内Tilemapのセルを読む。初期表示、岩壁と下層土地、資源、正負の遠方、アンロード、帰還時の決定論、液面、F3/F4・開発者可視化の既存契約を維持する。さらに、実際のDefault Worldで非0の`AnimalPopulationSeed`、地域状態、共通永続ID・種類・整数位置・群れID・外見差分を持つ野生動物Entityが作られ、`Animal Population`可視化が候補・確定位置Queryを例外なく描画できることを確認する。C6-B1以降は同じSubScene Bakerが`TerrainBlockMaterialCatalog`を1件公開し、代表`GrassLoam`の共通Item・Ground・Wall実行時IDがすべて有効であることも確認する。実際の生成設定と個体座標を照合して資源予約との重複がないこと、候補表示が木のセルを除外し資源なしの草原陸地を受理することも確認する。`SampleScene_SharedModeStreamsAndRegeneratesTerrainTiles`も同じ検証経路をOFFで実行し、旧共有方式の回帰を残す。テスト内の反射は表示参照と候補判定の読取検証に限り、未割当表示をテストから生成しない。
 
 | 分類 | 用途 |
 | --- | --- |

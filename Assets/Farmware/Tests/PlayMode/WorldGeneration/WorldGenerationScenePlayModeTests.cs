@@ -2664,7 +2664,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     animalCatalogQuery = world.EntityManager.CreateEntityQuery(
                         ComponentType.ReadOnly<DefinitionCatalog>(),
                         ComponentType.ReadOnly<AnimalSpeciesCatalog>(),
-                        ComponentType.ReadOnly<TerrainBlockCatalog>());
+                        ComponentType.ReadOnly<TerrainBlockCatalog>(),
+                        ComponentType.ReadOnly<TerrainBlockMaterialCatalog>());
                     animalPopulationSeedQuery = world.EntityManager.CreateEntityQuery(
                         ComponentType.ReadOnly<AnimalPopulationSeed>());
                     animalRegionQuery = world.EntityManager.CreateEntityQuery(
@@ -2784,6 +2785,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 animalCatalogQuery.GetSingleton<AnimalSpeciesCatalog>();
             TerrainBlockCatalog runtimeTerrainCatalog =
                 animalCatalogQuery.GetSingleton<TerrainBlockCatalog>();
+            TerrainBlockMaterialCatalog runtimeMaterialCatalog =
+                animalCatalogQuery.GetSingleton<TerrainBlockMaterialCatalog>();
             Assert.That(
                 DefinitionGuid.TryParse(
                     "1728e39573b24efa996020e9493cc742",
@@ -2814,7 +2817,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(chickenDefinition.MaximumWanderDistanceInTiles, Is.EqualTo(8));
             Assert.That(chickenDefinition.AppearanceVariantCount, Is.EqualTo(3));
 
-            // TERRAIN-01Aの組み込み5定義も同じSubSceneからBakeし、旧GroundTypeを有効セルへ変換できることを確認します。
+            // TERRAIN-01Aの暫定5定義も同じSubSceneからBakeし、旧GroundTypeを有効セルへ変換できることを確認します。
             Assert.That(runtimeTerrainCatalog.Value.IsCreated, Is.True);
             Assert.That(runtimeTerrainCatalog.BuiltInRuntimeIds.IsValid, Is.True);
             Assert.That(
@@ -2828,6 +2831,19 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(
                 runtimeRockWall.Flags & TerrainBlockDefinitionFlags.BlocksMovement,
                 Is.Not.EqualTo(TerrainBlockDefinitionFlags.None));
+
+            // C6-B1の41材質対応も同じBakerから公開し、代表材質のItem・Ground・Wallが欠けていないことを確認します。
+            Assert.That(runtimeMaterialCatalog.Value.IsCreated, Is.True);
+            Assert.That(
+                TerrainBlockMaterialCatalogLookup.TryGetDefinition(
+                    runtimeMaterialCatalog.Value,
+                    TerrainBlockMaterialId.GrassLoam,
+                    out TerrainBlockMaterialDefinitionBlob runtimeGrassLoam),
+                Is.True,
+                "GrassLoamのItem・Ground・Wall対応がBakeされていません。");
+            Assert.That(runtimeGrassLoam.ItemRuntimeId.IsValid, Is.True);
+            Assert.That(runtimeGrassLoam.GroundRuntimeId.IsValid, Is.True);
+            Assert.That(runtimeGrassLoam.WallRuntimeId.IsValid, Is.True);
 
             // SampleSceneの実際の固定Tickで独立Seedと地域状態まで作られ、静的定義だけで止まっていないことを確認します。
             // 新18Biomeでは初期表示範囲に温帯草原が存在しない場合があるため、鶏0羽を失敗にはしません。

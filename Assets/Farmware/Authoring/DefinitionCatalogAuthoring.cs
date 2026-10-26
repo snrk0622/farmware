@@ -239,11 +239,13 @@ namespace Farmware.Authoring
                     };
                 }
 
-                // TERRAIN-01Aの最小Blockは既存Sceneへ手作業のGUID追加を要求せず、全Worldで同じ定義を必ず登録します。
-                // 将来の追加パレットは別GUIDで増やし、ここにある5件のGUIDや意味を変更しません。
+                // 暫定5地形とC6-Bの41材質は既存Sceneへ手作業のGUID追加を要求せず、全Worldで同じ定義を登録します。
+                // 暫定5定義はC6-Cの置換まで意味を維持し、新41材質は別GUIDとして並行登録します。
                 DefinitionBuildEntry[] builtInTerrainDefinitions =
                     BuiltInTerrainBlockDefinitions.CreateCommonDefinitions(
-                        buildReferences.Count);
+                        buildReferences.Count,
+                        out DefinitionBuildReference[] builtInTerrainReferences);
+                buildReferences.AddRange(builtInTerrainReferences);
                 int authoredDefinitionCount = buildDefinitions.Length;
                 Array.Resize(
                     ref buildDefinitions,
@@ -312,30 +314,54 @@ namespace Farmware.Authoring
                         CreateAnimalValidationMessage(sourceAnimalSpecies, animalError));
                 }
 
-                if (!TerrainBlockCatalogBuilder.TryBuild(
-                    catalog,
-                    BuiltInTerrainBlockDefinitions.CreateTerrainDefinitions(),
-                    out BlobAssetReference<TerrainBlockCatalogBlob> terrainCatalog)
-                    || !BuiltInTerrainBlockDefinitions.TryResolveRuntimeIds(
+                BlobAssetReference<TerrainBlockCatalogBlob> terrainCatalog = default;
+                BlobAssetReference<TerrainBlockMaterialCatalogBlob> materialCatalog = default;
+                BuiltInTerrainBlockRuntimeIds terrainRuntimeIds = default;
+                bool terrainDefinitionsCreated =
+                    BuiltInTerrainBlockDefinitions.TryCreateTerrainDefinitions(
                         catalog,
-                        out BuiltInTerrainBlockRuntimeIds terrainRuntimeIds))
+                        out TerrainBlockDefinitionBuildEntry[] terrainDefinitions);
+                bool terrainCatalogCreated = terrainDefinitionsCreated
+                    && TerrainBlockCatalogBuilder.TryBuild(
+                        catalog,
+                        terrainDefinitions,
+                        out terrainCatalog);
+                bool materialCatalogCreated = terrainCatalogCreated
+                    && TerrainBlockMaterialCatalogBuilder.TryBuild(
+                        catalog,
+                        TerrainBlockMaterialDefinitions.CreateDefault(),
+                        out materialCatalog);
+                bool legacyIdsResolved = materialCatalogCreated
+                    && BuiltInTerrainBlockDefinitions.TryResolveRuntimeIds(
+                        catalog,
+                        out terrainRuntimeIds);
+                if (!terrainDefinitionsCreated
+                    || !terrainCatalogCreated
+                    || !materialCatalogCreated
+                    || !legacyIdsResolved)
                 {
-                    // どのBlobもまだBakerへ登録していないため、失敗時はこの処理が3件すべての所有権を解放します。
+                    // どのBlobもまだBakerへ登録していないため、失敗時はこの処理が作成済みBlobの所有権を解放します。
                     if (terrainCatalog.IsCreated)
                     {
                         terrainCatalog.Dispose();
                     }
 
+                    if (materialCatalog.IsCreated)
+                    {
+                        materialCatalog.Dispose();
+                    }
+
                     animalCatalog.Dispose();
                     catalog.Dispose();
                     throw new InvalidOperationException(
-                        "組み込み地形定義を共通DefinitionCatalogへ接続できませんでした。");
+                        "組み込み地形定義または41材質対応を共通DefinitionCatalogへ接続できませんでした。");
                 }
 
                 // Bakerへ登録して差分Bake時の参照数を正しく管理し、手動Disposeによる二重解放を避けます。
                 AddBlobAsset(ref catalog, out _);
                 AddBlobAsset(ref animalCatalog, out _);
                 AddBlobAsset(ref terrainCatalog, out _);
+                AddBlobAsset(ref materialCatalog, out _);
                 Entity entity = GetEntity(TransformUsageFlags.None);
                 AddComponent(entity, new DefinitionCatalog
                 {
@@ -349,6 +375,10 @@ namespace Farmware.Authoring
                 {
                     Value = terrainCatalog,
                     BuiltInRuntimeIds = terrainRuntimeIds
+                });
+                AddComponent(entity, new TerrainBlockMaterialCatalog
+                {
+                    Value = materialCatalog
                 });
             }
 
