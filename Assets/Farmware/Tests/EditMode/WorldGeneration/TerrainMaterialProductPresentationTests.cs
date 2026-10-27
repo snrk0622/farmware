@@ -241,15 +241,18 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(lowerFace.Sprite, Is.SameAs(face));
             Assert.That(lowerFace.Color.a, Is.EqualTo(2f / 3f).Within(0.01f));
 
-            // 水中Faceも同じ完成Spriteを使いますが、Alpha 0の識別値で乾燥減衰を回避します。
+            // 水中Faceも同じ完成Spriteを使い、専用レイヤーのセルデータへ距離を分離して白Tintを保ちます。
             for (int depth = 0; depth < TerrainLiquidPresentationUtility.MaximumFaceDepth; depth++)
             {
                 Assert.That(TerrainMaterialProductTileResolver.TryResolveSubmergedGroundFace(
                     catalog, lookup, 55UL, coordinate, groundRuntimeId, depth,
                     out TerrainMaterialProductTileSelection submergedFace), Is.True);
                 Assert.That(submergedFace.Sprite, Is.SameAs(depth == 0 ? groundBoundary : face));
-                Assert.That(submergedFace.Color, Is.EqualTo(new Color(1f, 1f, 1f, 0f)));
+                Assert.That(submergedFace.Color, Is.EqualTo(Color.white));
             }
+            Assert.That(TerrainMaterialProductTileResolver.TryResolveSubmergedGroundFace(
+                catalog, lookup, 55UL, coordinate, groundRuntimeId, TerrainLiquidPresentationUtility.MaximumFaceDepth,
+                out _), Is.False, "描画限界を越える水中断面を追加してはいけません。");
         }
 
         /// <summary>同じSprite・TintのTileと深部黒Tileを再利用し、セル数に応じてUnity Objectが増えないことを保証します。</summary>

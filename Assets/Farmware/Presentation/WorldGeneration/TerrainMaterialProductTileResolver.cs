@@ -15,7 +15,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// <summary>製品カタログから選択した16×16 px完成Spriteです。</summary>
         public Sprite Sprite { get; }
 
-        /// <summary>Wall暗色化、乾燥崖の段上端Alpha、またはAlpha 0の水中断面識別値を含むTile Tintです。</summary>
+        /// <summary>Wall暗色化または乾燥崖の段上端Alphaを含むTile Tintです。水中の距離データはセル色へ分離します。</summary>
         public Color Color { get; }
 
         /// <summary>選択済みSpriteとTintを変更不能な値として保持します。</summary>
@@ -157,14 +157,14 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// 淡水・海水越しへ続ける通常Ground Faceを選び、乾燥崖の黒Fadeを掛けず不透明な下地として返します。
+        /// 淡水・海水越しへ続ける通常Ground Faceを選び、水中専用レイヤーへ白Tintで渡します。
         /// </summary>
         /// <param name="catalog">41材質を完全登録した製品表示カタログです。</param>
         /// <param name="runtimeLookup">Ground Runtime IDから安定材質IDを引く検索表です。</param>
         /// <param name="worldSeed">保存済みの64bitワールドシードです。</param>
         /// <param name="sourceCoordinate">水際奥のGround元セル絶対座標です。</param>
         /// <param name="runtimeId">投影元GroundのRuntime IDです。</param>
-        /// <param name="faceDepth">水際直下を0とする0〜5の段数です。</param>
+        /// <param name="faceDepth">描画先行での0〜5の段数です。</param>
         /// <param name="selection">成功時に通常Faceまたは1段目用境界完成Spriteを受け取ります。</param>
         /// <returns>Ground材質とFace候補をフォールバックなしで解決できた場合はtrueです。</returns>
         public static bool TryResolveSubmergedGroundFace(
@@ -177,7 +177,7 @@ namespace Farmware.WorldGeneration.Presentation
             out TerrainMaterialProductTileSelection selection)
         {
             selection = default;
-            if (faceDepth < 0
+            if (faceDepth < 0 || faceDepth >= TerrainLiquidPresentationUtility.MaximumFaceDepth
                 || !TryResolveDefinition(
                     catalog,
                     runtimeLookup,
@@ -215,10 +215,9 @@ namespace Farmware.WorldGeneration.Presentation
                     forWall: false);
             }
 
-            // Ground Face Tilemapは乾燥崖と水中断面で共用するため、Alpha 0を「水中では不透明な下地」の識別値にします。
-            // TerrainDryCliffFace Shaderがこの値を復号し、水中で各16pxの乾燥減衰を繰り返さないようにします。
-            selection = new TerrainMaterialProductTileSelection(
-                selectedSprite, new Color(1f, 1f, 1f, 0f));
+            // 素材と描画深度を分離し、距離データは専用レイヤーのセル色へ設定します。
+            selection = new TerrainMaterialProductTileSelection(selectedSprite, Color.white);
+
             return true;
         }
 

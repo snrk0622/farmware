@@ -379,31 +379,27 @@ Projectビューの`Create > Farmware > Terrain Tile Art Generation Settings`か
 
 既存のSprite区画とSprite IDは、Sceneや設定Assetの参照を維持するため自動で作り直さない。境界なしの既存材質は上2行だけの8区画、境界候補を持つ材質は全3行の12区画を許可する。初回Import完了後に規定位置、中央Pivot、規定名と一致しなくなった場合は、自動修復せずConsoleへ理由を表示する。`.meta`を削除せず、画素修正は同じPNGパスへの上書きで行う。別フォルダーのPNG、液体、動物、植物、UI、Animation Spriteにはこの規則を適用しない。
 
-#### Liquid水際アニメーションの自動Importと生成
-
-- メニュー: `Farmware > World Generation > Generation > Generate Selected Liquid Edge Waves`
-- 実装: `TerrainLiquidEdgeWaveGenerator`、`TerrainLiquidEdgeWaveSourcePostprocessor`
-- PlayMode: 不要。Projectビューで入力PNGを1枚選択して実行する。
-
-`Assets/Farmware/Art/WorldGeneration/Liquids/Source/`直下の`FreshWaterEdgeWave.png`、`SaltWaterEdgeWave.png`、`MagmaEdgeGlow.png`だけを自動Import対象とする。追加または同じパスへ上書きすると、Point、Mip Maps Off、Compression None、Clamp、sRGB、Read/Write Onを自動適用する。材質PNGの4×3分割は適用しない。
-
-入力は64×48 pxとし、横4列をフレーム0〜3、縦3行を上から奥・左・右の16×16 pxセルとして描く。透明背景、1 px線、2色を基本とし、Alphaは0または255だけを使用する。左と右は自動反転しないため、両方向を個別に用意する。マグマは波線ではなく発光・流れとして描くが、寸法と配置は水と共通にする。
-
-メニュー実行時は選択中の1枚を検証し、奥・左・右の3bit非空組合せ7形状を各4フレームへ合成する。`Liquids/Generated/`へ112×64 pxの28 Sprite Atlasと7件のAnimatedTileを作成または更新する。形状順はbit値1〜7、すなわち奥、左、奥＋左、右、奥＋右、左＋右、奥＋左＋右である。
-
-#### 液体製品Assetの公開
+#### 液体製品Assetと水際Shaderの公開
 
 - メニュー: `Farmware > World Generation > Generation > Publish Liquid Presentation Assets`
 - 実装: `TerrainLiquidProductPublisher`
-- PlayMode: 不要。初回接続または方向別入力を上書きした後に実行する。
+- PlayMode: 停止中に実行する。追加の手描き水際素材は不要である。
 
-公開処理は3枚すべての方向別入力から各7 AnimatedTileを更新し、`Liquids/Published/Surfaces/`へ16×16 px・16 PPUの製品Surface SpriteとTile、`Liquids/Published/TerrainLiquidPresentationCatalog.asset`へ3液体の完成参照と深度色を保存する。入力PNGが存在しない初回だけ、検品で採用した寸法・仮配色の1 px／2色／4位相画像を固定Sourceパスへ作る。以後は同じパスへ手描き画像を上書きしても公開処理が置換せず、その内容から再生成する。
+公開処理は`Liquids/Published/Surfaces/`へ16×16 px・16 PPUの製品Surface SpriteとTile、`Liquids/Published/TerrainLiquidPresentationCatalog.asset`へ3液体のSurface参照・水際色・深度色を保存する。カタログ形式はVersion 2とし、旧AnimatedTile配列を持つ形式は再公開する。共有水際Materialは`Materials/TerrainLiquidShoreline.mat`へ初回だけ作り、再公開では調整値を保持する。
 
-淡水・海水のSurface画素はAlpha 0、マグマはAlpha 255とする。これにより水は背後の通常Faceまたは直下床をSurface Tileで隠さず、45 px／93 pxの製品深度Materialだけで0%から連続的に濃くなる。Surface TileのColor Alphaは1とし、Runtimeが通常セルと岸側3 pxクリップセルの共有Tileを生成する。製品カタログは`Generated/`と`Published/`だけを参照し、`Source/`や旧`Fallback/`をBuild Sceneの依存へ含めない。
+淡水・海水のSurface画素はAlpha 0、マグマはAlpha 255とする。通常Face、深度勾配、反射は既存の専用レイヤーを使い、水際Materialは最後に1px接触線だけを描く。現在の有効地形から奥・左・右・左右内角を選び、縦岸を16pxごとに切らず、内角の3px不足を補う。奥が同種液体で斜め奥に岸がない場合は、地面の裏側へ回り込む終端として該当する側線の上端3 pxだけを隠す。左右は独立に判定し、連続する縦岸や反対側を切らない。
 
-製品Scene接続時は、カタログの淡水・海水深度色を床あり・床なしMaterialへ同期する。淡水は`#184860`、海水は`#102A48`の暗い収束色とし、深いほどAlphaが増えて明度が下がる向きを維持する。Runtimeの深度Tile Tintは見た目の色ではなく、RGBへ左・中央・右セルの段開始Alpha、Aへ液体種を格納する。Linear色空間ではTilemapRendererが頂点RGBを色変換するため、深度ShaderがsRGB相当の元データ値へ復元してから隣接セル中央間を横補間する。床なし93 px勾配は段0〜5で完了し、段6以降は開始Alpha 1へ固定して最終16 px勾配を繰り返さない。Ground Face Tilemapの頂点Alphaは、正値なら乾燥崖の段開始可視率、0なら水中断面を不透明に描く識別値として使う。水中へ乾燥減衰を適用せず、岸のWall下にGroundがある場合もその断面を投影する。
+旧`Generate Selected Liquid Edge Waves`メニュー、方向別4フレーム入力、専用Importer、組合せAtlasと21 AnimatedTileは廃止した。形状素材やアニメーションフレームを手作業で作らない。製品Scene接続メニューで水際Tilemapへ専用Materialを割り当てる。
 
-確認では、Consoleに例外・警告がないこと、28 Spriteが16×16 px・16 PPU・中央Pivotであること、7 AnimatedTileが各4フレームを正しい順で参照すること、Backだけ・Leftだけ・Rightだけ・全3辺の形が入力どおりで、画面手前辺を含まないことを確認する。入力を同じパスへ上書きして再実行した場合も、生成Assetパスとカタログ参照が維持されることを確認する。
+調整は水際MaterialのInspectorで行う。初期値は最低濃度0、最大濃度0.9、模様長さ目安36px、透明を含む濃度4階調（Alpha 0／0.3／0.6／0.9）、寄せ引きの基準周期3秒、周期ばらつき25%（実周期2.25〜3.75秒）、明暗更新4回/秒とする。最低濃度0では最も弱い部分が完全透明になる。常時線を残したい場合だけ最低濃度を上げる。濃度階調数2〜8、基準周期1〜12秒、周期ばらつき0〜50%、更新数は整数1〜12回/秒で調整できる。波の固定中心ごとに位相・周期を決め、周囲4中心の固定空間形状を重ねる。一方向の移動速度や全岸共通の主・副2周期は使わない。ばらつき0でも開始位相は場所ごとに異なる。素材1px内の濃度とコマ間の状態を保持し、水中の深度勾配・反射には階調化を掛けない。再生・動作確認はPlayModeで行う。
+
+カタログの水際色は液体種ごとの基準RGBである。RuntimeではMaterialを1件だけ複製して全チャンクで共有し、表示原点の変更時だけ画素オフセットを更新する。Presenterは毎描画フレームに共有表示時間（秒）1件を渡し、Shaderがコマ数に合わせて切り捨てる。Project内のMaterialへ原点や実行時の時刻を書き戻さない。
+
+製品Scene接続時は、カタログの淡水・海水深度色を床あり・床なしMaterialへ同期する。淡水は`#184860`、海水は`#102A48`の収束色を維持する。接続メニューは`TerrainSubmergedGroundFace.mat`と水中Ground断面専用Tilemapも作り、乾燥崖用レイヤーには水中断面を置かない。床有無の分類は既存の2 Tilemapで保持するが、どちらも同じ一定の基底色をWaterSurface Order 0へ描く。白い全面Tileを1件だけ共有し、断面TileもSpriteと白Tintだけを共有する。セル色はR=その列の投影段数/6、G=床有無、B=海水印、A=奥岸なら128/255・それ以外1とする。水色は段数を濃度へ変換せず、断面だけが光学的な被覆率を読む。断面と直下床はWaterSurface Order 1、反射は2、水際は3へ配置する。直下床はLitと可視Alpha 50%を保ち、Global Lightの対象にWaterSurfaceを含める。水域の基底色は淡水・海水ごとに一定として先に不透明描画し、その上へ実際の奥岸の真下だけに水中断面を投影する。各断面の岸からの距離を素材1px中心で評価し、可視Alphaを「元SpriteのAlpha×(1−水の被覆率)」とする。被覆率は上端3pxの下から床あり45pxで50%、床なし93pxで100%へ増え、既存の直線岸の見た目を維持する。異なる岸のY位置を平均せず、隣列からの断面延長、共有四隅距離、陸地専用段数、左右だけの追加減衰は使わない。水色だけの出力は岸のY位置によらず均一となる一方、実際の断面の端そのものは正しい形状として残す。上端3pxを切るのは水面側だけで、そこに見える地面の縁は残す。直下床は48px以深へLit表示を維持した可視Alpha 50%で重ねる。乾燥崖の48px減衰は水中断面へ適用しない。反射は頂点Alphaの1/255・2/255で段数を渡し、3px低い実水面から始め、2段32pxを縦0.75倍した表示深度24pxで連続的に透明へ消す。
+
+深度色だけが変わるDirty更新でも描画を確定するため、共通の反映処理は対象サブチャンクの非空セルだけをRefreshしてから色付き一括書込する。順序を逆転すると断面共有Tileの色固定が深度色を白へ戻す。全Tilemapの毎フレーム再構築は行わない。
+
+確認では、縦岸、奥岸、左右の内角・外角、1タイル幅の水路、チャンク境界、負座標、Floating Origin後の接続を調べる。地形変更後にも旧水深が残らず、最低濃度が残ったまま明るい部分の長さや強さが変わり、地形・水面位置・水深が揺れないことをGameビューで確認する。第1段階では水面の短い筋模様と反射の揺れは変更しない。
 
 材質PNGを修正した後の流れは次のとおりである。
 

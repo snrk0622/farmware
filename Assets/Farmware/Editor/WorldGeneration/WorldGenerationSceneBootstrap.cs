@@ -1916,6 +1916,8 @@ namespace Farmware.WorldGeneration.Editor
                 TerrainProductSceneConnector.LiquidDepthWithoutFloorTilemapName);
             Transform underwaterFloorPreviewTransform = gridObject.transform.Find(
                 TerrainProductSceneConnector.UnderwaterFloorPreviewTilemapName);
+            Transform submergedGroundFaceTransform = gridObject.transform.Find(
+                TerrainProductSceneConnector.SubmergedGroundFaceTilemapName);
             Transform waterReflectionTransform = gridObject.transform.Find(
                 TerrainProductSceneConnector.WaterReflectionTilemapName);
             Transform liquidEdgeWaveTransform = gridObject.transform.Find(
@@ -1997,13 +1999,17 @@ namespace Farmware.WorldGeneration.Editor
                     TerrainProductSceneConnector.GroundSortingLayerName,
                     TerrainProductSceneConnector.SpriteLitMaterialPath)
                 || !ValidateProductLiquidTilemap(
+                    submergedGroundFaceTransform,
+                    TerrainProductSceneConnector.GroundSortingLayerName,
+                    TerrainProductSceneConnector.SubmergedGroundFaceMaterialPath)
+                || !ValidateProductLiquidTilemap(
                     waterReflectionTransform,
                     TerrainProductSceneConnector.WaterSortingLayerName,
                     TerrainProductSceneConnector.WaterReflectionMaterialPath)
                 || !ValidateProductLiquidTilemap(
                     liquidEdgeWaveTransform,
                     TerrainProductSceneConnector.WaterSortingLayerName,
-                    TerrainProductSceneConnector.SpriteUnlitMaterialPath)
+                    TerrainProductSceneConnector.ShorelineMaterialPath)
                 || gridObject.transform.Find("Terrain Front Edge Tilemap") != null
                 || gridObject.transform.Find("Rock Wall Front Face Tilemap") != null
                 || gridObject.transform.Find("Rock Wall Tilemap") != null
@@ -2136,6 +2142,7 @@ namespace Farmware.WorldGeneration.Editor
                 "liquidDepthWithFloorTilemap",
                 "liquidDepthWithoutFloorTilemap",
                 "underwaterFloorPreviewTilemap",
+                "submergedGroundFaceTilemap",
                 "waterReflectionTilemap",
                 "liquidEdgeWaveTilemap",
                 "rockWallTilemap",

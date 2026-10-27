@@ -2253,6 +2253,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 "World Grid/Liquid Depth Without Floor Tilemap")?.GetComponent<Tilemap>();
             Tilemap underwaterFloorPreview = GameObject.Find(
                 "World Grid/Underwater Floor Preview Tilemap")?.GetComponent<Tilemap>();
+            Tilemap submergedGroundFaces = GameObject.Find(
+                "World Grid/Submerged Ground Face Tilemap")?.GetComponent<Tilemap>();
             Tilemap waterReflection = GameObject.Find(
                 "World Grid/Water Reflection Tilemap")?.GetComponent<Tilemap>();
             Tilemap liquidEdgeWave = GameObject.Find(
@@ -2260,6 +2262,9 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(liquidDepthWithFloor, Is.Not.Null, "床あり液体深度Tilemapがありません。");
             Assert.That(liquidDepthWithoutFloor, Is.Not.Null, "床なし液体深度Tilemapがありません。");
             Assert.That(underwaterFloorPreview, Is.Not.Null, "直下床プレビューTilemapがありません。");
+            Assert.That(submergedGroundFaces, Is.Not.Null, "実際の岸からの垂直投影を使う水中断面Tilemapがありません。");
+            Assert.That(submergedGroundFaces.GetComponent<TilemapRenderer>().sharedMaterial.shader.name,
+                Is.EqualTo("Farmware/Terrain/Submerged Ground Face"));
             Assert.That(waterReflection, Is.Not.Null, "水面反射Tilemapがありません。");
             Assert.That(liquidEdgeWave, Is.Not.Null, "水際アニメーションTilemapがありません。");
             Assert.That(
@@ -2370,8 +2375,11 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 "製品液面はGround断面より手前のWaterSurface Layerへ置いてください。");
             Assert.That(
                 liquidBaseRenderer.sortingOrder,
-                Is.LessThan(liquidDepthRenderer.sortingOrder),
-                "製品Surfaceは深度Overlayより先に描画してください。");
+                Is.EqualTo(liquidDepthRenderer.sortingOrder),
+                "透明Surfaceと水の基底色は同じ背面Orderへ配置してください。");
+            Assert.That(liquidDepthRenderer.sortingOrder,
+                Is.LessThan(submergedGroundFaces.GetComponent<TilemapRenderer>().sortingOrder),
+                "水中断面は一定の水色より前へ描画してください。");
             Assert.That(
                 liquidDepthRenderer.sortingOrder,
                 Is.LessThan(waterReflectionRenderer.sortingOrder),
@@ -2664,6 +2672,23 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     out _),
                 Is.True,
                 "初期チャンクの描画完了時に左隣チャンクの6 Bufferが先読み完了していません。");
+
+            // Shader単体が正しくてもPresenterから時刻を渡し忘れると静止するため、実Sceneで時計の進行も検査します。
+            Material shorelineMaterial = liquidEdgeWaveRenderer.sharedMaterial;
+            Assert.That(shorelineMaterial.shader.name, Is.EqualTo("Farmware/Terrain/Liquid Shoreline"));
+            float shorelineTime = shorelineMaterial.GetFloat("_AnimationTimeSeconds");
+            yield return null;
+            Assert.That(shorelineMaterial.GetFloat("_AnimationTimeSeconds"), Is.GreaterThan(shorelineTime),
+                "水際の共通表示時間が描画フレームで進んでいません。");
+            foreach (TilemapRenderer renderer in Object.FindObjectsByType<TilemapRenderer>(FindObjectsSortMode.None))
+            {
+                // チャンク別コピーも同じMaterialを借用し、別々の再生時刻やMaterialを持たない契約です。
+                if (renderer.sharedMaterial != null
+                    && renderer.sharedMaterial.shader.name == "Farmware/Terrain/Liquid Shoreline")
+                {
+                    Assert.That(renderer.sharedMaterial, Is.SameAs(shorelineMaterial));
+                }
+            }
 
             // 実際のSubScene Baker結果を読み、Sceneの文字列だけ正しくてもRuntime Blobが欠ける回帰を検出します。
             DefinitionCatalog runtimeDefinitionCatalog =

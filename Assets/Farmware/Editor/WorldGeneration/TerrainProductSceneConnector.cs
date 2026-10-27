@@ -44,17 +44,24 @@ namespace Farmware.WorldGeneration.Editor
         public const string LegacyLiquidAnimationTilemapName =
             "Liquid Surface Animation Tilemap";
 
-        /// <summary>直下床あり45px深度Overlayレイヤー名です。</summary>
+        /// <summary>直下床あり水域の基底色レイヤー名です。45pxの光学減衰は断面側で評価します。</summary>
         public const string LiquidDepthWithFloorTilemapName =
             "Liquid Depth With Floor Tilemap";
 
-        /// <summary>直下床なし93px深度Overlayレイヤー名です。</summary>
+        /// <summary>直下床なし水域の基底色レイヤー名です。93pxの光学減衰は断面側で評価します。</summary>
         public const string LiquidDepthWithoutFloorTilemapName =
             "Liquid Depth Without Floor Tilemap";
 
         /// <summary>直下WorldLayerのGround上面を簡易投影するレイヤー名です。</summary>
         public const string UnderwaterFloorPreviewTilemapName =
             "Underwater Floor Preview Tilemap";
+
+        /// <summary>実際の岸の垂直投影距離で減衰する水中Ground断面の専用レイヤー名です。</summary>
+        public const string SubmergedGroundFaceTilemapName = "Submerged Ground Face Tilemap";
+
+        /// <summary>乾燥崖から分離した水中断面Materialの保存先です。</summary>
+        public const string SubmergedGroundFaceMaterialPath =
+            "Assets/Farmware/Art/WorldGeneration/Materials/TerrainSubmergedGroundFace.mat";
 
         /// <summary>Wall前面の水面反射Proxyレイヤー名です。</summary>
         public const string WaterReflectionTilemapName = "Water Reflection Tilemap";
@@ -103,11 +110,11 @@ namespace Farmware.WorldGeneration.Editor
         public const string LiquidSurfaceMaterialPath =
             "Assets/Farmware/Art/WorldGeneration/Materials/TerrainLiquidSurface.mat";
 
-        /// <summary>直下床あり45px連続勾配Materialのパスです。</summary>
+        /// <summary>直下床あり水域の一定の基底色Materialのパスです。</summary>
         public const string LiquidDepthWithFloorMaterialPath =
             "Assets/Farmware/Art/WorldGeneration/Materials/TerrainLiquidDepthWithFloor.mat";
 
-        /// <summary>直下床なし93px連続勾配Materialのパスです。</summary>
+        /// <summary>直下床なし水域の一定の基底色Materialのパスです。</summary>
         public const string LiquidDepthWithoutFloorMaterialPath =
             "Assets/Farmware/Art/WorldGeneration/Materials/TerrainLiquidDepthWithoutFloor.mat";
 
@@ -125,9 +132,8 @@ namespace Farmware.WorldGeneration.Editor
         public const string SpriteLitMaterialPath =
             "Packages/com.unity.render-pipelines.universal/Runtime/Materials/Sprite-Lit-Default.mat";
 
-        /// <summary>水際線を環境光に依存せず表示するURP 2D Unlit既定Materialのパスです。</summary>
-        public const string SpriteUnlitMaterialPath =
-            "Packages/com.unity.render-pipelines.universal/Runtime/Materials/Sprite-Unlit-Default.mat";
+        /// <summary>水際形状と明暗を分離する製品用共有Materialのパスです。</summary>
+        public const string ShorelineMaterialPath = TerrainLiquidProductPublisher.ShorelineMaterialPath;
 
         /// <summary>メニューから公開済み材質をSampleSceneへ接続し、Sceneを保存します。</summary>
         [MenuItem("Farmware/World Generation/Setup/Connect Product Terrain Presentation")]
@@ -181,6 +187,15 @@ namespace Farmware.WorldGeneration.Editor
             }
 
             Material dryCliff = LoadRequiredMaterial(DryCliffMaterialPath);
+            Material submergedGroundFace = AssetDatabase.LoadAssetAtPath<Material>(SubmergedGroundFaceMaterialPath);
+            if (submergedGroundFace == null)
+            {
+                // 既存の水際Materialを変更せず、新責務の水中断面Materialだけを新規作成します。
+                Shader submergedShader = Shader.Find("Farmware/Terrain/Submerged Ground Face");
+                if (submergedShader == null) throw new InvalidOperationException("水中断面Shaderがありません。");
+                submergedGroundFace = new Material(submergedShader);
+                AssetDatabase.CreateAsset(submergedGroundFace, SubmergedGroundFaceMaterialPath);
+            }
             Material contactShadow = LoadRequiredMaterial(ContactShadowMaterialPath);
             Material foldTop = LoadRequiredMaterial(FoldShadowTopMaterialPath);
             Material foldBottom = LoadRequiredMaterial(FoldShadowBottomMaterialPath);
@@ -191,7 +206,7 @@ namespace Farmware.WorldGeneration.Editor
                 LiquidDepthWithoutFloorMaterialPath);
             Material waterReflection = LoadRequiredMaterial(WaterReflectionMaterialPath);
             Material spriteLit = LoadRequiredMaterial(SpriteLitMaterialPath);
-            Material spriteUnlit = LoadRequiredMaterial(SpriteUnlitMaterialPath);
+            Material shoreline = LoadRequiredMaterial(ShorelineMaterialPath);
             ConfigureLiquidDepthMaterialColors(
                 liquidCatalog,
                 liquidDepthWithFloor,
@@ -276,22 +291,32 @@ namespace Farmware.WorldGeneration.Editor
                     gridObject.transform,
                     UnderwaterFloorPreviewTilemapName,
                     Vector3.zero,
-                    sortingLayerName: GroundSortingLayerName,
-                    sortingOrder: 0,
+                    sortingLayerName: WaterSortingLayerName,
+                    sortingOrder: 1,
                     spriteLit);
+                // 床は48px以深だけへ置くため、既存の最大被覆50%に対応する可視Alpha 50%を使います。
+                // Litの照明は維持し、水色の上へ透過合成します。隣の岸の距離は参照しません。
+                floorPreview.color = new Color(1f, 1f, 1f, 0.5f);
+                Tilemap submergedFaces = EnsureTilemap(
+                    gridObject.transform,
+                    SubmergedGroundFaceTilemapName,
+                    Vector3.zero,
+                    sortingLayerName: WaterSortingLayerName,
+                    sortingOrder: 1,
+                    submergedGroundFace);
                 Tilemap depthWithFloor = EnsureTilemap(
                     gridObject.transform,
                     LiquidDepthWithFloorTilemapName,
                     Vector3.zero,
                     sortingLayerName: WaterSortingLayerName,
-                    sortingOrder: 1,
+                    sortingOrder: 0,
                     liquidDepthWithFloor);
                 Tilemap depthWithoutFloor = EnsureTilemap(
                     gridObject.transform,
                     LiquidDepthWithoutFloorTilemapName,
                     Vector3.zero,
                     sortingLayerName: WaterSortingLayerName,
-                    sortingOrder: 1,
+                    sortingOrder: 0,
                     liquidDepthWithoutFloor);
                 Tilemap reflection = EnsureTilemap(
                     gridObject.transform,
@@ -306,7 +331,7 @@ namespace Farmware.WorldGeneration.Editor
                     Vector3.zero,
                     sortingLayerName: WaterSortingLayerName,
                     sortingOrder: 3,
-                    spriteUnlit);
+                    shoreline);
 
                 // 旧全面アニメーションは製品カタログ経路では書き込まないため、残存Tileを消してRendererも無効化します。
                 // GameObjectとPresenter参照は、製品未接続の開発Scene向け旧経路を別作業で削除するまで保持します。
@@ -416,7 +441,7 @@ namespace Farmware.WorldGeneration.Editor
                     gridObject.transform,
                     "Rock Wall Resource Tilemap",
                     wallLayerOffset);
-                EnsureGlobalLightIlluminatesWall(scene);
+                EnsureGlobalLightIlluminatesTerrain(scene);
 
                 presenter.ConfigureTerrainMaterialPresentation(
                     catalog,
@@ -433,6 +458,7 @@ namespace Farmware.WorldGeneration.Editor
                     depthWithFloor,
                     depthWithoutFloor,
                     floorPreview,
+                    submergedFaces,
                     reflection,
                     edgeWave);
                 EditorUtility.SetDirty(presenter);
@@ -542,11 +568,11 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>
-        /// Tile Tintを濃度補間データへ使えるよう、淡水・海水の製品色を深度Material側へ同期します。
+        /// Tile Tintを水種・段数のデータへ使えるよう、淡水・海水の一定の製品色をMaterial側へ同期します。
         /// </summary>
         /// <param name="catalog">淡水・海水の深度色を正として保持する製品カタログです。</param>
-        /// <param name="withFloor">直下床あり45px勾配Materialです。</param>
-        /// <param name="withoutFloor">直下床なし93px勾配Materialです。</param>
+        /// <param name="withFloor">直下床あり水域の基底色Materialです。</param>
+        /// <param name="withoutFloor">直下床なし水域の基底色Materialです。</param>
         private static void ConfigureLiquidDepthMaterialColors(
             TerrainLiquidPresentationCatalog catalog,
             Material withFloor,
@@ -634,12 +660,12 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>
-        /// 製品SceneのGlobal Light 2DへWall専用Sorting Layerを追加し、Lit MaterialのWallが無照明で黒くなることを防ぎます。
+        /// 製品SceneのGlobal Light 2DへWallと水中床のSorting Layerを追加し、Lit表示が無照明で黒くなることを防ぎます。
         /// </summary>
         /// <param name="scene">製品地形を表示するSampleSceneです。</param>
-        private static void EnsureGlobalLightIlluminatesWall(Scene scene)
+        private static void EnsureGlobalLightIlluminatesTerrain(Scene scene)
         {
-            int wallSortingLayerId = SortingLayer.NameToID(WallSortingLayerName);
+            int[] requiredLayers = { SortingLayer.NameToID(WallSortingLayerName), SortingLayer.NameToID(WaterSortingLayerName) };
             Light2D[] lights = UnityEngine.Object.FindObjectsByType<Light2D>(
                 FindObjectsInactive.Include,
                 FindObjectsSortMode.None);
@@ -655,34 +681,32 @@ namespace Farmware.WorldGeneration.Editor
                 }
 
                 foundSceneGlobalLight = true;
-                int[] currentLayers = light.targetSortingLayers;
-                bool alreadyIncluded = false;
-                for (int layerIndex = 0; layerIndex < currentLayers.Length; layerIndex++)
+                foreach (int required in requiredLayers)
                 {
-                    if (currentLayers[layerIndex] == wallSortingLayerId)
+                    int[] currentLayers = light.targetSortingLayers;
+                    bool alreadyIncluded = false;
+                    for (int layerIndex = 0; layerIndex < currentLayers.Length; layerIndex++)
                     {
-                        alreadyIncluded = true;
-                        break;
+                        if (currentLayers[layerIndex] == required)
+                        {
+                            alreadyIncluded = true;
+                            break;
+                        }
                     }
+                    if (alreadyIncluded) continue;
+                    // 既存対象は維持します。水色ShaderはUnlitのため、WaterSurface追加で変わるのはLitの水中床だけです。
+                    var updatedLayers = new int[currentLayers.Length + 1];
+                    Array.Copy(currentLayers, updatedLayers, currentLayers.Length);
+                    updatedLayers[updatedLayers.Length - 1] = required;
+                    light.targetSortingLayers = updatedLayers;
+                    EditorUtility.SetDirty(light);
                 }
-
-                if (alreadyIncluded)
-                {
-                    continue;
-                }
-
-                // 既存の照明対象を維持した末尾へWallを加え、液体など別Layerの意図した設定を壊しません。
-                var updatedLayers = new int[currentLayers.Length + 1];
-                Array.Copy(currentLayers, updatedLayers, currentLayers.Length);
-                updatedLayers[updatedLayers.Length - 1] = wallSortingLayerId;
-                light.targetSortingLayers = updatedLayers;
-                EditorUtility.SetDirty(light);
             }
 
             if (!foundSceneGlobalLight)
             {
                 throw new InvalidOperationException(
-                    "製品SceneにGlobal Light 2Dがないため、TerrainWallを照明対象へ追加できません。");
+                    "製品SceneにGlobal Light 2Dがないため、壁と水中床を照明対象へ追加できません。");
             }
         }
     }

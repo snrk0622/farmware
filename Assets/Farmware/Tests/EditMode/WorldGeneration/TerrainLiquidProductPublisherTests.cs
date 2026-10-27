@@ -1,4 +1,4 @@
-// このファイルは、製品液体カタログ、透明な水Surface、不透明なマグマSurface、生成済み水際Assetを検証します。
+// このファイルは、製品液体カタログ、透明な水Surface、不透明なマグマSurface、静止水際色と共有Materialを検証します。
 // SampleSceneへ接続する前提AssetがSourceやFallbackへ依存せず、淡水・海水の通常Faceを隠さないことを保証します。
 
 using System.IO;
@@ -12,18 +12,10 @@ using UnityEngine.Tilemaps;
 namespace Farmware.WorldGeneration.Tests
 {
     /// <summary>
-    /// 液体公開処理が保存した製品Assetを読取専用で検査し、3液体と各7形状の欠落を検出します。
+    /// 液体公開処理が保存した製品Assetを読取専用で検査し、3液体の参照・色の欠落を検出します。
     /// </summary>
     public sealed class TerrainLiquidProductPublisherTests
     {
-        /// <summary>液体種ごとの生成済み水際Asset接頭辞です。</summary>
-        private static readonly string[] EdgeBaseNames =
-        {
-            "FreshWaterEdgeWave",
-            "SaltWaterEdgeWave",
-            "MagmaEdgeGlow"
-        };
-
         /// <summary>
         /// 製品カタログが3液体を完全登録し、制作入力またはFallbackを再帰依存へ含めないことを確認します。
         /// </summary>
@@ -52,15 +44,7 @@ namespace Farmware.WorldGeneration.Tests
                     Is.True,
                     kinds[kindIndex].ToString());
                 Assert.That(definition.SurfaceTile, Is.Not.Null);
-                for (int maskValue = 1;
-                     maskValue <= TerrainLiquidEdgeWaveGenerator.MaskCount;
-                     maskValue++)
-                {
-                    Assert.That(
-                        definition.GetEdgeWaveTile((TerrainLiquidEdgeMask)maskValue),
-                        Is.Not.Null,
-                        $"{kinds[kindIndex]} Mask={maskValue}");
-                }
+                Assert.That(definition.ShorelineColor.a, Is.EqualTo(1f));
             }
 
             string[] dependencies = AssetDatabase.GetDependencies(
@@ -74,7 +58,7 @@ namespace Farmware.WorldGeneration.Tests
                 Assert.That(
                     dependency,
                     Does.Not.StartWith(
-                        TerrainLiquidEdgeWaveGenerator.SourceFolder + "/"),
+                        "Assets/Farmware/Art/WorldGeneration/Liquids/Source/"),
                     "製品Sceneが制作入力PNGを間接参照してはいけません。");
                 Assert.That(
                     dependency,
@@ -132,102 +116,26 @@ namespace Farmware.WorldGeneration.Tests
                 expectedAlpha: 255);
         }
 
-        /// <summary>
-        /// 3つの方向別入力が64×48 pxで、各液体の7 AnimatedTileが4フレームを保持することを確認します。
-        /// </summary>
+        /// <summary>製品水際Materialが専用Shaderを使い、旧4フレームAnimatedTileへ依存しないことを確認します。</summary>
         [Test]
-        public void PublishedEdgeAssets_HaveThreeInputsAndSevenFourFrameTilesEach()
+        public void PublishedShoreline_UsesSharedShaderWithoutAnimatedTiles()
         {
-            string[] sourcePaths =
-            {
-                TerrainLiquidProductPublisher.FreshWaterEdgeSourcePath,
-                TerrainLiquidProductPublisher.SaltWaterEdgeSourcePath,
-                TerrainLiquidProductPublisher.MagmaEdgeSourcePath
-            };
-            for (int sourceIndex = 0; sourceIndex < sourcePaths.Length; sourceIndex++)
-            {
-                Texture2D source = AssetDatabase.LoadAssetAtPath<Texture2D>(
-                    sourcePaths[sourceIndex]);
-                Assert.That(source, Is.Not.Null, sourcePaths[sourceIndex]);
-                Assert.That(
-                    source.width,
-                    Is.EqualTo(TerrainLiquidEdgeWaveGenerator.SourceWidthInPixels));
-                Assert.That(
-                    source.height,
-                    Is.EqualTo(TerrainLiquidEdgeWaveGenerator.SourceHeightInPixels));
-                AssertEdgeSourceGeometry(source, sourcePaths[sourceIndex]);
-            }
-
-            for (int kindIndex = 0; kindIndex < EdgeBaseNames.Length; kindIndex++)
-            {
-                for (int maskValue = 1;
-                     maskValue <= TerrainLiquidEdgeWaveGenerator.MaskCount;
-                     maskValue++)
-                {
-                    string tilePath =
-                        $"{TerrainLiquidEdgeWaveGenerator.OutputFolder}/{EdgeBaseNames[kindIndex]}Mask{maskValue}.asset";
-                    TileBase tile = AssetDatabase.LoadAssetAtPath<TileBase>(tilePath);
-                    Assert.That(tile, Is.Not.Null, tilePath);
-                    SerializedObject serializedTile = new SerializedObject(tile);
-                    SerializedProperty animatedSprites = serializedTile.FindProperty(
-                        "m_AnimatedSprites");
-                    SerializedProperty minimumSpeed = serializedTile.FindProperty("m_MinSpeed");
-                    SerializedProperty maximumSpeed = serializedTile.FindProperty("m_MaxSpeed");
-                    Assert.That(animatedSprites, Is.Not.Null, tilePath);
-                    Assert.That(
-                        animatedSprites.arraySize,
-                        Is.EqualTo(TerrainLiquidEdgeWaveGenerator.FrameCount),
-                        tilePath);
-                    for (int frame = 0; frame < animatedSprites.arraySize; frame++)
-                    {
-                        Assert.That(
-                            animatedSprites.GetArrayElementAtIndex(frame).objectReferenceValue,
-                            Is.Not.Null,
-                            $"{tilePath} frame={frame}");
-                    }
-
-                    Assert.That(minimumSpeed, Is.Not.Null, tilePath);
-                    Assert.That(maximumSpeed, Is.Not.Null, tilePath);
-                    Assert.That(
-                        minimumSpeed.floatValue,
-                        Is.EqualTo(TerrainLiquidEdgeWaveGenerator.FramesPerSecond));
-                    Assert.That(
-                        maximumSpeed.floatValue,
-                        Is.EqualTo(TerrainLiquidEdgeWaveGenerator.FramesPerSecond));
-                }
-            }
-        }
-
-        /// <summary>
-        /// 方向別入力が3px低い水面上端へ接続し、左右線がその上へ突き出さないことを確認します。
-        /// </summary>
-        /// <param name="source">Read/Write有効でImportされた64×48 px入力です。</param>
-        /// <param name="assetPath">失敗時に修正対象を示すAssetパスです。</param>
-        private static void AssertEdgeSourceGeometry(Texture2D source, string assetPath)
-        {
-            int tileSize = TerrainLiquidEdgeWaveGenerator.TileSizeInPixels;
-            int visibleTop = tileSize - TerrainLiquidPresentationUtility.SurfaceClipPixels - 1;
-            for (int frame = 0; frame < TerrainLiquidEdgeWaveGenerator.FrameCount; frame++)
-            {
-                int frameStartX = frame * tileSize;
-                for (int coordinate = 0; coordinate < tileSize; coordinate++)
-                {
-                    Assert.That(
-                        source.GetPixel(frameStartX + coordinate, (tileSize * 2) + visibleTop).a,
-                        Is.EqualTo(1f).Within(0.001f),
-                        $"{assetPath} Back frame={frame} x={coordinate}");
-
-                    bool shouldDrawSide = coordinate <= visibleTop;
-                    Assert.That(
-                        source.GetPixel(frameStartX, tileSize + coordinate).a,
-                        Is.EqualTo(shouldDrawSide ? 1f : 0f).Within(0.001f),
-                        $"{assetPath} Left frame={frame} y={coordinate}");
-                    Assert.That(
-                        source.GetPixel(frameStartX + tileSize - 1, coordinate).a,
-                        Is.EqualTo(shouldDrawSide ? 1f : 0f).Within(0.001f),
-                        $"{assetPath} Right frame={frame} y={coordinate}");
-                }
-            }
+            Material material = AssetDatabase.LoadAssetAtPath<Material>(
+                TerrainLiquidProductPublisher.ShorelineMaterialPath);
+            Assert.That(material, Is.Not.Null);
+            Assert.That(material.shader.name, Is.EqualTo("Farmware/Terrain/Liquid Shoreline"));
+            Assert.That(ShaderUtil.ShaderHasError(material.shader), Is.False);
+            // 最低濃度0による透明部分も正しい調整値です。常時着色する旧契約へ戻さないようにします。
+            Assert.That(material.GetFloat("_BaseOpacity"), Is.InRange(0f, 1f));
+            Assert.That(material.GetFloat("_HighlightOpacity"), Is.GreaterThan(material.GetFloat("_BaseOpacity")));
+            // 一方向の移動設定を残さず、階調数・往復周期・コマ数を調整できる製品契約を検査します。
+            Assert.That(material.HasProperty("_FlowSpeedPixelsPerSecond"), Is.False);
+            Assert.That(material.GetFloat("_BrightnessLevels"), Is.InRange(2f, 8f));
+            Assert.That(material.GetFloat("_OscillationPeriodSeconds"), Is.InRange(1f, 12f));
+            Assert.That(material.GetFloat("_PeriodVariation"), Is.InRange(0f, 0.5f));
+            Assert.That(material.GetFloat("_AnimationStepsPerSecond"), Is.InRange(1f, 12f));
+            Assert.That(AssetDatabase.FindAssets("t:AnimatedTile",
+                new[] { "Assets/Farmware/Art/WorldGeneration/Liquids" }), Is.Empty);
         }
 
         /// <summary>PNGを一時Textureへ読み、全画素のAlphaが期待値と一致することを確認します。</summary>

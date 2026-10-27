@@ -108,6 +108,8 @@ namespace Farmware.WorldGeneration.Tests
                 serialized,
                 "underwaterFloorPreviewTilemap",
                 TerrainProductSceneConnector.UnderwaterFloorPreviewTilemapName);
+            AssertTilemapReference(serialized, "submergedGroundFaceTilemap",
+                TerrainProductSceneConnector.SubmergedGroundFaceTilemapName);
             AssertTilemapReference(
                 serialized,
                 "waterReflectionTilemap",
@@ -119,7 +121,7 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 製品液体が論理セル位置を維持し、深度Overlay、反射、水際の順で重なり、旧全面アニメーションを無効にすることを確認します。
+        /// 製品液体が論理セル位置を維持し、基底色、水中断面、反射、水際の順で重なり、旧全面アニメーションを無効にすることを確認します。
         /// </summary>
         [Test]
         public void SampleScene_LiquidLayersUseProductMaterialsAndAdoptedOrder()
@@ -147,8 +149,11 @@ namespace Farmware.WorldGeneration.Tests
                 grid,
                 TerrainProductSceneConnector.UnderwaterFloorPreviewTilemapName,
                 Vector3.zero,
-                TerrainProductSceneConnector.GroundSortingLayerName,
+                TerrainProductSceneConnector.WaterSortingLayerName,
                 TerrainProductSceneConnector.SpriteLitMaterialPath);
+            AssertLayer(grid, TerrainProductSceneConnector.SubmergedGroundFaceTilemapName,
+                Vector3.zero, TerrainProductSceneConnector.WaterSortingLayerName,
+                TerrainProductSceneConnector.SubmergedGroundFaceMaterialPath);
             AssertLayer(
                 grid,
                 TerrainProductSceneConnector.WaterReflectionTilemapName,
@@ -160,7 +165,7 @@ namespace Farmware.WorldGeneration.Tests
                 TerrainProductSceneConnector.LiquidEdgeWaveTilemapName,
                 Vector3.zero,
                 TerrainProductSceneConnector.WaterSortingLayerName,
-                TerrainProductSceneConnector.SpriteUnlitMaterialPath);
+                TerrainProductSceneConnector.ShorelineMaterialPath);
 
             TilemapRenderer surface = GetRenderer(
                 grid,
@@ -174,7 +179,12 @@ namespace Farmware.WorldGeneration.Tests
             TilemapRenderer edgeWave = GetRenderer(
                 grid,
                 TerrainProductSceneConnector.LiquidEdgeWaveTilemapName);
-            Assert.That(surface.sortingOrder, Is.LessThan(depth.sortingOrder));
+            Assert.That(surface.sortingOrder, Is.EqualTo(depth.sortingOrder));
+            TilemapRenderer submerged = GetRenderer(grid, TerrainProductSceneConnector.SubmergedGroundFaceTilemapName);
+            Assert.That(depth.sortingOrder, Is.LessThan(submerged.sortingOrder));
+            Assert.That(submerged.sortingOrder, Is.LessThan(reflection.sortingOrder));
+            Assert.That(grid.Find(TerrainProductSceneConnector.UnderwaterFloorPreviewTilemapName).GetComponent<Tilemap>().color.a,
+                Is.EqualTo(0.5f));
             Assert.That(depth.sortingOrder, Is.LessThan(reflection.sortingOrder));
             Assert.That(reflection.sortingOrder, Is.LessThan(edgeWave.sortingOrder));
 
@@ -270,6 +280,8 @@ namespace Farmware.WorldGeneration.Tests
                 SceneHasGlobalLightTargeting(wallSortingLayerId),
                 Is.True,
                 "Lit MaterialのTerrainWallを対象にするGlobal Light 2Dが必要です。");
+            Assert.That(SceneHasGlobalLightTargeting(SortingLayer.NameToID(TerrainProductSceneConnector.WaterSortingLayerName)),
+                Is.True, "基底色の前へ移したLit水中床もGlobal Lightの対象に含めます。");
         }
 
         /// <summary>Scene直下から指定名のGameObjectを探します。</summary>

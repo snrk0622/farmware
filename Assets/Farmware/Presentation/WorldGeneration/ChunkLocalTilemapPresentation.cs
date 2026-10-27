@@ -117,8 +117,9 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="template">書込先レイヤーに対応するScene見本です。</param>
         /// <param name="bounds">0〜63のチャンク内に整列した16×16×1の範囲です。</param>
         /// <param name="tiles">全256セルを含む反映配列です。呼び出し後も保持・変更しません。</param>
-        /// <returns>実際にSetTilesBlockを呼んだ場合はtrue、空領域の省略または未設定レイヤーならfalseです。</returns>
-        public bool WriteSubChunk(Tilemap template, BoundsInt bounds, TileBase[] tiles)
+        /// <param name="tileChanges">色付きレイヤーの一括データです。通常レイヤーではnullで、呼び出し後は保持しません。</param>
+        /// <returns>通常・色付きいずれかの一括反映を実行した場合はtrue、空領域の省略または未設定レイヤーならfalseです。</returns>
+        public bool WriteSubChunk(Tilemap template, BoundsInt bounds, TileBase[] tiles, TileChangeData[] tileChanges = null)
         {
             for (int layer = 0; layer < templates.Length; layer++)
             {
@@ -141,7 +142,9 @@ namespace Farmware.WorldGeneration.Presentation
                     return false;
                 }
 
-                tilemaps[layer].SetTilesBlock(bounds, tiles);
+                // 色付き水深と水中断面も同じ非空履歴へ含め、プール再利用時にデータだけ残ることを防ぎます。
+                if (tileChanges == null) tilemaps[layer].SetTilesBlock(bounds, tiles);
+                else TerrainWaterRenderUtility.ApplyTiles(tilemaps[layer], tileChanges);
                 // 非空→空も必ず実際に消してからbitを解除し、再分類時に旧資源・液面を残さないようにします。
                 nonEmptySubChunksByLayer[layer] = hasTiles
                     ? (ushort)(nonEmptySubChunksByLayer[layer] | subChunkBit)

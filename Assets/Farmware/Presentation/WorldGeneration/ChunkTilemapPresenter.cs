@@ -111,26 +111,30 @@ namespace Farmware.WorldGeneration.Presentation
         [SerializeField] private Tilemap resourceBehindRockWallTilemap;
 
         // 製品カタログ未接続の開発Sceneだけで、旧全面アニメーションを静止した基礎色へ重ねます。
-        [Tooltip("製品液体カタログ未接続時だけ使う旧全面アニメーションTilemapです。製品SceneではRendererを無効にし、水際3bit Tilemapへ置き換えます。")]
+        [Tooltip("製品液体カタログ未接続時だけ使う旧全面アニメーションTilemapです。製品SceneではRendererを無効にし、静止形状とShader明暗を分けた水際Tilemapへ置き換えます。")]
         [SerializeField] private Tilemap liquidAnimationTilemap;
 
-        // 直下WorldLayerの床がある淡水・海水へ、最大Alpha 50%の45px連続勾配を重ねます。
-        [Tooltip("直下WorldLayerに床がある淡水・海水の深度Overlay専用Tilemapです。TerrainLiquidDepthWithFloor Materialを設定してください。")]
+        // 直下床がある水域の基底色です。45pxの光学減衰は前面の断面側で評価します。
+        [Tooltip("直下床がある淡水・海水の基底色Tilemapです。TerrainLiquidDepthWithFloor Materialを設定し、断面・床より後ろに置きます。")]
         [SerializeField] private Tilemap liquidDepthWithFloorTilemap;
 
-        // 直下WorldLayerの床がない淡水・海水へ、Alpha 100%までの93px連続勾配を重ねます。
-        [Tooltip("直下WorldLayerに床がない淡水・海水の深度Overlay専用Tilemapです。TerrainLiquidDepthWithoutFloor Materialを設定してください。")]
+        // 直下床がない水域の基底色です。93pxの光学減衰は前面の断面側で評価します。
+        [Tooltip("直下床がない淡水・海水の基底色Tilemapです。TerrainLiquidDepthWithoutFloor Materialを設定し、断面より後ろに置きます。")]
         [SerializeField] private Tilemap liquidDepthWithoutFloorTilemap;
 
         // Surfaceから見える直下Underwater、またはUnderwaterから見える直下DeepSeaのGround上面だけを描きます。
         [Tooltip("水域の4段目以降へ直下1層のGround上面を簡易投影するTilemapです。選択やSimulation処理には使用しません。")]
         [SerializeField] private Tilemap underwaterFloorPreviewTilemap;
 
+        // 乾燥崖とは別に、その列の実際の岸からの投影距離で減衰するGround断面を描きます。
+        [Tooltip("水中Ground断面専用Tilemapです。実際の岸からの投影距離で減衰するTerrainSubmergedGroundFace Materialを設定し、水の基底色より前に置きます。")]
+        [SerializeField] private Tilemap submergedGroundFaceTilemap;
+
         // Wall前面などの垂直面だけを上下反転・縦圧縮して水面へ映すProxy専用レイヤーです。
         [Tooltip("淡水・海水へ垂直面だけを映す反射Proxy Tilemapです。TerrainWaterReflection Materialを設定し、深度Overlayより前、水際線より後ろへ置きます。")]
         [SerializeField] private Tilemap waterReflectionTilemap;
 
-        // Back/Left/Rightの3bitから選ぶ7種類のAnimatedTileを水面の最前面へ描きます。
+        // 奥・左・右・左右内角・裏側終端の7bit形状を持つ静止Tileを水面の最前面へ描きます。
         [Tooltip("淡水・海水・マグマの奥・左・右接触線を描く水際アニメーションTilemapです。画面手前辺は描きません。")]
         [SerializeField] private Tilemap liquidEdgeWaveTilemap;
 
@@ -188,7 +192,7 @@ namespace Farmware.WorldGeneration.Presentation
         [Tooltip("41材質を完全登録した製品表示カタログです。未設定なら旧表示を維持し、設定時は不足や不正値をフォールバックせず拒否します。")]
         [SerializeField] private TerrainMaterialPresentationCatalog materialPresentationCatalog;
 
-        // 3液体の基礎Tile、7水際形状、深度色を完全登録した場合だけ製品Liquid経路を有効にします。
+        // 3液体の基礎Tile、水際色、深度色を現行カタログへ完全登録した場合だけ製品Liquid経路を有効にします。
         [Tooltip("淡水・海水・マグマを各1件登録した製品Liquid表示カタログです。未設定中は既存液面表示を維持します。")]
         [SerializeField] private TerrainLiquidPresentationCatalog liquidPresentationCatalog;
 
@@ -375,13 +379,22 @@ namespace Farmware.WorldGeneration.Presentation
         // 直下床なしの水だけへ93px深度Overlay Tileを置く256要素の再利用配列です。
         private TileBase[] liquidDepthWithoutFloorSubChunkTileBuffer;
 
+        // 水種・床有無・その列の投影段数を渡す、Presenter寿命中の再利用配列です。隣列とは補間しません。
+        private Color[] waterDepthSubChunkColorBuffer;
+
+        // 色付きTileの一括反映に使う256件です。更新ごとに配列を確保しません。
+        private TileChangeData[] waterTileChangeBuffer;
+
+        // 水中断面のSpriteだけを保持します。距離は上の共通色配列へ分離します。
+        private TileBase[] submergedGroundFaceSubChunkTileBuffer;
+
         // 水域4段目以降へ直下1層のGround上面を置く256要素の再利用配列です。
         private TileBase[] underwaterFloorPreviewSubChunkTileBuffer;
 
         // 淡水・海水へWall Face反射Proxyを置く256要素の再利用配列です。
         private TileBase[] waterReflectionSubChunkTileBuffer;
 
-        // 3bit接触辺に対応する水際AnimatedTileを置く256要素の再利用配列です。
+        // 7bit接触形状に対応する静止水際Tileを置く256要素の再利用配列です。
         private TileBase[] liquidEdgeWaveSubChunkTileBuffer;
 
         // 岩壁セルだけへ一体型ブロックTileを置く256要素の再利用配列です。下層の土地はGround Tilemapへ残します。
@@ -466,6 +479,27 @@ namespace Farmware.WorldGeneration.Presentation
 
         // 現在Tilemapセルと岩壁影Meshの配置に使用している表示原点です。Camera側の変更検出と旧セル消去に使います。
         private DisplayOrigin presentedDisplayOrigin;
+
+        /// <summary>水際Shaderへ絶対画素原点を渡すプロパティIDです。文字列検索を更新のたびに行いません。</summary>
+        private static readonly int ShorelineWorldPixelOffsetId = Shader.PropertyToID("_WorldPixelOffset");
+
+        /// <summary>全チャンクで同じ水際コマを描くため、表示時間（秒）を渡すプロパティIDです。</summary>
+        private static readonly int ShorelineAnimationTimeId = Shader.PropertyToID("_AnimationTimeSeconds");
+
+        /// <summary>Scene見本から借用する水際Rendererです。破棄時に元のMaterial参照へ戻します。</summary>
+        private TilemapRenderer shorelineMaterialRenderer;
+
+        /// <summary>Project内の元Materialです。PresenterはこのAssetを変更・破棄しません。</summary>
+        private Material shorelineSourceMaterial;
+
+        /// <summary>全チャンクで共有し、Presenterが生成・破棄する水際Materialの実行時コピーです。</summary>
+        private Material shorelineRuntimeMaterial;
+
+        /// <summary>最後にShaderへ送った原点です。原点が変わらないフレームでは原点用プロパティを書き換えません。</summary>
+        private int2 shorelineMaterialOrigin;
+
+        /// <summary>原点(0,0)を未初期化と区別するためのフラグです。</summary>
+        private bool hasShorelineMaterialOrigin;
 
         // presentedDisplayOriginを初期化済みか示し、絶対原点(0, 0)自体も有効値として区別します。
         private bool hasPresentedDisplayOrigin;
@@ -635,20 +669,22 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// Editor構築ツールまたはテストから、製品Liquid表示カタログと専用5レイヤーを設定します。
+        /// Editor構築ツールまたはテストから、製品Liquid表示カタログと専用6レイヤーを設定します。
         /// 全参照が揃うまで既存の基礎液面・全面アニメーションを維持し、新旧Liquid表現を同時に描きません。
         /// </summary>
         /// <param name="catalog">淡水・海水・マグマを完全登録した製品Liquid表示カタログです。</param>
         /// <param name="depthWithFloor">直下床あり45px深度OverlayのTilemapです。</param>
         /// <param name="depthWithoutFloor">直下床なし93px深度OverlayのTilemapです。</param>
         /// <param name="floorPreview">直下1層のGround上面を簡易投影するTilemapです。</param>
+        /// <param name="submergedFaces">乾燥崖から分離した水中Ground断面のTilemapです。</param>
         /// <param name="reflection">垂直面反射ProxyのTilemapです。</param>
-        /// <param name="edgeWave">3bit水際アニメーションのTilemapです。</param>
+        /// <param name="edgeWave">静止接触形状とShader明暗を描く水際Tilemapです。</param>
         public void ConfigureTerrainLiquidPresentation(
             TerrainLiquidPresentationCatalog catalog,
             Tilemap depthWithFloor,
             Tilemap depthWithoutFloor,
             Tilemap floorPreview,
+            Tilemap submergedFaces,
             Tilemap reflection,
             Tilemap edgeWave)
         {
@@ -656,6 +692,7 @@ namespace Farmware.WorldGeneration.Presentation
                 || liquidDepthWithFloorTilemap != depthWithFloor
                 || liquidDepthWithoutFloorTilemap != depthWithoutFloor
                 || underwaterFloorPreviewTilemap != floorPreview
+                || submergedGroundFaceTilemap != submergedFaces
                 || waterReflectionTilemap != reflection
                 || liquidEdgeWaveTilemap != edgeWave;
             if (!configurationChanged)
@@ -673,6 +710,7 @@ namespace Farmware.WorldGeneration.Presentation
             liquidDepthWithFloorTilemap = depthWithFloor;
             liquidDepthWithoutFloorTilemap = depthWithoutFloor;
             underwaterFloorPreviewTilemap = floorPreview;
+            submergedGroundFaceTilemap = submergedFaces;
             waterReflectionTilemap = reflection;
             liquidEdgeWaveTilemap = edgeWave;
             ResetMaterialPresentationState(disposeTileCache: true);
@@ -701,6 +739,9 @@ namespace Farmware.WorldGeneration.Presentation
             liquidAnimationSubChunkTileBuffer = new TileBase[tileCount];
             liquidDepthWithFloorSubChunkTileBuffer = new TileBase[tileCount];
             liquidDepthWithoutFloorSubChunkTileBuffer = new TileBase[tileCount];
+            waterDepthSubChunkColorBuffer = new Color[tileCount];
+            waterTileChangeBuffer = new TileChangeData[tileCount];
+            submergedGroundFaceSubChunkTileBuffer = new TileBase[tileCount];
             underwaterFloorPreviewSubChunkTileBuffer = new TileBase[tileCount];
             waterReflectionSubChunkTileBuffer = new TileBase[tileCount];
             liquidEdgeWaveSubChunkTileBuffer = new TileBase[tileCount];
@@ -820,6 +861,12 @@ namespace Farmware.WorldGeneration.Presentation
         {
             using (PresentationProfilerMarker.Auto())
             {
+                // チャンク用Rendererが見本Materialを複製参照する前に、全チャンク共有の実行時Materialを用意します。
+                if (!TrySynchronizeShorelineMaterial())
+                {
+                    return;
+                }
+
                 // Inspectorでの比較切替も同じ消去経路を通し、異なるセル座標方式を混在させません。
                 if (useChunkLocalTilemaps != chunkLocalTilemapsAreActive)
                 {
@@ -838,6 +885,7 @@ namespace Farmware.WorldGeneration.Presentation
                     && (liquidDepthWithFloorTilemap == null
                         || liquidDepthWithoutFloorTilemap == null
                         || underwaterFloorPreviewTilemap == null
+                        || submergedGroundFaceTilemap == null
                         || waterReflectionTilemap == null
                         || liquidEdgeWaveTilemap == null);
                 if (targetTilemap == null
@@ -943,6 +991,77 @@ namespace Farmware.WorldGeneration.Presentation
                 remainingBudget = ProcessApplyQueue(remainingBudget);
                 ProcessStaleOriginClearQueue(remainingBudget);
             }
+        }
+
+        /// <summary>各Updateの先頭で水際Material・表示時間・絶対原点を同期します。Assetは変更せず、複製は全チャンクで1件共有します。</summary>
+        /// <returns>製品液体が未設定、または必要な水際Materialを同期できた場合はtrueです。</returns>
+        private bool TrySynchronizeShorelineMaterial()
+        {
+            if (liquidPresentationCatalog == null || liquidEdgeWaveTilemap == null)
+            {
+                return true;
+            }
+
+            TilemapRenderer renderer = liquidEdgeWaveTilemap.GetComponent<TilemapRenderer>();
+            if (shorelineRuntimeMaterial == null || shorelineMaterialRenderer != renderer)
+            {
+                DisposeShorelineMaterial();
+                if (renderer == null || renderer.sharedMaterial == null
+                    || renderer.sharedMaterial.shader.name != "Farmware/Terrain/Liquid Shoreline")
+                {
+                    LogMaterialPresentationFailureOnce("製品水際TilemapにはLiquid Shoreline Materialが必要です。");
+                    return false;
+                }
+
+                shorelineMaterialRenderer = renderer;
+                shorelineSourceMaterial = renderer.sharedMaterial;
+                shorelineRuntimeMaterial = new Material(shorelineSourceMaterial)
+                {
+                    name = "Runtime Liquid Shoreline",
+                    hideFlags = HideFlags.DontSave
+                };
+                renderer.sharedMaterial = shorelineRuntimeMaterial;
+            }
+
+            // Time.timeは見た目専用の共通時計です。論理Tickや液体量へ影響させず、Shader側でコマを保持します。
+            // セルやチャンクを更新せず、共有Materialの時刻1件だけを毎描画フレームへ渡します。
+            shorelineRuntimeMaterial.SetFloat(ShorelineAnimationTimeId, Time.time);
+
+            int2 origin = cameraPanController == null
+                ? int2.zero
+                : cameraPanController.CurrentDisplayOrigin.AbsoluteTileCoordinate;
+            if (!hasShorelineMaterialOrigin
+                || origin.x != shorelineMaterialOrigin.x || origin.y != shorelineMaterialOrigin.y)
+            {
+                // 絶対タイル座標を整数のまま周期内へ丸め、遠方でもfloatへ巨大座標を渡しません。
+                shorelineRuntimeMaterial.SetVector(ShorelineWorldPixelOffsetId, new Vector4(
+                    TerrainLiquidPresentationUtility.GetShorelineOriginPixelOffset(origin.x),
+                    TerrainLiquidPresentationUtility.GetShorelineOriginPixelOffset(origin.y), 0f, 0f));
+                shorelineMaterialOrigin = origin;
+                hasShorelineMaterialOrigin = true;
+            }
+
+            return true;
+        }
+
+        /// <summary>設定先変更またはOnDestroyで、借用Materialを戻して実行時コピーだけを破棄します。</summary>
+        private void DisposeShorelineMaterial()
+        {
+            if (shorelineMaterialRenderer != null
+                && shorelineMaterialRenderer.sharedMaterial == shorelineRuntimeMaterial)
+            {
+                shorelineMaterialRenderer.sharedMaterial = shorelineSourceMaterial;
+            }
+
+            if (shorelineRuntimeMaterial != null)
+            {
+                DestroyUnityObject(shorelineRuntimeMaterial);
+            }
+
+            shorelineRuntimeMaterial = null;
+            shorelineSourceMaterial = null;
+            shorelineMaterialRenderer = null;
+            hasShorelineMaterialOrigin = false;
         }
 
         /// <summary>
@@ -1137,6 +1256,7 @@ namespace Farmware.WorldGeneration.Presentation
             DestroyAllRockWallShadows();
             DestroyAllWallDynamicShadowPresentations();
             DestroyChunkLocalPresentations();
+            DisposeShorelineMaterial();
             // マスク構築は呼び出し内の同期処理なので、破棄時にWorkerの完了を待つ必要はありません。
             if (rockWallShadowMaskBuffer.IsCreated)
             {
@@ -1889,6 +2009,8 @@ namespace Farmware.WorldGeneration.Presentation
                         dryCliffDeepBlackSubChunkTileBuffer[destinationIndex] = null;
                         liquidDepthWithFloorSubChunkTileBuffer[destinationIndex] = null;
                         liquidDepthWithoutFloorSubChunkTileBuffer[destinationIndex] = null;
+                        submergedGroundFaceSubChunkTileBuffer[destinationIndex] = null;
+                        waterDepthSubChunkColorBuffer[destinationIndex] = Color.white;
                         underwaterFloorPreviewSubChunkTileBuffer[destinationIndex] = null;
                         waterReflectionSubChunkTileBuffer[destinationIndex] = null;
                         liquidEdgeWaveSubChunkTileBuffer[destinationIndex] = null;
@@ -2035,12 +2157,16 @@ namespace Farmware.WorldGeneration.Presentation
                     coordinate,
                     liquidDepthWithFloorTilemap,
                     bounds,
-                    liquidDepthWithFloorSubChunkTileBuffer);
+                    liquidDepthWithFloorSubChunkTileBuffer,
+                    waterDepthSubChunkColorBuffer);
                 WriteSubChunkLayer(
                     coordinate,
                     liquidDepthWithoutFloorTilemap,
                     bounds,
-                    liquidDepthWithoutFloorSubChunkTileBuffer);
+                    liquidDepthWithoutFloorSubChunkTileBuffer,
+                    waterDepthSubChunkColorBuffer);
+                WriteSubChunkLayer(coordinate, submergedGroundFaceTilemap, bounds,
+                    submergedGroundFaceSubChunkTileBuffer, waterDepthSubChunkColorBuffer);
                 WriteSubChunkLayer(
                     coordinate,
                     underwaterFloorPreviewTilemap,
@@ -2267,7 +2393,7 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// 1セル分の製品Liquid深度、直下床、水際3bit、垂直面反射Proxyを再利用Tileへ分類します。
+        /// 1セル分の製品Liquid深度、直下床、水際7bit、垂直面反射Proxyを再利用Tileへ分類します。
         /// </summary>
         /// <param name="chunkCoordinate">絶対座標へ戻す対象論理チャンクです。</param>
         /// <param name="localX">チャンク内の表示対象Xです。</param>
@@ -2303,7 +2429,7 @@ namespace Farmware.WorldGeneration.Presentation
                 localX,
                 localY);
             liquidEdgeWaveSubChunkTileBuffer[destinationIndex] =
-                definition.GetEdgeWaveTile(edgeMask);
+                liquidTileCache.GetOrCreateShoreline(definition.ShorelineColor, edgeMask);
 
             // マグマはSurface Tileを3pxクリップして不透明描画し、背後のFace、青深度、反射を追加しません。
             if (kind == TerrainLiquidVisualKind.Magma)
@@ -2329,30 +2455,12 @@ namespace Farmware.WorldGeneration.Presentation
                 localX,
                 localY,
                 out GeneratedTerrainCell lowerCell);
-            float stageStartAlpha = TerrainLiquidPresentationUtility.GetDepthStageStartAlpha(
-                depthStage,
-                hasUnderwaterFloor);
-            float leftStageStartAlpha = GetHorizontalNeighborDepthStageStartAlpha(
-                terrainNeighborhood,
-                hasLowerNeighborhood,
-                lowerNeighborhood,
-                localX - 1,
-                localY,
-                kind,
-                stageStartAlpha);
-            float rightStageStartAlpha = GetHorizontalNeighborDepthStageStartAlpha(
-                terrainNeighborhood,
-                hasLowerNeighborhood,
-                lowerNeighborhood,
-                localX + 1,
-                localY,
-                kind,
-                stageStartAlpha);
-            TileBase depthTile = liquidTileCache.GetOrCreateDepthOverlay(
-                kind,
-                leftStageStartAlpha,
-                stageStartAlpha,
-                rightStageStartAlpha);
+            // 水色は一定の基底色、断面はこの列の実際の岸からの距離だけで合成します。
+            // 連結した水でも別の岸の投影距離は共有せず、隣列へ余計な断面を作りません。
+            waterDepthSubChunkColorBuffer[destinationIndex] = TerrainWaterRenderUtility.EncodeCell(
+                kind, depthStage, hasUnderwaterFloor, depthStage == 0);
+            TileBase depthTile = liquidTileCache.GetOrCreateDepthOverlay();
+            groundFaceSubChunkTileBuffer[destinationIndex] = null;
             if (hasUnderwaterFloor)
             {
                 liquidDepthWithFloorSubChunkTileBuffer[destinationIndex] = depthTile;
@@ -2405,8 +2513,8 @@ namespace Farmware.WorldGeneration.Presentation
                     faceProjection.FaceDepth,
                     out TerrainMaterialProductTileSelection submergedFace))
             {
-                groundFaceSubChunkTileBuffer[destinationIndex] =
-                    materialTileCache.GetOrCreate(submergedFace);
+                // 実際の岸の真下だけへ断面を置き、Shaderで1から水の被覆率を引いた値を可視Alphaにします。
+                submergedGroundFaceSubChunkTileBuffer[destinationIndex] = materialTileCache.GetOrCreate(submergedFace);
             }
 
             if (TerrainLiquidPresentationUtility.TryProjectWallReflection(
@@ -2553,19 +2661,32 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="template">対象レイヤーのScene見本です。未設定なら反映しません。</param>
         /// <param name="bounds">現在の表示方式で作成した16×16のセル範囲です。</param>
         /// <param name="tiles">全256セルの分類済み配列です。呼び出し中だけ参照します。</param>
-        /// <returns>SetTilesBlockを実行した場合はtrue、省略した場合はfalseです。</returns>
-        private bool WriteSubChunkLayer(ChunkCoordinate coordinate, Tilemap template, BoundsInt bounds, TileBase[] tiles)
+        /// <param name="colors">水種・床・投影段数などのセルデータ色です。通常レイヤーはnullです。</param>
+        /// <returns>一括書込を実行した場合はtrue、省略した場合はfalseです。</returns>
+        private bool WriteSubChunkLayer(ChunkCoordinate coordinate, Tilemap template, BoundsInt bounds, TileBase[] tiles, Color[] colors = null)
         {
             if (template == null) return false;
             Tilemap target = GetTilemapForChunk(coordinate, template, true);
+            if (colors != null)
+            {
+                // Spriteとデータを別々に更新せず、同じDirtyサブチャンクの一括書込で揃えます。
+                for (int index = 0; index < tiles.Length; index++)
+                {
+                    var position = new Vector3Int(bounds.xMin + index % bounds.size.x,
+                        bounds.yMin + index / bounds.size.x, bounds.zMin);
+                    waterTileChangeBuffer[index] = new TileChangeData(position, tiles[index], colors[index], Matrix4x4.identity);
+                }
+            }
             if (chunkLocalTilemapsAreActive)
             {
                 // 空であるという履歴はチャンク表示が所有します。絶対座標で別Dictionaryを持たず、プールと一緒に寿命を管理します。
-                return chunkLocalPresentations[coordinate].WriteSubChunk(template, bounds, tiles);
+                return chunkLocalPresentations[coordinate].WriteSubChunk(template, bounds, tiles,
+                    colors == null ? null : waterTileChangeBuffer);
             }
 
             // 共有方式は旧原点の遅延消去とセル範囲が交差し得るため、この局所的な履歴管理を適用しません。
-            target.SetTilesBlock(bounds, tiles);
+            if (colors == null) target.SetTilesBlock(bounds, tiles);
+            else TerrainWaterRenderUtility.ApplyTiles(target, waterTileChangeBuffer);
             return true;
         }
 
@@ -2658,6 +2779,10 @@ namespace Farmware.WorldGeneration.Presentation
                     liquidDepthWithoutFloorTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
                 }
 
+                if (submergedGroundFaceTilemap != null)
+                {
+                    submergedGroundFaceTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
+                }
                 if (underwaterFloorPreviewTilemap != null)
                 {
                     underwaterFloorPreviewTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
@@ -2846,7 +2971,7 @@ namespace Farmware.WorldGeneration.Presentation
                 wallContactShadowLeftTilemap, wallContactShadowRightTilemap,
                 wallFoldShadowTopTilemap, wallFoldShadowBottomTilemap,
                 dryCliffDeepBlackTilemap, liquidDepthWithFloorTilemap,
-                liquidDepthWithoutFloorTilemap, underwaterFloorPreviewTilemap,
+                liquidDepthWithoutFloorTilemap, underwaterFloorPreviewTilemap, submergedGroundFaceTilemap,
                 waterReflectionTilemap, liquidEdgeWaveTilemap, rockWallResourceTilemap };
         }
 
@@ -3262,56 +3387,7 @@ namespace Farmware.WorldGeneration.Presentation
             }
         }
 
-        /// <summary>
-        /// 左右の同種水セルについて段開始Alphaを求め、岸形状が段違いでも横方向へ滑らかにつなげます。
-        /// </summary>
-        /// <param name="terrainNeighborhood">現在WorldLayerの完成済み地形近傍です。</param>
-        /// <param name="hasLowerNeighborhood">直下WorldLayerの近傍を利用できる場合はtrueです。</param>
-        /// <param name="lowerNeighborhood">直下床の有無を判定する完成済み地形近傍です。</param>
-        /// <param name="neighborLocalX">確認する左右隣セルの中心チャンク基準Xです。</param>
-        /// <param name="neighborLocalY">確認する左右隣セルの中心チャンク基準Yです。</param>
-        /// <param name="currentKind">現在セルの淡水または海水種別です。</param>
-        /// <param name="fallbackAlpha">隣が別液体または非液体の場合に使う現在セルの開始Alphaです。</param>
-        /// <returns>同種水なら隣セルの開始Alpha、それ以外なら現在セルの開始Alphaです。</returns>
-        private float GetHorizontalNeighborDepthStageStartAlpha(
-            in CompletedChunkTerrainNeighborhood terrainNeighborhood,
-            bool hasLowerNeighborhood,
-            in CompletedChunkTerrainNeighborhood lowerNeighborhood,
-            int neighborLocalX,
-            int neighborLocalY,
-            TerrainLiquidVisualKind currentKind,
-            float fallbackAlpha)
-        {
-            if (!terrainNeighborhood.TryGetTile(
-                    neighborLocalX,
-                    neighborLocalY,
-                    out GeneratedTerrainCell neighborCell)
-                || TerrainLiquidPresentationUtility.Classify(neighborCell, terrainRuntimeIds)
-                    != currentKind)
-            {
-                return fallbackAlpha;
-            }
 
-            int neighborDepthStage = TerrainLiquidPresentationUtility.GetClampedWaterDepth(
-                terrainNeighborhood,
-                neighborLocalX,
-                neighborLocalY,
-                terrainRuntimeIds);
-            if (neighborDepthStage < 0)
-            {
-                return fallbackAlpha;
-            }
-
-            bool neighborHasUnderwaterFloor = TryGetUnderwaterFloor(
-                hasLowerNeighborhood,
-                lowerNeighborhood,
-                neighborLocalX,
-                neighborLocalY,
-                out _);
-            return TerrainLiquidPresentationUtility.GetDepthStageStartAlpha(
-                neighborDepthStage,
-                neighborHasUnderwaterFloor);
-        }
 
         /// <summary>指定セルの直下1層に、Wallで塞がれていないGround上面があるか判定します。</summary>
         /// <param name="hasLowerNeighborhood">直下WorldLayerの近傍を利用できる場合はtrueです。</param>

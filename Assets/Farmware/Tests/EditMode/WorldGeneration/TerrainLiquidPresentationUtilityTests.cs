@@ -1,4 +1,4 @@
-// このファイルは、製品Liquid表示の3pxクリップ、深度勾配、水際3bit、通常Face継続、反射Proxy分類を検証します。
+// このファイルは、製品Liquid表示の3pxクリップ、深度勾配、水際7bit、通常Face継続、反射Proxy分類を検証します。
 // 実SceneやAssetを変更せず、完成済み3×3チャンクを準備してDirtyサブチャンク分類と同じ純粋計算を保証します。
 
 using System.Collections.Generic;
@@ -87,33 +87,6 @@ namespace Farmware.WorldGeneration.Tests
                 "床ありは最大50%へ到達した後に濃くしてはいけません。");
         }
 
-        /// <summary>左右セルの深度差をタイル内へ分散し、16px境界で矩形状に濃度が飛ばないことを保証します。</summary>
-        [Test]
-        public void DepthOverlay_HorizontallySmoothsAdjacentStageStarts()
-        {
-            const float shallowAlpha = 0f;
-            const float deepAlpha = 0.25f;
-            float shallowRightPixel =
-                TerrainLiquidPresentationUtility.GetHorizontallySmoothedDepthStageStartAlpha(
-                    shallowAlpha,
-                    shallowAlpha,
-                    deepAlpha,
-                    TerrainLiquidPresentationUtility.PixelsPerCell - 1);
-            float deepLeftPixel =
-                TerrainLiquidPresentationUtility.GetHorizontallySmoothedDepthStageStartAlpha(
-                    shallowAlpha,
-                    deepAlpha,
-                    deepAlpha,
-                    0);
-
-            Assert.That(shallowRightPixel, Is.GreaterThan(shallowAlpha));
-            Assert.That(deepLeftPixel, Is.LessThan(deepAlpha));
-            Assert.That(
-                deepLeftPixel - shallowRightPixel,
-                Is.EqualTo(deepAlpha / TerrainLiquidPresentationUtility.PixelsPerCell)
-                    .Within(0.00001f),
-                "隣接セル間の全濃度差を境界1pxへ残さず、セル中央間の16pxへ均等に分散します。");
-        }
 
         /// <summary>93px勾配を過ぎた深部は段6へ固定し、最終16px勾配を各タイルで繰り返さないことを保証します。</summary>
         [Test]
@@ -145,20 +118,20 @@ namespace Farmware.WorldGeneration.Tests
                 Is.EqualTo(TerrainLiquidPresentationUtility.SaturatedDepthStage),
                 "岸まで7セル以上の位置は、勾配を繰り返さない段6です。");
             Assert.That(
-                TerrainLiquidPresentationUtility.GetDepthStageStartAlpha(
-                    TerrainLiquidPresentationUtility.SaturatedDepthStage,
+                TerrainLiquidPresentationUtility.GetDepthOverlayAlpha(
+                    TerrainLiquidPresentationUtility.SaturatedDepthStage * 16,
                     hasUnderwaterFloor: false),
                 Is.EqualTo(1f),
                 "床なし深部はタイル上端から完全不透明を維持します。");
             Assert.That(
-                TerrainLiquidPresentationUtility.GetDepthStageStartAlpha(
-                    TerrainLiquidPresentationUtility.SaturatedDepthStage,
+                TerrainLiquidPresentationUtility.GetDepthOverlayAlpha(
+                    TerrainLiquidPresentationUtility.SaturatedDepthStage * 16,
                     hasUnderwaterFloor: true),
                 Is.EqualTo(0.5f),
                 "床あり深部はタイル上端から最大50%を維持します。");
         }
 
-        /// <summary>奥・左・右だけを3bitへ詰め、画面手前の岸を波線へ含めないことを保証します。</summary>
+        /// <summary>奥・左・右の通常辺を選び、画面手前の岸を接触線へ含めないことを保証します。</summary>
         [Test]
         public void EdgeMask_SelectsSevenCombinationsWithoutFrontEdge()
         {
@@ -198,6 +171,193 @@ namespace Farmware.WorldGeneration.Tests
                     20),
                 Is.False,
                 "連続水域の内部セルを切ると16pxごとの横縞になるため、クリップしてはいけません。");
+        }
+
+        /// <summary>斜め奥の岸に対して、同種水がつながる側だけ内角の短い線を補うことを保証します。</summary>
+        [Test]
+        public void EdgeMask_ConnectsBothInnerCornersOnlyAcrossSameWater()
+        {
+            CompletedChunkTerrainNeighborhood neighborhood = CreateEmptyNeighborhood(
+                out NativeArray<GeneratedTerrainCell> center);
+            SetCell(center, 20, 20, Liquid(runtimeIds.FreshWater));
+            SetCell(center, 20, 21, Liquid(runtimeIds.FreshWater));
+            SetCell(center, 19, 20, Liquid(runtimeIds.FreshWater));
+            SetCell(center, 21, 20, Liquid(runtimeIds.FreshWater));
+            SetCell(center, 19, 21, Ground(201));
+            SetCell(center, 21, 21, Wall(301));
+            Assert.That(TerrainLiquidPresentationUtility.SelectEdgeMask(neighborhood, 20, 20),
+                Is.EqualTo(TerrainLiquidEdgeMask.LeftInnerCorner | TerrainLiquidEdgeMask.RightInnerCorner));
+
+            // 隣が別の液体なら、斜めの岸があってもその液体をまたいで水際を結びません。
+            SetCell(center, 19, 20, Liquid(runtimeIds.SaltWater));
+            Assert.That(TerrainLiquidPresentationUtility.SelectEdgeMask(neighborhood, 20, 20),
+                Is.EqualTo(TerrainLiquidEdgeMask.RightInnerCorner));
+            SetCell(center, 20, 21, Ground(202));
+            Assert.That(TerrainLiquidPresentationUtility.SelectEdgeMask(neighborhood, 20, 20),
+                Is.EqualTo(TerrainLiquidEdgeMask.Back));
+        }
+
+        /// <summary>中心チャンクの左右上端から負側・正側の斜めHaloを参照しても、内角が欠けないことを保証します。</summary>
+        [Test]
+        public void EdgeMask_ConnectsInnerCornersAcrossChunkHalo()
+        {
+            CompletedChunkTerrainNeighborhood neighborhood = CreateEmptyNeighborhood(
+                out NativeArray<GeneratedTerrainCell> center);
+            SetCell(center, 0, 63, Liquid(runtimeIds.FreshWater));
+            SetCell(center, 63, 63, Liquid(runtimeIds.FreshWater));
+
+            // CreateEmptyNeighborhoodの配列順は南西・南・南東・西・中央・東・北西・北・北東です。
+            // X=-1とX=64、Y=64がそれぞれ対応するHaloの端へ変換される条件を準備します。
+            SetCell(terrainArrays[3], 63, 63, Liquid(runtimeIds.FreshWater));
+            SetCell(terrainArrays[5], 0, 63, Liquid(runtimeIds.FreshWater));
+            SetCell(terrainArrays[7], 0, 0, Liquid(runtimeIds.FreshWater));
+            SetCell(terrainArrays[7], 63, 0, Liquid(runtimeIds.FreshWater));
+            SetCell(terrainArrays[6], 63, 0, Ground(201));
+            SetCell(terrainArrays[8], 0, 0, Ground(201));
+            Assert.That(TerrainLiquidPresentationUtility.SelectEdgeMask(neighborhood, 0, 63),
+                Is.EqualTo(TerrainLiquidEdgeMask.LeftInnerCorner));
+            Assert.That(TerrainLiquidPresentationUtility.SelectEdgeMask(neighborhood, 63, 63),
+                Is.EqualTo(TerrainLiquidEdgeMask.RightInnerCorner));
+        }
+
+        /// <summary>岸が奥へ続く側は維持し、裏側へ回り込む終端だけを液体3種で左右独立に選ぶことを保証します。</summary>
+        /// <param name="leftEndpoint">左岸だけを終端にする場合はtrue、右岸だけならfalseです。</param>
+        /// <param name="liquidId">淡水101、海水102、マグマ103のテスト用Runtime IDです。</param>
+        [TestCase(true, 101)]
+        [TestCase(false, 101)]
+        [TestCase(true, 102)]
+        [TestCase(false, 102)]
+        [TestCase(true, 103)]
+        [TestCase(false, 103)]
+        public void EdgeMask_ClipsBackEndpointIndependently(bool leftEndpoint, int liquidId)
+        {
+            CompletedChunkTerrainNeighborhood neighborhood = CreateEmptyNeighborhood(
+                out NativeArray<GeneratedTerrainCell> center);
+            var liquid = new DefinitionRuntimeId((ushort)liquidId);
+            SetCell(center, 20, 20, Liquid(liquid));
+            SetCell(center, 20, 21, Liquid(liquid));
+            SetCell(center, 19, 20, Ground(201));
+            SetCell(center, 21, 20, Wall(301));
+            SetCell(center, 19, 21, leftEndpoint ? Liquid(liquid) : Ground(201));
+            SetCell(center, 21, 21, leftEndpoint ? Wall(301) : Liquid(liquid));
+
+            TerrainLiquidEdgeMask sides = TerrainLiquidEdgeMask.Left | TerrainLiquidEdgeMask.Right;
+            TerrainLiquidEdgeMask endpoint = leftEndpoint
+                ? TerrainLiquidEdgeMask.LeftBackEndpoint : TerrainLiquidEdgeMask.RightBackEndpoint;
+            Assert.That(TerrainLiquidPresentationUtility.SelectEdgeMask(neighborhood, 20, 20),
+                Is.EqualTo(sides | endpoint));
+
+            // 同種液体が奥へ続かない場所は「地面の裏へ回り込む水際」として接続しません。
+            SetCell(center, 20, 21, Liquid(new DefinitionRuntimeId(104)));
+            Assert.That(TerrainLiquidPresentationUtility.SelectEdgeMask(neighborhood, 20, 20), Is.EqualTo(sides));
+            SetCell(center, 20, 21, default);
+            Assert.That(TerrainLiquidPresentationUtility.SelectEdgeMask(neighborhood, 20, 20), Is.EqualTo(sides));
+        }
+
+        /// <summary>中心の上端から左右のHaloへまたがる終端も、継続する縦岸と区別できることを保証します。</summary>
+        [Test]
+        public void EdgeMask_ClipsBackEndpointsAcrossChunkHalo()
+        {
+            CompletedChunkTerrainNeighborhood neighborhood = CreateEmptyNeighborhood(
+                out NativeArray<GeneratedTerrainCell> center);
+            SetCell(center, 0, 63, Liquid(runtimeIds.FreshWater));
+            SetCell(center, 63, 63, Liquid(runtimeIds.FreshWater));
+            SetCell(terrainArrays[3], 63, 63, Ground(201));
+            SetCell(terrainArrays[5], 0, 63, Wall(301));
+            SetCell(terrainArrays[7], 0, 0, Liquid(runtimeIds.FreshWater));
+            SetCell(terrainArrays[7], 63, 0, Liquid(runtimeIds.FreshWater));
+            SetCell(terrainArrays[6], 63, 0, Liquid(runtimeIds.FreshWater));
+            SetCell(terrainArrays[8], 0, 0, Liquid(runtimeIds.FreshWater));
+            Assert.That(TerrainLiquidPresentationUtility.SelectEdgeMask(neighborhood, 0, 63),
+                Is.EqualTo(TerrainLiquidEdgeMask.Left | TerrainLiquidEdgeMask.LeftBackEndpoint));
+            Assert.That(TerrainLiquidPresentationUtility.SelectEdgeMask(neighborhood, 63, 63),
+                Is.EqualTo(TerrainLiquidEdgeMask.Right | TerrainLiquidEdgeMask.RightBackEndpoint));
+
+            // 斜め奥にも岸を足すと縦岸は継続するため、上端3pxを削る印は消えます。
+            SetCell(terrainArrays[6], 63, 0, Ground(201));
+            SetCell(terrainArrays[8], 0, 0, Wall(301));
+            Assert.That(TerrainLiquidPresentationUtility.SelectEdgeMask(neighborhood, 0, 63),
+                Is.EqualTo(TerrainLiquidEdgeMask.Left));
+            Assert.That(TerrainLiquidPresentationUtility.SelectEdgeMask(neighborhood, 63, 63),
+                Is.EqualTo(TerrainLiquidEdgeMask.Right));
+        }
+
+        /// <summary>裏側終端だけ上端3pxが欠け、同じセルの反対側の縦線は全16px残ることを保証します。</summary>
+        /// <param name="leftEndpoint">左側終端を検査する場合はtrue、右側終端ならfalseです。</param>
+        [TestCase(true)]
+        [TestCase(false)]
+        public void ShorelineShape_BackEndpointClipsOnlyItsOwnSide(bool leftEndpoint)
+        {
+            TerrainLiquidEdgeMask mask = TerrainLiquidEdgeMask.Left | TerrainLiquidEdgeMask.Right
+                | (leftEndpoint ? TerrainLiquidEdgeMask.LeftBackEndpoint : TerrainLiquidEdgeMask.RightBackEndpoint);
+            for (int y = 0; y < 16; y++)
+            {
+                Assert.That(TerrainLiquidPresentationUtility.IsShorelinePixel(mask, leftEndpoint ? 0 : 15, y),
+                    Is.EqualTo(y <= 12), "裏側へ回り込む終端だけ3px隠します。");
+                Assert.That(TerrainLiquidPresentationUtility.IsShorelinePixel(mask, leftEndpoint ? 15 : 0, y),
+                    Is.True, "反対側の連続する岸には隙間を作りません。");
+            }
+        }
+
+        /// <summary>連続する縦岸は全16px、奥岸と重なる縦線は13px、内角は接点を含む4pxになることを保証します。</summary>
+        [Test]
+        public void ShorelineShape_ClipsOnlyBackShoreAndBridgesInnerCorner()
+        {
+            for (int y = 0; y < 16; y++)
+            {
+                Assert.That(TerrainLiquidPresentationUtility.IsShorelinePixel(TerrainLiquidEdgeMask.Left, 0, y), Is.True);
+                Assert.That(TerrainLiquidPresentationUtility.IsShorelinePixel(
+                    TerrainLiquidEdgeMask.Back | TerrainLiquidEdgeMask.Left, 0, y), Is.EqualTo(y <= 12));
+                Assert.That(TerrainLiquidPresentationUtility.IsShorelinePixel(
+                    TerrainLiquidEdgeMask.LeftInnerCorner, 0, y), Is.EqualTo(y >= 12));
+            }
+        }
+
+        /// <summary>表示原点の画素オフセットが負座標やintの両端でも周期内へ収まり、原点変更で絶対位相を失わないことを保証します。</summary>
+        /// <param name="origin">検証する表示原点の絶対タイル座標です。</param>
+        [TestCase(-1)]
+        [TestCase(64)]
+        [TestCase(-512)]
+        [TestCase(int.MinValue)]
+        [TestCase(int.MaxValue)]
+        public void ShorelineOrigin_WrapsWithoutIntegerOverflow(int origin)
+        {
+            int offset = TerrainLiquidPresentationUtility.GetShorelineOriginPixelOffset(origin);
+            long expected = ((long)origin * 16) % TerrainLiquidPresentationUtility.ShorelinePatternPeriodPixels;
+            if (expected < 0)
+            {
+                expected += TerrainLiquidPresentationUtility.ShorelinePatternPeriodPixels;
+            }
+            Assert.That(offset, Is.EqualTo((int)expected));
+        }
+
+        /// <summary>旧形式のAnimatedTileカタログを、新形式の色設定として暗黙に受理しないことを保証します。</summary>
+        [Test]
+        public void PresentationCatalog_RejectsOldFormatUntilRepublished()
+        {
+            TerrainLiquidPresentationCatalog catalog = CreateOwned<TerrainLiquidPresentationCatalog>();
+            Assert.That(catalog.TryInitialize(out string error), Is.False);
+            Assert.That(error, Does.Contain("再公開"));
+        }
+
+        /// <summary>同じ色と接触形状の水際Tileを再利用し、内部セル用のTileやアニメーションを生成しないことを保証します。</summary>
+        [Test]
+        public void RuntimeTileCache_ReusesStaticShorelineTiles()
+        {
+            using (var cache = new TerrainLiquidRuntimeTileCache())
+            {
+                TileBase first = cache.GetOrCreateShoreline(Color.white, TerrainLiquidEdgeMask.Left);
+                Assert.That(cache.GetOrCreateShoreline(Color.white, TerrainLiquidEdgeMask.Left), Is.SameAs(first));
+                Assert.That(first, Is.TypeOf<Tile>());
+                Assert.That(((Color32)((Tile)first).color).a, Is.EqualTo((byte)TerrainLiquidEdgeMask.Left));
+                // 上位bitの終端情報も同じAlphaへ格納し、通常の縦岸Tileとは別に共有します。
+                TerrainLiquidEdgeMask endpointMask = TerrainLiquidEdgeMask.Right | TerrainLiquidEdgeMask.RightBackEndpoint;
+                TileBase endpoint = cache.GetOrCreateShoreline(Color.white, endpointMask);
+                Assert.That(((Color32)((Tile)endpoint).color).a, Is.EqualTo((byte)endpointMask));
+                Assert.That(cache.GetOrCreateShoreline(Color.white, endpointMask), Is.SameAs(endpoint));
+                Assert.That(cache.GetOrCreateShoreline(Color.white, TerrainLiquidEdgeMask.None), Is.Null);
+                Assert.That(cache.ShorelineTileCount, Is.EqualTo(2));
+            }
         }
 
         /// <summary>同じ水が続く最大6段だけ通常Ground Faceを投影し、マグマや別液体を越えないことを保証します。</summary>
@@ -284,6 +444,7 @@ namespace Farmware.WorldGeneration.Tests
                 TerrainLiquidPresentationUtility.TryProjectGroundFaceThroughWater(
                     neighborhood, 10, 15, runtimeIds, out _), Is.False);
         }
+
 
         /// <summary>淡水・海水だけが32px以内のWall Faceを反射し、Ground上面とマグマを対象外にすることを保証します。</summary>
         [Test]
@@ -374,11 +535,9 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(surface.GetFloat("_ClipPixels"), Is.EqualTo(3f));
             Assert.That(withFloor, Is.Not.Null);
             Assert.That(withFloor.shader.name, Is.EqualTo("Farmware/Terrain/Liquid Depth Overlay"));
-            Assert.That(withFloor.GetFloat("_FadePixels"), Is.EqualTo(45f));
-            Assert.That(withFloor.GetFloat("_MaximumAlpha"), Is.EqualTo(0.5f));
+            Assert.That(withFloor.HasProperty("_FadePixels"), Is.False, "基底色に投影距離の勾配を残してはいけません。");
             Assert.That(withoutFloor, Is.Not.Null);
-            Assert.That(withoutFloor.GetFloat("_FadePixels"), Is.EqualTo(93f));
-            Assert.That(withoutFloor.GetFloat("_MaximumAlpha"), Is.EqualTo(1f));
+            Assert.That(withoutFloor.HasProperty("_MaximumAlpha"), Is.False);
             Assert.That(catalog, Is.Not.Null);
             Assert.That(catalog.TryInitialize(out string catalogError), Is.True, catalogError);
             Assert.That(
@@ -449,7 +608,7 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(source, Does.Contain("sampled.a * input.materialAlpha"));
         }
 
-        /// <summary>淡水・海水・マグマと各7形状がそろう場合だけ、種別順によらず検索できることを保証します。</summary>
+        /// <summary>淡水・海水・マグマの参照と水際色がそろう場合だけ、種別順によらず検索できることを保証します。</summary>
         [Test]
         public void PresentationCatalog_RequiresThreeCompleteLiquidDefinitions()
         {
@@ -469,15 +628,12 @@ namespace Farmware.WorldGeneration.Tests
                     out TerrainLiquidPresentationDefinition actual),
                 Is.True);
             Assert.That(actual, Is.SameAs(fresh));
-            Assert.That(
-                fresh.GetEdgeWaveTile(TerrainLiquidEdgeMask.Back | TerrainLiquidEdgeMask.Right),
-                Is.Not.Null,
-                "3bit値5は7要素配列の4番目へ対応します。");
+            Assert.That(fresh.ShorelineColor, Is.EqualTo(Color.white));
         }
 
-        /// <summary>同じ液体種や同じ水際Tileの再利用を拒否し、見た目の欠落を別Assetで補完しないことを保証します。</summary>
+        /// <summary>同じ液体種や無効な水際色を拒否し、不正な設定で描画を始めないことを保証します。</summary>
         [Test]
-        public void PresentationCatalog_RejectsDuplicateKindAndDuplicateEdgeShape()
+        public void PresentationCatalog_RejectsDuplicateKindAndInvalidShorelineColor()
         {
             TerrainLiquidPresentationCatalog duplicateKindCatalog =
                 CreateOwned<TerrainLiquidPresentationCatalog>();
@@ -491,20 +647,20 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(duplicateKindCatalog.TryInitialize(out string duplicateKindError), Is.False);
             Assert.That(duplicateKindError, Does.Contain("重複"));
 
-            TerrainLiquidPresentationCatalog duplicateEdgeCatalog =
+            TerrainLiquidPresentationCatalog invalidColorCatalog =
                 CreateOwned<TerrainLiquidPresentationCatalog>();
             TerrainLiquidPresentationDefinition invalidFresh = CreateLiquidDefinition(
                 TerrainLiquidVisualKind.FreshWater,
-                duplicateFirstEdge: true);
-            duplicateEdgeCatalog.SetDefinitions(new[]
+                invalidShorelineColor: true);
+            invalidColorCatalog.SetDefinitions(new[]
             {
                 invalidFresh,
                 CreateLiquidDefinition(TerrainLiquidVisualKind.SaltWater),
                 CreateLiquidDefinition(TerrainLiquidVisualKind.Magma)
             });
 
-            Assert.That(duplicateEdgeCatalog.TryInitialize(out string duplicateEdgeError), Is.False);
-            Assert.That(duplicateEdgeError, Does.Contain("同じAssetが重複"));
+            Assert.That(invalidColorCatalog.TryInitialize(out string invalidColorError), Is.False);
+            Assert.That(invalidColorError, Does.Contain("水際色"));
         }
 
         /// <summary>液体種・近傍濃度と反射Spriteが同じなら、セル数に比例してTileを生成しないことを保証します。</summary>
@@ -514,26 +670,10 @@ namespace Farmware.WorldGeneration.Tests
             var cache = new TerrainLiquidRuntimeTileCache();
             try
             {
-                TileBase firstDepth = cache.GetOrCreateDepthOverlay(
-                    TerrainLiquidVisualKind.FreshWater,
-                    0.1f,
-                    0.25f,
-                    0.4f);
-                TileBase secondDepth = cache.GetOrCreateDepthOverlay(
-                    TerrainLiquidVisualKind.FreshWater,
-                    0.1f,
-                    0.25f,
-                    0.4f);
-                Assert.That(secondDepth, Is.SameAs(firstDepth));
-                Assert.That(cache.DepthTileCount, Is.EqualTo(1));
+                TileBase firstDepth = cache.GetOrCreateDepthOverlay();
+                Assert.That(cache.GetOrCreateDepthOverlay(), Is.SameAs(firstDepth));
+                Assert.That(cache.DepthTileCount, Is.EqualTo(1), "セルの深度組合せに比例してTileを生成しません。");
 
-                TileBase differentNeighborDepth = cache.GetOrCreateDepthOverlay(
-                    TerrainLiquidVisualKind.FreshWater,
-                    0.1f,
-                    0.25f,
-                    0.5f);
-                Assert.That(differentNeighborDepth, Is.Not.SameAs(firstDepth));
-                Assert.That(cache.DepthTileCount, Is.EqualTo(2));
 
                 Tile sourceSurface = CreateOwned<Tile>();
                 var surfaceTexture = new Texture2D(16, 16, TextureFormat.RGBA32, false);
@@ -570,6 +710,15 @@ namespace Farmware.WorldGeneration.Tests
                 TileBase secondReflection = cache.GetOrCreateReflection(selection, 0);
                 Assert.That(secondReflection, Is.SameAs(firstReflection));
                 Assert.That(cache.ReflectionTileCount, Is.EqualTo(1));
+                Assert.That(((Tile)firstReflection).color.a, Is.EqualTo(1f / 255f));
+                Assert.That(((Tile)firstReflection).transform.m13,
+                    Is.EqualTo(TerrainLiquidPresentationUtility.ReflectionSurfaceOffsetInTiles));
+                Tile secondStage = (Tile)cache.GetOrCreateReflection(selection, 1);
+                Assert.That(secondStage.color.a, Is.EqualTo(2f / 255f));
+                Assert.That(secondStage.transform.m13, Is.EqualTo(0.1875f));
+                Assert.That(TerrainLiquidPresentationUtility.GetReflectionVisibility(0), Is.EqualTo(1f));
+                Assert.That(TerrainLiquidPresentationUtility.GetReflectionVisibility(12), Is.EqualTo(0.5f));
+                Assert.That(TerrainLiquidPresentationUtility.GetReflectionVisibility(24), Is.Zero);
             }
             finally
             {
@@ -627,13 +776,13 @@ namespace Farmware.WorldGeneration.Tests
             return value;
         }
 
-        /// <summary>Surfaceと7個の個別水際Tileを持つ、完全な1液体定義を作ります。</summary>
+        /// <summary>Surfaceと水際色を持つ、完全な1液体定義を作ります。</summary>
         /// <param name="kind">作成する淡水、海水、マグマの種別です。</param>
-        /// <param name="duplicateFirstEdge">trueなら検証失敗用に先頭2形状を同じTileへします。</param>
+        /// <param name="invalidShorelineColor">trueなら検証失敗用に水際色へNaNを入れます。</param>
         /// <returns>カタログ初期化へ渡せるテスト用定義です。</returns>
         private TerrainLiquidPresentationDefinition CreateLiquidDefinition(
             TerrainLiquidVisualKind kind,
-            bool duplicateFirstEdge = false)
+            bool invalidShorelineColor = false)
         {
             Tile surface = CreateOwned<Tile>();
             var surfaceTexture = new Texture2D(16, 16, TextureFormat.RGBA32, false);
@@ -647,18 +796,10 @@ namespace Farmware.WorldGeneration.Tests
                 16f);
             ownedUnityObjects.Add(surfaceSprite);
             surface.sprite = surfaceSprite;
-            var edges = new TileBase[7];
-            for (int index = 0; index < edges.Length; index++)
-            {
-                edges[index] = duplicateFirstEdge && index == 1
-                    ? edges[0]
-                    : CreateOwned<Tile>();
-            }
-
             return new TerrainLiquidPresentationDefinition(
                 kind,
                 surface,
-                edges,
+                invalidShorelineColor ? new Color(float.NaN, 1f, 1f, 1f) : Color.white,
                 new Color(0.1f, 0.2f, 0.3f, 1f));
         }
 

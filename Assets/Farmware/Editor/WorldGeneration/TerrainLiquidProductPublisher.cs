@@ -1,5 +1,5 @@
-// このファイルは、液体3種の初期製品素材、水際アニメーション、製品表示カタログを一括公開します。
-// TerrainLiquidEdgeWaveGeneratorへ方向別入力を渡し、ChunkTilemapPresenterが制作入力やFallbackを直接参照しない境界を作ります。
+// このファイルは、液体3種のSurface、静止水際の基準色、共有Shader Materialを製品カタログへ公開します。
+// 水際形状はRuntimeの有効地形から決めるため、方向別4フレーム入力やAnimatedTileは生成しません。
 
 using System;
 using System.IO;
@@ -11,8 +11,8 @@ using UnityEngine.Tilemaps;
 namespace Farmware.WorldGeneration.Editor
 {
     /// <summary>
-    /// 淡水・海水・マグマの製品用Surface Tile、7水際Tile、深度色を公開します。
-    /// 入力PNGがまだない場合だけ採用済み検品値から初期画像を作り、手描き画像へ上書きした後は内容を保持します。
+    /// 淡水・海水・マグマの製品用Surface Tile、水際色、深度色を公開します。
+    /// 製品の単色Surfaceは再生成し、明暗の調整値は共有MaterialのInspectorで変更できます。
     /// </summary>
     public static class TerrainLiquidProductPublisher
     {
@@ -23,18 +23,6 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>淡水・海水・マグマの完成参照をまとめる製品カタログの保存先です。</summary>
         public const string CatalogPath =
             "Assets/Farmware/Art/WorldGeneration/Liquids/Published/TerrainLiquidPresentationCatalog.asset";
-
-        /// <summary>淡水の方向別水際入力を保存する固定パスです。</summary>
-        public const string FreshWaterEdgeSourcePath =
-            "Assets/Farmware/Art/WorldGeneration/Liquids/Source/FreshWaterEdgeWave.png";
-
-        /// <summary>海水の方向別水際入力を保存する固定パスです。</summary>
-        public const string SaltWaterEdgeSourcePath =
-            "Assets/Farmware/Art/WorldGeneration/Liquids/Source/SaltWaterEdgeWave.png";
-
-        /// <summary>マグマの方向別発光入力を保存する固定パスです。</summary>
-        public const string MagmaEdgeSourcePath =
-            "Assets/Farmware/Art/WorldGeneration/Liquids/Source/MagmaEdgeGlow.png";
 
         /// <summary>淡水Surfaceの製品PNGパスです。</summary>
         public const string FreshWaterSurfaceTexturePath =
@@ -60,14 +48,8 @@ namespace Farmware.WorldGeneration.Editor
         public const string MagmaSurfaceTilePath =
             PublishedSurfaceFolder + "/MagmaSurface.asset";
 
-        /// <summary>淡水の初期水際線へ使う暗い色です。</summary>
-        private static readonly Color32 FreshWaterEdgeDark = new Color32(86, 180, 215, 255);
-
         /// <summary>淡水の初期水際線へ使う明るい色です。</summary>
         private static readonly Color32 FreshWaterEdgeLight = new Color32(171, 229, 238, 255);
-
-        /// <summary>海水の初期水際線へ使う暗い色です。</summary>
-        private static readonly Color32 SaltWaterEdgeDark = new Color32(78, 135, 205, 255);
 
         /// <summary>海水の初期水際線へ使う明るい色です。</summary>
         private static readonly Color32 SaltWaterEdgeLight = new Color32(157, 201, 237, 255);
@@ -78,11 +60,12 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>海水の深化Fadeが96px地点で収束する、淡水より暗い深い青です。</summary>
         private static readonly Color32 SaltWaterDepthColor = new Color32(16, 42, 72, 255);
 
-        /// <summary>マグマの初期接触発光へ使う暗い色です。</summary>
-        private static readonly Color32 MagmaEdgeDark = new Color32(238, 82, 24, 255);
-
         /// <summary>マグマの初期接触発光へ使う明るい色です。</summary>
         private static readonly Color32 MagmaEdgeLight = new Color32(255, 211, 64, 255);
+
+        /// <summary>固定した岸形状の上で明暗だけを動かす製品Materialの保存先です。</summary>
+        public const string ShorelineMaterialPath =
+            "Assets/Farmware/Art/WorldGeneration/Materials/TerrainLiquidShoreline.mat";
 
         /// <summary>メニューから液体3種の製品Assetを公開します。</summary>
         [MenuItem("Farmware/World Generation/Generation/Publish Liquid Presentation Assets")]
@@ -93,7 +76,7 @@ namespace Farmware.WorldGeneration.Editor
                 TerrainLiquidPresentationCatalog catalog = PublishAll();
                 EditorUtility.DisplayDialog(
                     "液体表示を製品公開しました",
-                    $"淡水・海水・マグマのSurface、水際7形状、製品カタログを更新しました。\n{AssetDatabase.GetAssetPath(catalog)}",
+                    $"淡水・海水・マグマのSurface、水際色、共有水際Material、製品カタログを更新しました。\n{AssetDatabase.GetAssetPath(catalog)}",
                     "閉じる");
             }
             catch (Exception exception)
@@ -107,31 +90,13 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>
-        /// 不足する初期入力を作成し、方向別入力から水際Tileを再生成して製品カタログを保存します。
+        /// 単色Surfaceと共有水際Materialを公開し、現行形式の製品カタログを保存します。
         /// </summary>
         /// <returns>保存後に再読込した検証済み製品液体カタログです。</returns>
         public static TerrainLiquidPresentationCatalog PublishAll()
         {
-            EnsureFolder(TerrainLiquidEdgeWaveGenerator.SourceFolder);
             EnsureFolder(PublishedSurfaceFolder);
-
-            // 初回だけ検品で採用した寸法と仮配色を画像化します。同じ固定パスに手描き画像があれば上書きしません。
-            EnsureInitialEdgeSource(
-                FreshWaterEdgeSourcePath,
-                FreshWaterEdgeDark,
-                FreshWaterEdgeLight);
-            EnsureInitialEdgeSource(
-                SaltWaterEdgeSourcePath,
-                SaltWaterEdgeDark,
-                SaltWaterEdgeLight);
-            EnsureInitialEdgeSource(
-                MagmaEdgeSourcePath,
-                MagmaEdgeDark,
-                MagmaEdgeLight);
-
-            GenerateEdgeAssets(FreshWaterEdgeSourcePath);
-            GenerateEdgeAssets(SaltWaterEdgeSourcePath);
-            GenerateEdgeAssets(MagmaEdgeSourcePath);
+            EnsureShorelineMaterial();
 
             // 水は全面Surfaceで断面を隠さず、専用Depth Overlayだけで0%から連続的に濃くします。
             // マグマだけは最初の段から不透明にし、背後のFaceを完全に遮蔽します。
@@ -162,17 +127,17 @@ namespace Farmware.WorldGeneration.Editor
                 CreateDefinition(
                     TerrainLiquidVisualKind.FreshWater,
                     freshSurface,
-                    "FreshWaterEdgeWave",
+                    FreshWaterEdgeLight,
                     FreshWaterDepthColor),
                 CreateDefinition(
                     TerrainLiquidVisualKind.SaltWater,
                     saltSurface,
-                    "SaltWaterEdgeWave",
+                    SaltWaterEdgeLight,
                     SaltWaterDepthColor),
                 CreateDefinition(
                     TerrainLiquidVisualKind.Magma,
                     magmaSurface,
-                    "MagmaEdgeGlow",
+                    MagmaEdgeLight,
                     new Color32(238, 82, 24, 255))
             });
             if (!catalog.TryInitialize(out string catalogError))
@@ -194,104 +159,6 @@ namespace Farmware.WorldGeneration.Editor
             }
 
             return reloaded;
-        }
-
-        /// <summary>
-        /// 64×48 pxの初期方向別入力がない場合だけ、奥・左・右の1px接触線を4位相で作成します。
-        /// </summary>
-        /// <param name="assetPath">固定ファイル名を含むSource PNGパスです。</param>
-        /// <param name="darkColor">2px帯の暗い色です。</param>
-        /// <param name="lightColor">2px帯の明るい色です。</param>
-        private static void EnsureInitialEdgeSource(
-            string assetPath,
-            Color32 darkColor,
-            Color32 lightColor)
-        {
-            if (File.Exists(assetPath))
-            {
-                AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceSynchronousImport);
-                return;
-            }
-
-            int width = TerrainLiquidEdgeWaveGenerator.SourceWidthInPixels;
-            int height = TerrainLiquidEdgeWaveGenerator.SourceHeightInPixels;
-            var pixels = new Color32[width * height];
-            for (int frame = 0; frame < TerrainLiquidEdgeWaveGenerator.FrameCount; frame++)
-            {
-                // Texture2Dは下端原点なので、下段=Right、中段=Left、上段=Backへ直接描きます。
-                for (int coordinate = 0;
-                     coordinate < TerrainLiquidEdgeWaveGenerator.TileSizeInPixels;
-                     coordinate++)
-                {
-                    Color32 color = ((coordinate + frame) / 2) % 2 == 0
-                        ? darkColor
-                        : lightColor;
-                    int frameStartX = frame * TerrainLiquidEdgeWaveGenerator.TileSizeInPixels;
-                    SetPixel(pixels, width, frameStartX + coordinate, 44, color);
-                    // 岸側の液面は上端3pxを隠すため、左右線も表示上端の12px目で止めて水面より上へ突き出させません。
-                    if (coordinate <= TerrainLiquidEdgeWaveGenerator.TileSizeInPixels
-                        - TerrainLiquidPresentationUtility.SurfaceClipPixels
-                        - 1)
-                    {
-                        SetPixel(
-                            pixels,
-                            width,
-                            frameStartX,
-                            TerrainLiquidEdgeWaveGenerator.TileSizeInPixels + coordinate,
-                            color);
-                        SetPixel(
-                            pixels,
-                            width,
-                            frameStartX + TerrainLiquidEdgeWaveGenerator.TileSizeInPixels - 1,
-                            coordinate,
-                            color);
-                    }
-                }
-            }
-
-            var texture = new Texture2D(width, height, TextureFormat.RGBA32, false);
-            try
-            {
-                texture.SetPixels32(pixels);
-                texture.Apply(updateMipmaps: false, makeNoLongerReadable: false);
-                File.WriteAllBytes(assetPath, texture.EncodeToPNG());
-            }
-            finally
-            {
-                UnityEngine.Object.DestroyImmediate(texture);
-            }
-
-            AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceSynchronousImport);
-        }
-
-        /// <summary>指定画素へ色を書き、方向別入力の座標式を1か所へ集約します。</summary>
-        /// <param name="pixels">下端原点で並ぶ出力画素です。</param>
-        /// <param name="width">画像の横幅です。</param>
-        /// <param name="x">書き込むX座標です。</param>
-        /// <param name="y">書き込むY座標です。</param>
-        /// <param name="color">Alpha 255の2色いずれかです。</param>
-        private static void SetPixel(
-            Color32[] pixels,
-            int width,
-            int x,
-            int y,
-            Color32 color)
-        {
-            pixels[(y * width) + x] = color;
-        }
-
-        /// <summary>Import済み方向別入力から28 Spriteと7 AnimatedTileを更新します。</summary>
-        /// <param name="sourcePath">固定名の64×48 px入力PNGです。</param>
-        private static void GenerateEdgeAssets(string sourcePath)
-        {
-            Texture2D source = AssetDatabase.LoadAssetAtPath<Texture2D>(sourcePath);
-            if (source == null)
-            {
-                throw new InvalidOperationException(
-                    $"液体水際入力を読み込めません: {sourcePath}");
-            }
-
-            TerrainLiquidEdgeWaveGenerator.Generate(source);
         }
 
         /// <summary>16×16 pxの単色製品Surface PNGとColliderなしTileを作成または更新します。</summary>
@@ -379,36 +246,39 @@ namespace Farmware.WorldGeneration.Editor
             importer.SaveAndReimport();
         }
 
-        /// <summary>1液体分のSurface、7水際Tile、深度色を完成定義へまとめます。</summary>
-        /// <param name="kind">淡水、海水、マグマのいずれかです。</param>
-        /// <param name="surfaceTile">製品用静止Surface Tileです。</param>
-        /// <param name="edgeBaseName">生成済みAnimatedTileの共通接頭辞です。</param>
+        /// <summary>1液体分のSurface、水際色、深度色を現行定義へまとめます。</summary>
+        /// <param name="kind">淡水、海水、マグマの種別です。</param>
+        /// <param name="surfaceTile">製品用の静止Surfaceです。</param>
+        /// <param name="shorelineColor">明暗Shaderへ渡す基準RGB色です。</param>
         /// <param name="depthColor">深度Overlayへ使うRGB色です。</param>
-        /// <returns>製品カタログへ保存する1行です。</returns>
+        /// <returns>現行形式のカタログへ保存する1行です。</returns>
         private static TerrainLiquidPresentationDefinition CreateDefinition(
-            TerrainLiquidVisualKind kind,
-            Tile surfaceTile,
-            string edgeBaseName,
-            Color depthColor)
+            TerrainLiquidVisualKind kind, Tile surfaceTile, Color shorelineColor, Color depthColor)
         {
-            var edgeTiles = new TileBase[TerrainLiquidEdgeWaveGenerator.MaskCount];
-            for (int maskIndex = 0; maskIndex < edgeTiles.Length; maskIndex++)
+            return new TerrainLiquidPresentationDefinition(kind, surfaceTile, shorelineColor, depthColor);
+        }
+
+        /// <summary>共有Shader Materialを初回だけ作ります。既存の明暗調整値は再公開でも保持します。</summary>
+        private static void EnsureShorelineMaterial()
+        {
+            Shader shader = Shader.Find("Farmware/Terrain/Liquid Shoreline");
+            if (shader == null)
             {
-                string assetPath =
-                    $"{TerrainLiquidEdgeWaveGenerator.OutputFolder}/{edgeBaseName}Mask{maskIndex + 1}.asset";
-                edgeTiles[maskIndex] = AssetDatabase.LoadAssetAtPath<TileBase>(assetPath);
-                if (edgeTiles[maskIndex] == null)
-                {
-                    throw new InvalidOperationException(
-                        $"生成済み水際Tileを読み込めません: {assetPath}");
-                }
+                throw new InvalidOperationException("製品用のLiquid Shoreline Shaderを読み込めません。");
             }
 
-            return new TerrainLiquidPresentationDefinition(
-                kind,
-                surfaceTile,
-                edgeTiles,
-                depthColor);
+            Material material = AssetDatabase.LoadAssetAtPath<Material>(ShorelineMaterialPath);
+            if (material == null)
+            {
+                material = new Material(shader) { name = "TerrainLiquidShoreline" };
+                AssetDatabase.CreateAsset(material, ShorelineMaterialPath);
+            }
+            else if (material.shader != shader)
+            {
+                // 固定パスの製品Materialが別Shaderを使っている場合だけ、正しい参照へ戻します。
+                material.shader = shader;
+                EditorUtility.SetDirty(material);
+            }
         }
 
         /// <summary>Assets配下のフォルダー階層を不足分だけ作成します。</summary>

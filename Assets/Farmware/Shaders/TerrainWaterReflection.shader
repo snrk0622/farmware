@@ -50,6 +50,7 @@ Shader "Farmware/Terrain/Water Reflection Proxy"
                 float3 positionWS : TEXCOORD0;
                 half4 color : COLOR;
                 float2 uv : TEXCOORD1;
+                float reflectionDepthPixels : TEXCOORD2;
             };
 
             TEXTURE2D(_MainTex);
@@ -69,13 +70,26 @@ Shader "Farmware/Terrain/Water Reflection Proxy"
                 Varyings output;
                 output.positionWS = TransformObjectToWorld(input.positionOS.xyz);
                 output.positionHCS = TransformWorldToHClip(output.positionWS);
-                output.color = input.color * _Color;
+                // TileのAlphaは1〜2/255の段数データなので、実際の透明度とは分離します。
+                output.color = half4(input.color.rgb * _Color.rgb, _Color.a);
                 output.uv = input.uv;
+                float stage = round(input.color.a * 255.0) - 1.0;
+                // Runtime Tileと同じ0.75圧縮・中心pivot・3px水面位置です。段ごとの補正を戻すと
+                // 各Quadの全頂点から同じセル原点が得られ、Atlas UVに依存せず実水面を復元できます。
+                const float compression = 0.75;
+                const float surfaceOffset = (1.0 - compression) * 0.5 - 3.0 / 16.0;
+                float cellBottom = floor(output.positionWS.y - stage * (1.0 - compression) - surfaceOffset);
+                float surfaceY = cellBottom + stage + 1.0 - 3.0 / 16.0;
+                output.reflectionDepthPixels = stage >= 0.0 && stage <= 1.0
+                    ? (surfaceY - output.positionWS.y) * 16.0 : -1.0;
                 return output;
             }
 
             half4 Frag(Varyings input) : SV_Target
             {
+                // 接触線より上へ反射を出さず、2枚を通した24px全体で連続的に消します。
+                clip(input.reflectionDepthPixels);
+                float visibility = saturate(1.0 - input.reflectionDepthPixels / 24.0);
                 // 画素行を時間位相へ加え、隣接行が同時に一枚板として移動しない水面らしい揺れにします。
                 float pixelRow = floor(input.positionWS.y * max(_PixelsPerUnit, 1.0));
                 float animationStep = floor(_Time.y * _WavePixelsPerSecond);
@@ -101,7 +115,8 @@ Shader "Farmware/Terrain/Water Reflection Proxy"
                 half alpha = source.a
                     * originalSilhouette
                     * _ReflectionTint.a
-                    * _MaximumAlpha;
+                    * _MaximumAlpha
+                    * visibility;
                 return half4(tintedColor, alpha);
             }
             ENDHLSL

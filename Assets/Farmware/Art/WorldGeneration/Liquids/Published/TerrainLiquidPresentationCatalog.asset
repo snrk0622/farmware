@@ -12,37 +12,17 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f012117ece7740cca100d01fa3a7aab4, type: 3}
   m_Name: TerrainLiquidPresentationCatalog
   m_EditorClassIdentifier: Farmware.WorldGeneration.Presentation::Farmware.WorldGeneration.Presentation.TerrainLiquidPresentationCatalog
+  formatVersion: 2
   definitions:
   - kind: 1
     surfaceTile: {fileID: 11400000, guid: 7efdbcb0e50bd40d9aeb3477d59be81b, type: 2}
-    edgeWaveTiles:
-    - {fileID: 11400000, guid: 2d2abb533011542d1a9a6b583ad95eab, type: 2}
-    - {fileID: 11400000, guid: d2de6c504dbdf48798e5d0661b0fbbbe, type: 2}
-    - {fileID: 11400000, guid: bbc5b5dfabe374d3c9e15e96b47ecbb8, type: 2}
-    - {fileID: 11400000, guid: c2e2413e07e1e48d2bc3101eed4cbeea, type: 2}
-    - {fileID: 11400000, guid: e32877234916b4401a7123cfe4317646, type: 2}
-    - {fileID: 11400000, guid: 832fe432e4e474d6f8d2d27ae9bc68be, type: 2}
-    - {fileID: 11400000, guid: 8690a62e5c5124c04898301c022ddb10, type: 2}
+    shorelineColor: {r: 0.67058825, g: 0.8980392, b: 0.93333334, a: 1}
     depthOverlayColor: {r: 0.09411765, g: 0.28235295, b: 0.3764706, a: 1}
   - kind: 2
     surfaceTile: {fileID: 11400000, guid: ce621f2f76f0f4d2785996bf9db1dee2, type: 2}
-    edgeWaveTiles:
-    - {fileID: 11400000, guid: e563cfef069154cb1a02364eff8a662d, type: 2}
-    - {fileID: 11400000, guid: f944e328a03c848028451f46d0e20d00, type: 2}
-    - {fileID: 11400000, guid: 2a4a7c672896a4cafb8fbec811c8338b, type: 2}
-    - {fileID: 11400000, guid: 735517a62505c4f49b5295fc84458fec, type: 2}
-    - {fileID: 11400000, guid: 12db5785492c04e78ab7fa41d44932c7, type: 2}
-    - {fileID: 11400000, guid: 6c8d1b6612ab741fcbe18e843541edc8, type: 2}
-    - {fileID: 11400000, guid: c2914d4d4f7354e73b8d77bf71f8c0e3, type: 2}
+    shorelineColor: {r: 0.6156863, g: 0.7882353, b: 0.92941177, a: 1}
     depthOverlayColor: {r: 0.0627451, g: 0.16470589, b: 0.28235295, a: 1}
   - kind: 3
     surfaceTile: {fileID: 11400000, guid: 15be2240473014ae68436e774016afe2, type: 2}
-    edgeWaveTiles:
-    - {fileID: 11400000, guid: 170a04cd42b1146d5be9ef25e1ea23bb, type: 2}
-    - {fileID: 11400000, guid: 2a10d54a4719049c4823f9bf14dd06cb, type: 2}
-    - {fileID: 11400000, guid: 778ea0cf701a543bd86b10feb39a4305, type: 2}
-    - {fileID: 11400000, guid: 28e676d288ab640929b5ec8db46a32f0, type: 2}
-    - {fileID: 11400000, guid: 5e56f35b84c87456c813480ddd6f4f71, type: 2}
-    - {fileID: 11400000, guid: 6d63918d0aca94c7fa71d23ff87dbf58, type: 2}
-    - {fileID: 11400000, guid: 2bd38d7f8c9334fec9e81f76e5c8289a, type: 2}
+    shorelineColor: {r: 1, g: 0.827451, b: 0.2509804, a: 1}
     depthOverlayColor: {r: 0.93333334, g: 0.32156864, b: 0.09411765, a: 1}

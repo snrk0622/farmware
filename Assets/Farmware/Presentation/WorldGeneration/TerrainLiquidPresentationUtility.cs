@@ -4,6 +4,7 @@
 using System;
 using Farmware.Simulation;
 
+
 namespace Farmware.WorldGeneration.Presentation
 {
     /// <summary>
@@ -26,8 +27,8 @@ namespace Farmware.WorldGeneration.Presentation
     }
 
     /// <summary>
-    /// 1つの液体セルへ描く奥・左・右の接触線を3bitで表します。
-    /// 0を除く1〜7は、Editorが生成する7種類の水際アニメーションTileへそのまま対応します。
+    /// 1つの液体セルへ描く奥・左・右の接触線、左右の内角、裏側の終端クリップを7bitで表します。
+    /// 形状だけを共有Tileの頂点Alphaへ渡し、明暗の動きは水際Shaderが共通時間から計算します。
     /// </summary>
     [Flags]
     public enum TerrainLiquidEdgeMask : byte
@@ -42,7 +43,19 @@ namespace Farmware.WorldGeneration.Presentation
         Left = 1 << 1,
 
         /// <summary>画面右、すなわちワールドXが1大きい辺です。</summary>
-        Right = 1 << 2
+        Right = 1 << 2,
+
+        /// <summary>左奥の岸から隣の奥辺へつなぐ、セル上端3pxと接点の短い線です。</summary>
+        LeftInnerCorner = 1 << 3,
+
+        /// <summary>右奥の岸から隣の奥辺へつなぐ、セル上端3pxと接点の短い線です。</summary>
+        RightInnerCorner = 1 << 4,
+
+        /// <summary>左岸が地面の裏側へ回り込む終端で、左線の上端3pxを隠す印です。</summary>
+        LeftBackEndpoint = 1 << 5,
+
+        /// <summary>右岸が地面の裏側へ回り込む終端で、右線の上端3pxを隠す印です。</summary>
+        RightBackEndpoint = 1 << 6
     }
 
     /// <summary>
@@ -93,6 +106,12 @@ namespace Farmware.WorldGeneration.Presentation
         /// <summary>1つの論理地形セルを構成する画素数です。</summary>
         public const int PixelsPerCell = 16;
 
+        /// <summary>接触辺3種、内角2種、終端クリップ2種を組み合わせた、Shaderへ渡せる最大マスク値です。</summary>
+        public const int MaximumEdgeMask = 127;
+
+        /// <summary>水際の明暗模様を繰り返す幅です。絶対座標をこの画素数で丸めて遠方のfloat精度低下を防ぎます。</summary>
+        public const int ShorelinePatternPeriodPixels = 4096;
+
         /// <summary>直下床ありの青Overlayが最大Alphaへ達する、クリップ後の表示深度です。</summary>
         public const int WithFloorFadePixels = 45;
 
@@ -111,6 +130,8 @@ namespace Farmware.WorldGeneration.Presentation
         /// <summary>深度勾配が最大Alphaへ到達し、以降の水面を同じ濃度へ固定する表示段です。</summary>
         public const int SaturatedDepthStage = MaximumFaceDepth;
 
+
+
         /// <summary>垂直面反射Proxyを表示する最大段数です。16px×2段で32pxです。</summary>
         public const int MaximumReflectionDepth = 2;
 
@@ -119,6 +140,13 @@ namespace Farmware.WorldGeneration.Presentation
 
         /// <summary>水中床を隠しすぎない反射Proxyの最大Alphaです。</summary>
         public const float ReflectionMaximumAlpha = 0.22f;
+
+        /// <summary>中心pivotで縦圧縮した反射の上端を、水面の上端3pxクリップへ一致させるタイル単位の移動量です。</summary>
+        public const float ReflectionSurfaceOffsetInTiles = (1f - ReflectionVerticalCompression) * 0.5f
+            - SurfaceClipPixels / (float)PixelsPerCell;
+
+        /// <summary>2段のWall Faceを0.75倍した、反射全体の表示深度です。水面から24pxで透明になります。</summary>
+        public const float ReflectionVisibleDepthPixels = MaximumReflectionDepth * PixelsPerCell * ReflectionVerticalCompression;
 
         /// <summary>行別の反射変位を進める速度です。単位は画素段階/秒です。</summary>
         public const float ReflectionWavePixelsPerSecond = 4f;
@@ -154,13 +182,13 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// 現在の液体セルがGroundまたはWallへ接する奥・左・右の辺を選びます。
+        /// 現在の液体セルがGroundまたはWallへ接する奥・左・右の辺、斜め奥の内角、裏側の終端を選びます。
         /// 手前辺は斜め見下ろしで前景を横切るため、隣接地形にかかわらず選択しません。
         /// </summary>
         /// <param name="neighborhood">中心と周囲8チャンクの完成済み地形です。</param>
         /// <param name="localX">中心チャンク基準の現在セルXです。</param>
         /// <param name="localY">中心チャンク基準の現在セルYです。</param>
-        /// <returns>0〜7の3bit接触辺です。現在セルが液体でなければNoneです。</returns>
+        /// <returns>0〜127の接触形状です。現在セルが液体でなければNoneです。</returns>
         public static TerrainLiquidEdgeMask SelectEdgeMask(
             in CompletedChunkTerrainNeighborhood neighborhood,
             int localX,
@@ -188,7 +216,92 @@ namespace Farmware.WorldGeneration.Presentation
                 mask |= TerrainLiquidEdgeMask.Right;
             }
 
+            // 奥と横が同種の水で、斜め奥だけが岸なら、通常の3方向判定では内角の3pxが欠けます。
+            // 水が実際につながる場合だけ短い線を補い、別種の液体や空セルをまたいで接続しません。
+            if ((mask & TerrainLiquidEdgeMask.Back) == 0
+                && IsSameLiquidNeighbor(neighborhood, localX, localY + 1, current))
+            {
+                // 横の岸が斜め奥へ続かない場所は、地面の裏側へ回り込む終端です。
+                // 左右を別々に判定し、縦岸の途中や反対側の連続線まで3px切らないようにします。
+                if ((mask & TerrainLiquidEdgeMask.Left) != 0
+                    && !IsSolidNeighbor(neighborhood, localX - 1, localY + 1))
+                {
+                    mask |= TerrainLiquidEdgeMask.LeftBackEndpoint;
+                }
+
+                if ((mask & TerrainLiquidEdgeMask.Right) != 0
+                    && !IsSolidNeighbor(neighborhood, localX + 1, localY + 1))
+                {
+                    mask |= TerrainLiquidEdgeMask.RightBackEndpoint;
+                }
+
+                if ((mask & TerrainLiquidEdgeMask.Left) == 0
+                    && IsSameLiquidNeighbor(neighborhood, localX - 1, localY, current)
+                    && IsSolidNeighbor(neighborhood, localX - 1, localY + 1))
+                {
+                    mask |= TerrainLiquidEdgeMask.LeftInnerCorner;
+                }
+
+                if ((mask & TerrainLiquidEdgeMask.Right) == 0
+                    && IsSameLiquidNeighbor(neighborhood, localX + 1, localY, current)
+                    && IsSolidNeighbor(neighborhood, localX + 1, localY + 1))
+                {
+                    mask |= TerrainLiquidEdgeMask.RightInnerCorner;
+                }
+            }
+
             return mask;
+        }
+
+        /// <summary>水際Shaderと同じ1px接触形状を、画素単位の回帰テスト用に求めます。状態は変更しません。</summary>
+        /// <param name="mask">奥・左右・内角と裏側終端クリップの接触形状です。</param>
+        /// <param name="pixelX">セル左端を0とする0〜15の画素列です。</param>
+        /// <param name="pixelY">セル下端を0とする0〜15の画素行です。</param>
+        /// <returns>この画素が静止した接触線上ならtrueです。</returns>
+        public static bool IsShorelinePixel(TerrainLiquidEdgeMask mask, int pixelX, int pixelY)
+        {
+            if (pixelX < 0 || pixelX >= PixelsPerCell || pixelY < 0 || pixelY >= PixelsPerCell)
+            {
+                return false;
+            }
+
+            int top = PixelsPerCell - SurfaceClipPixels - 1;
+            bool back = (mask & TerrainLiquidEdgeMask.Back) != 0;
+            // 奥岸と裏側の終端だけ上端3pxを隠します。終端でない縦岸は全16pxを描いて接続を保ちます。
+            bool leftRow = pixelY <= top || (!back && (mask & TerrainLiquidEdgeMask.LeftBackEndpoint) == 0);
+            bool rightRow = pixelY <= top || (!back && (mask & TerrainLiquidEdgeMask.RightBackEndpoint) == 0);
+            return (back && pixelY == top)
+                || (pixelX == 0 && leftRow && (mask & TerrainLiquidEdgeMask.Left) != 0)
+                || (pixelX == PixelsPerCell - 1 && rightRow && (mask & TerrainLiquidEdgeMask.Right) != 0)
+                || (!back && pixelX == 0 && pixelY >= top && (mask & TerrainLiquidEdgeMask.LeftInnerCorner) != 0)
+                || (!back && pixelX == PixelsPerCell - 1 && pixelY >= top && (mask & TerrainLiquidEdgeMask.RightInnerCorner) != 0);
+        }
+
+        /// <summary>表示原点を模様周期内の絶対画素オフセットへ変換し、Floating Originでも明暗の位置を保ちます。</summary>
+        /// <param name="absoluteTileCoordinate">表示原点のXまたはYです。単位は論理タイルです。</param>
+        /// <returns>0以上4096未満の画素オフセットです。</returns>
+        public static int GetShorelineOriginPixelOffset(int absoluteTileCoordinate)
+        {
+            // 先にlongへ拡張することで、int座標の端でも16倍が周回しないようにします。
+            long pixels = (long)absoluteTileCoordinate * PixelsPerCell;
+            long remainder = pixels % ShorelinePatternPeriodPixels;
+            return (int)(remainder < 0 ? remainder + ShorelinePatternPeriodPixels : remainder);
+        }
+
+        /// <summary>内角をつなぐ2つの隣接セルが、岸ではなく現在セルと同じ液体か確認します。</summary>
+        /// <param name="neighborhood">差分適用済みの完成地形です。</param>
+        /// <param name="localX">確認するXです。</param>
+        /// <param name="localY">確認するYです。</param>
+        /// <param name="current">比較元の液体セルです。</param>
+        /// <returns>同種液体が岸に遮られず存在する場合はtrueです。</returns>
+        private static bool IsSameLiquidNeighbor(
+            in CompletedChunkTerrainNeighborhood neighborhood, int localX, int localY,
+            in GeneratedTerrainCell current)
+        {
+            return neighborhood.TryGetTile(localX, localY, out GeneratedTerrainCell neighbor)
+                && !neighbor.GroundBlockRuntimeId.IsValid
+                && !neighbor.WallBlockRuntimeId.IsValid
+                && neighbor.LiquidRuntimeId.Value == current.LiquidRuntimeId.Value;
         }
 
         /// <summary>
@@ -258,6 +371,7 @@ namespace Farmware.WorldGeneration.Presentation
             // 次の段6を返して開始時点から最大Alphaへ固定します。
             return SaturatedDepthStage;
         }
+
 
         /// <summary>
         /// 同じ水が奥側Groundまで連続する場合に、液体越しへ通常Faceを最大6段投影します。
@@ -388,7 +502,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="hasUnderwaterFloor">直下1層に表示可能な床がある場合はtrueです。</param>
         /// <returns>床ありは48pxで0.5、床なしは96pxで1へ達し、その後は最大値を維持します。</returns>
         public static float GetDepthOverlayAlpha(
-            int depthFromTopPixels,
+            float depthFromTopPixels,
             bool hasUnderwaterFloor)
         {
             if (depthFromTopPixels <= SurfaceClipPixels)
@@ -411,53 +525,6 @@ namespace Farmware.WorldGeneration.Presentation
             return normalizedDepth * maximumAlpha;
         }
 
-        /// <summary>16px段の上端に対応する青Overlay Alphaを返します。</summary>
-        /// <param name="depthStage">水際直下を0とする非負の表示段です。</param>
-        /// <param name="hasUnderwaterFloor">直下1層に表示可能な床がある場合はtrueです。</param>
-        /// <returns>Shaderへ頂点色として渡す段開始Alphaです。</returns>
-        public static float GetDepthStageStartAlpha(
-            int depthStage,
-            bool hasUnderwaterFloor)
-        {
-            return depthStage < 0
-                ? 0f
-                : GetDepthOverlayAlpha(depthStage * PixelsPerCell, hasUnderwaterFloor);
-        }
-
-        /// <summary>
-        /// 左・中央・右セルの段開始Alphaを、現在タイル内の画素列へ連続的に補間します。
-        /// </summary>
-        /// <param name="leftStageStartAlpha">左隣セル中央の段開始Alphaです。</param>
-        /// <param name="centerStageStartAlpha">現在セル中央の段開始Alphaです。</param>
-        /// <param name="rightStageStartAlpha">右隣セル中央の段開始Alphaです。</param>
-        /// <param name="pixelColumn">現在16pxタイル内の左端を0とする画素列です。</param>
-        /// <returns>隣接タイルとの境界で急変しない、現在画素列の段開始Alphaです。</returns>
-        public static float GetHorizontallySmoothedDepthStageStartAlpha(
-            float leftStageStartAlpha,
-            float centerStageStartAlpha,
-            float rightStageStartAlpha,
-            int pixelColumn)
-        {
-            int clampedColumn = pixelColumn < 0
-                ? 0
-                : pixelColumn >= PixelsPerCell
-                    ? PixelsPerCell - 1
-                    : pixelColumn;
-            float normalizedPixelCenter = (clampedColumn + 0.5f) / PixelsPerCell;
-
-            // セル中央同士を直線で結ぶため、左半分は左→中央、右半分は中央→右を使います。
-            // これにより岸が階段状でも、16px境界で濃度が一度に切り替わる矩形帯を防げます。
-            if (normalizedPixelCenter < 0.5f)
-            {
-                float leftInterpolation = normalizedPixelCenter + 0.5f;
-                return leftStageStartAlpha
-                    + ((centerStageStartAlpha - leftStageStartAlpha) * leftInterpolation);
-            }
-
-            float rightInterpolation = normalizedPixelCenter - 0.5f;
-            return centerStageStartAlpha
-                + ((rightStageStartAlpha - centerStageStartAlpha) * rightInterpolation);
-        }
 
         /// <summary>
         /// 4段階の時間と画素行から、0、+1、0、-1の整数水平変位を行別位相付きで返します。
@@ -475,6 +542,19 @@ namespace Farmware.WorldGeneration.Presentation
             }
 
             return phase == 3 ? -1 : 0;
+        }
+
+        /// <summary>水面から離れるほど反射を薄くし、24pxの投影終端で矩形状に切れない可視率を返します。</summary>
+        /// <param name="depthFromSurfacePixels">3px低い実水面を0とする表示画素深度です。</param>
+        /// <returns>水面より上は0、水面で1、24px以深で0です。</returns>
+        public static float GetReflectionVisibility(float depthFromSurfacePixels)
+        {
+            if (depthFromSurfacePixels < 0f)
+            {
+                return 0f;
+            }
+            float visibility = 1f - depthFromSurfacePixels / ReflectionVisibleDepthPixels;
+            return visibility > 0f ? visibility : 0f;
         }
 
         /// <summary>指定セルがGroundまたはWallを持つ岸か判定します。</summary>
