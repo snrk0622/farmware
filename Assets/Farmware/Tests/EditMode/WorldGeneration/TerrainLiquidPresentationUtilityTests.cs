@@ -87,6 +87,77 @@ namespace Farmware.WorldGeneration.Tests
                 "床ありは最大50%へ到達した後に濃くしてはいけません。");
         }
 
+        /// <summary>左右セルの深度差をタイル内へ分散し、16px境界で矩形状に濃度が飛ばないことを保証します。</summary>
+        [Test]
+        public void DepthOverlay_HorizontallySmoothsAdjacentStageStarts()
+        {
+            const float shallowAlpha = 0f;
+            const float deepAlpha = 0.25f;
+            float shallowRightPixel =
+                TerrainLiquidPresentationUtility.GetHorizontallySmoothedDepthStageStartAlpha(
+                    shallowAlpha,
+                    shallowAlpha,
+                    deepAlpha,
+                    TerrainLiquidPresentationUtility.PixelsPerCell - 1);
+            float deepLeftPixel =
+                TerrainLiquidPresentationUtility.GetHorizontallySmoothedDepthStageStartAlpha(
+                    shallowAlpha,
+                    deepAlpha,
+                    deepAlpha,
+                    0);
+
+            Assert.That(shallowRightPixel, Is.GreaterThan(shallowAlpha));
+            Assert.That(deepLeftPixel, Is.LessThan(deepAlpha));
+            Assert.That(
+                deepLeftPixel - shallowRightPixel,
+                Is.EqualTo(deepAlpha / TerrainLiquidPresentationUtility.PixelsPerCell)
+                    .Within(0.00001f),
+                "隣接セル間の全濃度差を境界1pxへ残さず、セル中央間の16pxへ均等に分散します。");
+        }
+
+        /// <summary>93px勾配を過ぎた深部は段6へ固定し、最終16px勾配を各タイルで繰り返さないことを保証します。</summary>
+        [Test]
+        public void WaterDepth_BeyondNinetySixPixelsStaysAtSaturatedStage()
+        {
+            CompletedChunkTerrainNeighborhood neighborhood = CreateEmptyNeighborhood(
+                out NativeArray<GeneratedTerrainCell> center);
+            for (int y = 20; y < 28; y++)
+            {
+                SetCell(center, 20, y, Liquid(runtimeIds.FreshWater));
+            }
+
+            SetCell(center, 20, 28, Ground(201));
+
+            Assert.That(
+                TerrainLiquidPresentationUtility.GetClampedWaterDepth(
+                    neighborhood,
+                    20,
+                    22,
+                    runtimeIds),
+                Is.EqualTo(5),
+                "岸まで6セルの位置は、最後の16px勾配を描く段5です。");
+            Assert.That(
+                TerrainLiquidPresentationUtility.GetClampedWaterDepth(
+                    neighborhood,
+                    20,
+                    21,
+                    runtimeIds),
+                Is.EqualTo(TerrainLiquidPresentationUtility.SaturatedDepthStage),
+                "岸まで7セル以上の位置は、勾配を繰り返さない段6です。");
+            Assert.That(
+                TerrainLiquidPresentationUtility.GetDepthStageStartAlpha(
+                    TerrainLiquidPresentationUtility.SaturatedDepthStage,
+                    hasUnderwaterFloor: false),
+                Is.EqualTo(1f),
+                "床なし深部はタイル上端から完全不透明を維持します。");
+            Assert.That(
+                TerrainLiquidPresentationUtility.GetDepthStageStartAlpha(
+                    TerrainLiquidPresentationUtility.SaturatedDepthStage,
+                    hasUnderwaterFloor: true),
+                Is.EqualTo(0.5f),
+                "床あり深部はタイル上端から最大50%を維持します。");
+        }
+
         /// <summary>奥・左・右だけを3bitへ詰め、画面手前の岸を波線へ含めないことを保証します。</summary>
         [Test]
         public void EdgeMask_SelectsSevenCombinationsWithoutFrontEdge()
@@ -178,6 +249,42 @@ namespace Farmware.WorldGeneration.Tests
                 "不透明マグマの背後へ通常Faceを表示してはいけません。");
         }
 
+        /// <summary>岸にWallがあっても、その設置面Groundの断面を水中6段へ続け、濃紺の欠けた列を作らないことを保証します。</summary>
+        [Test]
+        public void WaterFaceProjection_UsesGroundBelowShoreWallForEveryStage()
+        {
+            CompletedChunkTerrainNeighborhood neighborhood = CreateEmptyNeighborhood(
+                out NativeArray<GeneratedTerrainCell> center);
+            GeneratedTerrainCell shore = Ground(401);
+            shore.WallBlockRuntimeId = new DefinitionRuntimeId(501);
+            SetCell(center, 10, 16, shore);
+            for (int y = 10; y < 16; y++)
+            {
+                SetCell(center, 10, y, Liquid(runtimeIds.SaltWater));
+            }
+
+            // 上面を高く表示するWallの有無で、水面より下のGroundが欠落してはいけません。
+            for (int stage = 0; stage < TerrainLiquidPresentationUtility.MaximumFaceDepth; stage++)
+            {
+                Assert.That(
+                    TerrainLiquidPresentationUtility.TryProjectGroundFaceThroughWater(
+                        neighborhood, 10, 15 - stage, runtimeIds,
+                        out TerrainLiquidFaceProjection projection), Is.True);
+                Assert.That(projection.FaceDepth, Is.EqualTo(stage));
+                Assert.That(projection.SourceCell.GroundBlockRuntimeId.Value, Is.EqualTo(401));
+                Assert.That(
+                    TerrainLiquidPresentationUtility.GetClampedWaterDepth(
+                        neighborhood, 10, 15 - stage, runtimeIds), Is.EqualTo(stage));
+            }
+
+            // 設置面GroundがないWallは、奥に別材質のGroundがあっても越えて投影しません。
+            SetCell(center, 10, 16, Wall(501));
+            SetCell(center, 10, 17, Ground(402));
+            Assert.That(
+                TerrainLiquidPresentationUtility.TryProjectGroundFaceThroughWater(
+                    neighborhood, 10, 15, runtimeIds, out _), Is.False);
+        }
+
         /// <summary>淡水・海水だけが32px以内のWall Faceを反射し、Ground上面とマグマを対象外にすることを保証します。</summary>
         [Test]
         public void ReflectionProjection_UsesOnlyVerticalWallFacesWithinTwoStages()
@@ -250,6 +357,9 @@ namespace Farmware.WorldGeneration.Tests
         [Test]
         public void ProductLiquidMaterials_UseProductShadersAndDocumentedValues()
         {
+            TerrainLiquidPresentationCatalog catalog =
+                AssetDatabase.LoadAssetAtPath<TerrainLiquidPresentationCatalog>(
+                    "Assets/Farmware/Art/WorldGeneration/Liquids/Published/TerrainLiquidPresentationCatalog.asset");
             Material surface = AssetDatabase.LoadAssetAtPath<Material>(
                 "Assets/Farmware/Art/WorldGeneration/Materials/TerrainLiquidSurface.mat");
             Material withFloor = AssetDatabase.LoadAssetAtPath<Material>(
@@ -269,6 +379,38 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(withoutFloor, Is.Not.Null);
             Assert.That(withoutFloor.GetFloat("_FadePixels"), Is.EqualTo(93f));
             Assert.That(withoutFloor.GetFloat("_MaximumAlpha"), Is.EqualTo(1f));
+            Assert.That(catalog, Is.Not.Null);
+            Assert.That(catalog.TryInitialize(out string catalogError), Is.True, catalogError);
+            Assert.That(
+                catalog.TryGetDefinition(
+                    TerrainLiquidVisualKind.FreshWater,
+                    out TerrainLiquidPresentationDefinition freshWater),
+                Is.True);
+            Assert.That(
+                catalog.TryGetDefinition(
+                    TerrainLiquidVisualKind.SaltWater,
+                    out TerrainLiquidPresentationDefinition saltWater),
+                Is.True);
+            Assert.That(
+                Vector4.Distance(
+                    withFloor.GetColor("_FreshWaterColor"),
+                    freshWater.DepthOverlayColor),
+                Is.LessThan(0.0001f));
+            Assert.That(
+                Vector4.Distance(
+                    withFloor.GetColor("_SaltWaterColor"),
+                    saltWater.DepthOverlayColor),
+                Is.LessThan(0.0001f));
+            Assert.That(
+                Vector4.Distance(
+                    withoutFloor.GetColor("_FreshWaterColor"),
+                    freshWater.DepthOverlayColor),
+                Is.LessThan(0.0001f));
+            Assert.That(
+                Vector4.Distance(
+                    withoutFloor.GetColor("_SaltWaterColor"),
+                    saltWater.DepthOverlayColor),
+                Is.LessThan(0.0001f));
             Assert.That(reflection, Is.Not.Null);
             Assert.That(reflection.shader.name, Is.EqualTo("Farmware/Terrain/Water Reflection Proxy"));
             Assert.That(reflection.GetFloat("_MaximumAlpha"), Is.EqualTo(0.22f));
@@ -365,7 +507,7 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(duplicateEdgeError, Does.Contain("同じAssetが重複"));
         }
 
-        /// <summary>深度色と反射Spriteが同じならセル数に比例してTileを生成せず、同一参照を共有することを保証します。</summary>
+        /// <summary>液体種・近傍濃度と反射Spriteが同じなら、セル数に比例してTileを生成しないことを保証します。</summary>
         [Test]
         public void RuntimeTileCache_ReusesDepthAndReflectionTiles()
         {
@@ -373,13 +515,25 @@ namespace Farmware.WorldGeneration.Tests
             try
             {
                 TileBase firstDepth = cache.GetOrCreateDepthOverlay(
-                    new Color(0.2f, 0.4f, 0.6f, 1f),
-                    0.25f);
+                    TerrainLiquidVisualKind.FreshWater,
+                    0.1f,
+                    0.25f,
+                    0.4f);
                 TileBase secondDepth = cache.GetOrCreateDepthOverlay(
-                    new Color(0.2f, 0.4f, 0.6f, 1f),
-                    0.25f);
+                    TerrainLiquidVisualKind.FreshWater,
+                    0.1f,
+                    0.25f,
+                    0.4f);
                 Assert.That(secondDepth, Is.SameAs(firstDepth));
                 Assert.That(cache.DepthTileCount, Is.EqualTo(1));
+
+                TileBase differentNeighborDepth = cache.GetOrCreateDepthOverlay(
+                    TerrainLiquidVisualKind.FreshWater,
+                    0.1f,
+                    0.25f,
+                    0.5f);
+                Assert.That(differentNeighborDepth, Is.Not.SameAs(firstDepth));
+                Assert.That(cache.DepthTileCount, Is.EqualTo(2));
 
                 Tile sourceSurface = CreateOwned<Tile>();
                 var surfaceTexture = new Texture2D(16, 16, TextureFormat.RGBA32, false);

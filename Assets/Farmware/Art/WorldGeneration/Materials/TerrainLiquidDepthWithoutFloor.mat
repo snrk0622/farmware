@@ -16,6 +16,7 @@ Material:
   m_LightmapFlags: 4
   m_EnableInstancingVariants: 0
   m_DoubleSidedGI: 0
+  m_CustomRenderQueue: -1
   stringTagMap: {}
   disabledShaderPasses: []
   m_LockedProperties:
@@ -34,5 +35,7 @@ Material:
     - _PixelsPerCell: 16
     m_Colors:
     - _Color: {r: 1, g: 1, b: 1, a: 1}
+    - _FreshWaterColor: {r: 0.09411765, g: 0.28235295, b: 0.3764706, a: 1}
+    - _SaltWaterColor: {r: 0.0627451, g: 0.16470589, b: 0.28235295, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

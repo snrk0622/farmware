@@ -1,7 +1,7 @@
 // [UNITY-SKILL:SPRITEATLAS]
 // [TYPE:PREBUILD]
 // [VERSION:2.0.3]
-// このファイルは、新18Biomeの仮土地・本番用岩壁・共通境界ハイライトをSprite Atlas V2へまとめ、Tilemapの描画を安定させます。
+// このファイルは、新18Biomeの仮土地と本番用岩壁をSprite Atlas V2へまとめ、Tilemapの描画を安定させます。
 // WorldGenerationSceneBootstrapからEditor確認用に呼ばれ、Playerビルド前にはIPreprocessBuildWithReportから同じ設定を再適用します。
 
 using System;
@@ -19,7 +19,7 @@ using UnityEngine.U2D;
 namespace Farmware.WorldGeneration.Editor
 {
     /// <summary>
-    /// Playerビルド開始前に土地・岩壁・共通境界Atlasを再生成し、設定漏れや複数ページ化をビルドへ持ち込まないためのEditor専用処理です。
+    /// Playerビルド開始前に土地・岩壁Atlasを再生成し、設定漏れや複数ページ化をビルドへ持ち込まないためのEditor専用処理です。
     /// </summary>
     public sealed class WorldGenerationSpriteAtlasPrebuildGenerator : IPreprocessBuildWithReport
     {
@@ -41,11 +41,13 @@ namespace Farmware.WorldGeneration.Editor
             }
 
             WorldGenerationSpriteAtlasBuilder.GenerateOrUpdateAtlases(report.summary.platform);
+            // 製品表示は41材質の公開Atlasを正とするため、ビルド直前にも制作設定と完成Assetの一致を検証します。
+            TerrainMaterialProductPublisher.PublishAll();
         }
     }
 
     /// <summary>
-    /// 新18Biomeの一体型仮土地、本番用岩壁、共通境界ハイライトのSprite Atlas V2を冪等に生成します。
+    /// 新18Biomeの一体型仮土地と本番用岩壁のSprite Atlas V2を冪等に生成します。
     /// </summary>
     public static class WorldGenerationSpriteAtlasBuilder
     {
@@ -60,24 +62,12 @@ namespace Farmware.WorldGeneration.Editor
         public const string RockWallAtlasPath =
             AtlasAssetFolder + "/RockWallAtlas.spriteatlasv2";
 
-        /// <summary>14基本形の共通境界ハイライトを独立管理するAtlasのアセットパスです。</summary>
-        public const string BoundaryHighlightAtlasPath =
-            AtlasAssetFolder + "/BoundaryHighlightAtlas.spriteatlasv2";
-
         /// <summary>上面16pxと側面12pxを一体化した本番用岩壁Textureパスです。</summary>
         public const string ProductionRockWallTexturePath =
             "Assets/Farmware/Art/WorldGeneration/Terrain/Base/terrain_rock_wall_01.png";
 
-        /// <summary>14基本形を16pxずつ横一列に収録した共通境界ハイライトTextureパスです。</summary>
-        public const string BoundaryHighlightTexturePath =
-            "Assets/Farmware/Art/WorldGeneration/Terrain/Highlights/terrain_boundary_highlights.png";
-
         /// <summary>C5-Cの土地Atlasへ必ず存在する新Biome Sprite数です。</summary>
         public const int ExpectedBiomeSpriteCount = BiomeStableIds.Count;
-
-        /// <summary>共通境界ハイライトシートに必ず存在するSprite数です。</summary>
-        public const int ExpectedBoundaryHighlightSpriteCount =
-            TerrainBoundaryHighlightUtility.ExpectedSpriteCount;
 
         /// <summary>Atlasの1ページへ許可する最大辺長です。単位はピクセルです。</summary>
         public const int AtlasMaxTextureSize = 512;
@@ -125,31 +115,6 @@ namespace Farmware.WorldGeneration.Editor
             ProductionRockWallTexturePath
         };
 
-        /// <summary>境界ハイライトAtlasへ収録する元Textureパスです。</summary>
-        private static readonly string[] BoundaryHighlightSourceTexturePaths =
-        {
-            BoundaryHighlightTexturePath
-        };
-
-        /// <summary>境界ハイライトシートを左から右へSliceしたときの安定したSprite名です。</summary>
-        private static readonly string[] ExpectedBoundaryHighlightSpriteNames =
-        {
-            "terrain_boundary_highlight_01",
-            "terrain_boundary_highlight_02",
-            "terrain_boundary_highlight_03",
-            "terrain_boundary_highlight_04",
-            "terrain_boundary_highlight_05",
-            "terrain_boundary_highlight_06",
-            "terrain_boundary_highlight_07",
-            "terrain_boundary_highlight_08",
-            "terrain_boundary_highlight_09",
-            "terrain_boundary_highlight_10",
-            "terrain_boundary_highlight_11",
-            "terrain_boundary_highlight_12",
-            "terrain_boundary_highlight_13",
-            "terrain_boundary_highlight_14"
-        };
-
         /// <summary>
         /// 土地Atlasへ収録する元Textureパスを、呼び出し元が書き換えられないコピーとして返します。
         /// </summary>
@@ -178,25 +143,7 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>
-        /// 境界ハイライトAtlasへ収録する元Textureパスを、呼び出し元が書き換えられないコピーとして返します。
-        /// </summary>
-        /// <returns>Unityプロジェクト相対パスを格納した新しい配列です。</returns>
-        public static string[] GetBoundaryHighlightSourceTexturePaths()
-        {
-            return (string[])BoundaryHighlightSourceTexturePaths.Clone();
-        }
-
-        /// <summary>
-        /// 境界ハイライトシートへ必要なSprite名を、呼び出し元が書き換えられないコピーとして返します。
-        /// </summary>
-        /// <returns>画像の左から右への14個の安定したSprite名です。</returns>
-        public static string[] GetExpectedBoundaryHighlightSpriteNames()
-        {
-            return (string[])ExpectedBoundaryHighlightSpriteNames.Clone();
-        }
-
-        /// <summary>
-        /// 現在選択中のBuildTarget向けに土地・岩壁・共通境界Atlasを生成し、EditorのPlayMode確認へ即時反映します。
+        /// 現在選択中のBuildTarget向けに土地・岩壁Atlasを生成し、EditorのPlayMode確認へ即時反映します。
         /// </summary>
         /// <remarks>Atlasアセット、Importer設定、Sprite Packer設定を更新し、パック結果も再生成します。</remarks>
         public static void GenerateOrUpdateAtlases()
@@ -205,7 +152,7 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>
-        /// 指定BuildTarget向けに土地・岩壁・共通境界Atlasを生成し、各Atlasの対象Spriteが1枚のTextureへパックされたことを検証します。
+        /// 指定BuildTarget向けに土地・岩壁Atlasを生成し、各Atlasの対象Spriteが1枚のTextureへパックされたことを検証します。
         /// </summary>
         /// <param name="buildTarget">Atlasをパックして検証するUnityのBuildTargetです。</param>
         /// <remarks>Atlasアセット、Importer設定、Sprite Packer設定を更新します。</remarks>
@@ -215,13 +162,9 @@ namespace Farmware.WorldGeneration.Editor
             EnsureFolderHierarchy(AtlasAssetFolder);
             ValidateFallbackBiomeSprites();
             ValidateProductionRockWallSprite();
-            ValidateBoundaryHighlightSpriteSheet();
 
             GenerateOrUpdateAtlas(GroundTerrainAtlasPath, GroundTerrainSourceTexturePaths);
             GenerateOrUpdateAtlas(RockWallAtlasPath, RockWallSourceTexturePaths);
-            GenerateOrUpdateAtlas(
-                BoundaryHighlightAtlasPath,
-                BoundaryHighlightSourceTexturePaths);
 
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
@@ -233,7 +176,7 @@ namespace Farmware.WorldGeneration.Editor
             Debug.Log(
                 $"Farmwareの地形Sprite Atlasを更新しました。"
                 + $" Target={buildTarget}, Ground={GroundTerrainAtlasPath}, "
-                + $"RockWall={RockWallAtlasPath}, Boundary={BoundaryHighlightAtlasPath}");
+                + $"RockWall={RockWallAtlasPath}");
         }
 
         /// <summary>
@@ -363,51 +306,6 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>
-        /// 共通境界ハイライトが14枚の16×16区画として、安定した名前順でImportされていることを確認します。
-        /// </summary>
-        /// <exception cref="InvalidOperationException">Sprite数、寸法、位置、名前が期待と異なる場合に送出します。</exception>
-        private static void ValidateBoundaryHighlightSpriteSheet()
-        {
-            Sprite[] sprites = AssetDatabase.LoadAllAssetsAtPath(BoundaryHighlightTexturePath)
-                .OfType<Sprite>()
-                .OrderBy(sprite => sprite.rect.x)
-                .ToArray();
-            if (sprites.Length != ExpectedBoundaryHighlightSpriteCount)
-            {
-                throw new InvalidOperationException(
-                    $"境界ハイライトシートは{ExpectedBoundaryHighlightSpriteCount}枚へSliceしてください: "
-                    + $"{BoundaryHighlightTexturePath}, actual={sprites.Length}");
-            }
-
-            for (int index = 0; index < ExpectedBoundaryHighlightSpriteNames.Length; index++)
-            {
-                Sprite sprite = sprites[index];
-                Rect rect = sprite.rect;
-                bool geometryIsValid = Mathf.Approximately(
-                        rect.x,
-                        index * TerrainBoundaryHighlightArtGenerator.SpriteSizeInPixels)
-                    && Mathf.Approximately(rect.y, 0f)
-                    && Mathf.Approximately(
-                        rect.width,
-                        TerrainBoundaryHighlightArtGenerator.SpriteSizeInPixels)
-                    && Mathf.Approximately(
-                        rect.height,
-                        TerrainBoundaryHighlightArtGenerator.SpriteSizeInPixels);
-                if (!geometryIsValid
-                    || !string.Equals(
-                        sprite.name,
-                        ExpectedBoundaryHighlightSpriteNames[index],
-                        StringComparison.Ordinal))
-                {
-                    throw new InvalidOperationException(
-                        $"境界ハイライトSpriteの順序、名前、または16px区画が不正です: "
-                        + $"index={index}, expected={ExpectedBoundaryHighlightSpriteNames[index]}, "
-                        + $"actual={sprite.name}, rect={rect}");
-                }
-            }
-        }
-
-        /// <summary>
         /// 元Textureを順番どおり読み込み、Sprite Importされていない画像や欠落ファイルを早期に報告します。
         /// </summary>
         /// <param name="sourceTexturePaths">確認・読み込み対象のUnityプロジェクト相対パスです。</param>
@@ -491,10 +389,8 @@ namespace Farmware.WorldGeneration.Editor
         {
             SpriteAtlas groundAtlas = LoadRequiredRuntimeAtlas(GroundTerrainAtlasPath);
             SpriteAtlas rockWallAtlas = LoadRequiredRuntimeAtlas(RockWallAtlasPath);
-            SpriteAtlas boundaryHighlightAtlas =
-                LoadRequiredRuntimeAtlas(BoundaryHighlightAtlasPath);
             SpriteAtlasUtility.PackAtlases(
-                new[] { groundAtlas, rockWallAtlas, boundaryHighlightAtlas },
+                new[] { groundAtlas, rockWallAtlas },
                 buildTarget,
                 canCancel: false);
 
@@ -504,9 +400,6 @@ namespace Farmware.WorldGeneration.Editor
             ValidateSpritesSharePackedTexture(
                 RockWallAtlasPath,
                 RockWallSourceTexturePaths);
-            ValidateSpritesSharePackedTexture(
-                BoundaryHighlightAtlasPath,
-                BoundaryHighlightSourceTexturePaths);
         }
 
         /// <summary>

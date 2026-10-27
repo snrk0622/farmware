@@ -108,6 +108,9 @@ namespace Farmware.WorldGeneration.Presentation
         /// <summary>通常Faceを水越しに続ける最大段数です。</summary>
         public const int MaximumFaceDepth = 6;
 
+        /// <summary>深度勾配が最大Alphaへ到達し、以降の水面を同じ濃度へ固定する表示段です。</summary>
+        public const int SaturatedDepthStage = MaximumFaceDepth;
+
         /// <summary>垂直面反射Proxyを表示する最大段数です。16px×2段で32pxです。</summary>
         public const int MaximumReflectionDepth = 2;
 
@@ -207,13 +210,13 @@ namespace Farmware.WorldGeneration.Presentation
 
         /// <summary>
         /// 水際から現在セルまで同じ水が連続する段数を求めます。
-        /// 6段より深い水域は最深段へ丸め、描画範囲外の探索や全水域走査を行いません。
+        /// 6段より深い水域は勾配完了段へ丸め、描画範囲外の探索や全水域走査を行いません。
         /// </summary>
         /// <param name="neighborhood">中心と周囲8チャンクの完成済み地形です。</param>
         /// <param name="localX">中心チャンク基準の現在セルXです。</param>
         /// <param name="localY">中心チャンク基準の現在セルYです。</param>
         /// <param name="runtimeIds">淡水・海水・マグマを識別するRuntime IDです。</param>
-        /// <returns>水際直下の0から、6段以上を表す5までの表示段です。水でなければ-1です。</returns>
+        /// <returns>水際直下の0から、96px以深の勾配完了を表す6までの表示段です。水でなければ-1です。</returns>
         public static int GetClampedWaterDepth(
             in CompletedChunkTerrainNeighborhood neighborhood,
             int localX,
@@ -236,7 +239,7 @@ namespace Farmware.WorldGeneration.Presentation
             {
                 if (!neighborhood.TryGetTile(localX, localY + distance, out GeneratedTerrainCell candidate))
                 {
-                    return MaximumFaceDepth - 1;
+                    return SaturatedDepthStage;
                 }
 
                 if (candidate.GroundBlockRuntimeId.IsValid
@@ -247,16 +250,18 @@ namespace Farmware.WorldGeneration.Presentation
 
                 if (Classify(candidate, runtimeIds) != currentKind)
                 {
-                    return MaximumFaceDepth - 1;
+                    return SaturatedDepthStage;
                 }
             }
 
-            return MaximumFaceDepth - 1;
+            // 5を返すと最終16pxの勾配が深部の全タイルで繰り返され、横帯として見えるため、
+            // 次の段6を返して開始時点から最大Alphaへ固定します。
+            return SaturatedDepthStage;
         }
 
         /// <summary>
         /// 同じ水が奥側Groundまで連続する場合に、液体越しへ通常Faceを最大6段投影します。
-        /// マグマ、別液体、Wall、空セルを越えず、液体専用断面Spriteを必要としません。
+        /// Ground上のWallは、その設置面Groundを水中断面の元にします。マグマ、別液体、GroundのないWall、空セルは越えません。
         /// </summary>
         /// <param name="neighborhood">中心と周囲8チャンクの完成済み地形です。</param>
         /// <param name="localX">中心チャンク基準の表示先Xです。</param>
@@ -292,12 +297,6 @@ namespace Farmware.WorldGeneration.Presentation
                     return false;
                 }
 
-                if (candidate.WallBlockRuntimeId.IsValid)
-                {
-                    // Wall前面とその反射は別経路で扱い、Ground Faceを同じセルへ重ねません。
-                    return false;
-                }
-
                 if (candidate.GroundBlockRuntimeId.IsValid)
                 {
                     projection = new TerrainLiquidFaceProjection(
@@ -306,6 +305,13 @@ namespace Farmware.WorldGeneration.Presentation
                         sourceY,
                         distance - 1);
                     return true;
+                }
+
+                if (candidate.WallBlockRuntimeId.IsValid)
+                {
+                    // Wallの水面より上のFace・反射とは別に、設置面Groundの水中断面が必要です。
+                    // Groundを持たないWallだけは材質を推測せず、ここで投影を止めます。
+                    return false;
                 }
 
                 if (Classify(candidate, runtimeIds) != currentKind)
@@ -416,6 +422,41 @@ namespace Farmware.WorldGeneration.Presentation
             return depthStage < 0
                 ? 0f
                 : GetDepthOverlayAlpha(depthStage * PixelsPerCell, hasUnderwaterFloor);
+        }
+
+        /// <summary>
+        /// 左・中央・右セルの段開始Alphaを、現在タイル内の画素列へ連続的に補間します。
+        /// </summary>
+        /// <param name="leftStageStartAlpha">左隣セル中央の段開始Alphaです。</param>
+        /// <param name="centerStageStartAlpha">現在セル中央の段開始Alphaです。</param>
+        /// <param name="rightStageStartAlpha">右隣セル中央の段開始Alphaです。</param>
+        /// <param name="pixelColumn">現在16pxタイル内の左端を0とする画素列です。</param>
+        /// <returns>隣接タイルとの境界で急変しない、現在画素列の段開始Alphaです。</returns>
+        public static float GetHorizontallySmoothedDepthStageStartAlpha(
+            float leftStageStartAlpha,
+            float centerStageStartAlpha,
+            float rightStageStartAlpha,
+            int pixelColumn)
+        {
+            int clampedColumn = pixelColumn < 0
+                ? 0
+                : pixelColumn >= PixelsPerCell
+                    ? PixelsPerCell - 1
+                    : pixelColumn;
+            float normalizedPixelCenter = (clampedColumn + 0.5f) / PixelsPerCell;
+
+            // セル中央同士を直線で結ぶため、左半分は左→中央、右半分は中央→右を使います。
+            // これにより岸が階段状でも、16px境界で濃度が一度に切り替わる矩形帯を防げます。
+            if (normalizedPixelCenter < 0.5f)
+            {
+                float leftInterpolation = normalizedPixelCenter + 0.5f;
+                return leftStageStartAlpha
+                    + ((centerStageStartAlpha - leftStageStartAlpha) * leftInterpolation);
+            }
+
+            float rightInterpolation = normalizedPixelCenter - 0.5f;
+            return centerStageStartAlpha
+                + ((rightStageStartAlpha - centerStageStartAlpha) * rightInterpolation);
         }
 
         /// <summary>

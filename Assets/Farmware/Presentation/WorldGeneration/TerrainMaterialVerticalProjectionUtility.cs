@@ -59,11 +59,19 @@ namespace Farmware.WorldGeneration.Presentation
         /// <summary>Wall前面を表示する固定段数です。</summary>
         public const int WallFaceDepth = 2;
 
+        /// <summary>
+        /// 論理Wallセルの根元から、Wall上面を画面奥へ持ち上げるタイル数です。
+        /// 上面と根元の間にFaceを2段置くため、Wall前面の段数と同じ値を使います。
+        /// </summary>
+        public const int WallTopOffsetInTiles = WallFaceDepth;
+
         /// <summary>16pxを3段連結した乾燥崖の連続減衰距離です。</summary>
         public const int DryCliffFadePixels = GroundFaceDepth * 16;
 
         /// <summary>
-        /// 現在セルへ投影されるWall前面を、奥側1〜2セルの最初のWallから求めます。
+        /// Wall表示レイヤを根元から2タイル持ち上げる前のセル空間で、
+        /// 現在セルへ投影されるWall前面を奥側1〜2セルの最初のWallから求めます。
+        /// Tilemap Transformに同じ+2Yを適用することで、最終表示の2段目が論理Wall根元と一致します。
         /// </summary>
         /// <param name="neighborhood">中心と周囲8チャンクの完成済み地形です。</param>
         /// <param name="localX">表示対象セルの中心チャンク基準Xです。</param>

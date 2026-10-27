@@ -373,9 +373,6 @@ namespace Farmware.WorldGeneration.Editor
                 DeleteObsoleteFallbackTile(legacyName + "Sandy");
             }
 
-            // 14基本形は論理マスクから再現可能に生成し、画像順と47接続選択の対応を常に一致させます。
-            TerrainBoundaryHighlightArtGenerator.GenerateOrUpdateSpriteSheet();
-
             // 本番PNG自体は書き換えず、Importerと専用Tileだけを冪等に設定します。
             // これを毎回行うことで、構築ツールの再実行後もFallback岩壁へ参照が戻りません。
             CreateOrUpdateProductionRockWallTile();
@@ -408,9 +405,6 @@ namespace Farmware.WorldGeneration.Editor
                 LoadRequiredFallbackAnimatedTile("SaltWaterAnimation");
             AnimatedTile magmaAnimationTile =
                 LoadRequiredFallbackAnimatedTile("MagmaAnimation");
-            Sprite[] boundaryHighlightSprites =
-                TerrainBoundaryHighlightArtGenerator.LoadRequiredSprites();
-
             SceneAsset settingsSubSceneAsset = CreateOrUpdateSettingsSubScene();
             ConfigureMainScene(
                 settingsSubSceneAsset,
@@ -424,8 +418,12 @@ namespace Farmware.WorldGeneration.Editor
                 sandResourceTile,
                 freshWaterAnimationTile,
                 saltWaterAnimationTile,
-                magmaAnimationTile,
-                boundaryHighlightSprites);
+                magmaAnimationTile);
+            // 旧フォールバックSceneを構築した直後に、今回の41材質と液体3種を製品カタログへ公開して接続します。
+            // これにより再構築メニューを実行しても製品Sceneが旧一体型地形・全面液体アニメーションへ戻りません。
+            TerrainMaterialProductPublisher.PublishAll();
+            TerrainLiquidProductPublisher.PublishAll();
+            TerrainProductSceneConnector.ConnectAndSave();
             ConfigurePixelArtQualitySettings();
 
             AssetDatabase.SaveAssets();
@@ -1387,7 +1385,6 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="freshWaterAnimationTile">淡水へ重ねる透明AnimatedTileです。</param>
         /// <param name="saltWaterAnimationTile">海水へ重ねる透明AnimatedTileです。</param>
         /// <param name="magmaAnimationTile">マグマへ重ねる透明AnimatedTileです。</param>
-        /// <param name="boundaryHighlightSprites">左からShape01〜Shape14の順に並ぶ境界ハイライトSpriteです。</param>
         private static void ConfigureMainScene(
             SceneAsset settingsSubSceneAsset,
             TileBase[] biomeTiles,
@@ -1400,8 +1397,7 @@ namespace Farmware.WorldGeneration.Editor
             TileBase sandResourceTile,
             TileBase freshWaterAnimationTile,
             TileBase saltWaterAnimationTile,
-            TileBase magmaAnimationTile,
-            Sprite[] boundaryHighlightSprites)
+            TileBase magmaAnimationTile)
         {
             Scene mainScene = EditorSceneManager.OpenScene(MainScenePath, OpenSceneMode.Single);
 
@@ -1430,13 +1426,6 @@ namespace Farmware.WorldGeneration.Editor
                 mode: TilemapRenderer.Mode.Individual,
                 sortOrder: TilemapRenderer.SortOrder.TopLeft);
             ChunkTilemapPresenter presenter = GetOrAddComponent<ChunkTilemapPresenter>(tilemapObject);
-
-            GameObject landBoundaryHighlightTilemapObject =
-                FindOrCreateDirectChild(gridObject.transform, "Land Boundary Highlight Tilemap");
-            Tilemap landBoundaryHighlightTilemap =
-                GetOrAddComponent<Tilemap>(landBoundaryHighlightTilemapObject);
-            landBoundaryHighlightTilemapObject.transform.localPosition = Vector3.zero;
-            ConfigureTilemapRenderer(landBoundaryHighlightTilemapObject, sortingOrder: 1);
 
             GameObject liquidBaseTilemapObject =
                 FindOrCreateDirectChild(gridObject.transform, "Liquid Base Tilemap");
@@ -1473,30 +1462,7 @@ namespace Farmware.WorldGeneration.Editor
                 mode: TilemapRenderer.Mode.Individual,
                 sortOrder: TilemapRenderer.SortOrder.TopLeft);
 
-            GameObject rockWallBoundaryHighlightTilemapObject =
-                FindOrCreateDirectChild(
-                    gridObject.transform,
-                    "Rock Wall Boundary Highlight Tilemap");
-            Tilemap rockWallBoundaryHighlightTilemap =
-                GetOrAddComponent<Tilemap>(rockWallBoundaryHighlightTilemapObject);
-            rockWallBoundaryHighlightTilemapObject.transform.localPosition = new Vector3(
-                0f,
-                TerrainLayerPresentationUtility.RockWallElevationInCells,
-                0f);
-            // ハイライトを白のまま暗いWallへ重ねると輪郭だけが浮くため、Wall上面と同じ既定係数をRGBへ掛けます。
-            // Tile自身の20% Alphaは維持するので、合成済みのWall全体を0.85倍した場合と同じ色関係になります。
-            float wallBoundaryHighlightDarkenFactor =
-                TerrainMaterialArtSource.DefaultWallDarkenFactor;
-            rockWallBoundaryHighlightTilemap.color = new Color(
-                wallBoundaryHighlightDarkenFactor,
-                wallBoundaryHighlightDarkenFactor,
-                wallBoundaryHighlightDarkenFactor,
-                1f);
-            ConfigureTilemapRenderer(
-                rockWallBoundaryHighlightTilemapObject,
-                sortingOrder: 4);
-
-            // 直前方が岩壁の資源だけを壁より先に描き、岩壁Spriteと重なる下部を確実に隠します。
+            // ここではフォールバック用の背面レイヤーを作り、後段の製品接続で手前2セルのWall遮蔽判定を使います。
             // 固定レイヤーへ振り分けるため、無限ワールドの大きな絶対Y座標を透明ソート値に使いません。
             GameObject resourceBehindRockWallTilemapObject =
                 FindOrCreateDirectChild(gridObject.transform, "Resource Behind Rock Wall Tilemap");
@@ -1535,12 +1501,9 @@ namespace Farmware.WorldGeneration.Editor
                 liquidAnimationTilemap,
                 rockWallTilemap,
                 rockWallResourceTilemap,
-                landBoundaryHighlightTilemap,
-                rockWallBoundaryHighlightTilemap,
                 freshWaterAnimationTile,
                 saltWaterAnimationTile,
-                magmaAnimationTile,
-                boundaryHighlightSprites);
+                magmaAnimationTile);
 
             Camera camera = FindMainCamera(mainScene);
             CameraPanController panController = ConfigureCamera(camera, grid);
@@ -1574,13 +1537,10 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="liquidBaseTilemap">静止した液面を土地より8px下へ描画するTilemapです。</param>
         /// <param name="liquidAnimationTilemap">液面アニメーションを静止液面と同じ8px下へ描画するTilemapです。</param>
         /// <param name="rockWallTilemap">16×28の岩壁ブロックを基準セルへ描画するTilemapです。</param>
-        /// <param name="rockWallResourceTilemap">露出した岩壁上の資源を12px上へ描画するTilemapです。</param>
-        /// <param name="landBoundaryHighlightTilemap">通常土地の水・マグマ側へ境界を重ねるTilemapです。</param>
-        /// <param name="rockWallBoundaryHighlightTilemap">岩壁上面の境界を12px高い位置へ重ねるTilemapです。</param>
+        /// <param name="rockWallResourceTilemap">フォールバックでは12px、後段の製品接続では論理Wall根元から2タイル上へ資源を描画するTilemapです。</param>
         /// <param name="freshWaterAnimationTile">淡水へ重ねる透明AnimatedTileです。</param>
         /// <param name="saltWaterAnimationTile">海水へ重ねる透明AnimatedTileです。</param>
         /// <param name="magmaAnimationTile">マグマへ重ねる透明AnimatedTileです。</param>
-        /// <param name="boundaryHighlightSprites">左からShape01〜Shape14の順に並ぶ境界ハイライトSpriteです。</param>
         private static void ConfigurePresenter(
             ChunkTilemapPresenter presenter,
             Tilemap tilemap,
@@ -1598,12 +1558,9 @@ namespace Farmware.WorldGeneration.Editor
             Tilemap liquidAnimationTilemap,
             Tilemap rockWallTilemap,
             Tilemap rockWallResourceTilemap,
-            Tilemap landBoundaryHighlightTilemap,
-            Tilemap rockWallBoundaryHighlightTilemap,
             TileBase freshWaterAnimationTile,
             TileBase saltWaterAnimationTile,
-            TileBase magmaAnimationTile,
-            Sprite[] boundaryHighlightSprites)
+            TileBase magmaAnimationTile)
         {
             presenter.Configure(
                 tilemap,
@@ -1625,11 +1582,6 @@ namespace Farmware.WorldGeneration.Editor
                 freshWaterAnimationTile,
                 saltWaterAnimationTile,
                 magmaAnimationTile);
-            presenter.ConfigureBoundaryHighlights(
-                landBoundaryHighlightTilemap,
-                rockWallBoundaryHighlightTilemap,
-                boundaryHighlightSprites,
-                TerrainBoundaryHighlightUtility.DefaultOpacity);
             EditorUtility.SetDirty(presenter);
         }
 
@@ -1958,14 +1910,20 @@ namespace Farmware.WorldGeneration.Editor
                 gridObject.transform.Find("Liquid Base Tilemap");
             Transform liquidAnimationTilemapTransform =
                 gridObject.transform.Find("Liquid Surface Animation Tilemap");
+            Transform liquidDepthWithFloorTransform = gridObject.transform.Find(
+                TerrainProductSceneConnector.LiquidDepthWithFloorTilemapName);
+            Transform liquidDepthWithoutFloorTransform = gridObject.transform.Find(
+                TerrainProductSceneConnector.LiquidDepthWithoutFloorTilemapName);
+            Transform underwaterFloorPreviewTransform = gridObject.transform.Find(
+                TerrainProductSceneConnector.UnderwaterFloorPreviewTilemapName);
+            Transform waterReflectionTransform = gridObject.transform.Find(
+                TerrainProductSceneConnector.WaterReflectionTilemapName);
+            Transform liquidEdgeWaveTransform = gridObject.transform.Find(
+                TerrainProductSceneConnector.LiquidEdgeWaveTilemapName);
             Transform rockWallTilemapTransform =
-                gridObject.transform.Find("Rock Wall Tilemap");
+                gridObject.transform.Find("Rock Wall Top Tilemap");
             Transform rockWallResourceTilemapTransform =
                 gridObject.transform.Find("Rock Wall Resource Tilemap");
-            Transform landBoundaryHighlightTilemapTransform =
-                gridObject.transform.Find("Land Boundary Highlight Tilemap");
-            Transform rockWallBoundaryHighlightTilemapTransform =
-                gridObject.transform.Find("Rock Wall Boundary Highlight Tilemap");
             GameObject subSceneObject = FindOrCreateRoot(mainScene, "World Generation SubScene");
 
             ChunkTilemapPresenter presenter = tilemapTransform == null
@@ -2005,14 +1963,6 @@ namespace Farmware.WorldGeneration.Editor
                     != TilemapRenderer.Mode.Individual
                 || tilemapTransform.GetComponent<TilemapRenderer>().sortOrder
                     != TilemapRenderer.SortOrder.TopLeft
-                || landBoundaryHighlightTilemapTransform == null
-                || landBoundaryHighlightTilemapTransform.GetComponent<Tilemap>() == null
-                || landBoundaryHighlightTilemapTransform.GetComponent<TilemapRenderer>() == null
-                || landBoundaryHighlightTilemapTransform.GetComponent<TilemapRenderer>().sortingOrder
-                    != 1
-                || !Mathf.Approximately(
-                    landBoundaryHighlightTilemapTransform.localPosition.y,
-                    0f)
                 || resourceTilemapTransform == null
                 || resourceTilemapTransform.GetComponent<Tilemap>() == null
                 || resourceTilemapTransform.GetComponent<TilemapRenderer>() == null
@@ -2024,16 +1974,39 @@ namespace Farmware.WorldGeneration.Editor
                 || liquidBaseTilemapTransform.GetComponent<TilemapRenderer>() == null
                 || !Mathf.Approximately(
                     liquidBaseTilemapTransform.localPosition.y,
-                    TerrainLayerPresentationUtility.LiquidSurfaceOffsetInCells)
+                    0f)
+                || liquidBaseTilemapTransform.GetComponent<TilemapRenderer>().sortingLayerName
+                    != TerrainProductSceneConnector.WaterSortingLayerName
+                || AssetDatabase.GetAssetPath(
+                    liquidBaseTilemapTransform.GetComponent<TilemapRenderer>().sharedMaterial)
+                    != TerrainProductSceneConnector.LiquidSurfaceMaterialPath
                 || liquidAnimationTilemapTransform == null
                 || liquidAnimationTilemapTransform.GetComponent<Tilemap>() == null
                 || liquidAnimationTilemapTransform.GetComponent<TilemapRenderer>() == null
-                || !Mathf.Approximately(
-                    liquidAnimationTilemapTransform.localPosition.y,
-                    TerrainLayerPresentationUtility.LiquidSurfaceOffsetInCells)
+                || liquidAnimationTilemapTransform.GetComponent<TilemapRenderer>().enabled
+                || !ValidateProductLiquidTilemap(
+                    liquidDepthWithFloorTransform,
+                    TerrainProductSceneConnector.WaterSortingLayerName,
+                    TerrainProductSceneConnector.LiquidDepthWithFloorMaterialPath)
+                || !ValidateProductLiquidTilemap(
+                    liquidDepthWithoutFloorTransform,
+                    TerrainProductSceneConnector.WaterSortingLayerName,
+                    TerrainProductSceneConnector.LiquidDepthWithoutFloorMaterialPath)
+                || !ValidateProductLiquidTilemap(
+                    underwaterFloorPreviewTransform,
+                    TerrainProductSceneConnector.GroundSortingLayerName,
+                    TerrainProductSceneConnector.SpriteLitMaterialPath)
+                || !ValidateProductLiquidTilemap(
+                    waterReflectionTransform,
+                    TerrainProductSceneConnector.WaterSortingLayerName,
+                    TerrainProductSceneConnector.WaterReflectionMaterialPath)
+                || !ValidateProductLiquidTilemap(
+                    liquidEdgeWaveTransform,
+                    TerrainProductSceneConnector.WaterSortingLayerName,
+                    TerrainProductSceneConnector.SpriteUnlitMaterialPath)
                 || gridObject.transform.Find("Terrain Front Edge Tilemap") != null
                 || gridObject.transform.Find("Rock Wall Front Face Tilemap") != null
-                || gridObject.transform.Find("Rock Wall Top Tilemap") != null
+                || gridObject.transform.Find("Rock Wall Tilemap") != null
                 || rockWallTilemapTransform == null
                 || rockWallTilemapTransform.GetComponent<Tilemap>() == null
                 || rockWallTilemapTransform.GetComponent<TilemapRenderer>() == null
@@ -2041,45 +2014,59 @@ namespace Farmware.WorldGeneration.Editor
                     != TilemapRenderer.Mode.Individual
                 || rockWallTilemapTransform.GetComponent<TilemapRenderer>().sortOrder
                     != TilemapRenderer.SortOrder.TopLeft
-                || resourceBehindRockWallTilemapTransform.GetComponent<TilemapRenderer>().sortingOrder
-                    >= rockWallTilemapTransform.GetComponent<TilemapRenderer>().sortingOrder
+                || resourceBehindRockWallTilemapTransform.GetComponent<TilemapRenderer>().sortingLayerName
+                    != TerrainProductSceneConnector.GroundSortingLayerName
+                || rockWallTilemapTransform.GetComponent<TilemapRenderer>().sortingLayerName
+                    != TerrainProductSceneConnector.WallSortingLayerName
+                || resourceTilemapTransform.GetComponent<TilemapRenderer>().sortingLayerName
+                    != TerrainProductSceneConnector.WallSortingLayerName
                 || resourceTilemapTransform.GetComponent<TilemapRenderer>().sortingOrder
                     <= rockWallTilemapTransform.GetComponent<TilemapRenderer>().sortingOrder
                 || !Mathf.Approximately(
                     rockWallTilemapTransform.localPosition.y,
-                    0f)
-                || rockWallBoundaryHighlightTilemapTransform == null
-                || rockWallBoundaryHighlightTilemapTransform.GetComponent<Tilemap>() == null
-                || rockWallBoundaryHighlightTilemapTransform.GetComponent<TilemapRenderer>() == null
-                || rockWallBoundaryHighlightTilemapTransform.GetComponent<TilemapRenderer>().sortingOrder
-                    != 4
-                || !Mathf.Approximately(
-                    rockWallBoundaryHighlightTilemapTransform.localPosition.y,
-                    TerrainLayerPresentationUtility.RockWallElevationInCells)
-                || !Mathf.Approximately(
-                    rockWallBoundaryHighlightTilemapTransform.GetComponent<Tilemap>().color.r,
-                    TerrainMaterialArtSource.DefaultWallDarkenFactor)
-                || !Mathf.Approximately(
-                    rockWallBoundaryHighlightTilemapTransform.GetComponent<Tilemap>().color.g,
-                    TerrainMaterialArtSource.DefaultWallDarkenFactor)
-                || !Mathf.Approximately(
-                    rockWallBoundaryHighlightTilemapTransform.GetComponent<Tilemap>().color.b,
-                    TerrainMaterialArtSource.DefaultWallDarkenFactor)
-                || !Mathf.Approximately(
-                    rockWallBoundaryHighlightTilemapTransform.GetComponent<Tilemap>().color.a,
-                    1f)
+                    TerrainMaterialVerticalProjectionUtility.WallTopOffsetInTiles)
                 || rockWallResourceTilemapTransform == null
                 || rockWallResourceTilemapTransform.GetComponent<Tilemap>() == null
                 || rockWallResourceTilemapTransform.GetComponent<TilemapRenderer>() == null
+                || rockWallResourceTilemapTransform.GetComponent<TilemapRenderer>().sortingLayerName
+                    != TerrainProductSceneConnector.WallSortingLayerName
+                || rockWallResourceTilemapTransform.GetComponent<TilemapRenderer>().sortingOrder
+                    <= resourceTilemapTransform.GetComponent<TilemapRenderer>().sortingOrder
                 || !Mathf.Approximately(
                     rockWallResourceTilemapTransform.localPosition.y,
-                    TerrainLayerPresentationUtility.RockWallElevationInCells)
+                    TerrainMaterialVerticalProjectionUtility.WallTopOffsetInTiles)
                 || !presenterReferencesAreValid
                 || subSceneObject.GetComponent<SubScene>() == null
                 || subSceneObject.GetComponent<SubScene>().SceneAsset == null)
             {
                 throw new InvalidOperationException("SampleSceneのマップ生成Component接続を検証できませんでした。");
             }
+        }
+
+        /// <summary>
+        /// 保存済み製品液体Tilemapが論理セル原点、期待Sorting Layer、期待Materialを保持するか確認します。
+        /// </summary>
+        /// <param name="tilemapTransform">検証するGrid直下のTransformです。</param>
+        /// <param name="expectedSortingLayer">液体またはGroundの期待Sorting Layer名です。</param>
+        /// <param name="expectedMaterialPath">共有Materialの期待Assetパスです。</param>
+        /// <returns>TilemapとRendererが揃い、製品接続値が一致すればtrueです。</returns>
+        private static bool ValidateProductLiquidTilemap(
+            Transform tilemapTransform,
+            string expectedSortingLayer,
+            string expectedMaterialPath)
+        {
+            if (tilemapTransform == null
+                || tilemapTransform.GetComponent<Tilemap>() == null
+                || tilemapTransform.GetComponent<TilemapRenderer>() == null
+                || tilemapTransform.localPosition != Vector3.zero)
+            {
+                return false;
+            }
+
+            TilemapRenderer renderer = tilemapTransform.GetComponent<TilemapRenderer>();
+            return renderer.enabled
+                && renderer.sortingLayerName == expectedSortingLayer
+                && AssetDatabase.GetAssetPath(renderer.sharedMaterial) == expectedMaterialPath;
         }
 
         /// <summary>
@@ -2146,10 +2133,22 @@ namespace Farmware.WorldGeneration.Editor
                 "resourceBehindRockWallTilemap",
                 "liquidBaseTilemap",
                 "liquidAnimationTilemap",
+                "liquidDepthWithFloorTilemap",
+                "liquidDepthWithoutFloorTilemap",
+                "underwaterFloorPreviewTilemap",
+                "waterReflectionTilemap",
+                "liquidEdgeWaveTilemap",
                 "rockWallTilemap",
                 "rockWallResourceTilemap",
-                "landBoundaryHighlightTilemap",
-                "rockWallBoundaryHighlightTilemap",
+                "groundFaceTilemap",
+                "wallFaceTilemap",
+                "dryCliffDeepBlackTilemap",
+                "wallContactShadowLeftTilemap",
+                "wallContactShadowRightTilemap",
+                "wallFoldShadowTopTilemap",
+                "wallFoldShadowBottomTilemap",
+                "materialPresentationCatalog",
+                "liquidPresentationCatalog",
                 "cameraPanController",
                 "magmaTile",
                 "freshWaterTile",
@@ -2188,36 +2187,6 @@ namespace Farmware.WorldGeneration.Editor
                 {
                     return false;
                 }
-            }
-
-            SerializedProperty boundarySpritesProperty =
-                serializedPresenter.FindProperty("boundaryHighlightSprites");
-            if (boundarySpritesProperty == null
-                || !boundarySpritesProperty.isArray
-                || boundarySpritesProperty.arraySize
-                    != TerrainBoundaryHighlightUtility.ExpectedSpriteCount)
-            {
-                return false;
-            }
-
-            for (int index = 0; index < boundarySpritesProperty.arraySize; index++)
-            {
-                SerializedProperty spriteProperty =
-                    boundarySpritesProperty.GetArrayElementAtIndex(index);
-                if (spriteProperty.objectReferenceValue == null)
-                {
-                    return false;
-                }
-            }
-
-            SerializedProperty boundaryOpacityProperty =
-                serializedPresenter.FindProperty("boundaryHighlightOpacity");
-            if (boundaryOpacityProperty == null
-                || !Mathf.Approximately(
-                    boundaryOpacityProperty.floatValue,
-                    TerrainBoundaryHighlightUtility.DefaultOpacity))
-            {
-                return false;
             }
 
             return true;

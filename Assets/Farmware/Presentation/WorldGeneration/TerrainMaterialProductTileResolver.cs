@@ -15,7 +15,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// <summary>製品カタログから選択した16×16 px完成Spriteです。</summary>
         public Sprite Sprite { get; }
 
-        /// <summary>Wall暗色化または乾燥崖の段上端Alphaを含むTile Tintです。</summary>
+        /// <summary>Wall暗色化、乾燥崖の段上端Alpha、またはAlpha 0の水中断面識別値を含むTile Tintです。</summary>
         public Color Color { get; }
 
         /// <summary>選択済みSpriteとTintを変更不能な値として保持します。</summary>
@@ -215,8 +215,10 @@ namespace Farmware.WorldGeneration.Presentation
                     forWall: false);
             }
 
-            // 水中ではFaceを黒く減衰させず、前面の青い深度Overlayだけで45px/93pxの深さを表します。
-            selection = new TerrainMaterialProductTileSelection(selectedSprite, Color.white);
+            // Ground Face Tilemapは乾燥崖と水中断面で共用するため、Alpha 0を「水中では不透明な下地」の識別値にします。
+            // TerrainDryCliffFace Shaderがこの値を復号し、水中で各16pxの乾燥減衰を繰り返さないようにします。
+            selection = new TerrainMaterialProductTileSelection(
+                selectedSprite, new Color(1f, 1f, 1f, 0f));
             return true;
         }
 

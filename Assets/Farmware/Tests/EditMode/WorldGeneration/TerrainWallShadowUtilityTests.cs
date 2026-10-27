@@ -179,7 +179,7 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(TerrainWallShadowUtility.CalculateFoldShadowAlpha(32), Is.EqualTo(0f));
         }
 
-        /// <summary>採用済みの左右1px、手前3px、各Alpha 22%と、最下段Face根元への2タイル移動を固定します。</summary>
+        /// <summary>採用済みの左右1px、手前3px、各Alpha 22%と、Casterが論理Wall根元からずれないことを固定します。</summary>
         [Test]
         public void ShadowConstants_MatchAdoptedPixelDimensions()
         {
@@ -187,7 +187,7 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(TerrainWallShadowUtility.ContactShadowOffsetYPixels, Is.EqualTo(-3));
             Assert.That(TerrainWallShadowUtility.ContactShadowLayerOpacity, Is.EqualTo(0.22f));
             Assert.That(TerrainWallShadowUtility.FoldShadowDepthPixels, Is.EqualTo(32));
-            Assert.That(TerrainWallShadowUtility.DynamicShadowCasterOffsetYInTiles, Is.EqualTo(-2));
+            Assert.That(TerrainWallShadowUtility.DynamicShadowCasterOffsetYInTiles, Is.Zero);
         }
 
         /// <summary>
@@ -237,7 +237,7 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(firstRenderers.Length, Is.EqualTo(1));
             GameObject firstCaster = firstRenderers[0].gameObject;
             Assert.That(firstCaster.transform.localPosition.x, Is.EqualTo(5.5f));
-            Assert.That(firstCaster.transform.localPosition.y, Is.EqualTo(4.5f));
+            Assert.That(firstCaster.transform.localPosition.y, Is.EqualTo(6.5f));
             Assert.That(firstCaster.transform.localScale.x, Is.EqualTo(3f));
 
             var updatedRuns = new List<TerrainWallShadowRun>
@@ -251,7 +251,7 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(updatedRenderers.Length, Is.EqualTo(1), "Dirty更新でCaster GameObjectを増やしてはいけません。");
             Assert.That(updatedRenderers[0].gameObject, Is.SameAs(firstCaster));
             Assert.That(firstCaster.transform.localPosition.x, Is.EqualTo(9f));
-            Assert.That(firstCaster.transform.localPosition.y, Is.EqualTo(8.5f));
+            Assert.That(firstCaster.transform.localPosition.y, Is.EqualTo(10.5f));
             Assert.That(firstCaster.transform.localScale.x, Is.EqualTo(2f));
         }
 

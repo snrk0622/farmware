@@ -94,12 +94,12 @@ namespace Farmware.WorldGeneration.Presentation
         // URP固有Shaderが見つからない場合にも、黒い頂点色を透明合成できる標準Sprite Shader名です。
         private const string FallbackRockWallShadowShaderName = "Sprites/Default";
 
-        // 上面16pxと前面断面8pxを一体化した土地ブロックを描画します。液体は半セル下げるため別Tilemapへ分けます。
+        // 上面16pxと前面断面8pxを一体化した旧土地ブロックを描画します。製品材質経路では16×16上面だけを書き込みます。
         [Tooltip("水・マグマを除く16×24の土地ブロックを描画する専用Tilemapです。行単位の重なりを正しく処理するためIndividual Modeで使用してください。")]
         [SerializeField] private Tilemap targetTilemap;
 
-        // 水・マグマの静止した基礎色を描画し、論理セルは変えずに表示だけ8px下げます。
-        [Tooltip("淡水・海水・マグマの基礎Tile専用Tilemapです。Scene側のTransform Yを-8/16セルへ設定してください。")]
+        // 水・マグマの静止Surfaceを描画します。製品Sceneは論理セル位置を維持し、岸側だけShaderで上端3pxを隠します。
+        [Tooltip("淡水・海水・マグマの基礎Surface専用Tilemapです。製品SceneではTransformを移動せず、TerrainLiquidSurface Materialで岸側上端3pxだけを隠します。")]
         [SerializeField] private Tilemap liquidBaseTilemap;
 
         // 岩壁に隠れない通常地面の資源を、岩壁より前へ描画する専用Tilemapです。採取状態の正には使用しません。
@@ -110,8 +110,8 @@ namespace Farmware.WorldGeneration.Presentation
         [Tooltip("直前方のセルが岩壁である通常資源を描画する専用Tilemapです。岩壁より後ろのSorting Orderへ設定してください。")]
         [SerializeField] private Tilemap resourceBehindRockWallTilemap;
 
-        // 水面とマグマ面の透明アニメーションだけを描画し、静止した基礎色やゲーム状態から分離します。
-        [Tooltip("淡水・海水・マグマへ透明な4フレームアニメーションを重ねる専用Tilemapです。静止液面と同じ-8px位置へ設定してください。")]
+        // 製品カタログ未接続の開発Sceneだけで、旧全面アニメーションを静止した基礎色へ重ねます。
+        [Tooltip("製品液体カタログ未接続時だけ使う旧全面アニメーションTilemapです。製品SceneではRendererを無効にし、水際3bit Tilemapへ置き換えます。")]
         [SerializeField] private Tilemap liquidAnimationTilemap;
 
         // 直下WorldLayerの床がある淡水・海水へ、最大Alpha 50%の45px連続勾配を重ねます。
@@ -134,17 +134,17 @@ namespace Farmware.WorldGeneration.Presentation
         [Tooltip("淡水・海水・マグマの奥・左・右接触線を描く水際アニメーションTilemapです。画面手前辺は描きません。")]
         [SerializeField] private Tilemap liquidEdgeWaveTilemap;
 
-        // 上面16pxと側面12pxを一体化した岩壁ブロックを、基準面と同じ論理セル位置へ描画します。
+        // 製品経路では論理Wall根元の2タイル奥へGroundTopを描画し、未接続時だけ旧一体型Spriteを使います。
         [FormerlySerializedAs("rockWallTopTilemap")]
-        [Tooltip("すべての岩壁へ16×28の一体型ブロックを描画する専用Tilemapです。Transformは移動せず、Sprite Pivotで12pxの高さを表します。")]
+        [Tooltip("製品Wall上面のGroundTopを描画するTilemapです。Scene側で論理根元から画面奥へ2タイル持ち上げます。")]
         [SerializeField] private Tilemap rockWallTilemap;
 
         // 製品カタログ経路で、乾燥穴へ投影したGround崖面3段だけを描画します。
         [Tooltip("製品材質のGround崖面3段を描画するTilemapです。Farmware/Terrain/Dry Cliff Face Materialを設定し、48px連続減衰を適用してください。")]
         [SerializeField] private Tilemap groundFaceTilemap;
 
-        // 製品カタログ経路で、Wall領域の手前へ投影した前面2段だけを描画します。
-        [Tooltip("製品材質のWall前面2段を描画するTilemapです。Face本体は暗色化せず、1段目だけWall用境界合成済みSpriteを使用します。")]
+        // 製品カタログ経路で、論理Wall根元から上へ積む前面2段だけを描画します。
+        [Tooltip("製品材質のWall前面2段を描画するTilemapです。Scene側の+2Y補正で最下段を論理根元へ合わせます。")]
         [SerializeField] private Tilemap wallFaceTilemap;
 
         // Wall上面と前面の結合シルエットを左1px・手前3pxへ複製し、光源に依存しない接地点を描きます。
@@ -168,16 +168,8 @@ namespace Farmware.WorldGeneration.Presentation
         [SerializeField] private Tilemap dryCliffDeepBlackTilemap;
 
         // 岩壁上に生成された資源だけを上面と同じ高さへ持ち上げ、側面へ埋まる表示を防ぎます。
-        [Tooltip("露出した岩壁上の資源を岩壁上面と同じ12px上へ表示する専用Tilemapです。ゲーム状態の正には使用しません。")]
+        [Tooltip("露出したWall上の資源を、製品Wall上面と同じく論理根元から2タイル奥へ表示する専用Tilemapです。")]
         [SerializeField] private Tilemap rockWallResourceTilemap;
-
-        // 通常土地の水・マグマ側だけへ境界線を重ね、Biome同士の境界は描画しない専用Tilemapです。
-        [Tooltip("通常土地と水・マグマの境界ハイライト専用Tilemapです。Groundより前、資源と岩壁より後ろのSorting Orderにしてください。")]
-        [SerializeField] private Tilemap landBoundaryHighlightTilemap;
-
-        // 岩壁上面の外周と内角へ境界線を重ね、側面や通常土地の表示から分離する専用Tilemapです。
-        [Tooltip("岩壁上面の境界ハイライト専用Tilemapです。Transform Yを12/16セル上げ、岩壁より前へ描画してください。")]
-        [SerializeField] private Tilemap rockWallBoundaryHighlightTilemap;
 
         // Cameraと全Tilemapで共有する表示原点を提供します。Tilemapセルへ絶対座標を直接書かないために使用します。
         [Tooltip("CameraとTilemapで共有する表示原点の所有者です。未指定時は絶対原点(0, 0)を使用します。")]
@@ -228,8 +220,8 @@ namespace Farmware.WorldGeneration.Presentation
         [Tooltip("海の海水域に表示するTileです。採水種別はECSデータで判定し、この参照には依存しません。")]
         [SerializeField] private TileBase saltWaterTile;
 
-        // WallBlockを持つ全セルへ、上面と12px側面を一体化して表示する共通Tileです。
-        [Tooltip("すべての岩壁に表示する16×28の共通Tileです。内部の暗さは影メッシュで後付けします。")]
+        // 製品経路では論理Wall根元から2タイル上へ描画する上面、未接続の旧開発Sceneでは16×28一体型Wallを保持します。
+        [Tooltip("製品では論理Wall根元から2タイル上の上面を表示するTileです。製品カタログ未設定の開発Sceneだけ、16×28の共通Tileを使います。")]
         [SerializeField] private TileBase rockWallTile;
 
         // 淡水セルへ重ねる透明なAnimatedTileです。基礎のFreshWater Tileは下層に残します。
@@ -243,16 +235,6 @@ namespace Farmware.WorldGeneration.Presentation
         // マグマセルへ重ねる透明なAnimatedTileです。基礎のMagma Tileは下層に残します。
         [Tooltip("マグマセルへ重ねる透明なAnimatedTileです。未設定ならマグマは静止表示のままです。")]
         [SerializeField] private TileBase magmaAnimationTile;
-
-        // 224×16画像を左から右へ16pxずつSliceした14枚です。配列順はBoundaryHighlightShapeの1〜14と一致します。
-        [Tooltip("境界ハイライト画像を左から右へ分割した14枚のSpriteです。順番を変えると47状態の形が崩れます。")]
-        [SerializeField] private Sprite[] boundaryHighlightSprites;
-
-        // 白い境界線へ一様に掛ける不透明度です。PNGの1px形状は変えず、Base Tileとの馴染みだけを調整します。
-        [Range(0f, 1f)]
-        [Tooltip("境界ハイライトの不透明度です。0で完全透明、1で不透明になり、下げるほどBase Tileへ馴染みます。")]
-        [SerializeField] private float boundaryHighlightOpacity =
-            TerrainBoundaryHighlightUtility.DefaultOpacity;
 
         // GeneratedResourceType.Treeへ使用する透明背景の表示専用Tileです。
         [Tooltip("樹木資源に表示する仮Tileです。資源の種類と存在はECSバッファを正とします。")]
@@ -446,17 +428,8 @@ namespace Farmware.WorldGeneration.Presentation
         // 乾燥穴の深部黒をFaceより後ろへ置く256要素の再利用配列です。
         private TileBase[] dryCliffDeepBlackSubChunkTileBuffer;
 
-        // 露出した岩壁上の資源だけを12px上へ描画する256要素の再利用配列です。
+        // 露出したWall上の資源だけを、製品では論理根元から2タイル上の上面へ描画する256要素の再利用配列です。
         private TileBase[] rockWallResourceSubChunkTileBuffer;
-
-        // 通常土地の境界ハイライトTilemapへ渡す256要素の再利用配列です。
-        private TileBase[] landBoundaryHighlightSubChunkTileBuffer;
-
-        // 岩壁上面の境界ハイライトTilemapへ渡す256要素の再利用配列です。
-        private TileBase[] rockWallBoundaryHighlightSubChunkTileBuffer;
-
-        // 14基本形を4方向へ回した実行時Tileです。このComponentがAwakeで作成し、OnDestroyで破棄します。
-        private Tile[,] generatedBoundaryHighlightTiles;
 
         // 表示済みチャンクへ重ねた影GameObjectとMeshを座標別に保持し、アンロード時に同じ単位で破棄します。
         private readonly Dictionary<ChunkCoordinate, RockWallShadowChunkPresentation>
@@ -553,7 +526,7 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// 直前方の岩壁に隠す通常資源専用Tilemapを設定します。
+        /// 画面手前側の2セル以内にあるWallに隠す通常資源専用Tilemapを設定します。
         /// </summary>
         /// <param name="behindRockWallTilemap">岩壁より小さいSorting Orderで描画する資源Tilemapです。</param>
         public void ConfigureResourceOcclusion(Tilemap behindRockWallTilemap)
@@ -568,7 +541,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="baseLiquidTilemap">淡水・海水・マグマの静止した基礎Tile専用Tilemapです。</param>
         /// <param name="animatedLiquidTilemap">淡水・海水・マグマの透明アニメーション専用Tilemapです。</param>
         /// <param name="combinedRockWallTilemap">16×28の岩壁ブロックを基準セルへ描画する専用Tilemapです。</param>
-        /// <param name="raisedRockWallResourceTilemap">露出した岩壁上の資源を12px持ち上げる専用Tilemapです。</param>
+        /// <param name="raisedRockWallResourceTilemap">露出したWall上の資源を、製品では論理根元から2タイル上へ持ち上げる専用Tilemapです。</param>
         /// <param name="freshWaterAnimation">淡水へ重ねる透明AnimatedTileです。</param>
         /// <param name="saltWaterAnimation">海水へ重ねる透明AnimatedTileです。</param>
         /// <param name="magmaAnimation">マグマへ重ねる透明AnimatedTileです。</param>
@@ -706,34 +679,6 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// Editor構築ツールまたはテストから、通常土地・岩壁の境界レイヤーと14基本Spriteを設定します。
-        /// 配列は呼び出し元と共有せず、PlayMode中なら回転済みの実行時Tileを直ちに作り直します。
-        /// </summary>
-        /// <param name="landHighlightTilemap">通常土地の水・マグマ側へ境界を重ねるTilemapです。</param>
-        /// <param name="rockWallHighlightTilemap">岩壁上面の外周・内角へ境界を重ねるTilemapです。</param>
-        /// <param name="highlightSprites">画像の左から右へShape01〜Shape14の順に並ぶ14枚のSpriteです。</param>
-        /// <param name="opacity">白い境界線へ一様に掛ける0〜1の不透明度です。</param>
-        public void ConfigureBoundaryHighlights(
-            Tilemap landHighlightTilemap,
-            Tilemap rockWallHighlightTilemap,
-            Sprite[] highlightSprites,
-            float opacity = TerrainBoundaryHighlightUtility.DefaultOpacity)
-        {
-            landBoundaryHighlightTilemap = landHighlightTilemap;
-            rockWallBoundaryHighlightTilemap = rockWallHighlightTilemap;
-            boundaryHighlightSprites = highlightSprites == null
-                ? null
-                : (Sprite[])highlightSprites.Clone();
-            boundaryHighlightOpacity = Mathf.Clamp01(opacity);
-
-            // EditModeのScene構築中は一時Tileを保存せず、PlayModeでAwake済みのテスト設定だけを即時反映します。
-            if (Application.isPlaying)
-            {
-                RebuildBoundaryHighlightTiles();
-            }
-        }
-
-        /// <summary>
         /// Editor構築ツールまたはテストから、Cameraと全Tilemapが共有する表示原点の所有者を設定します。
         /// </summary>
         /// <param name="panController">絶対座標から分離した表示原点を保持するCamera Controllerです。</param>
@@ -769,12 +714,9 @@ namespace Farmware.WorldGeneration.Presentation
             wallDynamicShadowRootMaskBuffer = new bool[tileCount];
             dryCliffDeepBlackSubChunkTileBuffer = new TileBase[tileCount];
             rockWallResourceSubChunkTileBuffer = new TileBase[tileCount];
-            landBoundaryHighlightSubChunkTileBuffer = new TileBase[tileCount];
-            rockWallBoundaryHighlightSubChunkTileBuffer = new TileBase[tileCount];
             AllocateRockWallShadowBuffers();
             EnsureWallDynamicShadowUnitSprite();
             EnsureFreshWaterFallbackTile();
-            RebuildBoundaryHighlightTiles();
         }
 
         /// <summary>
@@ -872,81 +814,6 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// 14枚の基本Spriteから時計回り0〜3回転の実行時Tileを1度だけ作り、セル走査中の生成を避けます。
-        /// </summary>
-        private void RebuildBoundaryHighlightTiles()
-        {
-            DestroyGeneratedBoundaryHighlightTiles();
-            if (boundaryHighlightSprites == null
-                || boundaryHighlightSprites.Length
-                    != TerrainBoundaryHighlightUtility.ExpectedSpriteCount)
-            {
-                return;
-            }
-
-            generatedBoundaryHighlightTiles = new Tile[
-                TerrainBoundaryHighlightUtility.ExpectedSpriteCount,
-                4];
-            for (int shapeIndex = 0;
-                 shapeIndex < TerrainBoundaryHighlightUtility.ExpectedSpriteCount;
-                 shapeIndex++)
-            {
-                Sprite sprite = boundaryHighlightSprites[shapeIndex];
-                if (sprite == null)
-                {
-                    continue;
-                }
-
-                for (int rotation = 0; rotation < 4; rotation++)
-                {
-                    Tile generatedTile = ScriptableObject.CreateInstance<Tile>();
-                    generatedTile.name =
-                        $"Generated Boundary Highlight {shapeIndex + 1:00} R{rotation}";
-                    generatedTile.sprite = sprite;
-                    // 元画像は不透明白のまま保ち、一様なαだけを表示時に掛けて色付きBase Tileへ自然に馴染ませます。
-                    generatedTile.color = new Color(
-                        1f,
-                        1f,
-                        1f,
-                        Mathf.Clamp01(boundaryHighlightOpacity));
-                    generatedTile.colliderType = Tile.ColliderType.None;
-                    // Unityの正Z回転は反時計回りなので、負角度で画像を時計回りへ回します。拡大・反転は加えません。
-                    generatedTile.transform = Matrix4x4.Rotate(
-                        Quaternion.Euler(0f, 0f, -90f * rotation));
-                    generatedTile.flags = TileFlags.LockColor | TileFlags.LockTransform;
-                    generatedBoundaryHighlightTiles[shapeIndex, rotation] = generatedTile;
-                }
-            }
-        }
-
-        /// <summary>
-        /// このComponentが作成した最大56個の境界Tileだけを破棄し、SceneやProjectのSpriteは破棄しません。
-        /// </summary>
-        private void DestroyGeneratedBoundaryHighlightTiles()
-        {
-            if (generatedBoundaryHighlightTiles == null)
-            {
-                return;
-            }
-
-            int shapeCount = generatedBoundaryHighlightTiles.GetLength(0);
-            int rotationCount = generatedBoundaryHighlightTiles.GetLength(1);
-            for (int shapeIndex = 0; shapeIndex < shapeCount; shapeIndex++)
-            {
-                for (int rotation = 0; rotation < rotationCount; rotation++)
-                {
-                    Tile generatedTile = generatedBoundaryHighlightTiles[shapeIndex, rotation];
-                    if (generatedTile != null)
-                    {
-                        DestroyUnityObject(generatedTile);
-                    }
-                }
-            }
-
-            generatedBoundaryHighlightTiles = null;
-        }
-
-        /// <summary>
         /// MonoBehaviourの各描画フレームで呼ばれ、表示対象の収集と予算分割された反映・消去を実行します。
         /// </summary>
         private void Update()
@@ -979,10 +846,7 @@ namespace Farmware.WorldGeneration.Presentation
                     || resourceBehindRockWallTilemap == null
                     || missingRequiredProductLayer
                     || missingRequiredLiquidLayer
-                    || missingMaterialForProductLiquid
-                    || (!usesProductMaterialPresentation
-                        && (landBoundaryHighlightTilemap == null
-                            || rockWallBoundaryHighlightTilemap == null)))
+                    || missingMaterialForProductLiquid)
                 {
                     if (missingRequiredProductLayer)
                     {
@@ -1273,8 +1137,6 @@ namespace Farmware.WorldGeneration.Presentation
             DestroyAllRockWallShadows();
             DestroyAllWallDynamicShadowPresentations();
             DestroyChunkLocalPresentations();
-            DestroyGeneratedBoundaryHighlightTiles();
-
             // マスク構築は呼び出し内の同期処理なので、破棄時にWorkerの完了を待つ必要はありません。
             if (rockWallShadowMaskBuffer.IsCreated)
             {
@@ -2065,44 +1927,17 @@ namespace Farmware.WorldGeneration.Presentation
                                 }
 
                             }
-                            landBoundaryHighlightSubChunkTileBuffer[destinationIndex] = null;
-                            rockWallBoundaryHighlightSubChunkTileBuffer[destinationIndex] = null;
                         }
                         else
                         {
-                            BoundaryHighlightSelection landBoundarySelection = default;
-                            BoundaryHighlightSelection rockWallBoundarySelection = default;
-                            if (terrainCell.GroundBlockRuntimeId.IsValid
-                                || terrainCell.WallBlockRuntimeId.IsValid)
-                            {
-                                // 内部・外周とも同じ完成Bufferと差分から有効地形を読み、ロード順へ依存しません。
-                                TerrainNeighborTiles neighbors = GetTerrainNeighborTiles(
-                                    tileLocalX,
-                                    tileLocalY,
-                                    terrainNeighborhood);
-                                if (!isRockWall)
-                                {
-                                    landBoundarySelection =
-                                        TerrainBoundaryHighlightUtility.SelectLand(terrainCell, neighbors);
-                                }
-                                else
-                                {
-                                    rockWallBoundarySelection =
-                                        TerrainBoundaryHighlightUtility.SelectRockWall(terrainCell, neighbors);
-                                }
-                            }
-
-                            // 全41材質と製品Sceneを接続するまでは、既存の一体型土地・岩壁表示を維持します。
+                            // 製品カタログ未設定の開発用Sceneでは、一体型土地・岩壁表示だけを維持します。
+                            // 旧境界レイヤーは新しい材質別境界へ置き換えたため、互換経路として残しません。
                             subChunkTileBuffer[destinationIndex] = isLiquid
                                 ? null
                                 : SelectLandTile(terrainCell);
                             rockWallSubChunkTileBuffer[destinationIndex] = isRockWall
                                 ? rockWallTile
                                 : null;
-                            landBoundaryHighlightSubChunkTileBuffer[destinationIndex] =
-                                SelectBoundaryHighlightTile(landBoundarySelection);
-                            rockWallBoundaryHighlightSubChunkTileBuffer[destinationIndex] =
-                                SelectBoundaryHighlightTile(rockWallBoundarySelection);
                         }
 
                         if (liquidPresentationIsReady)
@@ -2143,24 +1978,29 @@ namespace Farmware.WorldGeneration.Presentation
                                 ? SelectResourceTile(resources[sourceIndex])
                                 : null;
                         // TilemapRendererの行順は別Tilemap間を交互に並べないため、遠方座標でも確実な固定レイヤーへ振り分けます。
-                        // 画面手前はワールドYが小さい方向なので、直下1セルが岩壁なら資源を壁より先に描いて重なる部分を隠します。
+                        // 製品Wallは論理根元から画面奥へ2タイル伸びるため、手前1〜2セルのWallに重なる資源を背面へ回します。
                         bool isBehindFrontRockWall = false;
                         if (!isRockWall && selectedResource != null)
                         {
                             if (!terrainNeighborhood.TryGetTile(
                                     tileLocalX,
                                     tileLocalY - 1,
-                                    out GeneratedTerrainCell frontTerrainCell))
+                                    out GeneratedTerrainCell nearFrontTerrainCell)
+                                || !terrainNeighborhood.TryGetTile(
+                                    tileLocalX,
+                                    tileLocalY - 2,
+                                    out GeneratedTerrainCell farFrontTerrainCell))
                             {
                                 throw new System.InvalidOperationException(
-                                    $"完成済み地形近傍から手前セルを取得できません: Chunk=({coordinate.X}, {coordinate.Y}), Local=({tileLocalX}, {tileLocalY - 1})");
+                                    $"完成済み地形近傍からWall遮蔽用の手前2セルを取得できません: Chunk=({coordinate.X}, {coordinate.Y}), Local=({tileLocalX}, {tileLocalY - 2})");
                             }
 
                             isBehindFrontRockWall =
                                 TerrainLayerPresentationUtility.ShouldRenderResourceBehindRockWall(
                                     resources[sourceIndex],
                                     terrainCell,
-                                    frontTerrainCell);
+                                    nearFrontTerrainCell,
+                                    farFrontTerrainCell);
                         }
                         resourceSubChunkTileBuffer[destinationIndex] = !isRockWall
                             && !isBehindFrontRockWall
@@ -2263,12 +2103,6 @@ namespace Farmware.WorldGeneration.Presentation
                     WriteSubChunkLayer(coordinate, rockWallResourceTilemap, bounds, rockWallResourceSubChunkTileBuffer);
                 }
 
-                WriteSubChunkLayer(coordinate, landBoundaryHighlightTilemap,
-                    bounds,
-                    landBoundaryHighlightSubChunkTileBuffer);
-                WriteSubChunkLayer(coordinate, rockWallBoundaryHighlightTilemap,
-                    bounds,
-                    rockWallBoundaryHighlightSubChunkTileBuffer);
             }
 
             if (materialPresentationIsReady && wallShadowPresentationIsConfigured)
@@ -2489,20 +2323,36 @@ namespace Farmware.WorldGeneration.Presentation
                 return;
             }
 
-            GeneratedTerrainCell lowerCell = default;
-            bool hasUnderwaterFloor = hasLowerNeighborhood
-                && lowerNeighborhood.TryGetTile(
-                    localX,
-                    localY,
-                    out lowerCell)
-                && lowerCell.GroundBlockRuntimeId.IsValid
-                && !lowerCell.WallBlockRuntimeId.IsValid;
+            bool hasUnderwaterFloor = TryGetUnderwaterFloor(
+                hasLowerNeighborhood,
+                lowerNeighborhood,
+                localX,
+                localY,
+                out GeneratedTerrainCell lowerCell);
             float stageStartAlpha = TerrainLiquidPresentationUtility.GetDepthStageStartAlpha(
                 depthStage,
                 hasUnderwaterFloor);
-            TileBase depthTile = liquidTileCache.GetOrCreateDepthOverlay(
-                definition.DepthOverlayColor,
+            float leftStageStartAlpha = GetHorizontalNeighborDepthStageStartAlpha(
+                terrainNeighborhood,
+                hasLowerNeighborhood,
+                lowerNeighborhood,
+                localX - 1,
+                localY,
+                kind,
                 stageStartAlpha);
+            float rightStageStartAlpha = GetHorizontalNeighborDepthStageStartAlpha(
+                terrainNeighborhood,
+                hasLowerNeighborhood,
+                lowerNeighborhood,
+                localX + 1,
+                localY,
+                kind,
+                stageStartAlpha);
+            TileBase depthTile = liquidTileCache.GetOrCreateDepthOverlay(
+                kind,
+                leftStageStartAlpha,
+                stageStartAlpha,
+                rightStageStartAlpha);
             if (hasUnderwaterFloor)
             {
                 liquidDepthWithFloorSubChunkTileBuffer[destinationIndex] = depthTile;
@@ -2868,15 +2718,6 @@ namespace Farmware.WorldGeneration.Presentation
                     rockWallResourceTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
                 }
 
-                if (landBoundaryHighlightTilemap != null)
-                {
-                    landBoundaryHighlightTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
-                }
-
-                if (rockWallBoundaryHighlightTilemap != null)
-                {
-                    rockWallBoundaryHighlightTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
-                }
             }
         }
 
@@ -3006,8 +2847,7 @@ namespace Farmware.WorldGeneration.Presentation
                 wallFoldShadowTopTilemap, wallFoldShadowBottomTilemap,
                 dryCliffDeepBlackTilemap, liquidDepthWithFloorTilemap,
                 liquidDepthWithoutFloorTilemap, underwaterFloorPreviewTilemap,
-                waterReflectionTilemap, liquidEdgeWaveTilemap, rockWallResourceTilemap,
-                landBoundaryHighlightTilemap, rockWallBoundaryHighlightTilemap };
+                waterReflectionTilemap, liquidEdgeWaveTilemap, rockWallResourceTilemap };
         }
 
         /// <summary>
@@ -3195,64 +3035,6 @@ namespace Farmware.WorldGeneration.Presentation
                 WorldGridConstants.SubChunkSize,
                 WorldGridConstants.SubChunkSize,
                 1);
-        }
-
-        /// <summary>中央セルの8近傍を、変更差分適用済みの完成地形近傍から取得します。</summary>
-        /// <param name="localTileX">中心セルの水平ローカル座標です。</param>
-        /// <param name="localTileY">中心セルの垂直ローカル座標です。</param>
-        /// <param name="neighborhood">中心と周囲8チャンクの有効地形を同じ規則で解決する近傍です。</param>
-        /// <returns>境界表示へ渡す8方向の有効地形です。</returns>
-        private static TerrainNeighborTiles GetTerrainNeighborTiles(
-            int localTileX,
-            int localTileY,
-            in CompletedChunkTerrainNeighborhood neighborhood)
-        {
-            if (!neighborhood.TryGetTile(localTileX, localTileY + 1, out GeneratedTerrainCell north)
-                || !neighborhood.TryGetTile(localTileX + 1, localTileY, out GeneratedTerrainCell east)
-                || !neighborhood.TryGetTile(localTileX, localTileY - 1, out GeneratedTerrainCell south)
-                || !neighborhood.TryGetTile(localTileX - 1, localTileY, out GeneratedTerrainCell west)
-                || !neighborhood.TryGetTile(localTileX + 1, localTileY + 1, out GeneratedTerrainCell northEast)
-                || !neighborhood.TryGetTile(localTileX + 1, localTileY - 1, out GeneratedTerrainCell southEast)
-                || !neighborhood.TryGetTile(localTileX - 1, localTileY - 1, out GeneratedTerrainCell southWest)
-                || !neighborhood.TryGetTile(localTileX - 1, localTileY + 1, out GeneratedTerrainCell northWest))
-            {
-                throw new System.InvalidOperationException(
-                    $"完成済み地形近傍から8近傍を取得できません: Local=({localTileX}, {localTileY})");
-            }
-
-            return new TerrainNeighborTiles(
-                north,
-                east,
-                south,
-                west,
-                northEast,
-                southEast,
-                southWest,
-                northWest);
-        }
-
-        /// <summary>
-        /// 純粋計算で得た基本形と回転数を、Awakeで事前作成した実行時Tileへ変換します。
-        /// </summary>
-        /// <param name="selection">境界基本形と時計回り回転数です。</param>
-        /// <returns>対応するTileです。境界なし、未設定、範囲外ならnullです。</returns>
-        private TileBase SelectBoundaryHighlightTile(BoundaryHighlightSelection selection)
-        {
-            if (!selection.HasHighlight || generatedBoundaryHighlightTiles == null)
-            {
-                return null;
-            }
-
-            int shapeIndex = (int)selection.Shape - 1;
-            int rotation = selection.QuarterTurnsClockwise;
-            if (shapeIndex < 0
-                || shapeIndex >= generatedBoundaryHighlightTiles.GetLength(0)
-                || rotation >= generatedBoundaryHighlightTiles.GetLength(1))
-            {
-                return null;
-            }
-
-            return generatedBoundaryHighlightTiles[shapeIndex, rotation];
         }
 
         /// <summary>
@@ -3447,9 +3229,9 @@ namespace Farmware.WorldGeneration.Presentation
                     return;
                 }
 
-                // 岩壁上面Tilemapと同じ12px上へ移し、基準面に影だけ残るずれを防ぎます。
+                // 現行の製品Wallは根元から2タイル、未接続の旧一体型は12px持ち上げ、上面と内部影をそろえます。
                 presentation.GameObject.transform.localPosition = meshOrigin
-                    + (Vector3.up * TerrainLayerPresentationUtility.RockWallElevationInCells);
+                    + (Vector3.up * GetRockWallVisualElevationInCells());
                 presentation.Mesh.Clear();
                 presentation.Mesh.vertices = rockWallShadowVertexBuffer;
                 presentation.Mesh.colors32 = rockWallShadowColorBuffer;
@@ -3474,10 +3256,93 @@ namespace Farmware.WorldGeneration.Presentation
                     pair.Value.GameObject.transform.localPosition =
                         targetTilemap.CellToLocal(
                             CalculateRockWallShadowMinimumCell(pair.Key, currentOrigin))
-                        + (Vector3.up * TerrainLayerPresentationUtility.RockWallElevationInCells);
+                        + (Vector3.up * GetRockWallVisualElevationInCells());
                     reusableRockWallShadowCoordinates.Add(pair.Key);
                 }
             }
+        }
+
+        /// <summary>
+        /// 左右の同種水セルについて段開始Alphaを求め、岸形状が段違いでも横方向へ滑らかにつなげます。
+        /// </summary>
+        /// <param name="terrainNeighborhood">現在WorldLayerの完成済み地形近傍です。</param>
+        /// <param name="hasLowerNeighborhood">直下WorldLayerの近傍を利用できる場合はtrueです。</param>
+        /// <param name="lowerNeighborhood">直下床の有無を判定する完成済み地形近傍です。</param>
+        /// <param name="neighborLocalX">確認する左右隣セルの中心チャンク基準Xです。</param>
+        /// <param name="neighborLocalY">確認する左右隣セルの中心チャンク基準Yです。</param>
+        /// <param name="currentKind">現在セルの淡水または海水種別です。</param>
+        /// <param name="fallbackAlpha">隣が別液体または非液体の場合に使う現在セルの開始Alphaです。</param>
+        /// <returns>同種水なら隣セルの開始Alpha、それ以外なら現在セルの開始Alphaです。</returns>
+        private float GetHorizontalNeighborDepthStageStartAlpha(
+            in CompletedChunkTerrainNeighborhood terrainNeighborhood,
+            bool hasLowerNeighborhood,
+            in CompletedChunkTerrainNeighborhood lowerNeighborhood,
+            int neighborLocalX,
+            int neighborLocalY,
+            TerrainLiquidVisualKind currentKind,
+            float fallbackAlpha)
+        {
+            if (!terrainNeighborhood.TryGetTile(
+                    neighborLocalX,
+                    neighborLocalY,
+                    out GeneratedTerrainCell neighborCell)
+                || TerrainLiquidPresentationUtility.Classify(neighborCell, terrainRuntimeIds)
+                    != currentKind)
+            {
+                return fallbackAlpha;
+            }
+
+            int neighborDepthStage = TerrainLiquidPresentationUtility.GetClampedWaterDepth(
+                terrainNeighborhood,
+                neighborLocalX,
+                neighborLocalY,
+                terrainRuntimeIds);
+            if (neighborDepthStage < 0)
+            {
+                return fallbackAlpha;
+            }
+
+            bool neighborHasUnderwaterFloor = TryGetUnderwaterFloor(
+                hasLowerNeighborhood,
+                lowerNeighborhood,
+                neighborLocalX,
+                neighborLocalY,
+                out _);
+            return TerrainLiquidPresentationUtility.GetDepthStageStartAlpha(
+                neighborDepthStage,
+                neighborHasUnderwaterFloor);
+        }
+
+        /// <summary>指定セルの直下1層に、Wallで塞がれていないGround上面があるか判定します。</summary>
+        /// <param name="hasLowerNeighborhood">直下WorldLayerの近傍を利用できる場合はtrueです。</param>
+        /// <param name="lowerNeighborhood">直下WorldLayerの完成済み地形近傍です。</param>
+        /// <param name="localX">中心チャンク基準のX座標です。</param>
+        /// <param name="localY">中心チャンク基準のY座標です。</param>
+        /// <param name="lowerCell">床がある場合に、その材質解決へ使う直下セルを受け取ります。</param>
+        /// <returns>直下セルがGroundを持ち、Wallを持たない場合はtrueです。</returns>
+        private static bool TryGetUnderwaterFloor(
+            bool hasLowerNeighborhood,
+            in CompletedChunkTerrainNeighborhood lowerNeighborhood,
+            int localX,
+            int localY,
+            out GeneratedTerrainCell lowerCell)
+        {
+            lowerCell = default;
+            return hasLowerNeighborhood
+                && lowerNeighborhood.TryGetTile(localX, localY, out lowerCell)
+                && lowerCell.GroundBlockRuntimeId.IsValid
+                && !lowerCell.WallBlockRuntimeId.IsValid;
+        }
+
+        /// <summary>
+        /// 現在の表示経路に合わせ、岩壁上面と内部影を根元から持ち上げる高さを返します。
+        /// </summary>
+        /// <returns>製品の2段Wallは2タイル、カタログ未接続の一体型フォールバックは12px相当です。</returns>
+        private float GetRockWallVisualElevationInCells()
+        {
+            return materialPresentationIsReady
+                ? TerrainMaterialVerticalProjectionUtility.WallTopOffsetInTiles
+                : TerrainLayerPresentationUtility.RockWallElevationInCells;
         }
 
         /// <summary>

@@ -20,7 +20,7 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>Importer設定または新規Sprite分割を変更した場合はtrueです。</summary>
         public bool Changed { get; }
 
-        /// <summary>新規PNGへ12個のSprite区画を作成した場合はtrueです。</summary>
+        /// <summary>新規PNGまたは初回Import中の仮区画を12個のSprite区画へ分割した場合はtrueです。</summary>
         public bool CreatedSpriteRects { get; }
 
         /// <summary>検査または更新したAssets配下のPNGパスです。</summary>
@@ -28,7 +28,7 @@ namespace Farmware.WorldGeneration.Editor
 
         /// <summary>1枚の地形材質PNGに対する処理結果を変更不能な値としてまとめます。</summary>
         /// <param name="changed">ImporterまたはSprite区画を変更したかを示します。</param>
-        /// <param name="createdSpriteRects">新しいSprite区画を作成したかを示します。</param>
+        /// <param name="createdSpriteRects">新しいSprite区画を作成または初回Import中に置換したかを示します。</param>
         /// <param name="assetPath">処理したAssets配下のPNGパスです。</param>
         public TerrainMaterialSpriteImportResult(
             bool changed,
@@ -43,7 +43,7 @@ namespace Farmware.WorldGeneration.Editor
 
     /// <summary>
     /// 地形材質の64×48 px入力PNGへ、Pixel Art向けImporter設定と4列×3行のSprite区画を適用します。
-    /// 既存区画はSerialized参照を守るため作り直さず、規約と違う場合は自動修復せず理由を報告します。
+    /// 初回Import中にUnityが作った規約外区画だけは置換し、既存区画はSerialized参照を守るため作り直しません。
     /// </summary>
     public static class TerrainMaterialSpriteImportUtility
     {
@@ -93,6 +93,24 @@ namespace Farmware.WorldGeneration.Editor
         /// <exception cref="ArgumentException">対象外パスを指定した場合に送出します。</exception>
         /// <exception cref="InvalidOperationException">寸法、既存分割、Sprite編集能力が規約を満たさない場合に送出します。</exception>
         public static TerrainMaterialSpriteImportResult EnsureImported(string assetPath)
+        {
+            return EnsureImported(assetPath, false);
+        }
+
+        /// <summary>
+        /// 1枚の地形材質PNGを検査し、初回Import中だけ規約外の自動生成区画も4×3分割へ置き換えます。
+        /// </summary>
+        /// <param name="assetPath">Assetsから始まる材質PNGパスです。</param>
+        /// <param name="replaceInvalidRectsCreatedDuringInitialImport">
+        /// TextureImporterに既存設定がなかった初回Importだけtrueにします。
+        /// trueにすると規約外区画のSprite IDを作り直すため、既存参照を持つ通常の再Importには使用しません。
+        /// </param>
+        /// <returns>Importer変更と新規分割または初回区画置換の有無を含む処理結果です。</returns>
+        /// <exception cref="ArgumentException">対象外パスを指定した場合に送出します。</exception>
+        /// <exception cref="InvalidOperationException">寸法、既存分割、Sprite編集能力が規約を満たさない場合に送出します。</exception>
+        public static TerrainMaterialSpriteImportResult EnsureImported(
+            string assetPath,
+            bool replaceInvalidRectsCreatedDuringInitialImport)
         {
             string normalizedPath = NormalizeAssetPath(assetPath);
             if (!IsMaterialSourceTexture(normalizedPath))
@@ -147,11 +165,20 @@ namespace Farmware.WorldGeneration.Editor
                 || HasSingleFullTextureRect(existingRects);
             if (!requiresInitialSlicing)
             {
-                ValidateExistingSpriteRects(existingRects, normalizedPath);
-                return new TerrainMaterialSpriteImportResult(
-                    importerChanged,
-                    false,
-                    normalizedPath);
+                try
+                {
+                    ValidateExistingSpriteRects(existingRects, normalizedPath);
+                    return new TerrainMaterialSpriteImportResult(
+                        importerChanged,
+                        false,
+                        normalizedPath);
+                }
+                catch (InvalidOperationException) when (
+                    replaceInvalidRectsCreatedDuringInitialImport)
+                {
+                    // 初回Importでは、Unityが透明領域を基に横長区画を先に作る場合があります。
+                    // importSettingsMissingだった同じImportだけは参照元がまだ存在しないため、固定グリッドへ置換できます。
+                }
             }
 
             ValidateSpriteCreationCapability(dataProvider, normalizedPath);
@@ -312,7 +339,7 @@ namespace Farmware.WorldGeneration.Editor
             }
         }
 
-        /// <summary>未分割の新規PNGへ、上段から左→右の順で12個の16×16 px区画を作成します。</summary>
+        /// <summary>未分割または初回Import中のPNGへ、上段から左→右の順で12個の16×16 px区画を作成します。</summary>
         /// <param name="dataProvider">Sprite作成能力を確認済みのData Providerです。</param>
         /// <param name="assetPath">Sprite名の基礎名を取得するPNGパスです。</param>
         private static void CreateSpriteRects(
@@ -487,12 +514,47 @@ namespace Farmware.WorldGeneration.Editor
     }
 
     /// <summary>
+    /// 地形材質PNGの初回Importを通常のProject変更監視より前に検知します。
+    /// 初回であることを監視処理へ渡し、Asepriteから直接Exportした画像にUnityが仮区画を作っても安全に置換できるようにします。
+    /// </summary>
+    internal sealed class TerrainMaterialSpriteSourcePostprocessor : AssetPostprocessor
+    {
+        /// <summary>
+        /// Textureの読込前に呼ばれ、初回Import状態を記録します。
+        /// 既存PNGの再Importでは初回状態を記録しないため、保存済みSprite IDは後段の監視処理で維持されます。
+        /// </summary>
+        private void OnPreprocessTexture()
+        {
+            if (!TerrainMaterialSpriteImportUtility.IsMaterialSourceTexture(assetPath))
+            {
+                return;
+            }
+
+            TextureImporter importer = assetImporter as TextureImporter;
+            if (importer == null)
+            {
+                return;
+            }
+
+            // importSettingsMissingは対応する.metaがない初回だけtrueになるため、既存参照を持つ再Importと区別できます。
+            if (importer.importSettingsMissing)
+            {
+                TerrainMaterialSpriteImportWatcher.MarkInitialImport(assetPath);
+            }
+        }
+    }
+
+    /// <summary>
     /// Project内のAsset変更後に地形材質入力フォルダーを検査し、新規PNGへ安全なImport規約を適用します。
     /// AssetDatabaseの更新中へ再入しないよう、Project変更通知をEditorの次回更新まで遅延してまとめます。
     /// </summary>
     [InitializeOnLoad]
     internal static class TerrainMaterialSpriteImportWatcher
     {
+        // SessionStateへ初回Importを記録するキーの接頭辞です。Assembly再読込を挟んでも同じEditorセッション中は状態を維持します。
+        private const string InitialImportSessionKeyPrefix =
+            "Farmware.TerrainMaterialSpriteInitialImport.";
+
         // 同じProject変更通知が連続しても、次回更新へ登録する検査は1回だけにします。
         private static bool scanScheduled;
 
@@ -508,6 +570,15 @@ namespace Farmware.WorldGeneration.Editor
         {
             EditorApplication.projectChanged += ScheduleScan;
             ScheduleScan();
+        }
+
+        /// <summary>
+        /// 対応する.metaがない地形材質PNGを、現在のEditorセッションで初回Import中として記録します。
+        /// </summary>
+        /// <param name="assetPath">Unityが通知したAssets配下のPNGパスです。</param>
+        internal static void MarkInitialImport(string assetPath)
+        {
+            SessionState.SetBool(BuildInitialImportSessionKey(assetPath), true);
         }
 
         /// <summary>Asset Import完了後の次回Editor更新へ、材質入力フォルダーの検査を1回だけ予約します。</summary>
@@ -553,8 +624,12 @@ namespace Farmware.WorldGeneration.Editor
 
                     try
                     {
+                        bool isInitialImport = IsInitialImportPending(assetPath);
                         TerrainMaterialSpriteImportResult result =
-                            TerrainMaterialSpriteImportUtility.EnsureImported(assetPath);
+                            TerrainMaterialSpriteImportUtility.EnsureImported(
+                                assetPath,
+                                isInitialImport);
+                        ClearInitialImport(assetPath);
                         RemoveReportedErrorsForPath(assetPath);
                         if (result.Changed)
                         {
@@ -580,6 +655,32 @@ namespace Farmware.WorldGeneration.Editor
             {
                 applyingImportSettings = false;
             }
+        }
+
+        /// <summary>指定PNGが現在のEditorセッションで初回Import中かを取得します。</summary>
+        /// <param name="assetPath">Assets配下の地形材質PNGパスです。</param>
+        /// <returns>対応する.metaがない状態からImportを開始していればtrueです。</returns>
+        private static bool IsInitialImportPending(string assetPath)
+        {
+            return SessionState.GetBool(
+                BuildInitialImportSessionKey(assetPath),
+                false);
+        }
+
+        /// <summary>正常なImporter設定とSprite区画を確認できたPNGの初回Import状態を解除します。</summary>
+        /// <param name="assetPath">検査に成功した地形材質PNGパスです。</param>
+        private static void ClearInitialImport(string assetPath)
+        {
+            SessionState.SetBool(BuildInitialImportSessionKey(assetPath), false);
+        }
+
+        /// <summary>PNGごとに衝突しないSessionStateキーを作成します。</summary>
+        /// <param name="assetPath">Unityが使用するAssets配下のパスです。</param>
+        /// <returns>初回Import状態の保存と取得に使うキーです。</returns>
+        private static string BuildInitialImportSessionKey(string assetPath)
+        {
+            return InitialImportSessionKeyPrefix
+                + (assetPath ?? string.Empty).Replace('\\', '/');
         }
 
         /// <summary>対象PNGが正常になったとき、以前同じパスへ記録した重複抑制用エラーを取り除きます。</summary>

@@ -193,7 +193,7 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 通常地面の資源だけが、画面手前方向の隣接岩壁によって背面レイヤーへ振り分けられることを検証します。
+        /// 通常地面の資源だけが、画面手前1〜2セルのWall根元によって背面レイヤーへ振り分けられることを検証します。
         /// </summary>
         [Test]
         public void ShouldRenderResourceBehindRockWall_RequiresResourceOnLandAndFrontWall()
@@ -212,25 +212,37 @@ namespace Farmware.WorldGeneration.Tests
                 GroundBlockRuntimeId = GroundRuntimeId,
                 WallBlockRuntimeId = WallRuntimeId
             };
+            GeneratedTerrainCell empty = default;
 
             Assert.That(
                 TerrainLayerPresentationUtility.ShouldRenderResourceBehindRockWall(
                     tree,
                     land,
-                    rockWall),
+                    rockWall,
+                    empty),
                 Is.True,
-                "通常地面の木は、直前方の岩壁より後ろへ描画する必要があります。");
+                "通常地面の木は、手前1セル目のWallより後ろへ描画する必要があります。");
             Assert.That(
                 TerrainLayerPresentationUtility.ShouldRenderResourceBehindRockWall(
                     tree,
                     land,
-                    land),
+                    empty,
+                    rockWall),
+                Is.True,
+                "2段Wallの上面は根元から2タイル伸びるため、手前2セル目のWallも資源を隠します。");
+            Assert.That(
+                TerrainLayerPresentationUtility.ShouldRenderResourceBehindRockWall(
+                    tree,
+                    land,
+                    land,
+                    empty),
                 Is.False,
-                "直前方が通常地面なら、資源を岩壁背面レイヤーへ移してはいけません。");
+                "手前2セルにWallがなければ、資源をWall背面レイヤーへ移してはいけません。");
             Assert.That(
                 TerrainLayerPresentationUtility.ShouldRenderResourceBehindRockWall(
                     noResource,
                     land,
+                    rockWall,
                     rockWall),
                 Is.False,
                 "資源のないセルを背面レイヤーへ分類してはいけません。");
@@ -238,9 +250,10 @@ namespace Farmware.WorldGeneration.Tests
                 TerrainLayerPresentationUtility.ShouldRenderResourceBehindRockWall(
                     tree,
                     rockWall,
+                    rockWall,
                     rockWall),
                 Is.False,
-                "岩壁上資源は高さ12pxの専用レイヤーを使うため、通常資源の背面レイヤーへ分類してはいけません。");
+                "Wall上資源は上面まで持ち上げる専用レイヤーを使うため、通常資源の背面レイヤーへ分類してはいけません。");
         }
 
         /// <summary>全セルを同じ完成Blockセルで埋めた、呼び出し側所有の4096要素配列を作ります。</summary>

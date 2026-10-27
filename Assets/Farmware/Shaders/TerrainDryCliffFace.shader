@@ -1,5 +1,5 @@
 // 製品Gameビューの乾燥崖Face用Shaderです。
-// 各Tileの頂点Alphaを16px段の開始Alphaとして読み、ワールドセル内の高さから48px全体で連続する減衰を作ります。
+// 頂点Alphaが正なら乾燥崖の48px減衰、0なら水中断面の不透明下地として扱い、製品深度Overlayへ渡します。
 Shader "Farmware/Terrain/Dry Cliff Face"
 {
     Properties
@@ -72,7 +72,11 @@ Shader "Farmware/Terrain/Dry Cliff Face"
                 // Tileの上端から下端へ0～1を作り、48pxのうち現在16px段が占める1/3だけAlphaを減らします。
                 // 開始Alphaは上から1、2/3、1/3なので、段境界で濃さが戻らず3段目下端で0になります。
                 float depthInsideCell = 1.0 - frac(input.positionWS.y);
-                half visibleAlpha = saturate(input.color.a - (depthInsideCell / 3.0));
+                // Alpha 0は水中断面の識別値です。乾燥減衰を外し、水の濃さは前面のLiquid深度Overlayだけで決めます。
+                bool isSubmergedFace = input.color.a < (0.5h / 255.0h);
+                half visibleAlpha = isSubmergedFace
+                    ? 1.0h
+                    : saturate(input.color.a - (depthInsideCell / 3.0));
                 return half4(sampled.rgb * input.color.rgb, sampled.a * visibleAlpha);
             }
             ENDHLSL

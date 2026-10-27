@@ -1,0 +1,689 @@
+// このファイルは、公開済み41材質・液体カタログと採用済み断面・Wall影レイヤーを製品SampleSceneへ接続します。
+// Sprite生成やSimulation状態は変更せず、ChunkTilemapPresenterが製品表示へ書き込むTilemap、Material、描画順だけを構成します。
+
+using System;
+using Farmware.WorldGeneration.Authoring;
+using Farmware.WorldGeneration.Presentation;
+using UnityEditor;
+using UnityEditor.SceneManagement;
+using UnityEngine;
+using UnityEngine.Rendering.Universal;
+using UnityEngine.SceneManagement;
+using UnityEngine.Tilemaps;
+
+namespace Farmware.WorldGeneration.Editor
+{
+    /// <summary>
+    /// SampleSceneの既存Gridへ製品用地形・液体レイヤーを冪等に追加します。
+    /// C6-D2〜D4で実装したRuntime経路を、C6-D6で完成材質と液体Assetへ接続するEditor専用処理です。
+    /// </summary>
+    public static class TerrainProductSceneConnector
+    {
+        /// <summary>Build Settingsで有効な製品Sceneの固定パスです。</summary>
+        public const string ProductScenePath = "Assets/Scenes/SampleScene.unity";
+
+        /// <summary>製品材質表示を所有するGridルート名です。</summary>
+        public const string WorldGridName = "World Grid";
+
+        /// <summary>ChunkTilemapPresenterを持つGround Tilemap名です。</summary>
+        public const string GroundTilemapName = "Ground Tilemap";
+
+        /// <summary>Ground、液体、Wall背後の影や資源を描く既定Sorting Layer名です。</summary>
+        public const string GroundSortingLayerName = "Default";
+
+        /// <summary>Wall本体とWallより手前の資源を描くSorting Layer名です。</summary>
+        public const string WallSortingLayerName = "TerrainWall";
+
+        /// <summary>水面Surface、深度、反射、水際を順に重ねるSorting Layer名です。</summary>
+        public const string WaterSortingLayerName = "WaterSurface";
+
+        /// <summary>製品Surface Tileを書き込む既存液体基礎レイヤー名です。</summary>
+        public const string LiquidBaseTilemapName = "Liquid Base Tilemap";
+
+        /// <summary>製品経路では無効化する旧全面液体アニメーションレイヤー名です。</summary>
+        public const string LegacyLiquidAnimationTilemapName =
+            "Liquid Surface Animation Tilemap";
+
+        /// <summary>直下床あり45px深度Overlayレイヤー名です。</summary>
+        public const string LiquidDepthWithFloorTilemapName =
+            "Liquid Depth With Floor Tilemap";
+
+        /// <summary>直下床なし93px深度Overlayレイヤー名です。</summary>
+        public const string LiquidDepthWithoutFloorTilemapName =
+            "Liquid Depth Without Floor Tilemap";
+
+        /// <summary>直下WorldLayerのGround上面を簡易投影するレイヤー名です。</summary>
+        public const string UnderwaterFloorPreviewTilemapName =
+            "Underwater Floor Preview Tilemap";
+
+        /// <summary>Wall前面の水面反射Proxyレイヤー名です。</summary>
+        public const string WaterReflectionTilemapName = "Water Reflection Tilemap";
+
+        /// <summary>奥・左・右の3bit接触線アニメーションレイヤー名です。</summary>
+        public const string LiquidEdgeWaveTilemapName = "Liquid Edge Wave Tilemap";
+
+        /// <summary>乾燥穴へ投影するGround断面レイヤー名です。</summary>
+        public const string GroundFaceTilemapName = "Ground Face Tilemap";
+
+        /// <summary>Wall前面2段を描くレイヤー名です。</summary>
+        public const string WallFaceTilemapName = "Wall Face Tilemap";
+
+        /// <summary>乾燥穴4段目以降を完全な黒で埋めるレイヤー名です。</summary>
+        public const string DryCliffDeepBlackTilemapName = "Dry Cliff Deep Black Tilemap";
+
+        /// <summary>Wall結合シルエットを左へ1pxずらす固定接地影レイヤー名です。</summary>
+        public const string WallContactShadowLeftTilemapName = "Wall Contact Shadow Left Tilemap";
+
+        /// <summary>Wall結合シルエットを右へ1pxずらす固定接地影レイヤー名です。</summary>
+        public const string WallContactShadowRightTilemapName = "Wall Contact Shadow Right Tilemap";
+
+        /// <summary>32px折れ目影の0〜15pxを描くレイヤー名です。</summary>
+        public const string WallFoldShadowTopTilemapName = "Wall Fold Shadow Top Tilemap";
+
+        /// <summary>32px折れ目影の16〜31pxを描くレイヤー名です。</summary>
+        public const string WallFoldShadowBottomTilemapName = "Wall Fold Shadow Bottom Tilemap";
+
+        /// <summary>製品用乾燥崖連続減衰Materialのパスです。</summary>
+        public const string DryCliffMaterialPath =
+            "Assets/Farmware/Art/WorldGeneration/Materials/TerrainDryCliffFace.mat";
+
+        /// <summary>製品用固定接地影Materialのパスです。</summary>
+        public const string ContactShadowMaterialPath =
+            "Assets/Farmware/Art/WorldGeneration/Materials/TerrainWallContactShadow.mat";
+
+        /// <summary>製品用32px折れ目影上段Materialのパスです。</summary>
+        public const string FoldShadowTopMaterialPath =
+            "Assets/Farmware/Art/WorldGeneration/Materials/TerrainWallFoldShadowTop.mat";
+
+        /// <summary>製品用32px折れ目影下段Materialのパスです。</summary>
+        public const string FoldShadowBottomMaterialPath =
+            "Assets/Farmware/Art/WorldGeneration/Materials/TerrainWallFoldShadowBottom.mat";
+
+        /// <summary>岸側セルだけ上端3pxを隠す製品液面Materialのパスです。</summary>
+        public const string LiquidSurfaceMaterialPath =
+            "Assets/Farmware/Art/WorldGeneration/Materials/TerrainLiquidSurface.mat";
+
+        /// <summary>直下床あり45px連続勾配Materialのパスです。</summary>
+        public const string LiquidDepthWithFloorMaterialPath =
+            "Assets/Farmware/Art/WorldGeneration/Materials/TerrainLiquidDepthWithFloor.mat";
+
+        /// <summary>直下床なし93px連続勾配Materialのパスです。</summary>
+        public const string LiquidDepthWithoutFloorMaterialPath =
+            "Assets/Farmware/Art/WorldGeneration/Materials/TerrainLiquidDepthWithoutFloor.mat";
+
+        /// <summary>深度Shaderへ淡水色を渡すMaterialプロパティ名です。</summary>
+        public const string FreshWaterDepthColorProperty = "_FreshWaterColor";
+
+        /// <summary>深度Shaderへ海水色を渡すMaterialプロパティ名です。</summary>
+        public const string SaltWaterDepthColorProperty = "_SaltWaterColor";
+
+        /// <summary>垂直面だけを映す製品水面反射Materialのパスです。</summary>
+        public const string WaterReflectionMaterialPath =
+            "Assets/Farmware/Art/WorldGeneration/Materials/TerrainWaterReflection.mat";
+
+        /// <summary>直下床プレビューへ使うURP 2D Lit既定Materialのパスです。</summary>
+        public const string SpriteLitMaterialPath =
+            "Packages/com.unity.render-pipelines.universal/Runtime/Materials/Sprite-Lit-Default.mat";
+
+        /// <summary>水際線を環境光に依存せず表示するURP 2D Unlit既定Materialのパスです。</summary>
+        public const string SpriteUnlitMaterialPath =
+            "Packages/com.unity.render-pipelines.universal/Runtime/Materials/Sprite-Unlit-Default.mat";
+
+        /// <summary>メニューから公開済み材質をSampleSceneへ接続し、Sceneを保存します。</summary>
+        [MenuItem("Farmware/World Generation/Setup/Connect Product Terrain Presentation")]
+        public static void ConnectFromMenu()
+        {
+            try
+            {
+                ConnectAndSave();
+                EditorUtility.DisplayDialog(
+                    "製品地形表示を接続しました",
+                    "SampleSceneへ41材質、液体深度・反射・水際、採用済みWall影を接続しました。",
+                    "閉じる");
+            }
+            catch (Exception exception)
+            {
+                Debug.LogException(exception);
+                EditorUtility.DisplayDialog(
+                    "製品地形表示を接続できません",
+                    exception.Message,
+                    "閉じる");
+            }
+        }
+
+        /// <summary>
+        /// 公開済み材質・液体カタログとMaterialを検証し、SampleSceneへ製品Tilemapを接続して保存します。
+        /// </summary>
+        public static void ConnectAndSave()
+        {
+            TerrainMaterialPresentationCatalog catalog =
+                AssetDatabase.LoadAssetAtPath<TerrainMaterialPresentationCatalog>(
+                    TerrainMaterialProductPublisher.CatalogPath);
+            string catalogError = catalog == null
+                ? "製品カタログAssetがありません。"
+                : string.Empty;
+            if (catalog == null || !catalog.TryInitialize(out catalogError))
+            {
+                throw new InvalidOperationException(
+                    $"41材質の製品カタログを先に公開してください: {catalogError}");
+            }
+
+            TerrainLiquidPresentationCatalog liquidCatalog =
+                AssetDatabase.LoadAssetAtPath<TerrainLiquidPresentationCatalog>(
+                    TerrainLiquidProductPublisher.CatalogPath);
+            string liquidCatalogError = liquidCatalog == null
+                ? "製品液体カタログAssetがありません。"
+                : string.Empty;
+            if (liquidCatalog == null || !liquidCatalog.TryInitialize(out liquidCatalogError))
+            {
+                throw new InvalidOperationException(
+                    $"液体3種の製品カタログを先に公開してください: {liquidCatalogError}");
+            }
+
+            Material dryCliff = LoadRequiredMaterial(DryCliffMaterialPath);
+            Material contactShadow = LoadRequiredMaterial(ContactShadowMaterialPath);
+            Material foldTop = LoadRequiredMaterial(FoldShadowTopMaterialPath);
+            Material foldBottom = LoadRequiredMaterial(FoldShadowBottomMaterialPath);
+            Material liquidSurface = LoadRequiredMaterial(LiquidSurfaceMaterialPath);
+            Material liquidDepthWithFloor = LoadRequiredMaterial(
+                LiquidDepthWithFloorMaterialPath);
+            Material liquidDepthWithoutFloor = LoadRequiredMaterial(
+                LiquidDepthWithoutFloorMaterialPath);
+            Material waterReflection = LoadRequiredMaterial(WaterReflectionMaterialPath);
+            Material spriteLit = LoadRequiredMaterial(SpriteLitMaterialPath);
+            Material spriteUnlit = LoadRequiredMaterial(SpriteUnlitMaterialPath);
+            ConfigureLiquidDepthMaterialColors(
+                liquidCatalog,
+                liquidDepthWithFloor,
+                liquidDepthWithoutFloor);
+
+            Scene scene = SceneManager.GetSceneByPath(ProductScenePath);
+            bool openedForThisOperation = !scene.IsValid() || !scene.isLoaded;
+            if (openedForThisOperation)
+            {
+                // 現在の検品Sceneを閉じずにAdditiveで編集し、ユーザーのScene作業状態を壊さないようにします。
+                scene = EditorSceneManager.OpenScene(ProductScenePath, OpenSceneMode.Additive);
+            }
+
+            try
+            {
+                GameObject gridObject = FindRoot(scene, WorldGridName);
+                float wallTopOffset =
+                    TerrainMaterialVerticalProjectionUtility.WallTopOffsetInTiles;
+                Vector3 wallLayerOffset = new Vector3(0f, wallTopOffset, 0f);
+                Transform groundTransform = gridObject.transform.Find(GroundTilemapName);
+                if (groundTransform == null)
+                {
+                    throw new InvalidOperationException(
+                        $"製品Sceneに{GroundTilemapName}がありません: {ProductScenePath}");
+                }
+
+                ChunkTilemapPresenter presenter =
+                    groundTransform.GetComponent<ChunkTilemapPresenter>();
+                if (presenter == null)
+                {
+                    throw new InvalidOperationException(
+                        $"{GroundTilemapName}にChunkTilemapPresenterがありません。");
+                }
+
+                Tilemap groundFace = EnsureTilemap(
+                    gridObject.transform,
+                    GroundFaceTilemapName,
+                    Vector3.zero,
+                    sortingLayerName: GroundSortingLayerName,
+                    sortingOrder: 1,
+                    dryCliff);
+                Tilemap wallFace = EnsureTilemap(
+                    gridObject.transform,
+                    WallFaceTilemapName,
+                    wallLayerOffset,
+                    sortingLayerName: WallSortingLayerName,
+                    sortingOrder: 1,
+                    material: null);
+                Tilemap deepBlack = EnsureTilemap(
+                    gridObject.transform,
+                    DryCliffDeepBlackTilemapName,
+                    Vector3.zero,
+                    sortingLayerName: GroundSortingLayerName,
+                    sortingOrder: -1,
+                    material: null);
+
+                // 製品液面はTilemap全体を8px下げず、論理セル位置を維持したまま岸側だけShaderで上端3pxを隠します。
+                Transform liquidBaseTransform = gridObject.transform.Find(LiquidBaseTilemapName);
+                Tilemap liquidBase = liquidBaseTransform == null
+                    ? null
+                    : liquidBaseTransform.GetComponent<Tilemap>();
+                TilemapRenderer liquidBaseRenderer = liquidBaseTransform == null
+                    ? null
+                    : liquidBaseTransform.GetComponent<TilemapRenderer>();
+                if (liquidBase == null || liquidBaseRenderer == null)
+                {
+                    throw new InvalidOperationException(
+                        $"製品Sceneに必須Tilemapがありません: {LiquidBaseTilemapName}");
+                }
+
+                liquidBaseTransform.localPosition = Vector3.zero;
+                liquidBaseRenderer.enabled = true;
+                liquidBaseRenderer.mode = TilemapRenderer.Mode.Chunk;
+                liquidBaseRenderer.sortOrder = TilemapRenderer.SortOrder.BottomLeft;
+                liquidBaseRenderer.sortingLayerName = WaterSortingLayerName;
+                liquidBaseRenderer.sortingOrder = 0;
+                liquidBaseRenderer.sharedMaterial = liquidSurface;
+                EditorUtility.SetDirty(liquidBaseTransform);
+                EditorUtility.SetDirty(liquidBaseRenderer);
+
+                Tilemap floorPreview = EnsureTilemap(
+                    gridObject.transform,
+                    UnderwaterFloorPreviewTilemapName,
+                    Vector3.zero,
+                    sortingLayerName: GroundSortingLayerName,
+                    sortingOrder: 0,
+                    spriteLit);
+                Tilemap depthWithFloor = EnsureTilemap(
+                    gridObject.transform,
+                    LiquidDepthWithFloorTilemapName,
+                    Vector3.zero,
+                    sortingLayerName: WaterSortingLayerName,
+                    sortingOrder: 1,
+                    liquidDepthWithFloor);
+                Tilemap depthWithoutFloor = EnsureTilemap(
+                    gridObject.transform,
+                    LiquidDepthWithoutFloorTilemapName,
+                    Vector3.zero,
+                    sortingLayerName: WaterSortingLayerName,
+                    sortingOrder: 1,
+                    liquidDepthWithoutFloor);
+                Tilemap reflection = EnsureTilemap(
+                    gridObject.transform,
+                    WaterReflectionTilemapName,
+                    Vector3.zero,
+                    sortingLayerName: WaterSortingLayerName,
+                    sortingOrder: 2,
+                    waterReflection);
+                Tilemap edgeWave = EnsureTilemap(
+                    gridObject.transform,
+                    LiquidEdgeWaveTilemapName,
+                    Vector3.zero,
+                    sortingLayerName: WaterSortingLayerName,
+                    sortingOrder: 3,
+                    spriteUnlit);
+
+                // 旧全面アニメーションは製品カタログ経路では書き込まないため、残存Tileを消してRendererも無効化します。
+                // GameObjectとPresenter参照は、製品未接続の開発Scene向け旧経路を別作業で削除するまで保持します。
+                Transform legacyAnimationTransform = gridObject.transform.Find(
+                    LegacyLiquidAnimationTilemapName);
+                Tilemap legacyAnimation = legacyAnimationTransform == null
+                    ? null
+                    : legacyAnimationTransform.GetComponent<Tilemap>();
+                TilemapRenderer legacyAnimationRenderer = legacyAnimationTransform == null
+                    ? null
+                    : legacyAnimationTransform.GetComponent<TilemapRenderer>();
+                if (legacyAnimation == null || legacyAnimationRenderer == null)
+                {
+                    throw new InvalidOperationException(
+                        $"製品Sceneに移行元Tilemapがありません: {LegacyLiquidAnimationTilemapName}");
+                }
+
+                legacyAnimation.ClearAllTiles();
+                legacyAnimationTransform.localPosition = Vector3.zero;
+                legacyAnimationRenderer.enabled = false;
+                EditorUtility.SetDirty(legacyAnimationTransform);
+                EditorUtility.SetDirty(legacyAnimationRenderer);
+
+                float pixelsPerUnit = TerrainTileArtGenerationSettings.TileSizeInPixels;
+                Vector3 contactBaseOffset = new Vector3(
+                    0f,
+                    wallTopOffset
+                        + (TerrainWallShadowUtility.ContactShadowOffsetYPixels / pixelsPerUnit),
+                    0f);
+                Tilemap contactLeft = EnsureTilemap(
+                    gridObject.transform,
+                    WallContactShadowLeftTilemapName,
+                    contactBaseOffset + new Vector3(
+                        -TerrainWallShadowUtility.ContactShadowHorizontalSpreadPixels / pixelsPerUnit,
+                        0f,
+                        0f),
+                    sortingLayerName: GroundSortingLayerName,
+                    sortingOrder: 1,
+                    contactShadow);
+                Tilemap contactRight = EnsureTilemap(
+                    gridObject.transform,
+                    WallContactShadowRightTilemapName,
+                    contactBaseOffset + new Vector3(
+                        TerrainWallShadowUtility.ContactShadowHorizontalSpreadPixels / pixelsPerUnit,
+                        0f,
+                        0f),
+                    sortingLayerName: GroundSortingLayerName,
+                    sortingOrder: 1,
+                    contactShadow);
+                Tilemap foldTopTilemap = EnsureTilemap(
+                    gridObject.transform,
+                    WallFoldShadowTopTilemapName,
+                    wallLayerOffset,
+                    sortingLayerName: WallSortingLayerName,
+                    sortingOrder: 2,
+                    foldTop);
+                Tilemap foldBottomTilemap = EnsureTilemap(
+                    gridObject.transform,
+                    WallFoldShadowBottomTilemapName,
+                    wallLayerOffset,
+                    sortingLayerName: WallSortingLayerName,
+                    sortingOrder: 2,
+                    foldBottom);
+
+                // Wall上面は製品経路でも既存Rock Wall Tilemapを再利用しますが、一体型Spriteではなくカタログ選択Tileだけを書き込みます。
+                Transform wallTopTransform = gridObject.transform.Find("Rock Wall Top Tilemap");
+                if (wallTopTransform == null)
+                {
+                    // 旧Sceneをまだ再構築していない場合は一体型時代の名前を引き継ぎ、製品名へその場で更新します。
+                    wallTopTransform = gridObject.transform.Find("Rock Wall Tilemap");
+                    if (wallTopTransform != null)
+                    {
+                        wallTopTransform.name = "Rock Wall Top Tilemap";
+                    }
+                }
+
+                if (wallTopTransform == null)
+                {
+                    throw new InvalidOperationException("製品SceneにRock Wall Top Tilemapがありません。");
+                }
+
+                // Tileは論理根元セルへ書き込み、表示レイヤ全体を2タイル奥へ持ち上げます。
+                // 同じ補正を上面・Face・折れ目影・固定影へ適用することで、最下段Faceが論理根元に戻ります。
+                wallTopTransform.localPosition = wallLayerOffset;
+                TilemapRenderer wallTopRenderer = wallTopTransform.GetComponent<TilemapRenderer>();
+                wallTopRenderer.sortingLayerName = WallSortingLayerName;
+                wallTopRenderer.sortingOrder = 0;
+
+                // Sorting LayerはsortingOrderより優先されます。Wallを専用Layerへ移した後も、
+                // 通常資源はWallより手前、手前側2セル以内のWallに遮蔽される資源だけはWallより奥になるよう明示します。
+                ConfigureExistingRenderer(
+                    gridObject.transform,
+                    "Resource Behind Rock Wall Tilemap",
+                    GroundSortingLayerName,
+                    sortingOrder: 2);
+                ConfigureExistingRenderer(
+                    gridObject.transform,
+                    "Resource Tilemap",
+                    WallSortingLayerName,
+                    sortingOrder: 10);
+                ConfigureExistingRenderer(
+                    gridObject.transform,
+                    "Rock Wall Resource Tilemap",
+                    WallSortingLayerName,
+                    sortingOrder: 11);
+                SetExistingLocalPosition(
+                    gridObject.transform,
+                    "Rock Wall Resource Tilemap",
+                    wallLayerOffset);
+                EnsureGlobalLightIlluminatesWall(scene);
+
+                presenter.ConfigureTerrainMaterialPresentation(
+                    catalog,
+                    groundFace,
+                    wallFace,
+                    deepBlack);
+                presenter.ConfigureTerrainWallShadowPresentation(
+                    contactLeft,
+                    contactRight,
+                    foldTopTilemap,
+                    foldBottomTilemap);
+                presenter.ConfigureTerrainLiquidPresentation(
+                    liquidCatalog,
+                    depthWithFloor,
+                    depthWithoutFloor,
+                    floorPreview,
+                    reflection,
+                    edgeWave);
+                EditorUtility.SetDirty(presenter);
+
+                EditorSceneManager.MarkSceneDirty(scene);
+                if (!EditorSceneManager.SaveScene(scene, ProductScenePath))
+                {
+                    throw new InvalidOperationException(
+                        $"製品Sceneを保存できませんでした: {ProductScenePath}");
+                }
+            }
+            finally
+            {
+                if (openedForThisOperation && scene.IsValid() && scene.isLoaded)
+                {
+                    EditorSceneManager.CloseScene(scene, removeScene: true);
+                }
+            }
+        }
+
+        /// <summary>指定Scene直下から固定名のルートGameObjectを探します。</summary>
+        /// <param name="scene">製品SampleSceneです。</param>
+        /// <param name="name">検索するルート名です。</param>
+        /// <returns>一意に見つかったルートGameObjectです。</returns>
+        private static GameObject FindRoot(Scene scene, string name)
+        {
+            GameObject[] roots = scene.GetRootGameObjects();
+            for (int index = 0; index < roots.Length; index++)
+            {
+                if (string.Equals(roots[index].name, name, StringComparison.Ordinal))
+                {
+                    return roots[index];
+                }
+            }
+
+            throw new InvalidOperationException($"製品Sceneに{name}ルートがありません。");
+        }
+
+        /// <summary>Grid直下のTilemapを再利用または作成し、Transform、描画順、Materialを製品値へ揃えます。</summary>
+        /// <param name="grid">全地形Tilemapを所有するGrid Transformです。</param>
+        /// <param name="name">安定したTilemap GameObject名です。</param>
+        /// <param name="localPosition">1セルを1 unitとしたローカル位置です。</param>
+        /// <param name="sortingLayerName">受影面を分けるSorting Layer名です。</param>
+        /// <param name="sortingOrder">同じSorting Layer内の描画順です。</param>
+        /// <param name="material">専用Shaderを使う場合の共有Material、既定Sprite Materialならnullです。</param>
+        /// <returns>Presenterへ接続するTilemapです。</returns>
+        private static Tilemap EnsureTilemap(
+            Transform grid,
+            string name,
+            Vector3 localPosition,
+            string sortingLayerName,
+            int sortingOrder,
+            Material material)
+        {
+            Transform existing = grid.Find(name);
+            GameObject gameObject;
+            if (existing == null)
+            {
+                gameObject = new GameObject(name);
+                gameObject.transform.SetParent(grid, worldPositionStays: false);
+            }
+            else
+            {
+                gameObject = existing.gameObject;
+            }
+
+            gameObject.transform.localPosition = localPosition;
+            gameObject.transform.localRotation = Quaternion.identity;
+            gameObject.transform.localScale = Vector3.one;
+            Tilemap tilemap = gameObject.GetComponent<Tilemap>();
+            if (tilemap == null)
+            {
+                tilemap = gameObject.AddComponent<Tilemap>();
+            }
+
+            TilemapRenderer renderer = gameObject.GetComponent<TilemapRenderer>();
+            if (renderer == null)
+            {
+                renderer = gameObject.AddComponent<TilemapRenderer>();
+            }
+
+            renderer.mode = TilemapRenderer.Mode.Chunk;
+            renderer.sortOrder = TilemapRenderer.SortOrder.BottomLeft;
+            renderer.enabled = true;
+            renderer.sortingLayerName = sortingLayerName;
+            renderer.sortingOrder = sortingOrder;
+            if (material != null)
+            {
+                renderer.sharedMaterial = material;
+            }
+
+            return tilemap;
+        }
+
+        /// <summary>製品MaterialをAssetDatabaseから読み込み、不足時はSceneを変更する前に停止します。</summary>
+        /// <param name="assetPath">読み込むMaterialのAssetパスです。</param>
+        /// <returns>製品Sceneへ割り当てる共有Materialです。</returns>
+        private static Material LoadRequiredMaterial(string assetPath)
+        {
+            Material material = AssetDatabase.LoadAssetAtPath<Material>(assetPath);
+            if (material == null)
+            {
+                throw new InvalidOperationException($"製品Materialを読み込めません: {assetPath}");
+            }
+
+            return material;
+        }
+
+        /// <summary>
+        /// Tile Tintを濃度補間データへ使えるよう、淡水・海水の製品色を深度Material側へ同期します。
+        /// </summary>
+        /// <param name="catalog">淡水・海水の深度色を正として保持する製品カタログです。</param>
+        /// <param name="withFloor">直下床あり45px勾配Materialです。</param>
+        /// <param name="withoutFloor">直下床なし93px勾配Materialです。</param>
+        private static void ConfigureLiquidDepthMaterialColors(
+            TerrainLiquidPresentationCatalog catalog,
+            Material withFloor,
+            Material withoutFloor)
+        {
+            if (!catalog.TryGetDefinition(
+                    TerrainLiquidVisualKind.FreshWater,
+                    out TerrainLiquidPresentationDefinition freshWater)
+                || !catalog.TryGetDefinition(
+                    TerrainLiquidVisualKind.SaltWater,
+                    out TerrainLiquidPresentationDefinition saltWater))
+            {
+                throw new InvalidOperationException(
+                    "製品液体カタログから淡水・海水の深度色を取得できません。");
+            }
+
+            Material[] materials = { withFloor, withoutFloor };
+            for (int index = 0; index < materials.Length; index++)
+            {
+                Material material = materials[index];
+                if (!material.HasProperty(FreshWaterDepthColorProperty)
+                    || !material.HasProperty(SaltWaterDepthColorProperty))
+                {
+                    throw new InvalidOperationException(
+                        $"製品深度Materialに液体色プロパティがありません: {material.name}");
+                }
+
+                material.SetColor(FreshWaterDepthColorProperty, freshWater.DepthOverlayColor);
+                material.SetColor(SaltWaterDepthColorProperty, saltWater.DepthOverlayColor);
+                EditorUtility.SetDirty(material);
+            }
+
+            // Sceneだけ保存して色変更を失わないよう、共有Material Assetをここで永続化します。
+            AssetDatabase.SaveAssets();
+        }
+
+        /// <summary>
+        /// 既存TilemapRendererを指定Sorting Layerと順序へ揃えます。
+        /// </summary>
+        /// <param name="grid">対象Tilemapを直接所有する製品Gridです。</param>
+        /// <param name="name">必須Tilemap GameObject名です。</param>
+        /// <param name="sortingLayerName">設定するSorting Layer名です。</param>
+        /// <param name="sortingOrder">同じSorting Layer内の描画順です。</param>
+        private static void ConfigureExistingRenderer(
+            Transform grid,
+            string name,
+            string sortingLayerName,
+            int sortingOrder)
+        {
+            Transform child = grid.Find(name);
+            TilemapRenderer renderer = child == null
+                ? null
+                : child.GetComponent<TilemapRenderer>();
+            if (renderer == null)
+            {
+                throw new InvalidOperationException(
+                    $"製品Sceneに必須TilemapRendererがありません: {name}");
+            }
+
+            renderer.sortingLayerName = sortingLayerName;
+            renderer.sortingOrder = sortingOrder;
+            EditorUtility.SetDirty(renderer);
+        }
+
+        /// <summary>
+        /// 必須の既存Tilemapを、論理根元から求めた製品表示位置へ移動します。
+        /// </summary>
+        /// <param name="grid">対象Tilemapを直接所有する製品Gridです。</param>
+        /// <param name="name">必須Tilemap GameObject名です。</param>
+        /// <param name="localPosition">1セルを1 unitとしたローカル位置です。</param>
+        private static void SetExistingLocalPosition(
+            Transform grid,
+            string name,
+            Vector3 localPosition)
+        {
+            Transform child = grid.Find(name);
+            if (child == null || child.GetComponent<Tilemap>() == null)
+            {
+                throw new InvalidOperationException(
+                    $"製品Sceneに必須Tilemapがありません: {name}");
+            }
+
+            child.localPosition = localPosition;
+            EditorUtility.SetDirty(child);
+        }
+
+        /// <summary>
+        /// 製品SceneのGlobal Light 2DへWall専用Sorting Layerを追加し、Lit MaterialのWallが無照明で黒くなることを防ぎます。
+        /// </summary>
+        /// <param name="scene">製品地形を表示するSampleSceneです。</param>
+        private static void EnsureGlobalLightIlluminatesWall(Scene scene)
+        {
+            int wallSortingLayerId = SortingLayer.NameToID(WallSortingLayerName);
+            Light2D[] lights = UnityEngine.Object.FindObjectsByType<Light2D>(
+                FindObjectsInactive.Include,
+                FindObjectsSortMode.None);
+            bool foundSceneGlobalLight = false;
+
+            for (int lightIndex = 0; lightIndex < lights.Length; lightIndex++)
+            {
+                Light2D light = lights[lightIndex];
+                if (light.gameObject.scene != scene
+                    || light.lightType != Light2D.LightType.Global)
+                {
+                    continue;
+                }
+
+                foundSceneGlobalLight = true;
+                int[] currentLayers = light.targetSortingLayers;
+                bool alreadyIncluded = false;
+                for (int layerIndex = 0; layerIndex < currentLayers.Length; layerIndex++)
+                {
+                    if (currentLayers[layerIndex] == wallSortingLayerId)
+                    {
+                        alreadyIncluded = true;
+                        break;
+                    }
+                }
+
+                if (alreadyIncluded)
+                {
+                    continue;
+                }
+
+                // 既存の照明対象を維持した末尾へWallを加え、液体など別Layerの意図した設定を壊しません。
+                var updatedLayers = new int[currentLayers.Length + 1];
+                Array.Copy(currentLayers, updatedLayers, currentLayers.Length);
+                updatedLayers[updatedLayers.Length - 1] = wallSortingLayerId;
+                light.targetSortingLayers = updatedLayers;
+                EditorUtility.SetDirty(light);
+            }
+
+            if (!foundSceneGlobalLight)
+            {
+                throw new InvalidOperationException(
+                    "製品SceneにGlobal Light 2Dがないため、TerrainWallを照明対象へ追加できません。");
+            }
+        }
+    }
+}

@@ -2,6 +2,7 @@
 // 一時PNGをAssets配下へImportし、既存Sprite IDを維持したまま再検査できることまで保証します。
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using Farmware.WorldGeneration.Authoring;
 using Farmware.WorldGeneration.Editor;
@@ -127,6 +128,51 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(ReadSpriteRects(TestAssetPath).Length, Is.LessThanOrEqualTo(1));
         }
 
+        /// <summary>
+        /// 初回Import中にUnityが透明領域基準の規約外区画を作った場合は、参照が作られる前なので12区画へ置換できることを確認します。
+        /// </summary>
+        [Test]
+        public void EnsureImported_InitialImportWithUnexpectedRects_ReplacesWithGrid()
+        {
+            CreateAndImportTestPng(
+                TerrainMaterialSpriteImportUtility.ExpectedWidthInPixels,
+                TerrainMaterialSpriteImportUtility.ExpectedHeightInPixels);
+            ConfigureUnexpectedTwoSpriteRects(TestAssetPath);
+
+            TerrainMaterialSpriteImportResult result =
+                TerrainMaterialSpriteImportUtility.EnsureImported(TestAssetPath, true);
+
+            Assert.That(result.Changed, Is.True);
+            Assert.That(result.CreatedSpriteRects, Is.True);
+            AssertExpectedRects(ReadSpriteRects(TestAssetPath));
+        }
+
+        /// <summary>
+        /// 同じ規約外区画でも通常の再Importでは置換せず、既存Sprite IDと参照を保護することを確認します。
+        /// </summary>
+        [Test]
+        public void EnsureImported_ExistingUnexpectedRects_RejectsWithoutChangingIds()
+        {
+            CreateAndImportTestPng(
+                TerrainMaterialSpriteImportUtility.ExpectedWidthInPixels,
+                TerrainMaterialSpriteImportUtility.ExpectedHeightInPixels);
+            ConfigureUnexpectedTwoSpriteRects(TestAssetPath);
+            SpriteRect[] beforeRects = ReadSpriteRects(TestAssetPath);
+
+            InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() =>
+                TerrainMaterialSpriteImportUtility.EnsureImported(TestAssetPath));
+            SpriteRect[] afterRects = ReadSpriteRects(TestAssetPath);
+
+            Assert.That(exception.Message, Does.Contain("既存Sprite分割は自動修復しません"));
+            Assert.That(afterRects.Length, Is.EqualTo(beforeRects.Length));
+            // 区画数だけでなくIDと座標も比較し、例外を返す前に部分変更していないことを保証します。
+            for (int index = 0; index < beforeRects.Length; index++)
+            {
+                Assert.That(afterRects[index].spriteID, Is.EqualTo(beforeRects[index].spriteID));
+                Assert.That(afterRects[index].rect, Is.EqualTo(beforeRects[index].rect));
+            }
+        }
+
         /// <summary>既存の境界なし8区画と境界あり12区画を、変更やID再作成なしで受理することを確認します。</summary>
         /// <param name="fileName">Sourceフォルダーに存在する代表材質PNG名です。</param>
         /// <param name="expectedSpriteCount">境界有無に応じた既存区画数です。</param>
@@ -219,6 +265,71 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(dataProvider, Is.Not.Null);
             dataProvider.InitSpriteEditorDataProvider();
             return dataProvider.GetSpriteRects();
+        }
+
+        /// <summary>
+        /// 透明領域基準の自動Sliceを模した横長2区画を保存し、Asepriteからの初回Exportで発生した問題を再現します。
+        /// </summary>
+        /// <param name="assetPath">規約外区画を設定するテストPNGのAssets相対パスです。</param>
+        private static void ConfigureUnexpectedTwoSpriteRects(string assetPath)
+        {
+            TextureImporter importer = AssetImporter.GetAtPath(assetPath) as TextureImporter;
+            Assert.That(importer, Is.Not.Null);
+            importer.textureType = TextureImporterType.Sprite;
+            importer.spriteImportMode = SpriteImportMode.Multiple;
+            importer.SaveAndReimport();
+
+            ISpriteEditorDataProvider dataProvider = CreateSpriteDataProvider(importer);
+            ISpriteNameFileIdDataProvider nameFileIdProvider =
+                dataProvider.GetDataProvider<ISpriteNameFileIdDataProvider>();
+            Assert.That(nameFileIdProvider, Is.Not.Null);
+
+            GUID upperSpriteId = GUID.Generate();
+            GUID lowerSpriteId = GUID.Generate();
+            // 実際のMeadowSoilで発生した上下2領域の座標を使い、透明な中央帯で分離された自動Sliceを再現します。
+            SpriteRect[] unexpectedRects =
+            {
+                new SpriteRect
+                {
+                    name = "__TerrainMaterialSpriteImportTest_0",
+                    rect = new Rect(0f, 25f, 64f, 23f),
+                    alignment = SpriteAlignment.Center,
+                    pivot = Vector2.zero,
+                    spriteID = upperSpriteId
+                },
+                new SpriteRect
+                {
+                    name = "__TerrainMaterialSpriteImportTest_1",
+                    rect = new Rect(0f, 0f, 64f, 17f),
+                    alignment = SpriteAlignment.Center,
+                    pivot = Vector2.zero,
+                    spriteID = lowerSpriteId
+                }
+            };
+            List<SpriteNameFileIdPair> nameFileIdPairs = new List<SpriteNameFileIdPair>(2)
+            {
+                new SpriteNameFileIdPair(unexpectedRects[0].name, upperSpriteId),
+                new SpriteNameFileIdPair(unexpectedRects[1].name, lowerSpriteId)
+            };
+
+            dataProvider.SetSpriteRects(unexpectedRects);
+            nameFileIdProvider.SetNameFileIdPairs(nameFileIdPairs);
+            dataProvider.Apply();
+            importer.SaveAndReimport();
+        }
+
+        /// <summary>Importerから初期化済みのSprite Editor Data Providerを取得します。</summary>
+        /// <param name="importer">Sprite Multipleとして設定済みのテスト用Importerです。</param>
+        /// <returns>区画と名前・File IDを読み書きできるData Providerです。</returns>
+        private static ISpriteEditorDataProvider CreateSpriteDataProvider(AssetImporter importer)
+        {
+            SpriteDataProviderFactories factories = new SpriteDataProviderFactories();
+            factories.Init();
+            ISpriteEditorDataProvider dataProvider =
+                factories.GetSpriteEditorDataProviderFromObject(importer);
+            Assert.That(dataProvider, Is.Not.Null);
+            dataProvider.InitSpriteEditorDataProvider();
+            return dataProvider;
         }
 
         /// <summary>12区画の名前、上段左からの順序、寸法、中央Pivotが規約どおりか確認します。</summary>

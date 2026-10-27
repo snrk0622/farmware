@@ -69,11 +69,16 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// Wallの直前と2セル手前へ0段目・1段目を投影し、3セル以上離れたセルへ延長しないことを保証します。
+        /// +2Y表示補正前のレイヤ内でWallの直前と2セル手前へ0段目・1段目を分類し、
+        /// 補正後は論理根元から上へ2段積めることを保証します。
         /// </summary>
         [Test]
         public void WallProjection_UsesExactlyTwoFrontCells()
         {
+            Assert.That(
+                TerrainMaterialVerticalProjectionUtility.WallTopOffsetInTiles,
+                Is.EqualTo(2),
+                "Wall上面は論理根元からFace 2段分だけ画面奥へずらす必要があります。");
             CompletedChunkTerrainNeighborhood neighborhood = CreateEmptyNeighborhood(
                 out NativeArray<GeneratedTerrainCell> center,
                 out _);
@@ -235,6 +240,16 @@ namespace Farmware.WorldGeneration.Tests
                 catalog, lookup, 55UL, coordinate, groundRuntimeId, 1, false, out TerrainMaterialProductTileSelection lowerFace), Is.True);
             Assert.That(lowerFace.Sprite, Is.SameAs(face));
             Assert.That(lowerFace.Color.a, Is.EqualTo(2f / 3f).Within(0.01f));
+
+            // 水中Faceも同じ完成Spriteを使いますが、Alpha 0の識別値で乾燥減衰を回避します。
+            for (int depth = 0; depth < TerrainLiquidPresentationUtility.MaximumFaceDepth; depth++)
+            {
+                Assert.That(TerrainMaterialProductTileResolver.TryResolveSubmergedGroundFace(
+                    catalog, lookup, 55UL, coordinate, groundRuntimeId, depth,
+                    out TerrainMaterialProductTileSelection submergedFace), Is.True);
+                Assert.That(submergedFace.Sprite, Is.SameAs(depth == 0 ? groundBoundary : face));
+                Assert.That(submergedFace.Color, Is.EqualTo(new Color(1f, 1f, 1f, 0f)));
+            }
         }
 
         /// <summary>同じSprite・TintのTileと深部黒Tileを再利用し、セル数に応じてUnity Objectが増えないことを保証します。</summary>

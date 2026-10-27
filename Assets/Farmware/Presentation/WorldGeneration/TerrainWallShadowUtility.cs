@@ -16,7 +16,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// <summary>論理チャンク左端を0とする連続区間の開始Xです。</summary>
         public int StartX { get; }
 
-        /// <summary>論理チャンク下端を0とする、根元を投影するWall上面のYです。</summary>
+        /// <summary>論理チャンク下端を0とする、Wall根元の論理Yです。</summary>
         public int Y { get; }
 
         /// <summary>同じ行で連続するWallセル数です。常に1以上です。</summary>
@@ -24,7 +24,7 @@ namespace Farmware.WorldGeneration.Presentation
 
         /// <summary>検証済みの開始位置と長さを変更不能な値として保持します。</summary>
         /// <param name="startX">論理チャンク内の開始Xです。</param>
-        /// <param name="y">論理チャンク内のWall上面Yです。</param>
+        /// <param name="y">論理チャンク内のWall根元Yです。</param>
         /// <param name="length">連続するセル数です。</param>
         public TerrainWallShadowRun(int startX, int y, int length)
         {
@@ -72,9 +72,11 @@ namespace Farmware.WorldGeneration.Presentation
         /// <summary>Wall前面2段を通して連続減衰する折れ目影の画素数です。</summary>
         public const int FoldShadowDepthPixels = 32;
 
-        /// <summary>動的影の起点をWall上面から最下段Face根元へ移すタイル数です。</summary>
-        public const int DynamicShadowCasterOffsetYInTiles =
-            -TerrainMaterialVerticalProjectionUtility.WallFaceDepth;
+        /// <summary>
+        /// 動的影Casterを論理Wall根元からずらすタイル数です。
+        /// 論理セル自体が最下段Faceと接地面の起点なので、補正は不要です。
+        /// </summary>
+        public const int DynamicShadowCasterOffsetYInTiles = 0;
 
         /// <summary>
         /// 16×16サブチャンクの露出したWall根元を走査し、同じ行の隣接根元を材質に関係なく1区間へまとめます。
@@ -132,7 +134,8 @@ namespace Farmware.WorldGeneration.Presentation
 
         /// <summary>
         /// 現在の有効地形から、画面手前側にWallがなくFaceを表示するWallセルだけを根元マスクへ書き込みます。
-        /// 全Wallを2タイル手前へ投影すると奥側Casterが手前のWall上面へ重なって自己影を作るため、露出前縁だけへ限定します。
+        /// 論理Wallの根元すべてへCasterを作ると奥側Casterが手前のWallと重なるため、
+        /// 画面手前にFaceが露出する前縁だけへ限定します。
         /// </summary>
         /// <param name="neighborhood">中心と周囲8チャンクの完成済み有効地形です。</param>
         /// <param name="localStartX">論理チャンク内におけるサブチャンク左端Xです。</param>

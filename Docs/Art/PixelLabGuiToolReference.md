@@ -25,7 +25,7 @@ GUIに存在しない項目は、Promptで表現できる美術要件と、Unity
 
 ## 2. 地形制作での位置付け
 
-PixelLabの`Tiles`、`Paths`、`Tileset`、`Building`は、材質タイル制作には使用しない。材質タイルの`GroundTop`、任意の透明な`FaceBoundaryOverlay`、`Face`はAsepriteまたはPixeloramaで1 px単位に手描きする。Wall上面は専用Spriteを作らず、同じ材質の`GroundTop`を表示時だけ係数0.85で暗色化する。Ground／Wallの形状境界には既存14形状の共通境界ハイライトを使い、異なる材質のWall同士も接続扱いにする。断面は1段目から`Face`を使い、境界ありではEditorがGround用の元色Overlay版とWall用の暗色化Overlay版を事前合成する。41材質の境界有無は境界あり17材質・なし24材質で確定し、境界あり材質は同じOverlay入力をGround崖面とWall前面で共有する。細道や建築物など、材質タイル以外の用途でPixelLabを使うかは、該当機能の制作開始時に別途判断する。
+PixelLabの`Tiles`、`Paths`、`Tileset`、`Building`は、材質タイル制作には使用しない。材質タイルの`GroundTop`、任意の透明な`FaceBoundaryOverlay`、`Face`はAsepriteまたはPixeloramaで1 px単位に手描きする。Wall上面は専用Spriteを作らず、同じ材質の`GroundTop`を表示時だけ係数0.85で暗色化する。Ground／Wallの14形状境界ハイライトは製品表示に使わず、異なる材質のWall同士も接続扱いにする。断面は1段目から`Face`を使い、境界ありではEditorがGround用の元色Overlay版とWall用の暗色化Overlay版を事前合成する。41材質の境界有無は今回の64×48 px制作画像を正とする境界あり11材質・なし30材質で確定し、境界あり材質は同じOverlay入力をGround崖面とWall前面で共有する。細道や建築物など、材質タイル以外の用途でPixelLabを使うかは、該当機能の制作開始時に別途判断する。
 
 ## 3. Creator — Create image
 

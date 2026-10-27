@@ -9,7 +9,7 @@ using UnityEngine.Tilemaps;
 namespace Farmware.WorldGeneration.Presentation
 {
     /// <summary>
-    /// 深度色・開始Alphaと反射Sprite・段数の組を共有Tileとしてキャッシュします。
+    /// 液体種・左右中央の開始Alphaと反射Sprite・段数の組を共有Tileとしてキャッシュします。
     /// Project内のSprite、Tile、Materialは借用し、このクラスが作成した一時Objectだけを破棄します。
     /// </summary>
     internal sealed class TerrainLiquidRuntimeTileCache : IDisposable
@@ -17,7 +17,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// <summary>基礎液面Tileと岸側クリップ有無から共有Tileを引く検索表です。</summary>
         private readonly Dictionary<long, Tile> surfaceTiles = new Dictionary<long, Tile>();
 
-        /// <summary>深度OverlayのRGBと8bit開始Alphaから共有Tileを引く検索表です。</summary>
+        /// <summary>液体種と左右・中央の8bit開始Alphaから共有Tileを引く検索表です。</summary>
         private readonly Dictionary<uint, Tile> depthTiles = new Dictionary<uint, Tile>();
 
         /// <summary>反射元Spriteと反射段から共有Tileを引く検索表です。</summary>
@@ -33,7 +33,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// <summary>現在保持している基礎液面Tile数です。液体種ごとに通常・岸側の最大2件です。</summary>
         public int SurfaceTileCount => surfaceTiles.Count;
 
-        /// <summary>現在保持している深度Overlay Tile数です。セル数には比例しません。</summary>
+        /// <summary>現在保持している深度Overlay Tile数です。液体種と近傍濃度の組合せだけに比例します。</summary>
         public int DepthTileCount => depthTiles.Count;
 
         /// <summary>現在保持している反射Proxy Tile数です。Sprite差分数×最大2段が上限です。</summary>
@@ -74,18 +74,27 @@ namespace Farmware.WorldGeneration.Presentation
             return created;
         }
 
-        /// <summary>液体色と段開始Alphaの組を検索し、初回だけColliderなしの全面Tileを作ります。</summary>
-        /// <param name="overlayColor">深度OverlayのRGB色です。</param>
-        /// <param name="stageStartAlpha">現在16px段の上端Alphaです。</param>
+        /// <summary>液体種と左右・中央の段開始Alphaを検索し、初回だけColliderなしの全面Tileを作ります。</summary>
+        /// <param name="kind">淡水または海水です。Shaderが製品深度色を選ぶ印として使います。</param>
+        /// <param name="leftStageStartAlpha">左隣セルの段開始Alphaです。</param>
+        /// <param name="centerStageStartAlpha">現在セルの段開始Alphaです。</param>
+        /// <param name="rightStageStartAlpha">右隣セルの段開始Alphaです。</param>
         /// <returns>全チャンクで共有する深度Overlay Tileです。</returns>
-        public TileBase GetOrCreateDepthOverlay(Color overlayColor, float stageStartAlpha)
+        public TileBase GetOrCreateDepthOverlay(
+            TerrainLiquidVisualKind kind,
+            float leftStageStartAlpha,
+            float centerStageStartAlpha,
+            float rightStageStartAlpha)
         {
             EnsureWhiteSprite();
+
+            // RGBは見た目の色ではなく、左・中央・右の開始濃度をShaderへ渡すデータです。
+            // Aは0.25を淡水、0.75を海水として区別し、透明度には直接使用しません。
             var color = new Color32(
-                (byte)Mathf.RoundToInt(Mathf.Clamp01(overlayColor.r) * 255f),
-                (byte)Mathf.RoundToInt(Mathf.Clamp01(overlayColor.g) * 255f),
-                (byte)Mathf.RoundToInt(Mathf.Clamp01(overlayColor.b) * 255f),
-                (byte)Mathf.RoundToInt(Mathf.Clamp01(stageStartAlpha) * 255f));
+                ToByte(leftStageStartAlpha),
+                ToByte(centerStageStartAlpha),
+                ToByte(rightStageStartAlpha),
+                kind == TerrainLiquidVisualKind.SaltWater ? (byte)191 : (byte)64);
             uint packedColor = PackColor(color);
             if (depthTiles.TryGetValue(packedColor, out Tile existing))
             {
@@ -93,7 +102,7 @@ namespace Farmware.WorldGeneration.Presentation
             }
 
             Tile created = ScriptableObject.CreateInstance<Tile>();
-            created.name = $"Runtime Liquid Depth {color.r:X2}{color.g:X2}{color.b:X2}{color.a:X2}";
+            created.name = $"Runtime Liquid Depth {kind} {color.r:X2}{color.g:X2}{color.b:X2}";
             created.hideFlags = HideFlags.DontSave;
             created.sprite = whiteSprite;
             created.color = color;
@@ -101,6 +110,14 @@ namespace Farmware.WorldGeneration.Presentation
             created.flags = TileFlags.LockColor | TileFlags.LockTransform;
             depthTiles.Add(packedColor, created);
             return created;
+        }
+
+        /// <summary>0〜1の浮動小数Alphaを、共有Tileの検索キーに使う8bit値へ丸めます。</summary>
+        /// <param name="value">段開始Alphaです。</param>
+        /// <returns>0〜255へ制限した量子化値です。</returns>
+        private static byte ToByte(float value)
+        {
+            return (byte)Mathf.RoundToInt(Mathf.Clamp01(value) * 255f);
         }
 
         /// <summary>上下反転・0.75縦圧縮した垂直面Spriteを、反射段ごとの共有Tileとして返します。</summary>

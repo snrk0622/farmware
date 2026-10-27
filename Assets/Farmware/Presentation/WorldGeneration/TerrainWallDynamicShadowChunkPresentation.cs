@@ -68,6 +68,9 @@ namespace Farmware.WorldGeneration.Presentation
                 casterObjectsBySubChunk[subChunkIndex] = casterObjects;
             }
 
+            // プールから戻ったRootは非アクティブです。ShadowCaster2Dは有効なHierarchy内で初期輪郭を作るため、
+            // 新しい区間Objectを追加する前にRootを有効化します。同じフレーム内で位置更新と余剰非表示まで完了します。
+            Root.SetActive(true);
             for (int runIndex = 0; runIndex < runs.Count; runIndex++)
             {
                 GameObject casterObject = runIndex < casterObjects.Count
@@ -76,7 +79,7 @@ namespace Farmware.WorldGeneration.Presentation
                 TerrainWallShadowRun run = runs[runIndex];
 
                 // Spriteは中央Pivotの1×1 Unitなので、区間中央へ置きX Scaleだけをセル数へ広げます。
-                // YはWall前面2段分だけ手前へ移し、影がWall上面ではなく最下段Face根元から伸びるようにします。
+                // run.Yは上面ではなく論理Wallの根元です。そのセルから直接影を伸ばすためY補正は0です。
                 casterObject.transform.localPosition = new Vector3(
                     run.StartX + (run.Length * 0.5f),
                     run.Y + TerrainWallShadowUtility.DynamicShadowCasterOffsetYInTiles + 0.5f,
@@ -89,8 +92,6 @@ namespace Farmware.WorldGeneration.Presentation
             {
                 casterObjects[runIndex].SetActive(false);
             }
-
-            Root.SetActive(true);
         }
 
         /// <summary>指定サブチャンクのCasterを非表示にし、次のDirty反映で再利用できるよう保持します。</summary>
@@ -161,7 +162,6 @@ namespace Farmware.WorldGeneration.Presentation
         {
             var casterObject = new GameObject(
                 $"Wall Shadow Run {subChunkIndex:00}-{runIndex:00}");
-            casterObject.SetActive(false);
             casterObject.hideFlags = HideFlags.DontSave;
             casterObject.layer = unityLayer;
             casterObject.transform.SetParent(Root.transform, false);
@@ -177,6 +177,9 @@ namespace Farmware.WorldGeneration.Presentation
             caster.castingOption = ShadowCaster2D.ShadowCastingOptions.CastShadow;
             caster.trimEdge = 0f;
 
+            // PlayModeでは非アクティブObjectへ追加したShadowCaster2Dの内部輪郭がまだ初期化されません。
+            // 追加と設定まではアクティブ状態で行い、呼び出し元が位置とScaleを設定するまで描画対象から外します。
+            casterObject.SetActive(false);
             owner.Add(casterObject);
             return casterObject;
         }

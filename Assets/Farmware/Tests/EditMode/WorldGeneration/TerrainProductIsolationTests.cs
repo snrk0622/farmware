@@ -1,5 +1,5 @@
 // このファイルは、検証専用のScene・Shader・Material・生成設定が製品Build Sceneへ混入しないことを検査します。
-// また、立体地形表示へ置換するときに旧境界ハイライト一式を取り残さないための明示的な完了ゲートを提供します。
+// また、立体地形表示へ置換した後に比較・検品専用インフラを取り残さないための完了ゲートを提供します。
 
 using System;
 using System.Collections.Generic;
@@ -12,8 +12,8 @@ using UnityEngine;
 namespace Farmware.WorldGeneration.Tests
 {
     /// <summary>
-    /// 製品Build Sceneと検証専用アセットの境界、および旧境界ハイライト削除の完了条件を保証します。
-    /// 通常のEditMode実行ではBuild Scene依存関係を検査し、旧表示の削除時だけExplicitゲートを明示実行します。
+    /// 製品Build Sceneと制作入力の境界、および比較・検品専用インフラ削除の完了条件を保証します。
+    /// どちらも通常のEditMode実行へ含め、後続変更で削除済み経路が復活した時点で検出します。
     /// </summary>
     public sealed class TerrainProductIsolationTests
     {
@@ -26,28 +26,48 @@ namespace Farmware.WorldGeneration.Tests
             "Assets/Farmware/Shaders/Development/",
             "Assets/Farmware/Art/WorldGeneration/Generated/Inspection/",
             "Assets/Farmware/Art/WorldGeneration/Source/",
+            "Assets/Farmware/Art/WorldGeneration/Liquids/Source/",
             "Assets/Farmware/Art/WorldGeneration/Terrain/Settings/TerrainTileArtGenerationSettings.asset",
         };
 
-        // 製品表示の置換時に削除する、旧14形状境界ハイライト固有のアセットと実装です。
-        private static readonly string[] LegacyBoundaryHighlightAssetPaths =
+        // 製品表示の置換時に削除した、比較・検品専用のアセットと実装です。
+        private static readonly string[] RemovedComparisonAssetPaths =
         {
+            "Assets/Farmware/Art/WorldGeneration/Generated/Inspection",
+            "Assets/Farmware/Shaders/Development",
             "Assets/Farmware/Art/WorldGeneration/Terrain/Highlights",
             "Assets/Farmware/Art/WorldGeneration/Terrain/Highlights/terrain_boundary_highlights.png",
             "Assets/Farmware/Art/WorldGeneration/Atlases/BoundaryHighlightAtlas.spriteatlasv2",
             "Assets/Scenes/Development/TerrainBoundaryHighlightInspection.unity",
+            "Assets/Scenes/Development/TerrainTileArtInspection.unity",
+            "Assets/Scenes/Development/TerrainWallEdgeCueComparison.unity",
+            "Assets/Scenes/Development/TerrainWallShadowComparison.unity",
+            "Assets/Scenes/Development/TerrainWallSurfaceDarkenComparison.unity",
+            "Assets/Scenes/Development/TerrainWaterReflectionComparison.unity",
             "Assets/Farmware/Presentation/WorldGeneration/TerrainBoundaryHighlightUtility.cs",
             "Assets/Farmware/Editor/WorldGeneration/TerrainBoundaryHighlightArtGenerator.cs",
             "Assets/Farmware/Editor/WorldGeneration/TerrainBoundaryHighlightInspectionMapBuilder.cs",
+            "Assets/Farmware/Editor/WorldGeneration/TerrainTileArtInspectionMapBuilder.cs",
+            "Assets/Farmware/Editor/WorldGeneration/TerrainWallShadowComparisonMapBuilder.cs",
+            "Assets/Farmware/Editor/WorldGeneration/TerrainWaterReflectionComparisonMapBuilder.cs",
             "Assets/Farmware/Tests/EditMode/WorldGeneration/TerrainBoundaryHighlightArtGeneratorTests.cs",
             "Assets/Farmware/Tests/EditMode/WorldGeneration/TerrainBoundaryHighlightUtilityTests.cs",
+            "Assets/Farmware/Tests/EditMode/WorldGeneration/TerrainTileArtInspectionMapBuilderTests.cs",
+            "Assets/Farmware/Tests/EditMode/WorldGeneration/TerrainWaterReflectionComparisonMapBuilderTests.cs",
         };
 
-        // 型名とSerializedProperty名を検出し、ファイル名だけ削除して利用側を残す不完全な置換を防ぎます。
-        private static readonly string[] LegacyBoundaryHighlightTextTokens =
+        // 型名、Scene名、SerializedProperty名を検出し、ファイル名だけ削除して利用側を残す不完全な置換を防ぎます。
+        private static readonly string[] RemovedComparisonTextTokens =
         {
             "TerrainBoundaryHighlight",
             "boundaryHighlight",
+            "TerrainTileArtInspection",
+            "TerrainWallEdgeCueComparison",
+            "TerrainWallShadowComparison",
+            "TerrainWallSurfaceDarkenComparison",
+            "TerrainWaterReflectionComparison",
+            "Generated/Inspection",
+            "Shaders/Development",
             "2ae884cf4c0924fabbec0498ef250e81",
             "2ed07e917aa5f446b94162eae27291b4",
         };
@@ -128,33 +148,31 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 立体地形表示への置換時に、旧14形状境界ハイライトの素材、生成コード、選択処理、Scene参照、専用テストがすべて消えたことを検査します。
-        /// 現在は旧製品表示が残るためExplicitとし、置換後にこのテストを明示実行して成功させます。
+        /// 立体地形表示への置換後に、比較・検品専用のScene、生成物、コード、Serialized参照、専用テストがすべて消えたことを検査します。
         /// </summary>
         [Test]
-        [Explicit("新しい立体地形表示へ置換した後に実行する、旧境界ハイライトの削除完了ゲートです。")]
-        public void LegacyBoundaryHighlightRemovalGate_RemovesAllImplementation()
+        public void ComparisonInspectionRemovalGate_RemovesAllInfrastructure()
         {
             List<string> remainingItems = new List<string>();
 
             for (int pathIndex = 0;
-                 pathIndex < LegacyBoundaryHighlightAssetPaths.Length;
+                 pathIndex < RemovedComparisonAssetPaths.Length;
                  pathIndex++)
             {
-                string assetPath = LegacyBoundaryHighlightAssetPaths[pathIndex];
+                string assetPath = RemovedComparisonAssetPaths[pathIndex];
                 if (AssetDatabase.LoadMainAssetAtPath(assetPath) != null)
                 {
-                    remainingItems.Add($"旧アセットまたはコード: {assetPath}");
+                    remainingItems.Add($"比較・検品専用アセットまたはコード: {assetPath}");
                 }
             }
 
-            CollectLegacyTextReferences(remainingItems);
+            CollectRemovedTextReferences(remainingItems);
 
             Assert.That(
                 remainingItems,
                 Is.Empty,
                 BuildFailureMessage(
-                    "新しい立体地形表示への置換後も、旧14形状境界ハイライトが残っています。",
+                    "製品表示への置換後も、比較・検品専用インフラが残っています。",
                     remainingItems));
         }
 
@@ -194,7 +212,7 @@ namespace Farmware.WorldGeneration.Tests
         /// Assets配下の文字列化可能なファイルを走査し、旧型名、SerializedProperty名、旧素材GUIDへの参照を収集します。
         /// </summary>
         /// <param name="remainingItems">見つかった残存箇所を追記する一覧です。</param>
-        private static void CollectLegacyTextReferences(List<string> remainingItems)
+        private static void CollectRemovedTextReferences(List<string> remainingItems)
         {
             string[] fullPaths = Directory.GetFiles(
                 Application.dataPath,
@@ -236,10 +254,10 @@ namespace Farmware.WorldGeneration.Tests
                 }
 
                 for (int tokenIndex = 0;
-                     tokenIndex < LegacyBoundaryHighlightTextTokens.Length;
+                     tokenIndex < RemovedComparisonTextTokens.Length;
                      tokenIndex++)
                 {
-                    string token = LegacyBoundaryHighlightTextTokens[tokenIndex];
+                    string token = RemovedComparisonTextTokens[tokenIndex];
                     if (contents.IndexOf(token, StringComparison.OrdinalIgnoreCase) < 0)
                     {
                         continue;
