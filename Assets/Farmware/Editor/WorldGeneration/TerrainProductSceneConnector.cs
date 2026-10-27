@@ -66,6 +66,13 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>Wall前面の水面反射Proxyレイヤー名です。</summary>
         public const string WaterReflectionTilemapName = "Water Reflection Tilemap";
 
+        /// <summary>断面と反射の間へ重ねる短い水面模様のレイヤー名です。</summary>
+        public const string WaterSurfacePatternTilemapName = "Water Surface Pattern Tilemap";
+
+        /// <summary>水際の調整値と分離して保持する水面模様Materialの保存先です。</summary>
+        public const string WaterSurfacePatternMaterialPath =
+            "Assets/Farmware/Art/WorldGeneration/Materials/TerrainWaterSurfacePattern.mat";
+
         /// <summary>奥・左・右の3bit接触線アニメーションレイヤー名です。</summary>
         public const string LiquidEdgeWaveTilemapName = "Liquid Edge Wave Tilemap";
 
@@ -205,6 +212,15 @@ namespace Farmware.WorldGeneration.Editor
             Material liquidDepthWithoutFloor = LoadRequiredMaterial(
                 LiquidDepthWithoutFloorMaterialPath);
             Material waterReflection = LoadRequiredMaterial(WaterReflectionMaterialPath);
+            Material surfacePattern = AssetDatabase.LoadAssetAtPath<Material>(WaterSurfacePatternMaterialPath);
+            if (surfacePattern == null)
+            {
+                // 初回だけ既定値で作成し、再接続時にInspectorでの調整値を上書きしません。
+                Shader patternShader = Shader.Find("Farmware/Terrain/Water Surface Pattern");
+                if (patternShader == null) throw new InvalidOperationException("水面模様Shaderがありません。");
+                surfacePattern = new Material(patternShader);
+                AssetDatabase.CreateAsset(surfacePattern, WaterSurfacePatternMaterialPath);
+            }
             Material spriteLit = LoadRequiredMaterial(SpriteLitMaterialPath);
             Material shoreline = LoadRequiredMaterial(ShorelineMaterialPath);
             ConfigureLiquidDepthMaterialColors(
@@ -318,19 +334,26 @@ namespace Farmware.WorldGeneration.Editor
                     sortingLayerName: WaterSortingLayerName,
                     sortingOrder: 0,
                     liquidDepthWithoutFloor);
+                Tilemap pattern = EnsureTilemap(
+                    gridObject.transform,
+                    WaterSurfacePatternTilemapName,
+                    Vector3.zero,
+                    sortingLayerName: WaterSortingLayerName,
+                    sortingOrder: 2,
+                    surfacePattern);
                 Tilemap reflection = EnsureTilemap(
                     gridObject.transform,
                     WaterReflectionTilemapName,
                     Vector3.zero,
                     sortingLayerName: WaterSortingLayerName,
-                    sortingOrder: 2,
+                    sortingOrder: 3,
                     waterReflection);
                 Tilemap edgeWave = EnsureTilemap(
                     gridObject.transform,
                     LiquidEdgeWaveTilemapName,
                     Vector3.zero,
                     sortingLayerName: WaterSortingLayerName,
-                    sortingOrder: 3,
+                    sortingOrder: 4,
                     shoreline);
 
                 // 旧全面アニメーションは製品カタログ経路では書き込まないため、残存Tileを消してRendererも無効化します。
@@ -459,6 +482,7 @@ namespace Farmware.WorldGeneration.Editor
                     depthWithoutFloor,
                     floorPreview,
                     submergedFaces,
+                    pattern,
                     reflection,
                     edgeWave);
                 EditorUtility.SetDirty(presenter);

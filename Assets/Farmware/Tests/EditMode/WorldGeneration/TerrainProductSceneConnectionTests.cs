@@ -110,6 +110,8 @@ namespace Farmware.WorldGeneration.Tests
                 TerrainProductSceneConnector.UnderwaterFloorPreviewTilemapName);
             AssertTilemapReference(serialized, "submergedGroundFaceTilemap",
                 TerrainProductSceneConnector.SubmergedGroundFaceTilemapName);
+            AssertTilemapReference(serialized, "waterSurfacePatternTilemap",
+                TerrainProductSceneConnector.WaterSurfacePatternTilemapName);
             AssertTilemapReference(
                 serialized,
                 "waterReflectionTilemap",
@@ -121,7 +123,7 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 製品液体が論理セル位置を維持し、基底色、水中断面、反射、水際の順で重なり、旧全面アニメーションを無効にすることを確認します。
+        /// 製品液体が論理セル位置を維持し、基底色、水中断面、水面模様、反射、水際の順で重なることを確認します。
         /// </summary>
         [Test]
         public void SampleScene_LiquidLayersUseProductMaterialsAndAdoptedOrder()
@@ -154,6 +156,9 @@ namespace Farmware.WorldGeneration.Tests
             AssertLayer(grid, TerrainProductSceneConnector.SubmergedGroundFaceTilemapName,
                 Vector3.zero, TerrainProductSceneConnector.WaterSortingLayerName,
                 TerrainProductSceneConnector.SubmergedGroundFaceMaterialPath);
+            AssertLayer(grid, TerrainProductSceneConnector.WaterSurfacePatternTilemapName,
+                Vector3.zero, TerrainProductSceneConnector.WaterSortingLayerName,
+                TerrainProductSceneConnector.WaterSurfacePatternMaterialPath);
             AssertLayer(
                 grid,
                 TerrainProductSceneConnector.WaterReflectionTilemapName,
@@ -183,6 +188,9 @@ namespace Farmware.WorldGeneration.Tests
             TilemapRenderer submerged = GetRenderer(grid, TerrainProductSceneConnector.SubmergedGroundFaceTilemapName);
             Assert.That(depth.sortingOrder, Is.LessThan(submerged.sortingOrder));
             Assert.That(submerged.sortingOrder, Is.LessThan(reflection.sortingOrder));
+            TilemapRenderer pattern = GetRenderer(grid, TerrainProductSceneConnector.WaterSurfacePatternTilemapName);
+            Assert.That(submerged.sortingOrder, Is.LessThan(pattern.sortingOrder));
+            Assert.That(pattern.sortingOrder, Is.LessThan(reflection.sortingOrder));
             Assert.That(grid.Find(TerrainProductSceneConnector.UnderwaterFloorPreviewTilemapName).GetComponent<Tilemap>().color.a,
                 Is.EqualTo(0.5f));
             Assert.That(depth.sortingOrder, Is.LessThan(reflection.sortingOrder));

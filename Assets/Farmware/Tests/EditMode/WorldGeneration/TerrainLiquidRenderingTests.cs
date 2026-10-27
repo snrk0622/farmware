@@ -665,6 +665,271 @@ namespace Farmware.WorldGeneration.Tests
             }
         }
 
+        /// <summary>静止した短い筋が疎で、16px境界を跨ぎ、陸地に相当する空セルへ出ないことを実描画で保証します。</summary>
+        [Test]
+        public void SurfacePatternTilemap_StaticMarksCrossTileEdgesAndRespectWaterMask()
+        {
+            var material = new Material(Shader.Find("Farmware/Terrain/Water Surface Pattern"));
+            using (var cache = new TerrainLiquidRuntimeTileCache())
+            {
+                try
+                {
+                    material.SetFloat("_Animate", 0f);
+                    material.SetFloat("_Density", 1f);
+                    material.SetFloat("_MinimumLengthPixels", 8f);
+                    material.SetFloat("_MaximumLengthPixels", 8f);
+                    Tilemap map = CreateSurfacePatternTestTilemap(material, cache);
+                    RenderPixels();
+                    Color[] full = readback.GetPixels();
+                    int count = 0;
+                    bool crossesEdge = false;
+                    for (int y = 0; y < RenderHeight; y++)
+                    {
+                        for (int x = 0; x < RenderWidth; x++)
+                        {
+                            if (full[y * RenderWidth + x].r < 0.99f) count++;
+                            if (x > 0 && x % 16 == 0 && full[y * RenderWidth + x].r < 0.99f
+                                && full[y * RenderWidth + x - 1].r < 0.99f) crossesEdge = true;
+                        }
+                    }
+
+                    Assert.That(count, Is.InRange(10, RenderWidth * RenderHeight / 20), "線を敷き詰めず疎に配置します。");
+                    Assert.That(crossesEdge, Is.True, "16px境界で筋模様が分割されています。");
+                    // 水域の全面Tileを取り去り、以前の模様が残らないことも確認します。
+                    map.ClearAllTiles();
+                    RenderPixels();
+                    foreach (Color pixel in readback.GetPixels()) Assert.That(pixel.r, Is.EqualTo(1f).Within(0.0001f));
+                }
+                finally { Object.DestroyImmediate(material); }
+            }
+        }
+
+        /// <summary>最大形状を実描画し、長さは不規則でも、折れ・中央の欠けのない厚さ1pxの水平線だけになることを保証します。</summary>
+        [Test]
+        public void SurfacePatternTilemap_UsesContinuousSinglePixelHorizontalLines()
+        {
+            var material = new Material(Shader.Find("Farmware/Terrain/Water Surface Pattern"));
+            using (var cache = new TerrainLiquidRuntimeTileCache())
+            {
+                try
+                {
+                    material.SetFloat("_Animate", 0f);
+                    material.SetFloat("_Density", 1f);
+                    material.SetFloat("_MinimumLengthPixels", 3f);
+                    material.SetFloat("_MaximumLengthPixels", 8f);
+                    material.SetColor("_FreshColor", Color.black);
+                    material.SetFloat("_MaximumOpacity", 1f);
+                    CreateSurfacePatternTestTilemap(material, cache);
+
+                    // 位置・長さの既存抽選から、水平線だけを塗った期待画像を作ります。
+                    // 画面外の中心から入る線も含め、タイルの端や画面の端で誤って形状を限定しません。
+                    var expected = new bool[RenderWidth * RenderHeight];
+                    var selectedLengths = new bool[9];
+                    for (int nodeY = -1; nodeY <= 4; nodeY++)
+                    {
+                        for (int nodeX = -1; nodeX <= 2; nodeX++)
+                        {
+                            // 16bit乱数を2048で割ると、32px格子内の整数位置0〜31になります。
+                            int centerX = nodeX * 32 + (int)((GetSurfacePatternTestHash(nodeX, nodeY, 0x02e5be93u) & 65535u) / 2048u);
+                            int centerY = nodeY * 32 + (int)((GetSurfacePatternTestHash(nodeX, nodeY, 0x967a889bu) & 65535u) / 2048u);
+                            int length = 3 + (int)((GetSurfacePatternTestHash(nodeX, nodeY, 0x13a5ba1du) & 65535u) * 6u / 65536u);
+                            for (int offset = 0; offset < length; offset++)
+                            {
+                                int x = centerX - length / 2 + offset;
+                                if (x >= 0 && x < RenderWidth && centerY >= 0 && centerY < RenderHeight)
+                                {
+                                    expected[centerY * RenderWidth + x] = true;
+                                    selectedLengths[length] = true;
+                                }
+                            }
+                        }
+                    }
+
+                    RenderPixels();
+                    Color[] pixels = readback.GetPixels();
+                    for (int i = 0; i < pixels.Length; i++)
+                    {
+                        Assert.That(pixels[i].r, Is.EqualTo(expected[i] ? 0f : 1f).Within(0.0001f),
+                            $"素材画素({i % RenderWidth},{i / RenderWidth})が連続した1px水平線と一致しません。");
+                    }
+
+                    int lengthCount = 0;
+                    foreach (bool selected in selectedLengths)
+                    {
+                        if (selected) lengthCount++;
+                    }
+                    Assert.That(lengthCount, Is.GreaterThan(1), "直線化しても長さのばらつきを維持します。");
+                }
+                finally { Object.DestroyImmediate(material); }
+            }
+        }
+
+        /// <summary>GPUと同じ固定候補IDから乱数を求め、線の位置・長さの期待画像を作るテスト専用計算です。</summary>
+        /// <param name="x">32px候補格子のX座標です。</param>
+        /// <param name="y">32px候補格子のY座標です。</param>
+        /// <param name="salt">位置・長さの抽選を独立させる用途別の固定値です。</param>
+        /// <returns>負座標を含め128格子周期で一致する32bit値です。状態は変更しません。</returns>
+        private static uint GetSurfacePatternTestHash(int x, int y, uint salt)
+        {
+            // GPUの符号なし整数演算と同じ桁あふれを許可し、32bit値を混ぜます。
+            unchecked
+            {
+                uint value = ((uint)x & 127u) * 0x9e3779b9u ^ ((uint)y & 127u) * 0x85ebca6bu ^ salt;
+                value ^= value >> 16;
+                value *= 0x7feb352du;
+                value ^= value >> 15;
+                value *= 0x846ca68bu;
+                return value ^ (value >> 16);
+            }
+        }
+
+        /// <summary>元画素を4倍表示しても画素内の濃度を補間せず、静止位置を保つことを保証します。</summary>
+        [Test]
+        public void SurfacePatternTilemap_EnlargementKeepsNativePixelsUniform()
+        {
+            var material = new Material(Shader.Find("Farmware/Terrain/Water Surface Pattern"));
+            using (var cache = new TerrainLiquidRuntimeTileCache())
+            {
+                try
+                {
+                    material.SetFloat("_Animate", 0f);
+                    material.SetFloat("_Density", 1f);
+                    CreateSurfacePatternTestTilemap(material, cache);
+                    RenderPixels();
+                    Color[] nativePixels = readback.GetPixels();
+                    renderTarget.Release();
+                    renderTarget.width = RenderWidth * 4;
+                    renderTarget.height = RenderHeight * 4;
+                    renderTarget.Create();
+                    Object.DestroyImmediate(readback);
+                    readback = new Texture2D(RenderWidth * 4, RenderHeight * 4, TextureFormat.RGBAFloat, false, true);
+                    RenderPixels();
+                    for (int y = 0; y < RenderHeight * 4; y++)
+                    {
+                        for (int x = 0; x < RenderWidth * 4; x++)
+                        {
+                            Assert.That(readback.GetPixel(x, y).r,
+                                Is.EqualTo(nativePixels[y / 4 * RenderWidth + x / 4].r).Within(0.0001f));
+                        }
+                    }
+                }
+                finally { Object.DestroyImmediate(material); }
+            }
+        }
+
+        /// <summary>大きな負原点へ移しても模様が一致し、実際の奥岸の上端3pxだけを隠すことを保証します。</summary>
+        [Test]
+        public void SurfacePatternTilemap_OriginAndNorthBankClippingPreservePattern()
+        {
+            var material = new Material(Shader.Find("Farmware/Terrain/Water Surface Pattern"));
+            using (var cache = new TerrainLiquidRuntimeTileCache())
+            {
+                try
+                {
+                    material.SetFloat("_Animate", 0f);
+                    material.SetFloat("_Density", 1f);
+                    Tilemap map = CreateSurfacePatternTestTilemap(material, cache);
+                    RenderPixels();
+                    Color[] original = readback.GetPixels();
+                    // 周期の倍数を避け、原点補正が0でなくても一致することを検査します。
+                    Vector3 shift = new Vector3(65533f, 65531f, 0f);
+                    map.transform.position = shift;
+                    renderCamera.transform.position += shift;
+                    material.SetVector("_WorldPixelOffset", new Vector4(
+                        TerrainLiquidPresentationUtility.GetShorelineOriginPixelOffset(-65533),
+                        TerrainLiquidPresentationUtility.GetShorelineOriginPixelOffset(-65531), 0f, 0f));
+                    RenderPixels();
+                    Color[] rebased = readback.GetPixels();
+                    for (int i = 0; i < original.Length; i++)
+                        Assert.That(rebased[i].r, Is.EqualTo(original[i].r).Within(0.0001f));
+
+                    // 各画素行に必ず模様が通るよう原点をずらし、クリップ対象の有無を両方検査します。
+                    map.transform.position = Vector3.zero;
+                    renderCamera.transform.position -= shift;
+                    int removed = 0;
+                    for (int offset = 0; offset < 16; offset++)
+                    {
+                        material.SetVector("_WorldPixelOffset", new Vector4(0f, offset, 0f, 0f));
+                        SetWaterDataTile(map, new Vector3Int(1, 3, 0), cache.GetOrCreateDepthOverlay(),
+                            0, TerrainLiquidVisualKind.FreshWater, false, false);
+                        RenderPixels();
+                        Color[] unclipped = readback.GetPixels();
+                        SetWaterDataTile(map, new Vector3Int(1, 3, 0), cache.GetOrCreateDepthOverlay(),
+                            0, TerrainLiquidVisualKind.FreshWater, false, true);
+                        RenderPixels();
+                        Color[] clipped = readback.GetPixels();
+                        for (int y = 0; y < RenderHeight; y++)
+                        {
+                            for (int x = 0; x < RenderWidth; x++)
+                            {
+                                int i = y * RenderWidth + x;
+                                bool top = x >= 16 && x < 32 && y >= 61 && y < 64;
+                                Assert.That(clipped[i].r, Is.EqualTo(top ? 1f : unclipped[i].r).Within(0.0001f));
+                                if (top && unclipped[i].r < 0.99f) removed++;
+                            }
+                        }
+                    }
+                    Assert.That(removed, Is.GreaterThan(0), "実際に模様が通った上端を検査する必要があります。");
+                }
+                finally { Object.DestroyImmediate(material); }
+            }
+        }
+
+        /// <summary>同じ低FPSコマを保持し、出現・消失が同時刻に混在して全域が同期しないことを保証します。</summary>
+        [Test]
+        public void SurfacePatternTilemap_HoldsFramesAndAnimatesLocalMarksIndependently()
+        {
+            var material = new Material(Shader.Find("Farmware/Terrain/Water Surface Pattern"));
+            using (var cache = new TerrainLiquidRuntimeTileCache())
+            {
+                try
+                {
+                    material.SetFloat("_Density", 1f);
+                    CreateSurfacePatternTestTilemap(material, cache);
+                    material.SetFloat("_AnimationTimeSeconds", 1.01f);
+                    RenderPixels();
+                    Color[] first = readback.GetPixels();
+                    material.SetFloat("_AnimationTimeSeconds", 1.49f);
+                    RenderPixels();
+                    Color[] held = readback.GetPixels();
+                    Assert.That(held, Is.EqualTo(first), "2fpsのコマ内で状態が変化しています。");
+                    bool mixed = false;
+                    Color[] previous = first;
+                    for (int frame = 4; frame < 28; frame++)
+                    {
+                        material.SetFloat("_AnimationTimeSeconds", frame * 0.5f);
+                        RenderPixels();
+                        Color[] next = readback.GetPixels();
+                        bool brighten = false;
+                        bool dim = false;
+                        for (int i = 0; i < next.Length; i++)
+                        {
+                            brighten |= next[i].r < previous[i].r - 0.001f;
+                            dim |= next[i].r > previous[i].r + 0.001f;
+                        }
+                        mixed |= brighten && dim;
+                        previous = next;
+                    }
+                    Assert.That(mixed, Is.True, "模様全体の成長・減衰が同期しています。");
+                }
+                finally { Object.DestroyImmediate(material); }
+            }
+        }
+
+        /// <summary>水面模様のGPU検証用に淡水の全面Tileを3×8セルへ配置します。</summary>
+        /// <param name="material">テスト所有の模様Materialです。</param>
+        /// <param name="cache">共有全面Tileの所有者です。</param>
+        /// <returns>空セル化・原点移動を検査できるテスト所有Tilemapです。</returns>
+        private Tilemap CreateSurfacePatternTestTilemap(Material material, TerrainLiquidRuntimeTileCache cache)
+        {
+            Tilemap map = CreateTilemap(material);
+            for (int y = 0; y < 8; y++)
+                for (int x = 0; x < 3; x++)
+                    SetWaterDataTile(map, new Vector3Int(x, y, 0), cache.GetOrCreateDepthOverlay(),
+                        6, TerrainLiquidVisualKind.FreshWater, false, false);
+            return map;
+        }
+
         /// <summary>明暗テストのため、描画範囲全体へ奥岸・縦岸を持つ黒い水際を準備します。</summary>
         /// <param name="material">テスト所有の水際Materialです。</param>
         /// <param name="cache">テスト終了時に破棄する共有Tileの所有者です。</param>

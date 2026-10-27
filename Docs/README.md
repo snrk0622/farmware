@@ -1,6 +1,6 @@
 # Farmware ドキュメント案内
 
-- 最終更新日: 2026-10-25
+- 最終更新日: 2026-10-27
 - 目的: 仕様、制作資料、開発手順の参照先を一か所にまとめる。
 
 ## ゲーム仕様
@@ -36,6 +36,8 @@ v0.54では地上18種を維持し、アフリカサバンナを熱帯サバン�
 41材質の`GroundTop`、`FaceBoundaryOverlay`、`Face`の色・使用比率・模様方針は、地形タイル表現仕様第7章を正とする。通常材質のWall暗色化係数は0.85とし、Wall上面とWall用`FaceBoundaryOverlay`へ同じ係数を使う。`FaceBoundaryOverlay`と`Face`は`GrassLoam`で上面より暗く、部位内コントラストを抑えた配色を比較試作する。上面と同じ色相へ統一せず、材質構造を維持したまま、人間確認後に同じ明度関係を残り40材質へ適用する。
 
 ## 開発・検証
+
+短い水面模様は淡水・海水専用の独立Shader・Tilemap・Materialで追加画像なしに描画する。素材1px・低FPSで固定位置の線が非同期に出現・消失する。水際の調整済みMaterialと水中断面の合成は維持する。調整先は`TerrainWaterSurfacePattern.mat`とし、詳細は地形タイル表現仕様の「短い水面模様」、検証はTestingの`TerrainLiquidRenderingTests`を参照する。
 
 - [実装ロードマップ](./Development/ImplementationRoadmap.md)
 - [シミュレーション技術仕様](./Development/SimulationArchitectureSpecification.md)

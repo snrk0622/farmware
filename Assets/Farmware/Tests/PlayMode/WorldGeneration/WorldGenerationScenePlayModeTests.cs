@@ -2255,6 +2255,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 "World Grid/Underwater Floor Preview Tilemap")?.GetComponent<Tilemap>();
             Tilemap submergedGroundFaces = GameObject.Find(
                 "World Grid/Submerged Ground Face Tilemap")?.GetComponent<Tilemap>();
+            Tilemap surfacePattern = GameObject.Find(
+                "World Grid/Water Surface Pattern Tilemap")?.GetComponent<Tilemap>();
             Tilemap waterReflection = GameObject.Find(
                 "World Grid/Water Reflection Tilemap")?.GetComponent<Tilemap>();
             Tilemap liquidEdgeWave = GameObject.Find(
@@ -2266,6 +2268,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(submergedGroundFaces.GetComponent<TilemapRenderer>().sharedMaterial.shader.name,
                 Is.EqualTo("Farmware/Terrain/Submerged Ground Face"));
             Assert.That(waterReflection, Is.Not.Null, "水面反射Tilemapがありません。");
+            Assert.That(surfacePattern, Is.Not.Null, "短い水面模様のTilemapがありません。");
             Assert.That(liquidEdgeWave, Is.Not.Null, "水際アニメーションTilemapがありません。");
             Assert.That(
                 GameObject.Find("World Grid/Terrain Front Edge Tilemap"),
@@ -2677,9 +2680,16 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Material shorelineMaterial = liquidEdgeWaveRenderer.sharedMaterial;
             Assert.That(shorelineMaterial.shader.name, Is.EqualTo("Farmware/Terrain/Liquid Shoreline"));
             float shorelineTime = shorelineMaterial.GetFloat("_AnimationTimeSeconds");
+            Material patternMaterial = surfacePattern.GetComponent<TilemapRenderer>().sharedMaterial;
+            Assert.That(patternMaterial.shader.name, Is.EqualTo("Farmware/Terrain/Water Surface Pattern"));
+            Assert.That(surfacePattern.GetComponent<TilemapRenderer>().sortingOrder,
+                Is.LessThan(waterReflectionRenderer.sortingOrder));
+            float patternTime = patternMaterial.GetFloat("_AnimationTimeSeconds");
             yield return null;
             Assert.That(shorelineMaterial.GetFloat("_AnimationTimeSeconds"), Is.GreaterThan(shorelineTime),
                 "水際の共通表示時間が描画フレームで進んでいません。");
+            Assert.That(patternMaterial.GetFloat("_AnimationTimeSeconds"), Is.GreaterThan(patternTime),
+                "水面模様の共通時計が進んでいません。");
             foreach (TilemapRenderer renderer in Object.FindObjectsByType<TilemapRenderer>(FindObjectsSortMode.None))
             {
                 // チャンク別コピーも同じMaterialを借用し、別々の再生時刻やMaterialを持たない契約です。
@@ -2687,6 +2697,29 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     && renderer.sharedMaterial.shader.name == "Farmware/Terrain/Liquid Shoreline")
                 {
                     Assert.That(renderer.sharedMaterial, Is.SameAs(shorelineMaterial));
+                }
+
+                // 模様も全チャンクで1件を共有し、水際Materialとは独立して調整できるようにします。
+                if (renderer.sharedMaterial != null
+                    && renderer.sharedMaterial.shader.name == "Farmware/Terrain/Water Surface Pattern")
+                {
+                    Assert.That(renderer.sharedMaterial, Is.SameAs(patternMaterial));
+                    Tilemap map = renderer.GetComponent<Tilemap>();
+                    Tilemap withFloor = renderer.transform.parent.Find("Liquid Depth With Floor Tilemap").GetComponent<Tilemap>();
+                    Tilemap withoutFloor = renderer.transform.parent.Find("Liquid Depth Without Floor Tilemap").GetComponent<Tilemap>();
+                    // 基底色の範囲を基準にし、模様レイヤー自体が欠けた場合も検出します。
+                    BoundsInt waterBounds = withoutFloor.cellBounds;
+                    waterBounds.SetMinMax(Vector3Int.Min(waterBounds.min, withFloor.cellBounds.min),
+                        Vector3Int.Max(waterBounds.max, withFloor.cellBounds.max));
+                    foreach (Vector3Int cell in waterBounds.allPositionsWithin)
+                    {
+                        Assert.That(map.HasTile(cell), Is.EqualTo(withFloor.HasTile(cell) || withoutFloor.HasTile(cell)),
+                            "短い水面模様は淡水・海水と同じセルだけに必要です。陸地・マグマへは描きません。");
+                        if (!map.HasTile(cell)) continue;
+                        Color data = map.GetColor(cell);
+                        Assert.That(data.a, Is.EqualTo(1f).Or.EqualTo(128f / 255f).Within(0.001f),
+                            "水面模様へ奥岸クリップ情報が渡っていません。");
+                    }
                 }
             }
 
