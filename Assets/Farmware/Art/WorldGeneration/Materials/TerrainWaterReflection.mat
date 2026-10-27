@@ -16,9 +16,10 @@ Material:
   m_LightmapFlags: 4
   m_EnableInstancingVariants: 0
   m_DoubleSidedGI: 0
+  m_CustomRenderQueue: -1
   stringTagMap: {}
   disabledShaderPasses: []
-  m_LockedProperties:
+  m_LockedProperties: 
   m_SavedProperties:
     serializedVersion: 3
     m_TexEnvs:
@@ -28,11 +29,18 @@ Material:
         m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
-    - _MaximumAlpha: 0.22
-    - _PixelsPerUnit: 16
-    - _WavePixelsPerSecond: 4
+    - _AnchorPixels: 2
+    - _AnimationStepsPerSecond: 2
+    - _AnimationTimeSeconds: 0
+    - _MaximumAlpha: 1
+    - _OscillationPeriodSeconds: 4
+    - _PeriodVariation: 0.35
+    - _WaveAmplitudePixels: 2
+    - _WaveBandPixels: 4
+    - _WaveSpacingPixels: 32
     m_Colors:
     - _Color: {r: 1, g: 1, b: 1, a: 1}
     - _ReflectionTint: {r: 0.56, g: 0.82, b: 0.91, a: 1}
+    - _WorldPixelOffset: {r: 0, g: 0, b: 0, a: 0}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

@@ -2685,11 +2685,25 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(surfacePattern.GetComponent<TilemapRenderer>().sortingOrder,
                 Is.LessThan(waterReflectionRenderer.sortingOrder));
             float patternTime = patternMaterial.GetFloat("_AnimationTimeSeconds");
+            // 実Sceneの反射Meshにも時計が届き、Tilemapの段数方式を残さないことを確認します。
+            Material reflectionMaterial = waterReflectionRenderer.sharedMaterial;
+            Assert.That(reflectionMaterial.shader.name, Is.EqualTo("Farmware/Terrain/Water Reflection Proxy"));
+            float reflectionTime = reflectionMaterial.GetFloat("_AnimationTimeSeconds");
+            Assert.That(waterReflection.GetUsedTilesCount(), Is.Zero, "反射設定見本へ旧反射Tileを配置してはいけません。");
             yield return null;
             Assert.That(shorelineMaterial.GetFloat("_AnimationTimeSeconds"), Is.GreaterThan(shorelineTime),
                 "水際の共通表示時間が描画フレームで進んでいません。");
             Assert.That(patternMaterial.GetFloat("_AnimationTimeSeconds"), Is.GreaterThan(patternTime),
                 "水面模様の共通時計が進んでいません。");
+            Assert.That(reflectionMaterial.GetFloat("_AnimationTimeSeconds"), Is.GreaterThan(reflectionTime));
+            // 反射はDontSaveなので全Object検索では除外されます。所有Gridの子から実際のMeshを検査します。
+            foreach (MeshRenderer renderer in waterReflection.transform.parent.GetComponentsInChildren<MeshRenderer>(true))
+            {
+                if (renderer.sharedMaterial == null || renderer.sharedMaterial.shader != reflectionMaterial.shader) continue;
+                Assert.That(renderer.sharedMaterial, Is.SameAs(reflectionMaterial), "反射MeshもMaterialを1件で共有します。");
+                Assert.That(renderer.GetComponent<MeshFilter>().sharedMesh.vertexCount, Is.LessThanOrEqualTo(6144),
+                    "1サブチャンクの反射は最大256水セル×左右を含む3列×2画像×4頂点に収めます。");
+            }
             foreach (TilemapRenderer renderer in Object.FindObjectsByType<TilemapRenderer>(FindObjectsSortMode.None))
             {
                 // チャンク別コピーも同じMaterialを借用し、別々の再生時刻やMaterialを持たない契約です。

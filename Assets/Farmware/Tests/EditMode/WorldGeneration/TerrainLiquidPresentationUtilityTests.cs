@@ -457,24 +457,31 @@ namespace Farmware.WorldGeneration.Tests
             SetCell(center, 30, 32, Wall(501));
 
             Assert.That(
-                TerrainLiquidPresentationUtility.TryProjectWallReflection(
+                TerrainLiquidPresentationUtility.TryFindWallReflectionSource(
                     neighborhood,
                     30,
                     30,
                     runtimeIds,
+                    TerrainLiquidVisualKind.FreshWater,
                     out TerrainMaterialFaceProjection reflection),
                 Is.True);
-            Assert.That(reflection.FaceDepth, Is.EqualTo(1));
+            Assert.That(reflection.SourceLocalY, Is.EqualTo(32));
             Assert.That(reflection.IsWall, Is.True);
+            // 直接隣接だけに限定せず、地面を挟んでも届くWallを投影元として返します。
+            SetCell(center, 30, 31, Ground(502));
+            Assert.That(TerrainLiquidPresentationUtility.TryFindWallReflectionSource(
+                neighborhood, 30, 30, runtimeIds, TerrainLiquidVisualKind.FreshWater, out reflection), Is.True);
+            Assert.That(reflection.SourceLocalY, Is.EqualTo(32));
 
             SetCell(center, 31, 30, Liquid(runtimeIds.FreshWater));
             SetCell(center, 31, 31, Ground(502));
             Assert.That(
-                TerrainLiquidPresentationUtility.TryProjectWallReflection(
+                TerrainLiquidPresentationUtility.TryFindWallReflectionSource(
                     neighborhood,
                     31,
                     30,
                     runtimeIds,
+                    TerrainLiquidVisualKind.FreshWater,
                     out _),
                 Is.False,
                 "水平なGroundTopは反射対象にしてはいけません。");
@@ -482,36 +489,103 @@ namespace Farmware.WorldGeneration.Tests
             SetCell(center, 32, 30, Liquid(runtimeIds.Magma));
             SetCell(center, 32, 31, Wall(503));
             Assert.That(
-                TerrainLiquidPresentationUtility.TryProjectWallReflection(
+                TerrainLiquidPresentationUtility.TryFindWallReflectionSource(
                     neighborhood,
                     32,
                     30,
                     runtimeIds,
+                    TerrainLiquidVisualKind.Magma,
                     out _),
                 Is.False,
                 "マグマへ水面反射Proxyを作ってはいけません。");
         }
 
-        /// <summary>隣接する画素行が別位相となり、全体を一枚板のように同じ量だけ動かさないことを保証します。</summary>
+        /// <summary>隣列の地面上に投影された像も探索し、受け手の水域でだけ輪郭を描けることを保証します。</summary>
         [Test]
-        public void ReflectionOffset_ChangesPhaseForEveryPixelRow()
+        public void ReflectionSource_UsesReceivingWaterKindForNeighborLandColumn()
         {
-            Assert.That(
-                TerrainLiquidPresentationUtility.GetReflectionHorizontalOffset(0, 0),
-                Is.EqualTo(0));
-            Assert.That(
-                TerrainLiquidPresentationUtility.GetReflectionHorizontalOffset(0, 1),
-                Is.EqualTo(1));
-            Assert.That(
-                TerrainLiquidPresentationUtility.GetReflectionHorizontalOffset(0, 2),
-                Is.EqualTo(0));
-            Assert.That(
-                TerrainLiquidPresentationUtility.GetReflectionHorizontalOffset(0, 3),
-                Is.EqualTo(-1));
-            Assert.That(
-                TerrainLiquidPresentationUtility.GetReflectionHorizontalOffset(-1, 0),
-                Is.EqualTo(-1),
-                "負の入力でもC#の負剰余へ依存せず同じ4段階へ正規化します。");
+            CompletedChunkTerrainNeighborhood neighborhood = CreateEmptyNeighborhood(out NativeArray<GeneratedTerrainCell> center);
+            SetCell(center, 30, 30, Ground(502));
+            SetCell(center, 30, 31, Wall(501));
+            Assert.That(TerrainLiquidPresentationUtility.TryFindWallReflectionSource(neighborhood, 30, 30,
+                runtimeIds, TerrainLiquidVisualKind.FreshWater, out var reflection), Is.True);
+            Assert.That(reflection.SourceLocalX, Is.EqualTo(30));
+            Assert.That(TerrainLiquidPresentationUtility.TryFindWallReflectionSource(neighborhood, 30, 30,
+                runtimeIds, TerrainLiquidVisualKind.Magma, out _), Is.False);
+        }
+
+        /// <summary>横揺れの余白は隣の水域まで届く一方、受け手の矩形を越えないことを保証します。</summary>
+        /// <param name="origin">負座標でも同じ矩形を返す確認用のタイル原点です。</param>
+        [TestCase(0)]
+        [TestCase(-64)]
+        public void ReflectionGeometry_PadsSourceOutlineButNotReceivingWater(int origin)
+        {
+            Rect source = new Rect(origin + 1, 4, 1, 1);
+            Rect water = new Rect(origin + 2, 3, 1, 13f / 16f);
+            Assert.That(TerrainWaterReflectionGeometry.TryProjectToWater(source, 4, 61f / 16f,
+                water, 0.75f, 24, out var slice), Is.False);
+            Assert.That(TerrainWaterReflectionGeometry.TryProjectToWater(source, 4, 61f / 16f,
+                water, 0.75f, 24, out slice, 2), Is.True);
+            Assert.That(slice.Destination.xMin, Is.EqualTo(origin + 2));
+            Assert.That(slice.Destination.xMax, Is.EqualTo(origin + 2 + 2f / 16f));
+            Assert.That(slice.Source.xMin, Is.EqualTo(1f));
+            Assert.That(slice.Source.xMax, Is.EqualTo(1f + 2f / 16f));
+        }
+
+        /// <summary>上下2枚のWallを、接地点に近い下段から正しく反転投影することを保証します。</summary>
+        /// <param name="heightStage">接地点から上への段数です。</param>
+        /// <param name="faceDepth">Wall上端から数えた元画像の段数です。</param>
+        [TestCase(0, 1)]
+        [TestCase(1, 0)]
+        [TestCase(2, -1)]
+        public void ReflectionSource_OrderStartsAtActualWallFoot(int heightStage, int faceDepth)
+        {
+            Assert.That(TerrainLiquidPresentationUtility.GetReflectedWallFaceDepth(heightStage), Is.EqualTo(faceDepth));
+        }
+
+        /// <summary>反射元の高さに応じて、奥側の対象が水面へ届くかを判定し、岸へ吸着しないことを保証します。</summary>
+        /// <param name="height">対象の高さ（タイル）です。</param>
+        /// <param name="expected">水面と交差する場合はtrueです。</param>
+        [TestCase(1f, false)]
+        [TestCase(4f, true)]
+        public void ReflectionGeometry_UsesHeightAndContactRatherThanAdjacentTile(float height, bool expected)
+        {
+            Assert.That(TerrainWaterReflectionGeometry.TryProjectToWater(new Rect(0, 2, 1, height),
+                2f, 2f - 3f / 16f, new Rect(0, 0, 1, 13f / 16f), 0.75f, height * 12f, out var slice), Is.EqualTo(expected));
+            if (expected)
+            {
+                Assert.That(slice.DepthPixels.y, Is.GreaterThan(0f), "水際で距離を0へ戻してはいけません。");
+                Assert.That(slice.MaximumDepthPixels, Is.EqualTo(48f));
+                Assert.That(slice.Source.yMin, Is.GreaterThan(0f), "届いた画像の一部分だけを表示します。");
+            }
+        }
+
+        /// <summary>切り抜きが負座標でも一致し、地面を挟むWall反射の最後8pxだけを表示することを保証します。</summary>
+        /// <param name="origin">正負を比較するタイル原点です。</param>
+        [TestCase(0f)]
+        [TestCase(-64f)]
+        public void ReflectionGeometry_ClipsToReceiverWithoutRestartingDepth(float origin)
+        {
+            Assert.That(TerrainWaterReflectionGeometry.TryProjectToWater(new Rect(0, origin + 3, 1, 1),
+                origin + 2, origin + 2 - 3f / 16f, new Rect(0, origin, 1, 13f / 16f),
+                0.75f, 24f, out var slice), Is.True);
+            Assert.That(slice.Destination.yMin - origin, Is.EqualTo(5f / 16f).Within(0.0001f));
+            Assert.That(slice.Destination.yMax - origin, Is.EqualTo(13f / 16f).Within(0.0001f));
+            Assert.That(slice.DepthPixels.x, Is.EqualTo(24f).Within(0.0001f));
+            Assert.That(slice.DepthPixels.y, Is.EqualTo(16f).Within(0.0001f));
+            Assert.That(slice.Source.yMin, Is.EqualTo(1f / 3f).Within(0.0001f));
+        }
+
+        /// <summary>反射が水域と重ならない場合や不正な寸法を、描画Objectの生成前に拒否します。</summary>
+        [Test]
+        public void ReflectionGeometry_RejectsInvalidOrNonOverlappingInput()
+        {
+            Assert.That(TerrainWaterReflectionGeometry.TryProjectToWater(new Rect(0, 4, 1, 1), 4, 4,
+                new Rect(0, 0, 1, 1), 0.75f, 24f, out _), Is.False);
+            Assert.That(TerrainWaterReflectionGeometry.TryProjectToWater(new Rect(0, 0, 1, 1), 0, 0,
+                new Rect(0, -1, 1, 1), 0f, 24f, out _), Is.False);
+            Assert.That(TerrainWaterReflectionGeometry.TryProjectToWater(new Rect(0, 0, 1, 1), float.NaN, 0,
+                new Rect(0, -1, 1, 1), 0.75f, 24f, out _), Is.False);
         }
 
         /// <summary>製品用Surface、深度2種、反射Materialが検品専用ではないShaderと確定値を参照することを保証します。</summary>
@@ -572,13 +646,24 @@ namespace Farmware.WorldGeneration.Tests
                 Is.LessThan(0.0001f));
             Assert.That(reflection, Is.Not.Null);
             Assert.That(reflection.shader.name, Is.EqualTo("Farmware/Terrain/Water Reflection Proxy"));
-            Assert.That(reflection.GetFloat("_MaximumAlpha"), Is.EqualTo(0.22f));
-            Assert.That(reflection.GetFloat("_WavePixelsPerSecond"), Is.EqualTo(4f));
+            // MaterialはユーザーがInspectorで調整するため、採用時の初期値へ固定せず有効範囲を検査します。
+            Assert.That(reflection.GetFloat("_MaximumAlpha"), Is.InRange(0f, 1f));
+            Assert.That(reflection.GetFloat("_WaveAmplitudePixels"), Is.InRange(0f, 2f));
+            Assert.That(reflection.GetFloat("_AnimationStepsPerSecond"), Is.InRange(1f, 12f));
+            var defaults = new Material(reflection.shader);
+            try
+            {
+                // 初期値の契約は保存Assetとは別に、Shaderから作った一時Materialで保証します。
+                Assert.That(defaults.GetFloat("_MaximumAlpha"), Is.EqualTo(0.22f));
+                Assert.That(defaults.GetFloat("_WaveAmplitudePixels"), Is.EqualTo(1f));
+                Assert.That(defaults.GetFloat("_AnimationStepsPerSecond"), Is.EqualTo(2f));
+            }
+            finally { Object.DestroyImmediate(defaults); }
         }
 
-        /// <summary>反射Shaderが画素行を位相へ加え、移動後Spriteを元シルエットAlphaで切り抜くことを保証します。</summary>
+        /// <summary>反射Shaderが場所別周期で輪郭ごと動き、変位後のUVだけを元Spriteの矩形で切り抜くことを保証します。</summary>
         [Test]
-        public void ProductReflectionShader_UsesPerRowPhaseAndOriginalSilhouetteMask()
+        public void ProductReflectionShader_UsesLocalPeriodsAndSpriteBounds()
         {
             string projectRoot = Directory.GetParent(Application.dataPath)?.FullName;
             Assert.That(projectRoot, Is.Not.Null);
@@ -587,10 +672,14 @@ namespace Farmware.WorldGeneration.Tests
                 "Assets/Farmware/Shaders/TerrainWaterReflection.shader");
             string source = File.ReadAllText(shaderPath);
 
-            Assert.That(source, Does.Contain("animationStep + pixelRow"));
-            Assert.That(source, Does.Contain("horizontalPixelOffset * _MainTex_TexelSize.x"));
-            Assert.That(source, Does.Contain("originalSilhouette"));
+            Assert.That(source, Does.Contain("NodeDisplacement"));
+            Assert.That(source, Does.Contain("clamp(shiftedUv,input.bounds.xy"));
+            Assert.That(source, Does.Contain("offset*_MainTex_TexelSize.x"));
+            Assert.That(source, Does.Not.Contain("originalSilhouette"), "元のAlphaを固定マスクとして掛けず、輪郭も動かします。");
+            Assert.That(source, Does.Contain("clip(min(min(shiftedUv.x-input.bounds.x"));
             Assert.That(source, Does.Contain("sampler_PointClamp"));
+            Assert.That(source, Does.Contain("clamp(round(_WaveAmplitudePixels),0.0,2.0)"));
+            Assert.That(TerrainLiquidPresentationUtility.ReflectionHorizontalPaddingPixels, Is.EqualTo(2));
         }
 
         /// <summary>液面Shaderが岸側Tileの印だけをクリップし、内部Tileの見た目Alphaへ印を混ぜないことを保証します。</summary>
@@ -665,7 +754,7 @@ namespace Farmware.WorldGeneration.Tests
 
         /// <summary>液体種・近傍濃度と反射Spriteが同じなら、セル数に比例してTileを生成しないことを保証します。</summary>
         [Test]
-        public void RuntimeTileCache_ReusesDepthAndReflectionTiles()
+        public void RuntimeTileCache_ReusesDepthAndSurfaceTiles()
         {
             var cache = new TerrainLiquidRuntimeTileCache();
             try
@@ -694,28 +783,6 @@ namespace Farmware.WorldGeneration.Tests
                 Assert.That(interior, Is.Not.SameAs(firstShore));
                 Assert.That(cache.SurfaceTileCount, Is.EqualTo(2));
 
-                var texture = new Texture2D(16, 16, TextureFormat.RGBA32, false);
-                texture.SetPixel(0, 0, Color.white);
-                texture.Apply();
-                ownedUnityObjects.Add(texture);
-                Sprite sprite = Sprite.Create(
-                    texture,
-                    new Rect(0f, 0f, 16f, 16f),
-                    new Vector2(0.5f, 0.5f),
-                    16f);
-                ownedUnityObjects.Add(sprite);
-                var selection = new TerrainMaterialProductTileSelection(sprite, Color.white);
-
-                TileBase firstReflection = cache.GetOrCreateReflection(selection, 0);
-                TileBase secondReflection = cache.GetOrCreateReflection(selection, 0);
-                Assert.That(secondReflection, Is.SameAs(firstReflection));
-                Assert.That(cache.ReflectionTileCount, Is.EqualTo(1));
-                Assert.That(((Tile)firstReflection).color.a, Is.EqualTo(1f / 255f));
-                Assert.That(((Tile)firstReflection).transform.m13,
-                    Is.EqualTo(TerrainLiquidPresentationUtility.ReflectionSurfaceOffsetInTiles));
-                Tile secondStage = (Tile)cache.GetOrCreateReflection(selection, 1);
-                Assert.That(secondStage.color.a, Is.EqualTo(2f / 255f));
-                Assert.That(secondStage.transform.m13, Is.EqualTo(0.1875f));
                 Assert.That(TerrainLiquidPresentationUtility.GetReflectionVisibility(0), Is.EqualTo(1f));
                 Assert.That(TerrainLiquidPresentationUtility.GetReflectionVisibility(12), Is.EqualTo(0.5f));
                 Assert.That(TerrainLiquidPresentationUtility.GetReflectionVisibility(24), Is.Zero);

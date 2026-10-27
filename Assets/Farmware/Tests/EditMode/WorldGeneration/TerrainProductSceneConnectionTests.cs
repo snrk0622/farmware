@@ -112,6 +112,8 @@ namespace Farmware.WorldGeneration.Tests
                 TerrainProductSceneConnector.SubmergedGroundFaceTilemapName);
             AssertTilemapReference(serialized, "waterSurfacePatternTilemap",
                 TerrainProductSceneConnector.WaterSurfacePatternTilemapName);
+            Assert.That(serialized.FindProperty("waterReflectionAtlas").objectReferenceValue,
+                Is.Not.Null, "水面反射は製品Atlasを明示参照し、元画像ごとの描画バッチを作りません。");
             AssertTilemapReference(
                 serialized,
                 "waterReflectionTilemap",

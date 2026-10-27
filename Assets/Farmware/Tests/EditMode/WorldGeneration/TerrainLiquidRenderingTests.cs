@@ -315,11 +315,11 @@ namespace Farmware.WorldGeneration.Tests
                 TerrainWaterRenderUtility.EncodeCell(kind, stage, floor, clip), Matrix4x4.identity) });
         }
 
-        /// <summary>反射2枚の圧縮と頂点段数を実描画し、実水面3pxの下から24pxで消えることを保証します。</summary>
+        /// <summary>接地点から投影した反射Meshを実描画し、実水面3pxの下から24pxで消えることを保証します。</summary>
         /// <param name="originY">負座標でも水面を復元できることを確認する表示原点です。</param>
         [TestCase(0)]
         [TestCase(-64)]
-        public void ReflectionTilemap_StartsAtWaterAndFadesAcrossBothStages(int originY)
+        public void ReflectionMesh_StartsAtContactAndFadesAcrossBothStages(int originY)
         {
             using (var cache = new TerrainLiquidRuntimeTileCache())
             {
@@ -332,13 +332,26 @@ namespace Farmware.WorldGeneration.Tests
                 {
                     material.SetColor("_Color", Color.black);
                     material.SetFloat("_MaximumAlpha", 1f);
-                    Tilemap map = CreateTilemap(material);
-                    map.transform.position = new Vector3(0, originY, 0);
+                    material.SetFloat("_WaveAmplitudePixels", 0f);
+                    var root = new GameObject("Reflection Test Grid");
+                    SceneManager.MoveGameObjectToScene(root, previewScene);
+                    root.transform.position = new Vector3(0, originY, 0);
+                    var settings = root.AddComponent<MeshRenderer>();
+                    settings.sharedMaterial = material;
                     renderCamera.transform.position += new Vector3(0, originY, 0);
-                    var selection = new TerrainMaterialProductTileSelection(sprite, Color.white);
-                    map.SetTile(new Vector3Int(1, 3, 0), cache.GetOrCreateReflection(selection, 0));
-                    map.SetTile(new Vector3Int(1, 2, 0), cache.GetOrCreateReflection(selection, 1));
-                    RenderPixels();
+                    using (var mesh = new TerrainWaterReflectionMesh(root.transform))
+                    {
+                        mesh.Begin(0);
+                        for (int stage = 0; stage < 2; stage++)
+                        {
+                            Assert.That(TerrainWaterReflectionGeometry.TryProjectToWater(
+                                new Rect(1, 4 + stage, 1, 1), 4f, 4f - 3f / 16f,
+                                new Rect(1, 0, 1, 4f - 3f / 16f), 0.75f, 24f, out var slice), Is.True);
+                            mesh.Append(0, sprite, slice, settings);
+                        }
+                        mesh.Upload(0);
+                        RenderPixels();
+                    }
                     // 論理上端64pxから3px下の61pxが水面です。反射もそこから始まり、37pxで消えます。
                     for (int y = 35; y <= 64; y++)
                     {
@@ -355,6 +368,249 @@ namespace Farmware.WorldGeneration.Tests
             }
         }
 
+
+        /// <summary>地面を1セル挟んだ反射を実描画し、水の上端3pxと陸地へ反射を出さないことを保証します。</summary>
+        [Test]
+        public void ReflectionMesh_DrawsOnlyTheDistantProjectionWaterIntersection()
+        {
+            var material = new Material(Shader.Find("Farmware/Terrain/Water Reflection Proxy"));
+            Texture2D texture = CreateReflectionTestTexture(false);
+            Sprite sprite = Sprite.Create(texture, new Rect(0, 0, 16, 16), new Vector2(0.5f, 0.5f), 16);
+            var parent = new GameObject("Clipped Reflection Test");
+            SceneManager.MoveGameObjectToScene(parent, previewScene);
+            Renderer settings = parent.AddComponent<MeshRenderer>(); settings.sharedMaterial = material;
+            try
+            {
+                material.SetFloat("_WaveAmplitudePixels", 0);
+                material.SetFloat("_MaximumAlpha", 1);
+                material.SetColor("_Color", Color.black);
+                using (var mesh = new TerrainWaterReflectionMesh(parent.transform))
+                {
+                    Assert.That(TerrainWaterReflectionGeometry.TryProjectToWater(new Rect(1, 3, 1, 1),
+                        2, 2f - 3f / 16f, new Rect(1, 0, 1, 13f / 16f), 0.75f, 24f, out var slice), Is.True);
+                    mesh.Append(0, sprite, slice, settings); mesh.Upload(0); RenderPixels();
+                    for (int y = 0; y < RenderHeight; y++)
+                    {
+                        for (int x = 0; x < RenderWidth; x++)
+                        {
+                            float alpha = x >= 16 && x < 32 && y >= 5 && y < 13
+                                ? 1f - (29f - y - 0.5f) / 24f : 0f;
+                            Assert.That(1f - readback.GetPixel(x, y).r, Is.EqualTo(alpha).Within(0.005f));
+                        }
+                    }
+                }
+            }
+            finally { Object.DestroyImmediate(sprite); Object.DestroyImmediate(texture); Object.DestroyImmediate(material); }
+        }
+
+        /// <summary>Atlas境界を守りながら画像と透明部分を動かし、コマ保持・場所別の揺れ・原点変更も保証します。</summary>
+        [Test]
+        public void ReflectionMesh_PreservesSilhouetteAtlasBoundsAndLocalSteppedAnimation()
+        {
+            var material = new Material(Shader.Find("Farmware/Terrain/Water Reflection Proxy"));
+            Texture2D texture = CreateReflectionTestTexture(true);
+            Sprite sprite = Sprite.Create(texture, new Rect(0, 0, 16, 16), new Vector2(0.5f, 0.5f), 16);
+            var parent = new GameObject("Animated Reflection Test");
+            SceneManager.MoveGameObjectToScene(parent, previewScene);
+            Renderer settings = parent.AddComponent<MeshRenderer>(); settings.sharedMaterial = material;
+            try
+            {
+                material.SetColor("_ReflectionTint", Color.white);
+                material.SetFloat("_MaximumAlpha", 1);
+                material.SetFloat("_WaveAmplitudePixels", 2);
+                using (var mesh = new TerrainWaterReflectionMesh(parent.transform))
+                {
+                    // 3列・上下2画像を共通の絶対座標場へ置き、Spriteやセルごとの再生ずれを避けます。
+                    for (int x = 0; x < 3; x++)
+                    {
+                        for (int stage = 0; stage < 2; stage++)
+                        {
+                            TerrainWaterReflectionGeometry.TryProjectToWater(new Rect(x, 4 + stage, 1, 1),
+                                4f, 4f - 3f / 16f, new Rect(0, 0, 3, 61f / 16f), 0.75f, 24f, out var slice, 2);
+                            mesh.Append(0, sprite, slice, settings);
+                        }
+                    }
+                    mesh.Upload(0);
+                    material.SetFloat("_AnimationTimeSeconds", 1.01f); RenderPixels();
+                    Color[] first = readback.GetPixels();
+                    material.SetFloat("_AnimationTimeSeconds", 1.49f); RenderPixels();
+                    Assert.That(readback.GetPixels(), Is.EqualTo(first), "2fpsの保持中に画像が変わっています。");
+                    // 4096px周期の倍数ではない負原点を使い、原点補正を省く不具合も検出します。
+                    parent.transform.position = new Vector3(65, 67, 0);
+                    renderCamera.transform.position += new Vector3(65, 67, 0);
+                    material.SetVector("_WorldPixelOffset", new Vector4(
+                        TerrainLiquidPresentationUtility.GetShorelineOriginPixelOffset(-65),
+                        TerrainLiquidPresentationUtility.GetShorelineOriginPixelOffset(-67), 0, 0));
+                    RenderPixels();
+                    Assert.That(readback.GetPixels(), Is.EqualTo(first), "原点変更で揺れが抽選し直されています。");
+                    bool mixed = false;
+                    Color[] previous = first;
+                    for (int frame = 4; frame < 40; frame++)
+                    {
+                        material.SetFloat("_AnimationTimeSeconds", frame * 0.5f); RenderPixels();
+                        Color[] next = readback.GetPixels();
+                        bool increase = false; bool decrease = false;
+                        for (int y = 37; y < 61; y++)
+                        {
+                            for (int x = 0; x < RenderWidth; x++)
+                            {
+                                int i = y * RenderWidth + x;
+                                // 隣の赤いSpriteが混入するとR/Gが異なります。元画像は灰色だけです。
+                                Assert.That(next[i].r, Is.EqualTo(next[i].g).Within(0.0001f));
+                                if (x == 15 || x == 16 || x == 31 || x == 32)
+                                {
+                                    // 元Spriteの外を透明にしても、隣の画像が同じ逆変位で引き継ぎ、内部境界を欠かしません。
+                                    float visibility = 1f - (61f - y - 0.5f) / 24f;
+                                    Assert.That(next[i].r, Is.LessThan(1f - visibility * 0.1f), "内部タイル境界に反射の欠けがあります。");
+                                }
+                                if (y >= 59) Assert.That(next[i].r, Is.EqualTo(first[i].r).Within(0.0001f), "反射の付け根が動いています。");
+                                increase |= next[i].r > previous[i].r + 0.001f;
+                                decrease |= next[i].r < previous[i].r - 0.001f;
+                            }
+                        }
+                        mixed |= increase && decrease; previous = next;
+                    }
+                    Assert.That(mixed, Is.True, "全領域が同じ変位で同期しています。");
+                }
+            }
+            finally { Object.DestroyImmediate(sprite); Object.DestroyImmediate(texture); Object.DestroyImmediate(material); }
+        }
+
+        /// <summary>実設定の濃度でも外周と透明な穴が一緒に動き、水域・固定した付け根を越えないことを保証します。</summary>
+        /// <param name="amplitude">最大変位です。採用値1pxと調整上限2pxを検査します。</param>
+        /// <param name="narrowWater">左右が陸地の1セル幅へ切り抜く場合はtrueです。</param>
+        [TestCase(1, false)]
+        [TestCase(2, false)]
+        [TestCase(1, true)]
+        public void ReflectionMesh_MovesWholeOutlineAndHolesWithinWater(int amplitude, bool narrowWater)
+        {
+            var material = new Material(Shader.Find("Farmware/Terrain/Water Reflection Proxy"));
+            Texture2D texture = CreateReflectionTestTexture(true);
+            Sprite sprite = Sprite.Create(texture, new Rect(0, 0, 16, 16), new Vector2(0.5f, 0.5f), 16);
+            var parent = new GameObject("Whole Reflection Outline Test");
+            SceneManager.MoveGameObjectToScene(parent, previewScene);
+            Renderer settings = parent.AddComponent<MeshRenderer>(); settings.sharedMaterial = material;
+            try
+            {
+                // 黒で輪郭だけを読み取り、実採用の低濃度でもAlphaが時間変化していることを検査します。
+                material.SetColor("_Color", Color.black);
+                material.SetFloat("_MaximumAlpha", 0.22f);
+                material.SetFloat("_WaveAmplitudePixels", amplitude);
+                int firstWaterPixel = narrowWater ? 16 : 0;
+                int lastWaterPixel = narrowWater ? 32 : 48;
+                using (var mesh = new TerrainWaterReflectionMesh(parent.transform))
+                {
+                    Rect water = new Rect(firstWaterPixel / 16f, 0, (lastWaterPixel - firstWaterPixel) / 16f, 61f / 16f);
+                    for (int stage = 0; stage < 2; stage++)
+                    {
+                        Assert.That(TerrainWaterReflectionGeometry.TryProjectToWater(new Rect(1, 4 + stage, 1, 1),
+                            4, 61f / 16f, water, 0.75f, 24, out var slice, 2), Is.True);
+                        mesh.Append(0, sprite, slice, settings);
+                    }
+                    mesh.Upload(0);
+                    bool expanded = false;
+                    bool retreated = false;
+                    bool movedHole = false;
+                    Color[] first = null;
+                    bool changedOutline = false;
+                    for (int frame = 0; frame < 32; frame++)
+                    {
+                        material.SetFloat("_AnimationTimeSeconds", frame * 0.5f); RenderPixels();
+                        Color[] pixels = readback.GetPixels();
+                        for (int y = 35; y < 64; y++)
+                        {
+                            float expectedAlpha = 0.22f * TerrainLiquidPresentationUtility.GetReflectionVisibility(61f - y - 0.5f);
+                            for (int x = 0; x < RenderWidth; x++)
+                            {
+                                int i = y * RenderWidth + x;
+                                float alpha = 1f - pixels[i].r;
+                                bool inWater = x >= firstWaterPixel && x < lastWaterPixel && y >= 37 && y < 61;
+                                if (!inWater)
+                                    Assert.That(alpha, Is.EqualTo(0).Within(0.0001f), "輪郭の揺れが陸地または上端3pxへ漏れています。");
+                                if (!inWater) continue;
+                                // 隣画像との重複で2回合成された場合も検出します。輪郭内は元の濃度、外は透明です。
+                                Assert.That(alpha, Is.EqualTo(0).Within(0.0001f).Or.EqualTo(expectedAlpha).Within(0.0001f));
+                                if (y >= 59)
+                                    Assert.That(alpha, Is.EqualTo(x >= 16 && x < 32 && x != 23 && x != 24 ? expectedAlpha : 0)
+                                        .Within(0.0001f), "反射の付け根が動いています。");
+                                expanded |= (x < 16 || x >= 32) && alpha > 0.0001f;
+                                retreated |= (x == 16 || x == 31) && alpha < 0.0001f;
+                                movedHole |= (x == 23 || x == 24) && alpha > 0.0001f;
+                                if (first != null && (x <= 17 || x >= 30))
+                                    changedOutline |= Mathf.Abs(first[i].r - pixels[i].r) > 0.0001f;
+                            }
+                        }
+                        if (first == null) first = pixels;
+                    }
+                    Assert.That(changedOutline && retreated && movedHole, Is.True,
+                        "画像内部だけでなく、外周と透明な穴も時間に応じて動く必要があります。");
+                    Assert.That(expanded, Is.EqualTo(!narrowWater), "開いた水面側だけへ輪郭を広げる必要があります。");
+                }
+            }
+            finally { Object.DestroyImmediate(sprite); Object.DestroyImmediate(texture); Object.DestroyImmediate(material); }
+        }
+
+        /// <summary>岸の高さが違う隣接画像も受け手の変位を共有し、境界で欠けたり二重合成されたりしないことを保証します。</summary>
+        [Test]
+        public void ReflectionMesh_DifferentContactsShareReceiverDisplacementAtSeam()
+        {
+            var material = new Material(Shader.Find("Farmware/Terrain/Water Reflection Proxy"));
+            Texture2D texture = CreateReflectionTestTexture(false);
+            Sprite sprite = Sprite.Create(texture, new Rect(0, 0, 16, 16), new Vector2(0.5f, 0.5f), 16);
+            var parent = new GameObject("Reflection Contact Seam Test");
+            SceneManager.MoveGameObjectToScene(parent, previewScene);
+            Renderer settings = parent.AddComponent<MeshRenderer>(); settings.sharedMaterial = material;
+            try
+            {
+                material.SetColor("_Color", Color.black);
+                material.SetFloat("_MaximumAlpha", 1);
+                material.SetFloat("_WaveAmplitudePixels", 2);
+                using (var mesh = new TerrainWaterReflectionMesh(parent.transform))
+                {
+                    for (int x = 0; x < 2; x++)
+                    {
+                        float contact = 4 + x;
+                        for (int stage = 0; stage < 2; stage++)
+                        {
+                            if (TerrainWaterReflectionGeometry.TryProjectToWater(new Rect(x, contact + stage, 1, 1),
+                                contact, contact - 3f / 16f, new Rect(0, 0, 3, 61f / 16f),
+                                0.75f, 24, out var slice, 2))
+                                mesh.Append(0, sprite, slice, settings, 61f / 16f);
+                        }
+                    }
+                    mesh.Upload(0);
+                    for (int frame = 0; frame < 32; frame++)
+                    {
+                        material.SetFloat("_AnimationTimeSeconds", frame * 0.5f); RenderPixels();
+                        // この行範囲には両方の像が届きますが、画素を担当する元画像はどちらか1枚だけです。
+                        for (int y = 54; y < 61; y++)
+                        {
+                            float leftAlpha = 1f - (61f - y - 0.5f) / 24f;
+                            float rightAlpha = 1f - (77f - y - 0.5f) / 24f;
+                            for (int x = 14; x <= 17; x++)
+                                Assert.That(1f - readback.GetPixel(x, y).r,
+                                    Is.EqualTo(leftAlpha).Within(0.0001f).Or.EqualTo(rightAlpha).Within(0.0001f),
+                                    "接地点の違いで画像間に穴または二重合成が生じています。");
+                        }
+                    }
+                }
+            }
+            finally { Object.DestroyImmediate(sprite); Object.DestroyImmediate(texture); Object.DestroyImmediate(material); }
+        }
+
+        /// <summary>反射テスト用の灰色画像と、混入検出用の隣接する赤画像を作ります。</summary>
+        /// <param name="pattern">灰色勾配と透明な縦穴を含める場合はtrueです。</param>
+        /// <returns>呼出側が破棄する、Point Sampleの32×16 Textureです。</returns>
+        private static Texture2D CreateReflectionTestTexture(bool pattern)
+        {
+            var texture = new Texture2D(32, 16, TextureFormat.RGBA32, false, true) { filterMode = FilterMode.Point };
+            for (int y = 0; y < 16; y++)
+                for (int x = 0; x < 32; x++)
+                    texture.SetPixel(x, y, x >= 16 ? Color.red : new Color(pattern ? 0.2f + 0.6f * x / 15f : 1f,
+                        pattern ? 0.2f + 0.6f * x / 15f : 1f, pattern ? 0.2f + 0.6f * x / 15f : 1f,
+                        pattern && x >= 7 && x <= 8 ? 0f : 1f));
+            texture.Apply(); return texture;
+        }
 
         /// <summary>隔離SceneへGridと描画Tilemapを追加し、指定した製品Materialだけを使います。</summary>
         /// <param name="material">検査するShaderを持つ一時Materialです。</param>

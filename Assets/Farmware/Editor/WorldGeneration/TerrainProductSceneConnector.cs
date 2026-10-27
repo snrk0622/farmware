@@ -484,6 +484,7 @@ namespace Farmware.WorldGeneration.Editor
                     submergedFaces,
                     pattern,
                     reflection,
+                    AssetDatabase.LoadAssetAtPath<UnityEngine.U2D.SpriteAtlas>(TerrainMaterialProductPublisher.AtlasPath),
                     edgeWave);
                 EditorUtility.SetDirty(presenter);
 

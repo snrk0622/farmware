@@ -2917,6 +2917,7 @@ MonoBehaviour:
   submergedGroundFaceTilemap: {fileID: 2050193503}
   waterSurfacePatternTilemap: {fileID: 554572686}
   waterReflectionTilemap: {fileID: 877155642}
+  waterReflectionAtlas: {fileID: 100100200, guid: 10887a705c0ed401aa859416833bb465, type: 3}
   liquidEdgeWaveTilemap: {fileID: 267524653}
   rockWallTilemap: {fileID: 444993567}
   groundFaceTilemap: {fileID: 1768123364}

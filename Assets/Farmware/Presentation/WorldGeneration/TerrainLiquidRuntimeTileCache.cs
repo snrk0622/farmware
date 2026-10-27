@@ -1,4 +1,4 @@
-// このファイルは、静止水際、液体深度Overlay、垂直面反射Proxyに使う実行時Tileを少数の共有Objectへ変換します。
+// このファイルは、静止水際と液体深度Overlayに使う実行時Tileを少数の共有Objectへ変換します。
 // ChunkTilemapPresenterが所有・破棄し、液体セルごとのScriptableObjectやGameObject生成を防ぎます。
 
 using System;
@@ -9,7 +9,7 @@ using UnityEngine.Tilemaps;
 namespace Farmware.WorldGeneration.Presentation
 {
     /// <summary>
-    /// 水際色・7bit形状、深度用の白Sprite、反射Sprite・段数の組を共有Tileとしてキャッシュします。
+    /// 水際色・7bit形状と深度用の白Spriteを共有Tileとしてキャッシュします。
     /// Project内のSprite、Tile、Materialは借用し、このクラスが作成した一時Objectだけを破棄します。
     /// </summary>
     internal sealed class TerrainLiquidRuntimeTileCache : IDisposable
@@ -22,10 +22,6 @@ namespace Farmware.WorldGeneration.Presentation
 
         /// <summary>水際色と7bit形状を共有する静止Tileです。セル数ではなく色×形状数にだけ比例します。</summary>
         private readonly Dictionary<uint, Tile> shorelineTiles = new Dictionary<uint, Tile>();
-
-        /// <summary>反射元Spriteと反射段から共有Tileを引く検索表です。</summary>
-        private readonly Dictionary<ReflectionTileKey, Tile> reflectionTiles =
-            new Dictionary<ReflectionTileKey, Tile>();
 
         /// <summary>深度Overlayと水際の全面描画に共有する1×1白Textureです。</summary>
         private Texture2D whiteTexture;
@@ -73,9 +69,6 @@ namespace Farmware.WorldGeneration.Presentation
             shorelineTiles.Add(key, created);
             return created;
         }
-
-        /// <summary>現在保持している反射Proxy Tile数です。Sprite差分数×最大2段が上限です。</summary>
-        public int ReflectionTileCount => reflectionTiles.Count;
 
         /// <summary>
         /// 基礎液面のSpriteとRGB Tintを共有し、岸側セルだけAlpha 0をShaderへのクリップ印として設定します。
@@ -129,53 +122,6 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
 
-        /// <summary>上下反転・0.75縦圧縮した垂直面Spriteを、反射段ごとの共有Tileとして返します。</summary>
-        /// <param name="selection">材質カタログから解決したWall Face Spriteです。</param>
-        /// <param name="reflectionDepth">水際直下を0とする0〜1の反射段です。</param>
-        /// <returns>反射用Transformを持つColliderなしTile、またはSprite未設定ならnullです。</returns>
-        public TileBase GetOrCreateReflection(
-            TerrainMaterialProductTileSelection selection,
-            int reflectionDepth)
-        {
-            if (selection.Sprite == null
-                || reflectionDepth < 0
-                || reflectionDepth >= TerrainLiquidPresentationUtility.MaximumReflectionDepth)
-            {
-                return null;
-            }
-
-            var key = new ReflectionTileKey(selection.Sprite, reflectionDepth);
-            if (reflectionTiles.TryGetValue(key, out Tile existing))
-            {
-                return existing;
-            }
-
-            Tile created = ScriptableObject.CreateInstance<Tile>();
-            created.name = $"Runtime Water Reflection {selection.Sprite.name} {reflectionDepth}";
-            created.hideFlags = HideFlags.DontSave;
-            created.sprite = selection.Sprite;
-            // 頂点Alphaの1/255・2/255を段数の印にし、Shaderが2枚をまたぐ深度を復元します。
-            // 見た目の透明度はMaterialと画素深度で決めるため、この印をAlpha合成へ直接掛けません。
-            created.color = new Color(1f, 1f, 1f, (reflectionDepth + 1) / 255f);
-            created.colliderType = Tile.ColliderType.None;
-
-            // 各16px Faceを水際で上下反転し、0.75倍へ圧縮します。
-            // 2段目は1段目の圧縮後下端へ続くよう4px分を奥へ寄せ、16px区切りの隙間を避けます。
-            float stageCompensation = reflectionDepth
-                * (1f - TerrainLiquidPresentationUtility.ReflectionVerticalCompression)
-                + TerrainLiquidPresentationUtility.ReflectionSurfaceOffsetInTiles;
-            created.transform = Matrix4x4.TRS(
-                new Vector3(0f, stageCompensation, 0f),
-                Quaternion.identity,
-                new Vector3(
-                    1f,
-                    -TerrainLiquidPresentationUtility.ReflectionVerticalCompression,
-                    1f));
-            created.flags = TileFlags.LockColor | TileFlags.LockTransform;
-            reflectionTiles.Add(key, created);
-            return created;
-        }
-
         /// <summary>このキャッシュが生成したTile、白Sprite、白Textureだけを破棄します。</summary>
         public void Dispose()
         {
@@ -188,11 +134,6 @@ namespace Farmware.WorldGeneration.Presentation
             depthTile = null;
 
 
-            foreach (Tile tile in reflectionTiles.Values)
-            {
-                DestroyUnityObject(tile);
-            }
-
             foreach (Tile tile in shorelineTiles.Values)
             {
                 DestroyUnityObject(tile);
@@ -200,7 +141,6 @@ namespace Farmware.WorldGeneration.Presentation
 
             surfaceTiles.Clear();
 
-            reflectionTiles.Clear();
             shorelineTiles.Clear();
             DestroyUnityObject(whiteSprite);
             DestroyUnityObject(whiteTexture);
@@ -266,49 +206,5 @@ namespace Farmware.WorldGeneration.Presentation
             }
         }
 
-        /// <summary>反射元Spriteと0〜1段を値比較するDictionaryキーです。</summary>
-        private readonly struct ReflectionTileKey : IEquatable<ReflectionTileKey>
-        {
-            /// <summary>Project内Spriteを区別するUnity Instance IDです。</summary>
-            private readonly int spriteInstanceId;
-
-            /// <summary>水際直下を0とする0〜1の反射段です。</summary>
-            private readonly int depth;
-
-            /// <summary>Sprite参照と反射段から再利用キーを作ります。</summary>
-            /// <param name="sprite">nullではないWall Face Spriteです。</param>
-            /// <param name="depth">0〜1の反射段です。</param>
-            public ReflectionTileKey(Sprite sprite, int depth)
-            {
-                spriteInstanceId = sprite.GetInstanceID();
-                this.depth = depth;
-            }
-
-            /// <summary>Spriteと段が両方同じ場合に同じ共有Tileと判定します。</summary>
-            /// <param name="other">比較する別キーです。</param>
-            /// <returns>同じ反射Tileを表す場合はtrueです。</returns>
-            public bool Equals(ReflectionTileKey other)
-            {
-                return spriteInstanceId == other.spriteInstanceId && depth == other.depth;
-            }
-
-            /// <summary>Object経由でも同じ型のキーを値比較します。</summary>
-            /// <param name="obj">比較対象です。</param>
-            /// <returns>同じReflectionTileKeyならtrueです。</returns>
-            public override bool Equals(object obj)
-            {
-                return obj is ReflectionTileKey other && Equals(other);
-            }
-
-            /// <summary>Spriteと段を混合したDictionary検索用ハッシュ値を返します。</summary>
-            /// <returns>同じキーで必ず同じ値です。</returns>
-            public override int GetHashCode()
-            {
-                unchecked
-                {
-                    return (spriteInstanceId * 397) ^ depth;
-                }
-            }
-        }
     }
 }

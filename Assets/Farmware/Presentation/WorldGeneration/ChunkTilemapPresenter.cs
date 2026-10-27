@@ -1,4 +1,4 @@
-// このファイルは、ECSで生成済みの地形・資源チャンクデータを、製品用の上面・断面・液体深度・水際・反射・Wall影を含む複数Tilemapへ16×16サブチャンク単位で反映・消去します。
+// このファイルは、ECSで生成済みの地形・資源チャンクデータを、上面・断面・液体・水際・Wall影のTilemapと反射Meshへ16×16サブチャンク単位で反映・消去します。
 // 既定のチャンク別ローカルTilemapを自動原点変更で再利用し、比較・診断用に旧共有Tilemap方式へ切り替えられます。
 // Tilemapは表示専用キャッシュであり、地形はGeneratedTerrainCell、資源はGeneratedResourceTileを正として参照します。
 // 分類は中心と周囲8チャンクの完成自然地形へ永続差分を重ねた有効地形を直接参照します。
@@ -134,9 +134,32 @@ namespace Farmware.WorldGeneration.Presentation
         [Tooltip("短い水面模様専用Tilemapです。Water Surface Pattern Materialを設定します。水際・水深の調整値には影響しません。")]
         [SerializeField] private Tilemap waterSurfacePatternTilemap;
 
-        // Wall前面などの垂直面だけを上下反転・縦圧縮して水面へ映すProxy専用レイヤーです。
-        [Tooltip("淡水・海水へ垂直面だけを映す反射Proxy Tilemapです。TerrainWaterReflection Materialを設定し、深度Overlayより前、水際線より後ろへ置きます。")]
+        // 反射MeshのMaterial・Sorting設定の見本です。このTilemap自体へ反射Tileは書き込みません。
+        [Tooltip("接地点から投影する反射Meshの描画設定見本です。TerrainWaterReflection Materialを設定し、水面模様より前、水際線より後ろへ置きます。")]
         [SerializeField] private Tilemap waterReflectionTilemap;
+
+        /// <summary>反射元Spriteを1ページへまとめる製品Atlasです。Scene接続時に設定し、実行時は借用します。</summary>
+        [SerializeField, Tooltip("反射元Faceを収録した、回転なし・FullRectの製品Atlasです。水中断面やSimulationは変更しません。")]
+        private UnityEngine.U2D.SpriteAtlas waterReflectionAtlas;
+
+        /// <summary>表示中チャンクの反射Mesh所有者です。Dirtyサブチャンクだけを再構築します。</summary>
+        private readonly Dictionary<ChunkCoordinate, TerrainWaterReflectionMesh> reflectionMeshes =
+            new Dictionary<ChunkCoordinate, TerrainWaterReflectionMesh>();
+
+        /// <summary>製品Atlasから取り出したSpriteコピーです。Presenterが最後に破棄します。</summary>
+        private readonly Dictionary<Sprite, Sprite> reflectionAtlasSprites = new Dictionary<Sprite, Sprite>();
+
+        /// <summary>原点と時計だけを書き換える共有反射Materialの実行時コピーです。</summary>
+        private Material reflectionRuntimeMaterial;
+
+        /// <summary>Project内の反射Materialです。実行時の変更は書き戻しません。</summary>
+        private Material reflectionSourceMaterial;
+
+        /// <summary>反射へ最後に適用した整数原点です。変更時だけRoot群を移動します。</summary>
+        private int2 reflectionMaterialOrigin;
+
+        /// <summary>絶対原点0と未初期化を区別します。</summary>
+        private bool hasReflectionMaterialOrigin;
 
         // 奥・左・右・左右内角・裏側終端の7bit形状を持つ静止Tileを水面の最前面へ描きます。
         [Tooltip("淡水・海水・マグマの奥・左・右接触線を描く水際アニメーションTilemapです。画面手前辺は描きません。")]
@@ -394,9 +417,6 @@ namespace Farmware.WorldGeneration.Presentation
 
         // 水域4段目以降へ直下1層のGround上面を置く256要素の再利用配列です。
         private TileBase[] underwaterFloorPreviewSubChunkTileBuffer;
-
-        // 淡水・海水へWall Face反射Proxyを置く256要素の再利用配列です。
-        private TileBase[] waterReflectionSubChunkTileBuffer;
 
         // 淡水・海水セルだけへ共有全面Tileを置く256件です。模様ごとのObjectは作りません。
         private TileBase[] waterSurfacePatternSubChunkTileBuffer;
@@ -691,7 +711,7 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// Editor構築ツールまたはテストから、製品Liquid表示カタログと専用7レイヤーを設定します。
+        /// Editor構築ツールまたはテストから、製品Liquid表示カタログ、専用レイヤー、反射の描画設定を設定します。
         /// 全参照が揃うまで既存の基礎液面・全面アニメーションを維持し、新旧Liquid表現を同時に描きません。
         /// </summary>
         /// <param name="catalog">淡水・海水・マグマを完全登録した製品Liquid表示カタログです。</param>
@@ -700,7 +720,8 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="floorPreview">直下1層のGround上面を簡易投影するTilemapです。</param>
         /// <param name="submergedFaces">乾燥崖から分離した水中Ground断面のTilemapです。</param>
         /// <param name="surfacePattern">淡水・海水の短い水面模様専用Tilemapです。</param>
-        /// <param name="reflection">垂直面反射ProxyのTilemapです。</param>
+        /// <param name="reflection">反射MeshへMaterialとSortingを渡す設定見本Tilemapです。</param>
+        /// <param name="reflectionAtlas">反射元Spriteをまとめる製品Atlasです。</param>
         /// <param name="edgeWave">静止接触形状とShader明暗を描く水際Tilemapです。</param>
         public void ConfigureTerrainLiquidPresentation(
             TerrainLiquidPresentationCatalog catalog,
@@ -710,6 +731,7 @@ namespace Farmware.WorldGeneration.Presentation
             Tilemap submergedFaces,
             Tilemap surfacePattern,
             Tilemap reflection,
+            UnityEngine.U2D.SpriteAtlas reflectionAtlas,
             Tilemap edgeWave)
         {
             bool configurationChanged = liquidPresentationCatalog != catalog
@@ -719,6 +741,7 @@ namespace Farmware.WorldGeneration.Presentation
                 || submergedGroundFaceTilemap != submergedFaces
                 || waterSurfacePatternTilemap != surfacePattern
                 || waterReflectionTilemap != reflection
+                || waterReflectionAtlas != reflectionAtlas
                 || liquidEdgeWaveTilemap != edgeWave;
             if (!configurationChanged)
             {
@@ -738,6 +761,13 @@ namespace Farmware.WorldGeneration.Presentation
             submergedGroundFaceTilemap = submergedFaces;
             waterSurfacePatternTilemap = surfacePattern;
             waterReflectionTilemap = reflection;
+            if (waterReflectionAtlas != reflectionAtlas)
+            {
+                // 設定変更前のMeshは上で消去済みです。別Atlasの同名Spriteを混在させません。
+                foreach (Sprite sprite in reflectionAtlasSprites.Values) DestroyUnityObject(sprite);
+                reflectionAtlasSprites.Clear();
+            }
+            waterReflectionAtlas = reflectionAtlas;
             liquidEdgeWaveTilemap = edgeWave;
             ResetMaterialPresentationState(disposeTileCache: true);
         }
@@ -769,7 +799,6 @@ namespace Farmware.WorldGeneration.Presentation
             waterTileChangeBuffer = new TileChangeData[tileCount];
             submergedGroundFaceSubChunkTileBuffer = new TileBase[tileCount];
             underwaterFloorPreviewSubChunkTileBuffer = new TileBase[tileCount];
-            waterReflectionSubChunkTileBuffer = new TileBase[tileCount];
             waterSurfacePatternSubChunkTileBuffer = new TileBase[tileCount];
             liquidEdgeWaveSubChunkTileBuffer = new TileBase[tileCount];
             rockWallSubChunkTileBuffer = new TileBase[tileCount];
@@ -889,7 +918,8 @@ namespace Farmware.WorldGeneration.Presentation
             using (PresentationProfilerMarker.Auto())
             {
                 // チャンク用Rendererが見本Materialを複製参照する前に、全チャンク共有の実行時Materialを用意します。
-                if (!TrySynchronizeShorelineMaterial() || !TrySynchronizeSurfacePatternMaterial())
+                if (!TrySynchronizeShorelineMaterial() || !TrySynchronizeSurfacePatternMaterial()
+                    || !TrySynchronizeReflectionMaterial())
                 {
                     return;
                 }
@@ -915,6 +945,7 @@ namespace Farmware.WorldGeneration.Presentation
                         || submergedGroundFaceTilemap == null
                         || waterSurfacePatternTilemap == null
                         || waterReflectionTilemap == null
+                        || waterReflectionAtlas == null
                         || liquidEdgeWaveTilemap == null);
                 if (targetTilemap == null
                     || liquidBaseTilemap == null
@@ -933,7 +964,7 @@ namespace Farmware.WorldGeneration.Presentation
                     if (missingRequiredLiquidLayer)
                     {
                         LogMaterialPresentationFailureOnce(
-                            "製品Liquid表示には床あり深度、床なし深度、直下床、反射、水際の5 Tilemapが必要です。");
+                            "製品Liquid表示には基底色、直下床、水中断面、水面模様、水際、反射設定見本と製品Atlasの参照が必要です。");
                     }
 
                     if (missingMaterialForProductLiquid)
@@ -1161,6 +1192,48 @@ namespace Farmware.WorldGeneration.Presentation
             hasSurfacePatternMaterialOrigin = false;
         }
 
+        /// <summary>描画前に共有反射Materialを作り、共通時計・絶対画素原点だけを同期します。</summary>
+        /// <returns>未接続、または必要なMaterialを用意できた場合はtrueです。</returns>
+        private bool TrySynchronizeReflectionMaterial()
+        {
+            if (liquidPresentationCatalog == null || waterReflectionTilemap == null) return true;
+            Renderer renderer = waterReflectionTilemap.GetComponent<Renderer>();
+            if (reflectionRuntimeMaterial == null)
+            {
+                if (renderer.sharedMaterial == null
+                    || renderer.sharedMaterial.shader.name != "Farmware/Terrain/Water Reflection Proxy")
+                {
+                    LogMaterialPresentationFailureOnce("反射投影にはWater Reflection Proxy Materialが必要です。");
+                    return false;
+                }
+                reflectionSourceMaterial = renderer.sharedMaterial;
+                reflectionRuntimeMaterial = new Material(reflectionSourceMaterial)
+                { name = "Runtime Water Reflection", hideFlags = HideFlags.DontSave };
+                renderer.sharedMaterial = reflectionRuntimeMaterial;
+            }
+            reflectionRuntimeMaterial.SetFloat(ShorelineAnimationTimeId, Time.time);
+            int2 origin = cameraPanController == null ? int2.zero : cameraPanController.CurrentDisplayOrigin.AbsoluteTileCoordinate;
+            if (!hasReflectionMaterialOrigin || math.any(reflectionMaterialOrigin != origin))
+            {
+                reflectionRuntimeMaterial.SetVector(ShorelineWorldPixelOffsetId, new Vector4(
+                    TerrainLiquidPresentationUtility.GetShorelineOriginPixelOffset(origin.x),
+                    TerrainLiquidPresentationUtility.GetShorelineOriginPixelOffset(origin.y), 0, 0));
+                // チャンク内の頂点は維持し、表示原点が変わった場合だけRoot群を移動します。
+                foreach (var pair in reflectionMeshes)
+                    pair.Value.Reposition(CalculateRockWallShadowMinimumCell(pair.Key, new DisplayOrigin(origin)));
+                reflectionMaterialOrigin = origin;
+                hasReflectionMaterialOrigin = true;
+            }
+            return true;
+        }
+
+        /// <summary>全反射Meshを破棄します。World・方式切替とComponent無効化から呼びます。</summary>
+        private void DestroyReflectionMeshes()
+        {
+            foreach (TerrainWaterReflectionMesh mesh in reflectionMeshes.Values) mesh.Dispose();
+            reflectionMeshes.Clear();
+        }
+
         /// <summary>
         /// Camera側の表示原点変更を検出し、旧相対セルを片付けて新しい原点で再収集できる状態へ戻します。
         /// 旧共有方式の自動変更では旧セルを分割消去へ移します。既定のローカル方式では位置だけ更新し、反映進捗を保ちます。
@@ -1355,6 +1428,11 @@ namespace Farmware.WorldGeneration.Presentation
             DestroyChunkLocalPresentations();
             DisposeShorelineMaterial();
             DisposeSurfacePatternMaterial();
+            if (waterReflectionTilemap != null && reflectionRuntimeMaterial != null)
+                waterReflectionTilemap.GetComponent<Renderer>().sharedMaterial = reflectionSourceMaterial;
+            DestroyUnityObject(reflectionRuntimeMaterial);
+            foreach (Sprite sprite in reflectionAtlasSprites.Values) DestroyUnityObject(sprite);
+            reflectionAtlasSprites.Clear();
             // マスク構築は呼び出し内の同期処理なので、破棄時にWorkerの完了を待つ必要はありません。
             if (rockWallShadowMaskBuffer.IsCreated)
             {
@@ -2071,6 +2149,8 @@ namespace Farmware.WorldGeneration.Presentation
             int localStartY = subChunkY * WorldGridConstants.SubChunkSize;
             bool wallShadowPresentationIsConfigured =
                 HasCompleteTerrainWallShadowConfiguration();
+            if (reflectionMeshes.TryGetValue(coordinate, out TerrainWaterReflectionMesh reflectionMesh))
+                reflectionMesh.Begin(subChunkIndex);
 
             using (SubChunkClassificationProfilerMarker.Auto())
             {
@@ -2110,7 +2190,6 @@ namespace Farmware.WorldGeneration.Presentation
                         submergedGroundFaceSubChunkTileBuffer[destinationIndex] = null;
                         waterDepthSubChunkColorBuffer[destinationIndex] = Color.white;
                         underwaterFloorPreviewSubChunkTileBuffer[destinationIndex] = null;
-                        waterReflectionSubChunkTileBuffer[destinationIndex] = null;
                         waterSurfacePatternSubChunkTileBuffer[destinationIndex] = null;
                         liquidEdgeWaveSubChunkTileBuffer[destinationIndex] = null;
 
@@ -2176,6 +2255,7 @@ namespace Farmware.WorldGeneration.Presentation
                             liquidAnimationSubChunkTileBuffer[destinationIndex] = null;
                             ClassifyProductLiquidTiles(
                                 coordinate,
+                                subChunkIndex,
                                 tileLocalX,
                                 tileLocalY,
                                 destinationIndex,
@@ -2271,11 +2351,8 @@ namespace Farmware.WorldGeneration.Presentation
                     underwaterFloorPreviewTilemap,
                     bounds,
                     underwaterFloorPreviewSubChunkTileBuffer);
-                WriteSubChunkLayer(
-                    coordinate,
-                    waterReflectionTilemap,
-                    bounds,
-                    waterReflectionSubChunkTileBuffer);
+                if (reflectionMeshes.TryGetValue(coordinate, out TerrainWaterReflectionMesh uploadedReflection))
+                    uploadedReflection.Upload(subChunkIndex);
                 WriteSubChunkLayer(coordinate, waterSurfacePatternTilemap, bounds,
                     waterSurfacePatternSubChunkTileBuffer, waterDepthSubChunkColorBuffer);
                 WriteSubChunkLayer(
@@ -2502,10 +2579,12 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="destinationIndex">256要素の再利用配列へ書く位置です。</param>
         /// <param name="terrainCell">現在表示セルの完成済み地形です。</param>
         /// <param name="terrainNeighborhood">水際から最大6段奥の投影元を含む完成地形近傍です。</param>
+        /// <param name="subChunkIndex">反射Meshを更新する0〜15の番号です。</param>
         /// <param name="hasLowerNeighborhood">直下WorldLayerの完成3×3近傍を借用できた場合はtrueです。</param>
         /// <param name="lowerNeighborhood">直下床プレビューへ使う完成地形です。未準備時は読みません。</param>
         private void ClassifyProductLiquidTiles(
             ChunkCoordinate chunkCoordinate,
+            int subChunkIndex,
             int localX,
             int localY,
             int destinationIndex,
@@ -2620,30 +2699,55 @@ namespace Farmware.WorldGeneration.Presentation
                 submergedGroundFaceSubChunkTileBuffer[destinationIndex] = materialTileCache.GetOrCreate(submergedFace);
             }
 
-            if (TerrainLiquidPresentationUtility.TryProjectWallReflection(
+            // 反射元の幅から左右2pxへ輪郭を動かせるよう、受け手から左右1列のWallも読みます。
+            // 各断片はこの水セル内だけに切り抜き、余白で陸地・別セルの3pxの縁を覆いません。
+            float bankOffset = TerrainLiquidPresentationUtility.SurfaceClipPixels
+                / (float)TerrainLiquidPresentationUtility.PixelsPerCell;
+            var waterBounds = new Rect(localX, localY, 1f, depthStage == 0 ? 1f - bankOffset : 1f);
+            float waterSurfaceY = localY + depthStage + 1f - bankOffset;
+            for (int sourceOffsetX = -1; sourceOffsetX <= 1; sourceOffsetX++)
+            {
+                int sourceX = localX + sourceOffsetX;
+                if (!TerrainLiquidPresentationUtility.TryFindWallReflectionSource(
                     terrainNeighborhood,
-                    localX,
+                    sourceX,
                     localY,
                     terrainRuntimeIds,
+                    kind,
                     out TerrainMaterialFaceProjection reflectionProjection)
-                && TryCreateFaceSourceCoordinate(
+                || !TryCreateFaceSourceCoordinate(
                     chunkCoordinate,
                     reflectionProjection,
-                    out WorldTileCoordinate reflectionSourceCoordinate)
-                && TerrainMaterialProductTileResolver.TryResolveFace(
-                    materialPresentationCatalog,
-                    materialRuntimeLookup,
-                    presentationWorldSeed,
-                    reflectionSourceCoordinate,
-                    reflectionProjection.SourceCell.WallBlockRuntimeId,
-                    reflectionProjection.FaceDepth,
-                    forWall: true,
-                    out TerrainMaterialProductTileSelection reflectionFace))
-            {
-                waterReflectionSubChunkTileBuffer[destinationIndex] =
-                    liquidTileCache.GetOrCreateReflection(
-                        reflectionFace,
-                        reflectionProjection.FaceDepth);
+                    out WorldTileCoordinate reflectionSourceCoordinate)) continue;
+                // 反射元の接地点は動かさず、2枚の垂直画像をそれぞれ実水面で切り抜きます。
+                float contactY = reflectionProjection.SourceLocalY;
+                float planeY = contactY - bankOffset;
+                for (int stage = 0; stage < TerrainLiquidPresentationUtility.MaximumReflectionDepth; stage++)
+                {
+                    if (!TerrainWaterReflectionGeometry.TryProjectToWater(new Rect(sourceX, contactY + stage, 1f, 1f),
+                        contactY, planeY, waterBounds, TerrainLiquidPresentationUtility.ReflectionVerticalCompression,
+                        TerrainLiquidPresentationUtility.ReflectionVisibleDepthPixels, out TerrainWaterReflectionSlice slice,
+                        TerrainLiquidPresentationUtility.ReflectionHorizontalPaddingPixels)
+                        || !TerrainMaterialProductTileResolver.TryResolveFace(materialPresentationCatalog,
+                            materialRuntimeLookup, presentationWorldSeed, reflectionSourceCoordinate,
+                            reflectionProjection.SourceCell.WallBlockRuntimeId,
+                            TerrainLiquidPresentationUtility.GetReflectedWallFaceDepth(stage), forWall: true,
+                            out TerrainMaterialProductTileSelection reflectionFace)) continue;
+
+                    if (!reflectionAtlasSprites.TryGetValue(reflectionFace.Sprite, out Sprite packed))
+                    {
+                        packed = waterReflectionAtlas.GetSprite(reflectionFace.Sprite.name);
+                        if (packed == null) throw new System.InvalidOperationException("製品Atlasに反射元Spriteがありません。");
+                        reflectionAtlasSprites.Add(reflectionFace.Sprite, packed);
+                    }
+                    if (!reflectionMeshes.TryGetValue(chunkCoordinate, out TerrainWaterReflectionMesh mesh))
+                    {
+                        mesh = new TerrainWaterReflectionMesh(waterReflectionTilemap.transform.parent);
+                        mesh.Reposition(CalculateRockWallShadowMinimumCell(chunkCoordinate, presentedDisplayOrigin));
+                        reflectionMeshes.Add(chunkCoordinate, mesh);
+                    }
+                    mesh.Append(subChunkIndex, packed, slice, waterReflectionTilemap.GetComponent<Renderer>(), waterSurfaceY);
+                }
             }
         }
 
@@ -2823,6 +2927,8 @@ namespace Farmware.WorldGeneration.Presentation
         {
             if (subChunkIndex == 0 && destroyCurrentShadow)
             {
+                // 反射も現在チャンクの表示寿命へ従わせ、旧原点Tileの遅延消去では新しいMeshを消しません。
+                if (reflectionMeshes.Remove(coordinate, out TerrainWaterReflectionMesh reflection)) reflection.Dispose();
                 // Tilemap消去を分割している間に古い影だけが残らないよう、チャンク影は消去開始時にまとめて外します。
                 DestroyRockWallShadow(coordinate);
                 ReleaseWallDynamicShadowPresentation(coordinate);
@@ -2889,11 +2995,6 @@ namespace Farmware.WorldGeneration.Presentation
                 if (underwaterFloorPreviewTilemap != null)
                 {
                     underwaterFloorPreviewTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
-                }
-
-                if (waterReflectionTilemap != null)
-                {
-                    waterReflectionTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
                 }
 
                 if (waterSurfacePatternTilemap != null)
@@ -3080,7 +3181,7 @@ namespace Farmware.WorldGeneration.Presentation
                 wallFoldShadowTopTilemap, wallFoldShadowBottomTilemap,
                 dryCliffDeepBlackTilemap, liquidDepthWithFloorTilemap,
                 liquidDepthWithoutFloorTilemap, underwaterFloorPreviewTilemap, submergedGroundFaceTilemap,
-                waterSurfacePatternTilemap, waterReflectionTilemap, liquidEdgeWaveTilemap, rockWallResourceTilemap };
+                waterSurfacePatternTilemap, liquidEdgeWaveTilemap, rockWallResourceTilemap };
         }
 
         /// <summary>
@@ -3142,6 +3243,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// </summary>
         private void DestroyChunkLocalPresentations()
         {
+            DestroyReflectionMeshes();
             foreach (ChunkLocalTilemapPresentation presentation in chunkLocalPresentations.Values)
             {
                 presentation.Destroy();

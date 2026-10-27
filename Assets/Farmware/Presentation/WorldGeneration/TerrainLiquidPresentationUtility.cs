@@ -141,15 +141,11 @@ namespace Farmware.WorldGeneration.Presentation
         /// <summary>水中床を隠しすぎない反射Proxyの最大Alphaです。</summary>
         public const float ReflectionMaximumAlpha = 0.22f;
 
-        /// <summary>中心pivotで縦圧縮した反射の上端を、水面の上端3pxクリップへ一致させるタイル単位の移動量です。</summary>
-        public const float ReflectionSurfaceOffsetInTiles = (1f - ReflectionVerticalCompression) * 0.5f
-            - SurfaceClipPixels / (float)PixelsPerCell;
-
         /// <summary>2段のWall Faceを0.75倍した、反射全体の表示深度です。水面から24pxで透明になります。</summary>
         public const float ReflectionVisibleDepthPixels = MaximumReflectionDepth * PixelsPerCell * ReflectionVerticalCompression;
 
-        /// <summary>行別の反射変位を進める速度です。単位は画素段階/秒です。</summary>
-        public const float ReflectionWavePixelsPerSecond = 4f;
+        /// <summary>輪郭を動かすShaderとMeshが共有する最大横変位（素材px）です。Dirty更新時に両側へ余白を確保します。</summary>
+        public const int ReflectionHorizontalPaddingPixels = 2;
 
         /// <summary>
         /// ECSの組み込みRuntime IDから製品表示用の液体種別を求めます。
@@ -442,27 +438,28 @@ namespace Farmware.WorldGeneration.Presentation
         /// 水平なGroundTop、WallTop、床は入力候補にしないため反射へ混入しません。
         /// </summary>
         /// <param name="neighborhood">中心と周囲8チャンクの完成済み地形です。</param>
-        /// <param name="localX">中心チャンク基準の水面Xです。</param>
-        /// <param name="localY">中心チャンク基準の水面Yです。</param>
+        /// <param name="localX">中心チャンク基準の反射元列Xです。受け手の左右1列も探索します。</param>
+        /// <param name="localY">受け手水面と同じ高さの探索開始Yです。</param>
         /// <param name="runtimeIds">現在Worldの組み込みLiquid Runtime IDです。</param>
-        /// <param name="projection">成功時にWallのFace投影元と0〜1段目を受け取ります。</param>
-        /// <returns>同じ水がWallまで連続し、32px以内へ垂直面だけを映せる場合はtrueです。</returns>
-        public static bool TryProjectWallReflection(
+        /// <param name="receivingWaterKind">実際に描く受け手セルの液体種別です。反射元列が陸地でも水域の条件はこの値で判定します。</param>
+        /// <param name="projection">成功時にWallのセルと接地点座標を受け取ります。描くFaceは別途高さから選びます。</param>
+        /// <returns>投影が届く範囲の最寄りWallがある場合はtrueです。地面上の区間は後段の矩形交差で隠します。</returns>
+        public static bool TryFindWallReflectionSource(
             in CompletedChunkTerrainNeighborhood neighborhood,
             int localX,
             int localY,
             in BuiltInTerrainBlockRuntimeIds runtimeIds,
+            TerrainLiquidVisualKind receivingWaterKind,
             out TerrainMaterialFaceProjection projection)
         {
             projection = default;
-            if (!neighborhood.TryGetTile(localX, localY, out GeneratedTerrainCell current))
+            if (!neighborhood.TryGetTile(localX, localY, out _))
             {
                 return false;
             }
 
-            TerrainLiquidVisualKind currentKind = Classify(current, runtimeIds);
-            if (currentKind != TerrainLiquidVisualKind.FreshWater
-                && currentKind != TerrainLiquidVisualKind.SaltWater)
+            if (receivingWaterKind != TerrainLiquidVisualKind.FreshWater
+                && receivingWaterKind != TerrainLiquidVisualKind.SaltWater)
             {
                 return false;
             }
@@ -481,12 +478,14 @@ namespace Farmware.WorldGeneration.Presentation
                         candidate,
                         localX,
                         sourceY,
-                        distance - 1,
+                        0,
                         isWall: true);
                     return true;
                 }
 
-                if (Classify(candidate, runtimeIds) != currentKind)
+                // 岸から1セル離れたWallでも投影が届く可能性があります。地面は反射元にせず探索だけ通します。
+                // 別種液体や空の穴は、水面の高さ・連続性が未定義なので今回のWall投影では越えません。
+                if (!candidate.GroundBlockRuntimeId.IsValid && Classify(candidate, runtimeIds) != receivingWaterKind)
                 {
                     return false;
                 }
@@ -526,22 +525,13 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
 
-        /// <summary>
-        /// 4段階の時間と画素行から、0、+1、0、-1の整数水平変位を行別位相付きで返します。
-        /// Shaderと同じ規則をCPUテストでも検証できるようにします。
-        /// </summary>
-        /// <param name="animationStep">毎秒4段階で増える整数時間です。</param>
-        /// <param name="pixelRow">反射Sprite内の0以上の画素行です。</param>
-        /// <returns>-1、0、+1のいずれかの画素変位です。</returns>
-        public static int GetReflectionHorizontalOffset(int animationStep, int pixelRow)
+        /// <summary>接地点に近い下段から反射するため、上端0のWall Face段数へ変換します。</summary>
+        /// <param name="heightStage">接地点から上へ数えた0〜1の段です。</param>
+        /// <returns>元WallのFace段数です。範囲外は-1を返し、画像は選択しません。</returns>
+        public static int GetReflectedWallFaceDepth(int heightStage)
         {
-            int phase = PositiveModulo(animationStep + pixelRow, 4);
-            if (phase == 1)
-            {
-                return 1;
-            }
-
-            return phase == 3 ? -1 : 0;
+            return heightStage >= 0 && heightStage < MaximumReflectionDepth
+                ? MaximumReflectionDepth - 1 - heightStage : -1;
         }
 
         /// <summary>水面から離れるほど反射を薄くし、24pxの投影終端で矩形状に切れない可視率を返します。</summary>
