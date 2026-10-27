@@ -1,11 +1,9 @@
 // このファイルは、岩壁の露出面判定と、内部へ重ねる連続グラデーション影の不透明度を純粋計算します。
 // ChunkTilemapPresenterの影メッシュと開発者用Rock Wall可視化が同じ距離・補間規則を共有します。
-// マスク生成だけは呼び出し元所有のNative配列を同期Burst Jobで更新し、余白の座標ノイズ計算をまとめます。
+// マスク生成は呼び出し元所有のNative配列を同期更新し、有効地形の疎な差分も同じ近傍参照から反映します。
 
 using System;
-using Unity.Burst;
 using Unity.Collections;
-using Unity.Jobs;
 using UnityEngine;
 
 namespace Farmware.WorldGeneration.Presentation
@@ -47,7 +45,7 @@ namespace Farmware.WorldGeneration.Presentation
 
         /// <summary>
         /// チャンク完成時に岩壁マスクを全件更新します。中心と外周のどちらも確定済み地形Bufferを使います。
-        /// 同期Runで呼び出し中に終了するため、配列を保持せず、Worker待ちや影の公開遅延を追加しません。
+        /// 呼び出し中に同期完了するため、配列を保持せず、Worker待ちや影の公開遅延を追加しません。
         /// </summary>
         /// <param name="neighborhood">中心と周囲8チャンクの完成済み地形Bufferを借用した近傍です。</param>
         /// <param name="mask">呼び出し元が所有・破棄する80×80の再利用配列です。全要素を上書きします。</param>
@@ -56,7 +54,7 @@ namespace Farmware.WorldGeneration.Presentation
             in CompletedChunkTerrainNeighborhood neighborhood,
             NativeArray<bool> mask)
         {
-            // Burst側では例外による入力検査へ依存せず、公開APIの入口で配列の大きさを検証します。
+            // ループへ入る前に公開APIの入口で配列の大きさを検証し、途中まで書いた状態を残しません。
             if (mask.Length != ShadowMaskSizeInTiles * ShadowMaskSizeInTiles)
             {
                 throw new ArgumentException("岩壁影マスクには80×80の出力配列が必要です。", nameof(mask));
@@ -67,44 +65,23 @@ namespace Farmware.WorldGeneration.Presentation
                 throw new ArgumentException("岩壁影マスクには4096要素の完成中心チャンクが必要です。", nameof(neighborhood));
             }
 
-            var job = new FillShadowMaskJob
+            int padding = ShadowSearchRadiusInTiles + 1;
+            for (int y = 0; y < ShadowMaskSizeInTiles; y++)
             {
-                Neighborhood = neighborhood,
-                Mask = mask
-            };
-            // Schedule→Completeではなく、その場で計算を完了させます。UnityEngine.ObjectやECS QueryはJobへ渡しません。
-            job.Run();
-        }
-
-        /// <summary>3×3完成Bufferの参照をまとめてBurstへ渡し、岩壁マスクへ変換する同期Jobです。</summary>
-        [BurstCompile]
-        private struct FillShadowMaskJob : IJob
-        {
-            /// <summary>呼び出し中だけ借りる3×3チャンクの完成地形です。読み取り専用で保持・破棄しません。</summary>
-            [ReadOnly] public CompletedChunkTerrainNeighborhood Neighborhood;
-
-            /// <summary>呼び出し元所有の出力です。このJobが全要素へ書き、同期終了後すぐに参照できます。</summary>
-            [WriteOnly] public NativeArray<bool> Mask;
-
-            /// <summary>メインスレッド上で80×80を行優先で埋め、完成Bufferが存在しないワールド外は非岩壁にします。</summary>
-            public void Execute()
-            {
-                int padding = ShadowSearchRadiusInTiles + 1;
-                for (int y = 0; y < ShadowMaskSizeInTiles; y++)
+                int localY = y - padding;
+                for (int x = 0; x < ShadowMaskSizeInTiles; x++)
                 {
-                    int localY = y - padding;
-                    for (int x = 0; x < ShadowMaskSizeInTiles; x++)
-                    {
-                        int localX = x - padding;
-                        // 中心も外周も完成Bufferだけを読み、int端でBufferがない領域は空地として影を閉じません。
-                        bool isRockWall = Neighborhood.TryGetTile(
-                                localX,
-                                localY,
-                                out GeneratedTerrainCell tile)
-                            && tile.WallBlockRuntimeId.IsValid;
+                    int localX = x - padding;
+                    // 差分BufferがないチャンクではNativeArrayが未生成になります。Jobへ構造体ごと渡すとUnityが
+                    // 未生成配列を拒否するため、ここでは同期ループで必要なセルだけを読みます。中心も外周も
+                    // 同じ有効地形解決を通し、int端でBufferがない領域は空地として影を閉じません。
+                    bool isRockWall = neighborhood.TryGetTile(
+                            localX,
+                            localY,
+                            out GeneratedTerrainCell tile)
+                        && tile.WallBlockRuntimeId.IsValid;
 
-                        Mask[(y * ShadowMaskSizeInTiles) + x] = isRockWall;
-                    }
+                    mask[(y * ShadowMaskSizeInTiles) + x] = isRockWall;
                 }
             }
         }

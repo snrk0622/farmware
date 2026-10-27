@@ -116,7 +116,7 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(worldTileY, Is.Zero);
         }
 
-        /// <summary>ワールド外の表示用外周を生成し、土地・岩壁へ接続しない空Block値になることを保証します。</summary>
+        /// <summary>ワールド端の有効地形近傍が、外側を土地・岩壁へ接続しないことを保証します。</summary>
         /// <param name="chunkCoordinate">正または負の端にある論理チャンク座標です。</param>
         /// <param name="outsideLocalCoordinate">外周1セルのローカル座標です。</param>
         [TestCase(WorldGridConstants.MinimumLogicalChunkCoordinate, -1)]
@@ -153,11 +153,6 @@ namespace Farmware.WorldGeneration.Tests
             }
 
             var centerCoordinate = new ChunkCoordinate(chunkCoordinate, chunkCoordinate);
-            DynamicBuffer<GeneratedTerrainCell> tiles = entityManager.GetBuffer<GeneratedTerrainCell>(
-                completedEntities[centerCoordinate],
-                true);
-            using var halo = new Unity.Collections.NativeArray<GeneratedTerrainCell>(TerrainNeighborHaloUtility.TileCount,
-                Unity.Collections.Allocator.TempJob);
             Assert.That(
                 CompletedChunkTerrainNeighborhoodFactory.TryCreate(
                     entityManager,
@@ -166,17 +161,10 @@ namespace Farmware.WorldGeneration.Tests
                     out CompletedChunkTerrainNeighborhood neighborhood),
                 Is.True);
             // Factoryはワールド外のdefault配列を中心借用で安全に代用しつつ、外側を非接続として区別します。
-            TerrainNeighborHaloUtility.Fill(neighborhood,
-                0, WorldGridConstants.SubChunksPerChunk, halo);
-            GeneratedTerrainCell neighbor = TerrainNeighborHaloUtility.GetTile(
-                outsideLocalCoordinate,
-                0,
-                tiles,
-                halo);
-            Assert.That(neighbor.GroundBlockRuntimeId.IsValid, Is.False);
-            Assert.That(neighbor.WallBlockRuntimeId.IsValid, Is.False);
-            Assert.That(neighbor.LiquidRuntimeId.IsValid, Is.False,
-                "int端の外側は土地・岩壁・液体のいずれにも接続しない空Block値にします。");
+            Assert.That(
+                neighborhood.TryGetTile(outsideLocalCoordinate, 0, out _),
+                Is.False,
+                "int端の外側には完成セルがなく、土地・岩壁・液体のいずれにも接続しません。");
         }
 
         /// <summary>

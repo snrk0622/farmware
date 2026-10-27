@@ -1,12 +1,11 @@
-// このファイルは、Tilemap分類で参照する中心チャンクと周囲8チャンクの完成地形をまとめて扱います。
-// 内部・外周ともECSの完成Bufferを正とし、外周1セルだけをPresenter所有の260要素配列へ一時保存します。
+// このファイルは、Tilemap分類で参照する中心チャンクと周囲8チャンクの完成地形・永続差分をまとめて扱います。
+// 内部・外周ともECSの自然地形Bufferへ差分を適用した有効地形を正とし、必要な同期処理へ貸し出します。
 
 using System;
 using System.Collections.Generic;
-using Unity.Burst;
+using Farmware.Simulation;
 using Unity.Collections;
 using Unity.Entities;
-using Unity.Jobs;
 
 namespace Farmware.WorldGeneration.Presentation
 {
@@ -43,18 +42,35 @@ namespace Farmware.WorldGeneration.Presentation
         // 右上チャンクの完成地形Bufferを同期処理中だけ借用します。この値は配列を所有・破棄しません。
         private readonly NativeArray<GeneratedTerrainCell> northEast;
 
+        // 左下から右上までの各チャンクに対応する疎な地形差分です。所有者がない位置はdefaultで表します。
+        private readonly NativeArray<TerrainCellDelta> southWestDeltas;
+        private readonly NativeArray<TerrainCellDelta> southDeltas;
+        private readonly NativeArray<TerrainCellDelta> southEastDeltas;
+        private readonly NativeArray<TerrainCellDelta> westDeltas;
+        private readonly NativeArray<TerrainCellDelta> centerDeltas;
+        private readonly NativeArray<TerrainCellDelta> eastDeltas;
+        private readonly NativeArray<TerrainCellDelta> northWestDeltas;
+        private readonly NativeArray<TerrainCellDelta> northDeltas;
+        private readonly NativeArray<TerrainCellDelta> northEastDeltas;
+
+        // 3×3の各位置に差分所有者があるかを9bitで保持し、差分なしと未作成配列を区別します。
+        private readonly ushort deltaAvailabilityMask;
+
+        // 自然生成セルへ差分を適用するとき、Runtime IDの区画種別を検証する読み取り専用カタログです。
+        private readonly BlobAssetReference<TerrainBlockCatalogBlob> terrainCatalog;
+
         // 3×3の各位置に実在する完成チャンクがあるかを9bitで保持し、ワールド外を代替配列と区別します。
         private readonly ushort availabilityMask;
 
-        /// <summary>同期Jobへ渡せる有効な中心4096セルを保持する場合はtrueです。</summary>
+        /// <summary>同期表示処理で読める有効な中心4096セルを保持する場合はtrueです。</summary>
         public bool HasValidCenter => IsChunkAvailable(0, 0)
             && center.IsCreated
             && center.Length == WorldGridConstants.TilesPerChunk;
 
         /// <summary>
         /// 3×3チャンクの完成地形Bufferを借用して近傍を作ります。
-        /// ワールド端の外側に当たる配列だけはdefaultを渡せます。Job安全性のため内部では中心配列を代入し、
-        /// availabilityMaskにより実在する隣接チャンクと区別します。中心と実在チャンクは必ず4096要素を渡します。
+        /// ワールド端の外側に当たる配列だけはdefaultを渡せます。availabilityMaskにより実在する隣接チャンクと区別し、
+        /// 中心と実在チャンクは必ず4096要素を渡します。
         /// </summary>
         /// <param name="southWest">左下チャンクの完成地形、またはワールド外ならdefaultです。</param>
         /// <param name="south">下チャンクの完成地形、またはワールド外ならdefaultです。</param>
@@ -80,18 +96,89 @@ namespace Farmware.WorldGeneration.Presentation
                 southWest, south, southEast,
                 west, center, east,
                 northWest, north, northEast);
-            // Unity Jobは未使用でもdefault NativeArrayをJobデータ内に許さないため、ワールド外だけ中心配列で代用します。
-            // TryGetTileはavailabilityMaskを先に確認するので、代用品を実在する地形として返すことはありません。
-            NativeArray<GeneratedTerrainCell> fallback = IsUsable(center) ? center : default;
-            this.southWest = IsUsable(southWest) ? southWest : fallback;
-            this.south = IsUsable(south) ? south : fallback;
-            this.southEast = IsUsable(southEast) ? southEast : fallback;
-            this.west = IsUsable(west) ? west : fallback;
+            this.southWest = southWest;
+            this.south = south;
+            this.southEast = southEast;
+            this.west = west;
             this.center = center;
-            this.east = IsUsable(east) ? east : fallback;
-            this.northWest = IsUsable(northWest) ? northWest : fallback;
-            this.north = IsUsable(north) ? north : fallback;
-            this.northEast = IsUsable(northEast) ? northEast : fallback;
+            this.east = east;
+            this.northWest = northWest;
+            this.north = north;
+            this.northEast = northEast;
+            southWestDeltas = default;
+            southDeltas = default;
+            southEastDeltas = default;
+            westDeltas = default;
+            centerDeltas = default;
+            eastDeltas = default;
+            northWestDeltas = default;
+            northDeltas = default;
+            northEastDeltas = default;
+            deltaAvailabilityMask = 0;
+            terrainCatalog = default;
+        }
+
+        /// <summary>
+        /// 3×3の完成自然地形と任意の疎な変更差分を借用し、表示・診断が同じ有効地形を読める近傍を作ります。
+        /// 配列は呼び出し元が所有し、この値は同期処理中だけ参照します。
+        /// </summary>
+        /// <param name="southWest">左下チャンクの自然地形です。</param>
+        /// <param name="south">下チャンクの自然地形です。</param>
+        /// <param name="southEast">右下チャンクの自然地形です。</param>
+        /// <param name="west">左チャンクの自然地形です。</param>
+        /// <param name="center">中心チャンクの自然地形です。</param>
+        /// <param name="east">右チャンクの自然地形です。</param>
+        /// <param name="northWest">左上チャンクの自然地形です。</param>
+        /// <param name="north">上チャンクの自然地形です。</param>
+        /// <param name="northEast">右上チャンクの自然地形です。</param>
+        /// <param name="southWestDeltas">左下チャンクの疎な差分です。</param>
+        /// <param name="southDeltas">下チャンクの疎な差分です。</param>
+        /// <param name="southEastDeltas">右下チャンクの疎な差分です。</param>
+        /// <param name="westDeltas">左チャンクの疎な差分です。</param>
+        /// <param name="centerDeltas">中心チャンクの疎な差分です。</param>
+        /// <param name="eastDeltas">右チャンクの疎な差分です。</param>
+        /// <param name="northWestDeltas">左上チャンクの疎な差分です。</param>
+        /// <param name="northDeltas">上チャンクの疎な差分です。</param>
+        /// <param name="northEastDeltas">右上チャンクの疎な差分です。</param>
+        /// <param name="deltaAvailabilityMask">差分所有者が存在する位置を表す9bitです。</param>
+        /// <param name="terrainCatalog">差分適用時のRuntime ID分類を検証するカタログです。</param>
+        public CompletedChunkTerrainNeighborhood(
+            NativeArray<GeneratedTerrainCell> southWest,
+            NativeArray<GeneratedTerrainCell> south,
+            NativeArray<GeneratedTerrainCell> southEast,
+            NativeArray<GeneratedTerrainCell> west,
+            NativeArray<GeneratedTerrainCell> center,
+            NativeArray<GeneratedTerrainCell> east,
+            NativeArray<GeneratedTerrainCell> northWest,
+            NativeArray<GeneratedTerrainCell> north,
+            NativeArray<GeneratedTerrainCell> northEast,
+            NativeArray<TerrainCellDelta> southWestDeltas,
+            NativeArray<TerrainCellDelta> southDeltas,
+            NativeArray<TerrainCellDelta> southEastDeltas,
+            NativeArray<TerrainCellDelta> westDeltas,
+            NativeArray<TerrainCellDelta> centerDeltas,
+            NativeArray<TerrainCellDelta> eastDeltas,
+            NativeArray<TerrainCellDelta> northWestDeltas,
+            NativeArray<TerrainCellDelta> northDeltas,
+            NativeArray<TerrainCellDelta> northEastDeltas,
+            ushort deltaAvailabilityMask,
+            BlobAssetReference<TerrainBlockCatalogBlob> terrainCatalog)
+            : this(
+                southWest, south, southEast,
+                west, center, east,
+                northWest, north, northEast)
+        {
+            this.southWestDeltas = southWestDeltas;
+            this.southDeltas = southDeltas;
+            this.southEastDeltas = southEastDeltas;
+            this.westDeltas = westDeltas;
+            this.centerDeltas = centerDeltas;
+            this.eastDeltas = eastDeltas;
+            this.northWestDeltas = northWestDeltas;
+            this.northDeltas = northDeltas;
+            this.northEastDeltas = northEastDeltas;
+            this.deltaAvailabilityMask = deltaAvailabilityMask;
+            this.terrainCatalog = terrainCatalog;
         }
 
         /// <summary>
@@ -117,7 +204,7 @@ namespace Farmware.WorldGeneration.Presentation
 
             if (!IsChunkAvailable(chunkOffsetX, chunkOffsetY))
             {
-                // Job安全性用の代替配列をワールド外の地形として読み取らないよう、配列選択より先に拒否します。
+                // default配列をワールド外の地形として読み取らないよう、配列選択より先に拒否します。
                 return false;
             }
 
@@ -128,8 +215,89 @@ namespace Farmware.WorldGeneration.Presentation
                 return false;
             }
 
-            tile = source[WorldGrid.ToTileIndex(sourceX, sourceY)];
+            int tileIndex = WorldGrid.ToTileIndex(sourceX, sourceY);
+            tile = source[tileIndex];
+            if (!terrainCatalog.IsCreated || !IsDeltaChunkAvailable(chunkOffsetX, chunkOffsetY))
+            {
+                return true;
+            }
+
+            NativeArray<TerrainCellDelta> deltas = SelectDeltaChunk(chunkOffsetX, chunkOffsetY);
+            bool hasDelta = TryFindDelta(deltas, (ushort)tileIndex, out TerrainCellDelta delta);
+            if (EffectiveTerrainResolver.TryResolve(
+                    tile,
+                    hasDelta,
+                    delta,
+                    terrainCatalog,
+                    out EffectiveTerrainCell effectiveCell)
+                != EffectiveTerrainResolveResult.Success)
+            {
+                return false;
+            }
+
+            tile = ToGeneratedTerrainCell(effectiveCell);
             return true;
+        }
+
+        /// <summary>3×3内の相対位置へ対応する疎な差分Bufferを返します。</summary>
+        private NativeArray<TerrainCellDelta> SelectDeltaChunk(int offsetX, int offsetY)
+        {
+            if (offsetY < 0)
+            {
+                return offsetX < 0 ? southWestDeltas : offsetX > 0 ? southEastDeltas : southDeltas;
+            }
+
+            if (offsetY > 0)
+            {
+                return offsetX < 0 ? northWestDeltas : offsetX > 0 ? northEastDeltas : northDeltas;
+            }
+
+            return offsetX < 0 ? westDeltas : offsetX > 0 ? eastDeltas : centerDeltas;
+        }
+
+        /// <summary>LocalTileIndex昇順の疎な差分を二分探索し、描画順に依存せず対象セルだけを取得します。</summary>
+        private static bool TryFindDelta(
+            NativeArray<TerrainCellDelta> deltas,
+            ushort localTileIndex,
+            out TerrainCellDelta delta)
+        {
+            int minimum = 0;
+            int maximum = deltas.Length - 1;
+            while (minimum <= maximum)
+            {
+                int middle = minimum + ((maximum - minimum) / 2);
+                TerrainCellDelta candidate = deltas[middle];
+                if (candidate.LocalTileIndex == localTileIndex)
+                {
+                    delta = candidate;
+                    return true;
+                }
+
+                if (candidate.LocalTileIndex < localTileIndex)
+                {
+                    minimum = middle + 1;
+                }
+                else
+                {
+                    maximum = middle - 1;
+                }
+            }
+
+            delta = default;
+            return false;
+        }
+
+        /// <summary>有効地形を既存Presentation APIが共有する値型へコピーします。</summary>
+        private static GeneratedTerrainCell ToGeneratedTerrainCell(in EffectiveTerrainCell cell)
+        {
+            return new GeneratedTerrainCell
+            {
+                Biome = cell.Biome,
+                GroundBlockRuntimeId = cell.GroundBlockRuntimeId,
+                WallBlockRuntimeId = cell.WallBlockRuntimeId,
+                LiquidRuntimeId = cell.LiquidRuntimeId,
+                TerrainSurfaceRuntimeId = cell.TerrainSurfaceRuntimeId
+            };
         }
 
         /// <summary>3×3内の相対チャンク位置に対応する借用Bufferを返します。</summary>
@@ -205,6 +373,15 @@ namespace Farmware.WorldGeneration.Presentation
                 && bitIndex < 9
                 && (availabilityMask & (1 << bitIndex)) != 0;
         }
+
+        /// <summary>中心から-1〜1の相対位置に差分所有者があるかを返します。</summary>
+        private bool IsDeltaChunkAvailable(int offsetX, int offsetY)
+        {
+            int bitIndex = ((offsetY + 1) * 3) + offsetX + 1;
+            return bitIndex >= 0
+                && bitIndex < 9
+                && (deltaAvailabilityMask & (1 << bitIndex)) != 0;
+        }
     }
 
     /// <summary>
@@ -212,6 +389,72 @@ namespace Farmware.WorldGeneration.Presentation
     /// </summary>
     public static class CompletedChunkTerrainNeighborhoodFactory
     {
+        /// <summary>
+        /// 完成自然地形と永続差分の座標索引から、現在の有効地形を返す3×3近傍を構築します。
+        /// 差分所有者がないチャンクは自然生成をそのまま使用し、別レイヤー・別座標の差分は参照しません。
+        /// </summary>
+        /// <param name="entityManager">自然地形と差分Bufferを借用する現在Worldの管理境界です。</param>
+        /// <param name="completedEntities">完成自然地形を座標で引く索引です。</param>
+        /// <param name="deltaOwnerEntities">永続差分所有者をレイヤー付き座標で引く索引です。</param>
+        /// <param name="centerCoordinate">近傍の中心となる論理チャンク座標です。</param>
+        /// <param name="terrainCatalog">差分Runtime IDの分類を検証する地形カタログです。</param>
+        /// <param name="neighborhood">成功時に有効地形を返す借用近傍です。</param>
+        /// <returns>必要な自然地形と、存在する差分所有者をすべて検証して借用できた場合はtrueです。</returns>
+        public static bool TryCreateEffective(
+            EntityManager entityManager,
+            IReadOnlyDictionary<ChunkCoordinate, Entity> completedEntities,
+            IReadOnlyDictionary<ChunkCoordinate, Entity> deltaOwnerEntities,
+            ChunkCoordinate centerCoordinate,
+            BlobAssetReference<TerrainBlockCatalogBlob> terrainCatalog,
+            out CompletedChunkTerrainNeighborhood neighborhood)
+        {
+            neighborhood = default;
+            if (!terrainCatalog.IsCreated
+                || !TryGetChunk(entityManager, completedEntities, centerCoordinate, -1, -1, out NativeArray<GeneratedTerrainCell> southWest)
+                || !TryGetChunk(entityManager, completedEntities, centerCoordinate, 0, -1, out NativeArray<GeneratedTerrainCell> south)
+                || !TryGetChunk(entityManager, completedEntities, centerCoordinate, 1, -1, out NativeArray<GeneratedTerrainCell> southEast)
+                || !TryGetChunk(entityManager, completedEntities, centerCoordinate, -1, 0, out NativeArray<GeneratedTerrainCell> west)
+                || !TryGetChunk(entityManager, completedEntities, centerCoordinate, 0, 0, out NativeArray<GeneratedTerrainCell> center)
+                || !TryGetChunk(entityManager, completedEntities, centerCoordinate, 1, 0, out NativeArray<GeneratedTerrainCell> east)
+                || !TryGetChunk(entityManager, completedEntities, centerCoordinate, -1, 1, out NativeArray<GeneratedTerrainCell> northWest)
+                || !TryGetChunk(entityManager, completedEntities, centerCoordinate, 0, 1, out NativeArray<GeneratedTerrainCell> north)
+                || !TryGetChunk(entityManager, completedEntities, centerCoordinate, 1, 1, out NativeArray<GeneratedTerrainCell> northEast)
+                || !TryGetDeltaChunk(entityManager, deltaOwnerEntities, centerCoordinate, -1, -1, out NativeArray<TerrainCellDelta> southWestDeltas, out bool hasSouthWestDeltas)
+                || !TryGetDeltaChunk(entityManager, deltaOwnerEntities, centerCoordinate, 0, -1, out NativeArray<TerrainCellDelta> southDeltas, out bool hasSouthDeltas)
+                || !TryGetDeltaChunk(entityManager, deltaOwnerEntities, centerCoordinate, 1, -1, out NativeArray<TerrainCellDelta> southEastDeltas, out bool hasSouthEastDeltas)
+                || !TryGetDeltaChunk(entityManager, deltaOwnerEntities, centerCoordinate, -1, 0, out NativeArray<TerrainCellDelta> westDeltas, out bool hasWestDeltas)
+                || !TryGetDeltaChunk(entityManager, deltaOwnerEntities, centerCoordinate, 0, 0, out NativeArray<TerrainCellDelta> centerDeltas, out bool hasCenterDeltas)
+                || !TryGetDeltaChunk(entityManager, deltaOwnerEntities, centerCoordinate, 1, 0, out NativeArray<TerrainCellDelta> eastDeltas, out bool hasEastDeltas)
+                || !TryGetDeltaChunk(entityManager, deltaOwnerEntities, centerCoordinate, -1, 1, out NativeArray<TerrainCellDelta> northWestDeltas, out bool hasNorthWestDeltas)
+                || !TryGetDeltaChunk(entityManager, deltaOwnerEntities, centerCoordinate, 0, 1, out NativeArray<TerrainCellDelta> northDeltas, out bool hasNorthDeltas)
+                || !TryGetDeltaChunk(entityManager, deltaOwnerEntities, centerCoordinate, 1, 1, out NativeArray<TerrainCellDelta> northEastDeltas, out bool hasNorthEastDeltas))
+            {
+                return false;
+            }
+
+            ushort deltaMask = 0;
+            if (hasSouthWestDeltas) deltaMask |= 1 << 0;
+            if (hasSouthDeltas) deltaMask |= 1 << 1;
+            if (hasSouthEastDeltas) deltaMask |= 1 << 2;
+            if (hasWestDeltas) deltaMask |= 1 << 3;
+            if (hasCenterDeltas) deltaMask |= 1 << 4;
+            if (hasEastDeltas) deltaMask |= 1 << 5;
+            if (hasNorthWestDeltas) deltaMask |= 1 << 6;
+            if (hasNorthDeltas) deltaMask |= 1 << 7;
+            if (hasNorthEastDeltas) deltaMask |= 1 << 8;
+
+            neighborhood = new CompletedChunkTerrainNeighborhood(
+                southWest, south, southEast,
+                west, center, east,
+                northWest, north, northEast,
+                southWestDeltas, southDeltas, southEastDeltas,
+                westDeltas, centerDeltas, eastDeltas,
+                northWestDeltas, northDeltas, northEastDeltas,
+                deltaMask,
+                terrainCatalog);
+            return true;
+        }
+
         /// <summary>
         /// 中心とワールド内の周囲8チャンクが完成Bufferを持つ場合だけ、借用近傍を返します。
         /// </summary>
@@ -293,141 +536,54 @@ namespace Farmware.WorldGeneration.Presentation
             tiles = buffer.AsNativeArray();
             return true;
         }
-    }
 
-    /// <summary>
-    /// 地形境界・資源の前後関係に必要な外周を、同じ反映バッチ内で再利用する表示専用計算です。
-    /// 配列は呼び出し元が所有し、次のフレームまたは別チャンクを処理する前にFillで上書きします。
-    /// </summary>
-    public static class TerrainNeighborHaloUtility
-    {
-        /// <summary>上下66セルずつと左右64セルずつを収める、再利用配列の必要要素数です。</summary>
-        public const int TileCount = (WorldGridConstants.LogicalChunkSize * 4) + 4;
-
-        /// <summary>
-        /// 連続する反映対象サブチャンクを囲む矩形から、チャンク外1セルだけを完成Bufferから複写します。
-        /// Job.Runは呼び出し中に終了し、Worker待機やECSの構造変更は発生させません。
-        /// </summary>
-        /// <param name="neighborhood">中心と周囲8チャンクの完成済み地形Bufferを借用した近傍です。</param>
-        /// <param name="firstSubChunk">先頭の行優先サブチャンク番号（0〜15）です。</param>
-        /// <param name="subChunkCount">連続する対象数（1〜残りサブチャンク数）です。</param>
-        /// <param name="halo">呼び出し元所有の260要素配列です。対象矩形外の値は更新せず、読んではいけません。</param>
-        /// <exception cref="ArgumentException">中心完成チャンクがないか、外周配列が260要素でない場合です。</exception>
-        /// <exception cref="ArgumentOutOfRangeException">サブチャンク範囲が0〜15を越える場合です。</exception>
-        public static void Fill(in CompletedChunkTerrainNeighborhood neighborhood,
-            int firstSubChunk, int subChunkCount, NativeArray<GeneratedTerrainCell> halo)
+        /// <summary>相対チャンクの差分所有者を検証して借用し、所有者なしを正常な空差分として返します。</summary>
+        private static bool TryGetDeltaChunk(
+            EntityManager entityManager,
+            IReadOnlyDictionary<ChunkCoordinate, Entity> deltaOwnerEntities,
+            ChunkCoordinate center,
+            int offsetX,
+            int offsetY,
+            out NativeArray<TerrainCellDelta> deltas,
+            out bool hasOwner)
         {
-            if (!halo.IsCreated || halo.Length != TileCount)
+            deltas = default;
+            hasOwner = false;
+            long chunkX = (long)center.X + offsetX;
+            long chunkY = (long)center.Y + offsetY;
+            if (chunkX < WorldGridConstants.MinimumLogicalChunkCoordinate
+                || chunkX > WorldGridConstants.MaximumLogicalChunkCoordinate
+                || chunkY < WorldGridConstants.MinimumLogicalChunkCoordinate
+                || chunkY > WorldGridConstants.MaximumLogicalChunkCoordinate)
             {
-                throw new ArgumentException("外周配列は260要素で確保してください。", nameof(halo));
+                return true;
             }
 
-            if (!neighborhood.HasValidCenter)
+            var coordinate = new ChunkCoordinate(center.Layer, (int)chunkX, (int)chunkY);
+            if (!deltaOwnerEntities.TryGetValue(coordinate, out Entity entity))
             {
-                throw new ArgumentException("外周複写には4096要素の完成中心チャンクが必要です。", nameof(neighborhood));
+                return true;
             }
 
-            if (firstSubChunk < 0 || firstSubChunk >= WorldGridConstants.SubChunksPerChunk
-                || subChunkCount <= 0
-                || subChunkCount > WorldGridConstants.SubChunksPerChunk - firstSubChunk)
+            if (!entityManager.Exists(entity)
+                || !entityManager.HasComponent<TerrainChunkDeltaOwner>(entity)
+                || !entityManager.HasBuffer<TerrainCellDelta>(entity))
             {
-                throw new ArgumentOutOfRangeException(nameof(subChunkCount), "反映範囲は0〜15の内部にしてください。");
+                return false;
             }
 
-            int lastSubChunk = firstSubChunk + subChunkCount - 1;
-            int firstRow = firstSubChunk / WorldGridConstants.SubChunksPerAxis;
-            int lastRow = lastSubChunk / WorldGridConstants.SubChunksPerAxis;
-            // 複数行にまたがる場合は横幅全体を含めます。最大でも外周260セルに限定し、複雑な範囲リストを作りません。
-            int firstColumn = firstRow == lastRow ? firstSubChunk % WorldGridConstants.SubChunksPerAxis : 0;
-            int lastColumn = firstRow == lastRow ? lastSubChunk % WorldGridConstants.SubChunksPerAxis
-                : WorldGridConstants.SubChunksPerAxis - 1;
-            new FillHaloJob
+            TerrainChunkDeltaOwner owner = entityManager.GetComponentData<TerrainChunkDeltaOwner>(entity);
+            if (owner.Layer != coordinate.Layer
+                || owner.ChunkX != coordinate.X
+                || owner.ChunkY != coordinate.Y)
             {
-                Neighborhood = neighborhood,
-                MinimumX = firstColumn * WorldGridConstants.SubChunkSize - 1,
-                MaximumX = (lastColumn + 1) * WorldGridConstants.SubChunkSize,
-                MinimumY = firstRow * WorldGridConstants.SubChunkSize - 1,
-                MaximumY = (lastRow + 1) * WorldGridConstants.SubChunkSize,
-                Halo = halo
-            }.Run();
-        }
-
-        /// <summary>内部セルはECS Buffer、外1セルは直前のFillで準備した配列から取得します。生成処理は行いません。</summary>
-        /// <param name="localX">チャンク内の水平座標です。外周を含む-1〜64を指定します。</param>
-        /// <param name="localY">チャンク内の垂直座標です。外周を含む-1〜64を指定します。</param>
-        /// <param name="tiles">現在のECSチャンクの生成済みBufferです。外周の値より優先します。</param>
-        /// <param name="halo">読み取る中心セルを含む反映範囲でFill済みの外周配列です。</param>
-        /// <returns>生成済み地形、またはintワールド外を示す非接続の水域値です。</returns>
-        public static GeneratedTerrainCell GetTile(
-            int localX,
-            int localY,
-            DynamicBuffer<GeneratedTerrainCell> tiles,
-            NativeArray<GeneratedTerrainCell> halo)
-        {
-            int size = WorldGridConstants.LogicalChunkSize;
-            if (localX >= 0 && localX < size && localY >= 0 && localY < size)
-            {
-                return tiles[WorldGrid.ToTileIndex(localX, localY)];
+                return false;
             }
 
-            if (localX < -1 || localX > size || localY < -1 || localY > size)
-            {
-                throw new ArgumentOutOfRangeException(nameof(localX), "表示分類の外周は-1〜64だけを参照できます。");
-            }
-
-            // 四隅は上下の行へ一度だけ格納し、左右の列には含めないことで重複生成を防ぎます。
-            if (localY == -1) return halo[localX + 1];
-            if (localY == size) return halo[size + 2 + localX + 1];
-            int sideOffset = (size + 2) * 2;
-            return halo[sideOffset + (localX == -1 ? 0 : size) + localY];
-        }
-
-        /// <summary>必要な外周地形だけを完成Bufferから一括複写する、呼び出し内で完結するBurst Jobです。</summary>
-        [BurstCompile]
-        private struct FillHaloJob : IJob
-        {
-            // 中心と周囲8チャンクの完成Bufferを同期実行中だけ借用し、Jobは書き込みも破棄もしません。
-            [ReadOnly] public CompletedChunkTerrainNeighborhood Neighborhood;
-            // 対象サブチャンク矩形に1セルの余白を加えた水平最小値です。
-            public int MinimumX;
-            // 対象サブチャンク矩形に1セルの余白を加えた水平最大値です。
-            public int MaximumX;
-            // 対象サブチャンク矩形に1セルの余白を加えた垂直最小値です。
-            public int MinimumY;
-            // 対象サブチャンク矩形に1セルの余白を加えた垂直最大値です。
-            public int MaximumY;
-            // Presenterから借りる出力配列です。Jobは破棄せず、同期実行中だけ書き込みます。
-            [WriteOnly] public NativeArray<GeneratedTerrainCell> Halo;
-
-            /// <summary>Runから呼ばれ、外周の各セルを最大1回複写します。対象外の配列要素は保持します。</summary>
-            public void Execute()
-            {
-                int size = WorldGridConstants.LogicalChunkSize;
-                int rowLength = size + 2;
-                for (int index = 0; index < TileCount; index++)
-                {
-                    // 一次元の格納位置を上下の行、左右の列の順に逆変換します。
-                    int x;
-                    int y;
-                    if (index < rowLength * 2)
-                    {
-                        x = index % rowLength - 1;
-                        y = index < rowLength ? -1 : size;
-                    }
-                    else
-                    {
-                        int sideIndex = index - rowLength * 2;
-                        x = sideIndex < size ? -1 : size;
-                        y = sideIndex % size;
-                    }
-
-                    if (x < MinimumX || x > MaximumX || y < MinimumY || y > MaximumY) continue;
-                    // int端のワールド外だけは完成Bufferが存在しないため、土地・岩壁へ接続しない水域値にします。
-                    Halo[index] = Neighborhood.TryGetTile(x, y, out GeneratedTerrainCell tile)
-                        ? tile
-                        : default;
-                }
-            }
+            deltas = entityManager.GetBuffer<TerrainCellDelta>(entity, true).AsNativeArray();
+            hasOwner = true;
+            return true;
         }
     }
+
 }

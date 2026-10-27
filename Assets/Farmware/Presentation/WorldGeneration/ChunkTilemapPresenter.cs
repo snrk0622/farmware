@@ -1,7 +1,7 @@
 // このファイルは、ECSで生成済みの地形・資源チャンクデータを、製品用の上面・断面・液体深度・水際・反射・Wall影を含む複数Tilemapへ16×16サブチャンク単位で反映・消去します。
 // 既定のチャンク別ローカルTilemapを自動原点変更で再利用し、比較・診断用に旧共有Tilemap方式へ切り替えられます。
 // Tilemapは表示専用キャッシュであり、地形はGeneratedTerrainCell、資源はGeneratedResourceTileを正として参照します。
-// 分類用の外周1セルは反映バッチごとに同期Burstでまとめ、同じ隣接地形の重複生成を減らします。
+// 分類は中心と周囲8チャンクの完成自然地形へ永続差分を重ねた有効地形を直接参照します。
 
 using System.Collections.Generic;
 using Farmware.Simulation;
@@ -42,10 +42,6 @@ namespace Farmware.WorldGeneration.Presentation
         // 1サブチャンク256セルの地形・境界・資源表示を再利用配列へ分類する時間を確認する計測区間です。
         private static readonly ProfilerMarker SubChunkClassificationProfilerMarker =
             new ProfilerMarker("Farmware.WorldGeneration.SubChunkClassification");
-
-        // 分類の前処理も含めて比較できるよう、外周地形の同期Burst生成を独立して計測します。
-        private static readonly ProfilerMarker TerrainNeighborHaloProfilerMarker =
-            new ProfilerMarker("Farmware.WorldGeneration.TerrainNeighborHaloBuild");
 
         // 分類済み配列を現在有効な全TilemapへSetTilesBlockする時間を確認する計測区間です。
         private static readonly ProfilerMarker SubChunkTilemapWriteProfilerMarker =
@@ -285,6 +281,9 @@ namespace Farmware.WorldGeneration.Presentation
         // Liquid Runtime IDを淡水・海水・マグマ表示へ対応付けるSingleton Queryです。
         private EntityQuery terrainCatalogQuery;
 
+        // 自然生成へ重ねる永続地形差分を座標別に取得するQueryです。表示はこの差分を合成した有効地形を参照します。
+        private EntityQuery terrainDeltaQuery;
+
         // 41材質のGround／Wall Runtime IDと安定材質IDの対応を取得するSingleton Queryです。
         private EntityQuery terrainMaterialCatalogQuery;
 
@@ -293,6 +292,9 @@ namespace Farmware.WorldGeneration.Presentation
 
         // 現在Worldのカタログから毎フレーム取得し、サブチャンク分類中に同じ組み込みIDを再利用します。
         private BuiltInTerrainBlockRuntimeIds terrainRuntimeIds;
+
+        // 差分Runtime IDの分類検証と有効地形合成へ使う、現在Worldの読み取り専用地形カタログです。
+        private BlobAssetReference<TerrainBlockCatalogBlob> terrainCatalogBlob;
 
         // 現在Worldの41材質Blobから一度だけ構築し、セル分類中のRuntime ID解決に再利用します。
         private TerrainMaterialPresentationRuntimeLookup materialRuntimeLookup;
@@ -343,6 +345,19 @@ namespace Farmware.WorldGeneration.Presentation
         // 水文・Biomeまで確定した地形Bufferを持つEntityを座標で引き、表示外周が基礎生成へ戻らないようにします。
         private readonly Dictionary<ChunkCoordinate, Entity> completedChunkEntities =
             new Dictionary<ChunkCoordinate, Entity>();
+
+        // ストリーミングEntityと寿命が異なる永続差分所有者を、レイヤー付きチャンク座標で引く再利用索引です。
+        private readonly Dictionary<ChunkCoordinate, Entity> terrainDeltaOwnerEntities =
+            new Dictionary<ChunkCoordinate, Entity>();
+
+        // 各差分Bufferの内容ハッシュです。毎フレーム疎な差分だけを走査し、変更された近傍だけをDirty再描画します。
+        private readonly Dictionary<ChunkCoordinate, ulong> terrainDeltaFingerprints =
+            new Dictionary<ChunkCoordinate, ulong>();
+
+        // Tilemapへ最後に反映した中心・周辺・直下の完成Entity寿命と差分内容の合成ハッシュです。
+        // Floating Originでは論理地形が変わらないため値を維持します。
+        private readonly Dictionary<ChunkCoordinate, ulong> displayedTerrainFingerprints =
+            new Dictionary<ChunkCoordinate, ulong>();
 
         // 消去を要求した順番と途中位置を保持し、フレーム予算を超えないよう分割処理します。
         private readonly Queue<ChunkClearProgress> clearQueue = new Queue<ChunkClearProgress>();
@@ -453,13 +468,9 @@ namespace Farmware.WorldGeneration.Presentation
         private readonly HashSet<ChunkCoordinate> reusableRockWallShadowCoordinates =
             new HashSet<ChunkCoordinate>();
 
-        // 影距離の探索半径を含む80×80の岩壁有無です。同期Burst Jobへ貸すためNative配列を使います。
-        // Awakeで一度確保し、全チャンクで再利用してOnDestroyで破棄します。未完了Jobは保持しません。
+        // 影距離の探索半径を含む80×80の岩壁有無です。GC確保せず同期更新するためNative配列を使います。
+        // Awakeで一度確保し、全チャンクで再利用してOnDestroyで破棄します。フレーム間の借用参照は保持しません。
         private NativeArray<bool> rockWallShadowMaskBuffer;
-
-        // 分類用の外周1セルを保持する260要素です。Awakeで確保しOnDestroyで破棄します。
-        // チャンクと反映フレームが変わるたびに必要範囲を上書きし、フレームをまたぐキャッシュにはしません。
-        private NativeArray<GeneratedTerrainCell> terrainNeighborHaloBuffer;
 
         // チャンク境界の頂点を計算するため、-1〜64の66×66タイル中心の影不透明度を保持する再利用配列です。
         private float[] rockWallShadowTileOpacityBuffer;
@@ -760,8 +771,6 @@ namespace Farmware.WorldGeneration.Presentation
             rockWallResourceSubChunkTileBuffer = new TileBase[tileCount];
             landBoundaryHighlightSubChunkTileBuffer = new TileBase[tileCount];
             rockWallBoundaryHighlightSubChunkTileBuffer = new TileBase[tileCount];
-            terrainNeighborHaloBuffer = new NativeArray<GeneratedTerrainCell>(TerrainNeighborHaloUtility.TileCount,
-                Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
             AllocateRockWallShadowBuffers();
             EnsureWallDynamicShadowUnitSprite();
             EnsureFreshWaterFallbackTile();
@@ -1011,10 +1020,11 @@ namespace Farmware.WorldGeneration.Presentation
                     return;
                 }
 
-                terrainRuntimeIds = terrainCatalogQuery
-                    .GetSingleton<TerrainBlockCatalog>()
-                    .BuiltInRuntimeIds;
-                if (!terrainRuntimeIds.IsValid)
+                TerrainBlockCatalog terrainCatalog = terrainCatalogQuery
+                    .GetSingleton<TerrainBlockCatalog>();
+                terrainRuntimeIds = terrainCatalog.BuiltInRuntimeIds;
+                terrainCatalogBlob = terrainCatalog.Value;
+                if (!terrainRuntimeIds.IsValid || !terrainCatalogBlob.IsCreated)
                 {
                     return;
                 }
@@ -1265,16 +1275,10 @@ namespace Farmware.WorldGeneration.Presentation
             DestroyChunkLocalPresentations();
             DestroyGeneratedBoundaryHighlightTiles();
 
-            // マスクJobは呼び出し内で終了するため、破棄時にWorkerの完了を待つ必要はありません。
+            // マスク構築は呼び出し内の同期処理なので、破棄時にWorkerの完了を待つ必要はありません。
             if (rockWallShadowMaskBuffer.IsCreated)
             {
                 rockWallShadowMaskBuffer.Dispose();
-            }
-
-            // 分類用外周も同期Runだけで使用するため、この時点で配列を借りている未完了Jobはありません。
-            if (terrainNeighborHaloBuffer.IsCreated)
-            {
-                terrainNeighborHaloBuffer.Dispose();
             }
 
             // 各影Meshは共有Materialを所有しないため、Presenterが作成したMaterialだけを最後に1回破棄します。
@@ -1339,6 +1343,9 @@ namespace Farmware.WorldGeneration.Presentation
                 entityManager.CreateEntityQuery(ComponentType.ReadOnly<ChunkStreamingSettings>());
             terrainCatalogQuery =
                 entityManager.CreateEntityQuery(ComponentType.ReadOnly<TerrainBlockCatalog>());
+            terrainDeltaQuery = entityManager.CreateEntityQuery(
+                ComponentType.ReadOnly<TerrainChunkDeltaOwner>(),
+                ComponentType.ReadOnly<TerrainCellDelta>());
             terrainMaterialCatalogQuery =
                 entityManager.CreateEntityQuery(ComponentType.ReadOnly<TerrainBlockMaterialCatalog>());
             worldGenerationSettingsQuery =
@@ -1464,8 +1471,9 @@ namespace Farmware.WorldGeneration.Presentation
                 chunkQuery.ToComponentDataArray<ChunkGenerationStatus>(Allocator.Temp);
             seenCoordinates.Clear();
             completedChunkEntities.Clear();
+            CacheTerrainDeltaOwners(entityManager);
 
-            // 可視チャンクを予約する前に、外周参照へ使える完成Bufferを全ロード範囲から座標索引化します。
+            // 可視チャンクを予約する前に、近傍参照へ使える完成Bufferを全ロード範囲から座標索引化します。
             // 周囲8チャンクがまだ生成中なら中心の表示を待ち、確定前の単一タイル生成へ戻りません。
             for (int index = 0; index < entities.Length; index++)
             {
@@ -1522,14 +1530,26 @@ namespace Farmware.WorldGeneration.Presentation
 
                     bool hasCompleteNeighborhood = isInsidePreparation
                         && hasCompleteData
-                        && CompletedChunkTerrainNeighborhoodFactory.TryCreate(
+                        && CompletedChunkTerrainNeighborhoodFactory.TryCreateEffective(
                             entityManager,
                             completedChunkEntities,
+                            terrainDeltaOwnerEntities,
                             coordinate,
+                            terrainCatalogBlob,
                             out _);
                     if (hasCompleteNeighborhood)
                     {
-                        ScheduleApply(coordinate, entities[index]);
+                        ulong terrainFingerprint = CalculatePresentationTerrainFingerprint(coordinate);
+                        if (displayedTerrainFingerprints.TryGetValue(
+                                coordinate,
+                                out ulong displayedFingerprint)
+                            && displayedFingerprint != terrainFingerprint)
+                        {
+                            // 中心または境界・直下へ影響する差分が変わった場合だけ、既存表示をDirtyとして再構築します。
+                            CancelApplyAndScheduleClearIfNeeded(coordinate);
+                        }
+
+                        ScheduleApply(coordinate, entities[index], terrainFingerprint);
                     }
                     else
                     {
@@ -1563,11 +1583,178 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
+        /// 永続地形差分をレイヤー付きチャンク座標で索引化し、疎なBuffer内容の決定論的ハッシュを更新します。
+        /// 差分Entityはストリーミング対象外なので、画面外へ出ても破棄せず再訪時に同じ有効地形へ戻せます。
+        /// </summary>
+        /// <param name="entityManager">現在のDefault Worldから差分ComponentとBufferを読む管理境界です。</param>
+        private void CacheTerrainDeltaOwners(EntityManager entityManager)
+        {
+            terrainDeltaOwnerEntities.Clear();
+            terrainDeltaFingerprints.Clear();
+            using NativeArray<Entity> entities = terrainDeltaQuery.ToEntityArray(Allocator.Temp);
+            using NativeArray<TerrainChunkDeltaOwner> owners =
+                terrainDeltaQuery.ToComponentDataArray<TerrainChunkDeltaOwner>(Allocator.Temp);
+            for (int index = 0; index < entities.Length; index++)
+            {
+                Entity entity = entities[index];
+                TerrainChunkDeltaOwner owner = owners[index];
+                var coordinate = new ChunkCoordinate(owner.Layer, owner.ChunkX, owner.ChunkY);
+                DynamicBuffer<TerrainCellDelta> deltas =
+                    entityManager.GetBuffer<TerrainCellDelta>(entity, true);
+                if (!terrainDeltaOwnerEntities.TryAdd(coordinate, entity))
+                {
+                    throw new System.InvalidOperationException(
+                        $"同じチャンク座標の地形差分所有者が重複しています: {coordinate}");
+                }
+
+                terrainDeltaFingerprints.Add(coordinate, CalculateDeltaFingerprint(deltas));
+            }
+        }
+
+        /// <summary>LocalTileIndex順の疎な差分内容を64bit FNV-1aへ畳み込み、生成順に依存しないDirty判定値を作ります。</summary>
+        private static ulong CalculateDeltaFingerprint(DynamicBuffer<TerrainCellDelta> deltas)
+        {
+            const ulong offsetBasis = 1469598103934665603UL;
+            const ulong prime = 1099511628211UL;
+            ulong hash = offsetBasis;
+            for (int index = 0; index < deltas.Length; index++)
+            {
+                TerrainCellDelta delta = deltas[index];
+                hash = (hash ^ delta.LocalTileIndex) * prime;
+                hash = (hash ^ (byte)delta.ChangeMask) * prime;
+                hash = (hash ^ (uint)delta.GroundBlockRuntimeId.Value) * prime;
+                hash = (hash ^ (uint)delta.WallBlockRuntimeId.Value) * prime;
+                hash = (hash ^ (uint)delta.LiquidRuntimeId.Value) * prime;
+                hash = (hash ^ (uint)delta.TerrainSurfaceRuntimeId.Value) * prime;
+            }
+
+            return (hash ^ (uint)deltas.Length) * prime;
+        }
+
+        /// <summary>
+        /// 中心と周囲8チャンク、および直下レイヤーの完成Entityと差分ハッシュを固定順で合成します。
+        /// 完成自然地形は公開後不変なのでEntity世代で寿命を識別し、可変差分はBuffer内容をDirty条件にします。
+        /// </summary>
+        private ulong CalculatePresentationTerrainFingerprint(ChunkCoordinate center)
+        {
+            const ulong offsetBasis = 1469598103934665603UL;
+            const ulong prime = 1099511628211UL;
+            ulong hash = offsetBasis;
+            hash = AppendNeighborhoodTerrainEntityFingerprints(hash, center, prime);
+            hash = AppendNeighborhoodDeltaFingerprints(hash, center, prime);
+            if (TryGetLowerLayer(center.Layer, out WorldLayer lowerLayer))
+            {
+                var lowerCenter = new ChunkCoordinate(lowerLayer, center.X, center.Y);
+                hash = AppendNeighborhoodTerrainEntityFingerprints(hash, lowerCenter, prime);
+                hash = AppendNeighborhoodDeltaFingerprints(
+                    hash,
+                    lowerCenter,
+                    prime);
+            }
+
+            return hash;
+        }
+
+        /// <summary>
+        /// 3×3の完成自然地形Entityを固定順で畳み込みます。ワールド内の1件でも未完成なら不完全Markerだけを使い、
+        /// 直下層が部分ロードされる順番を表示Fingerprintへ持ち込みません。
+        /// </summary>
+        private ulong AppendNeighborhoodTerrainEntityFingerprints(
+            ulong hash,
+            ChunkCoordinate center,
+            ulong prime)
+        {
+            for (int offsetY = -1; offsetY <= 1; offsetY++)
+            {
+                for (int offsetX = -1; offsetX <= 1; offsetX++)
+                {
+                    long chunkX = (long)center.X + offsetX;
+                    long chunkY = (long)center.Y + offsetY;
+                    bool isOutsideWorld = chunkX < WorldGridConstants.MinimumLogicalChunkCoordinate
+                        || chunkX > WorldGridConstants.MaximumLogicalChunkCoordinate
+                        || chunkY < WorldGridConstants.MinimumLogicalChunkCoordinate
+                        || chunkY > WorldGridConstants.MaximumLogicalChunkCoordinate;
+                    if (!isOutsideWorld
+                        && !completedChunkEntities.ContainsKey(new ChunkCoordinate(
+                            center.Layer,
+                            (int)chunkX,
+                            (int)chunkY)))
+                    {
+                        // 部分的な直下層は床プレビューに使わないため、到着順ではなく未完成という1状態へ正規化します。
+                        return (hash ^ 0UL) * prime;
+                    }
+                }
+            }
+
+            hash = (hash ^ 1UL) * prime;
+            for (int offsetY = -1; offsetY <= 1; offsetY++)
+            {
+                for (int offsetX = -1; offsetX <= 1; offsetX++)
+                {
+                    long chunkX = (long)center.X + offsetX;
+                    long chunkY = (long)center.Y + offsetY;
+                    ulong value = ulong.MaxValue;
+                    if (chunkX >= WorldGridConstants.MinimumLogicalChunkCoordinate
+                        && chunkX <= WorldGridConstants.MaximumLogicalChunkCoordinate
+                        && chunkY >= WorldGridConstants.MinimumLogicalChunkCoordinate
+                        && chunkY <= WorldGridConstants.MaximumLogicalChunkCoordinate)
+                    {
+                        Entity entity = completedChunkEntities[new ChunkCoordinate(
+                            center.Layer,
+                            (int)chunkX,
+                            (int)chunkY)];
+                        // EntityのIndexとVersionを組にし、同じIndexが再利用されても別の完成地形寿命として検出します。
+                        value = ((ulong)(uint)entity.Index << 32) | (uint)entity.Version;
+                    }
+
+                    hash = (hash ^ value) * prime;
+                }
+            }
+
+            return hash;
+        }
+
+        /// <summary>3×3チャンクを南西から北東の固定順に走査し、存在しない差分も0として位置を保持します。</summary>
+        private ulong AppendNeighborhoodDeltaFingerprints(
+            ulong hash,
+            ChunkCoordinate center,
+            ulong prime)
+        {
+            for (int offsetY = -1; offsetY <= 1; offsetY++)
+            {
+                for (int offsetX = -1; offsetX <= 1; offsetX++)
+                {
+                    long chunkX = (long)center.X + offsetX;
+                    long chunkY = (long)center.Y + offsetY;
+                    ulong value = 0UL;
+                    if (chunkX >= WorldGridConstants.MinimumLogicalChunkCoordinate
+                        && chunkX <= WorldGridConstants.MaximumLogicalChunkCoordinate
+                        && chunkY >= WorldGridConstants.MinimumLogicalChunkCoordinate
+                        && chunkY <= WorldGridConstants.MaximumLogicalChunkCoordinate)
+                    {
+                        var coordinate = new ChunkCoordinate(
+                            center.Layer,
+                            (int)chunkX,
+                            (int)chunkY);
+                        terrainDeltaFingerprints.TryGetValue(coordinate, out value);
+                    }
+
+                    hash = (hash ^ value) * prime;
+                }
+            }
+
+            return hash;
+        }
+
+        /// <summary>
         /// 未表示の可視・先行準備チャンクを反映待ちへ追加し、すでに待機中なら最新Entity参照へ更新します。
         /// </summary>
         /// <param name="coordinate">反映する論理チャンク座標です。</param>
         /// <param name="entity">GeneratedTerrainCell Bufferを所有する現在のEntityです。</param>
-        private void ScheduleApply(ChunkCoordinate coordinate, Entity entity)
+        private void ScheduleApply(
+            ChunkCoordinate coordinate,
+            Entity entity,
+            ulong terrainFingerprint)
         {
             if (displayedCoordinates.Contains(coordinate) || pendingClearCoordinates.Contains(coordinate))
             {
@@ -1576,11 +1763,20 @@ namespace Farmware.WorldGeneration.Presentation
 
             if (applyProgressByCoordinate.TryGetValue(coordinate, out ChunkApplyProgress progress))
             {
+                if (progress.TerrainFingerprint != terrainFingerprint)
+                {
+                    // 部分反映中に差分が変わった場合は、新旧サブチャンクを混在させず先頭からやり直します。
+                    CancelApplyAndScheduleClearIfNeeded(coordinate);
+                    return;
+                }
+
                 progress.Entity = entity;
                 return;
             }
 
-            applyProgressByCoordinate.Add(coordinate, new ChunkApplyProgress(entity));
+            applyProgressByCoordinate.Add(
+                coordinate,
+                new ChunkApplyProgress(entity, terrainFingerprint));
             applyQueue.Enqueue(coordinate);
         }
 
@@ -1622,6 +1818,8 @@ namespace Farmware.WorldGeneration.Presentation
                     clearQueue.Dequeue();
                     pendingClearCoordinates.Remove(progress.Coordinate);
                     displayedCoordinates.Remove(progress.Coordinate);
+                    // 次回ロード時は現在の変更差分と比較し直すため、表示完了時の指紋も同じ寿命で破棄します。
+                    displayedTerrainFingerprints.Remove(progress.Coordinate);
                     ReleaseChunkLocalPresentation(progress.Coordinate);
                 }
             }
@@ -1637,7 +1835,7 @@ namespace Farmware.WorldGeneration.Presentation
         private int ProcessApplyQueue(int remainingBudget)
         {
             EntityManager entityManager = presentationWorld.EntityManager;
-            // 同一呼び出し内の連続サブチャンクだけで外周を共有します。次フレームは完成Bufferを改めて借用します。
+            // 同一呼び出し内の連続サブチャンクだけで有効地形近傍を共有し、次フレームは完成Bufferを借り直します。
             ChunkApplyProgress preparedProgress = null;
             CompletedChunkTerrainNeighborhood preparedNeighborhood = default;
             CompletedChunkTerrainNeighborhood preparedLowerNeighborhood = default;
@@ -1674,13 +1872,15 @@ namespace Farmware.WorldGeneration.Presentation
 
                 if (preparedProgress != progress)
                 {
-                    if (!CompletedChunkTerrainNeighborhoodFactory.TryCreate(
+                    if (!CompletedChunkTerrainNeighborhoodFactory.TryCreateEffective(
                             entityManager,
                             completedChunkEntities,
+                            terrainDeltaOwnerEntities,
                             coordinate,
+                            terrainCatalogBlob,
                             out preparedNeighborhood))
                     {
-                        // Streaming更新との間で隣接Entityが消えた場合は、古い外周を使わず次回の収集まで待ちます。
+                        // Streaming更新との間で隣接Entityが消えた場合は、古い近傍を使わず次回の収集まで待ちます。
                         return remainingBudget;
                     }
 
@@ -1692,19 +1892,13 @@ namespace Farmware.WorldGeneration.Presentation
                             coordinate.X,
                             coordinate.Y);
                         preparedHasLowerNeighborhood =
-                            CompletedChunkTerrainNeighborhoodFactory.TryCreate(
+                            CompletedChunkTerrainNeighborhoodFactory.TryCreateEffective(
                                 entityManager,
                                 completedChunkEntities,
+                                terrainDeltaOwnerEntities,
                                 lowerCoordinate,
+                                terrainCatalogBlob,
                                 out preparedLowerNeighborhood);
-                    }
-
-                    int batchCount = math.min(remainingBudget,
-                        WorldGridConstants.SubChunksPerChunk - progress.NextSubChunkIndex);
-                    using (TerrainNeighborHaloProfilerMarker.Auto())
-                    {
-                        TerrainNeighborHaloUtility.Fill(preparedNeighborhood,
-                            progress.NextSubChunkIndex, batchCount, terrainNeighborHaloBuffer);
                     }
 
                     preparedProgress = progress;
@@ -1713,7 +1907,6 @@ namespace Farmware.WorldGeneration.Presentation
                 ApplySubChunk(
                     coordinate,
                     progress.NextSubChunkIndex,
-                    terrainCells,
                     resources,
                     preparedNeighborhood,
                     preparedHasLowerNeighborhood,
@@ -1733,6 +1926,7 @@ namespace Farmware.WorldGeneration.Presentation
                     applyProgressByCoordinate.Remove(coordinate);
                     applyQueue.Dequeue();
                     displayedCoordinates.Add(coordinate);
+                    displayedTerrainFingerprints[coordinate] = progress.TerrainFingerprint;
 
                     ChunkGenerationStatus status = entityManager.GetComponentData<ChunkGenerationStatus>(progress.Entity);
                     if (status.Phase == ChunkGenerationPhase.ReadyToApply)
@@ -1779,7 +1973,6 @@ namespace Farmware.WorldGeneration.Presentation
         /// </summary>
         /// <param name="coordinate">対象の論理チャンク座標です。</param>
         /// <param name="subChunkIndex">行優先の0〜15サブチャンク番号です。</param>
-        /// <param name="terrainCells">4096件の自然生成BlockセルBufferです。</param>
         /// <param name="resources">地形と同じ行優先4096件の生成済み資源Bufferです。</param>
         /// <param name="terrainNeighborhood">中心と周囲8チャンクの完成地形です。断面・液体・水際分類に使用します。</param>
         /// <param name="hasLowerNeighborhood">直下WorldLayerの3×3完成地形が準備済みならtrueです。</param>
@@ -1787,7 +1980,6 @@ namespace Farmware.WorldGeneration.Presentation
         private void ApplySubChunk(
             ChunkCoordinate coordinate,
             int subChunkIndex,
-            DynamicBuffer<GeneratedTerrainCell> terrainCells,
             DynamicBuffer<GeneratedResourceTile> resources,
             in CompletedChunkTerrainNeighborhood terrainNeighborhood,
             bool hasLowerNeighborhood,
@@ -1810,13 +2002,19 @@ namespace Farmware.WorldGeneration.Presentation
                         int destinationIndex = (localY * WorldGridConstants.SubChunkSize) + localX;
                         int tileLocalX = localStartX + localX;
                         int tileLocalY = localStartY + localY;
-                        GeneratedTerrainCell terrainCell = terrainCells[sourceIndex];
+                        // 表示は自然生成Bufferを直接読まず、疎な変更差分を適用した有効地形だけを参照します。
+                        // 同じ近傍スナップショットを境界・断面・影へ共有することで、処理順による見た目の食い違いを防ぎます。
+                        if (!terrainNeighborhood.TryGetTile(tileLocalX, tileLocalY, out GeneratedTerrainCell terrainCell))
+                        {
+                            throw new System.InvalidOperationException(
+                                $"完成済み地形近傍から中心セルを取得できません: Chunk=({coordinate.X}, {coordinate.Y}), Local=({tileLocalX}, {tileLocalY})");
+                        }
+
                         RockWallAppearance rockWallAppearance = ClassifyRockWallAppearance(
                             tileLocalX,
                             tileLocalY,
                             terrainCell,
-                            terrainCells,
-                            terrainNeighborHaloBuffer);
+                            terrainNeighborhood);
                         bool isLiquid = terrainCell.LiquidRuntimeId.IsValid;
 
                         groundFaceSubChunkTileBuffer[destinationIndex] = null;
@@ -1877,12 +2075,11 @@ namespace Farmware.WorldGeneration.Presentation
                             if (terrainCell.GroundBlockRuntimeId.IsValid
                                 || terrainCell.WallBlockRuntimeId.IsValid)
                             {
-                                // 内部は現在のECS Buffer、外周は同じ反映バッチで一度だけ生成した値を読み、ロード順へ依存しません。
+                                // 内部・外周とも同じ完成Bufferと差分から有効地形を読み、ロード順へ依存しません。
                                 TerrainNeighborTiles neighbors = GetTerrainNeighborTiles(
                                     tileLocalX,
                                     tileLocalY,
-                                    terrainCells,
-                                    terrainNeighborHaloBuffer);
+                                    terrainNeighborhood);
                                 if (!isRockWall)
                                 {
                                     landBoundarySelection =
@@ -1950,11 +2147,15 @@ namespace Farmware.WorldGeneration.Presentation
                         bool isBehindFrontRockWall = false;
                         if (!isRockWall && selectedResource != null)
                         {
-                            GeneratedTerrainCell frontTerrainCell = TerrainNeighborHaloUtility.GetTile(
-                                tileLocalX,
-                                tileLocalY - 1,
-                                terrainCells,
-                                terrainNeighborHaloBuffer);
+                            if (!terrainNeighborhood.TryGetTile(
+                                    tileLocalX,
+                                    tileLocalY - 1,
+                                    out GeneratedTerrainCell frontTerrainCell))
+                            {
+                                throw new System.InvalidOperationException(
+                                    $"完成済み地形近傍から手前セルを取得できません: Chunk=({coordinate.X}, {coordinate.Y}), Local=({tileLocalX}, {tileLocalY - 1})");
+                            }
+
                             isBehindFrontRockWall =
                                 TerrainLayerPresentationUtility.ShouldRenderResourceBehindRockWall(
                                     resources[sourceIndex],
@@ -2996,27 +3197,38 @@ namespace Farmware.WorldGeneration.Presentation
                 1);
         }
 
-        /// <summary>中央セルの8近傍を、現在のECS Bufferとこの反映バッチの外周配列から取得します。</summary>
+        /// <summary>中央セルの8近傍を、変更差分適用済みの完成地形近傍から取得します。</summary>
         /// <param name="localTileX">中心セルの水平ローカル座標です。</param>
         /// <param name="localTileY">中心セルの垂直ローカル座標です。</param>
-        /// <param name="tiles">現在のチャンクの生成済み地形Bufferです。</param>
-        /// <param name="halo">中心セルを含む反映範囲でFill済みの外周配列です。</param>
-        /// <returns>境界表示へ渡す8方向の生成地形です。</returns>
+        /// <param name="neighborhood">中心と周囲8チャンクの有効地形を同じ規則で解決する近傍です。</param>
+        /// <returns>境界表示へ渡す8方向の有効地形です。</returns>
         private static TerrainNeighborTiles GetTerrainNeighborTiles(
             int localTileX,
             int localTileY,
-            DynamicBuffer<GeneratedTerrainCell> tiles,
-            NativeArray<GeneratedTerrainCell> halo)
+            in CompletedChunkTerrainNeighborhood neighborhood)
         {
+            if (!neighborhood.TryGetTile(localTileX, localTileY + 1, out GeneratedTerrainCell north)
+                || !neighborhood.TryGetTile(localTileX + 1, localTileY, out GeneratedTerrainCell east)
+                || !neighborhood.TryGetTile(localTileX, localTileY - 1, out GeneratedTerrainCell south)
+                || !neighborhood.TryGetTile(localTileX - 1, localTileY, out GeneratedTerrainCell west)
+                || !neighborhood.TryGetTile(localTileX + 1, localTileY + 1, out GeneratedTerrainCell northEast)
+                || !neighborhood.TryGetTile(localTileX + 1, localTileY - 1, out GeneratedTerrainCell southEast)
+                || !neighborhood.TryGetTile(localTileX - 1, localTileY - 1, out GeneratedTerrainCell southWest)
+                || !neighborhood.TryGetTile(localTileX - 1, localTileY + 1, out GeneratedTerrainCell northWest))
+            {
+                throw new System.InvalidOperationException(
+                    $"完成済み地形近傍から8近傍を取得できません: Local=({localTileX}, {localTileY})");
+            }
+
             return new TerrainNeighborTiles(
-                TerrainNeighborHaloUtility.GetTile(localTileX, localTileY + 1, tiles, halo),
-                TerrainNeighborHaloUtility.GetTile(localTileX + 1, localTileY, tiles, halo),
-                TerrainNeighborHaloUtility.GetTile(localTileX, localTileY - 1, tiles, halo),
-                TerrainNeighborHaloUtility.GetTile(localTileX - 1, localTileY, tiles, halo),
-                TerrainNeighborHaloUtility.GetTile(localTileX + 1, localTileY + 1, tiles, halo),
-                TerrainNeighborHaloUtility.GetTile(localTileX + 1, localTileY - 1, tiles, halo),
-                TerrainNeighborHaloUtility.GetTile(localTileX - 1, localTileY - 1, tiles, halo),
-                TerrainNeighborHaloUtility.GetTile(localTileX - 1, localTileY + 1, tiles, halo));
+                north,
+                east,
+                south,
+                west,
+                northEast,
+                southEast,
+                southWest,
+                northWest);
         }
 
         /// <summary>
@@ -3120,19 +3332,17 @@ namespace Farmware.WorldGeneration.Presentation
             return biomeTiles[stableId - BiomeStableIds.First];
         }
 
-        /// <summary>現在のBufferと準備済み外周の4方向を調べ、資源を残す露出面と内部を区別します。</summary>
+        /// <summary>変更差分適用済み近傍の4方向を調べ、資源を残す露出面と内部を区別します。</summary>
         /// <param name="localX">中心セルの水平ローカル座標です。</param>
         /// <param name="localY">中心セルの垂直ローカル座標です。</param>
         /// <param name="tile">中心セルの現在の生成地形です。</param>
-        /// <param name="tiles">現在のチャンクの生成済み地形Bufferです。</param>
-        /// <param name="halo">中心セルを含む反映範囲でFill済みの外周配列です。</param>
+        /// <param name="neighborhood">中心と周囲8チャンクの有効地形を同じ規則で解決する近傍です。</param>
         /// <returns>非岩壁ならNone、非岩壁に接する岩壁ならExposed、それ以外はInteriorです。</returns>
         private static RockWallAppearance ClassifyRockWallAppearance(
             int localX,
             int localY,
             GeneratedTerrainCell terrainCell,
-            DynamicBuffer<GeneratedTerrainCell> terrainCells,
-            NativeArray<GeneratedTerrainCell> halo)
+            in CompletedChunkTerrainNeighborhood neighborhood)
         {
             if (!terrainCell.WallBlockRuntimeId.IsValid)
             {
@@ -3140,11 +3350,20 @@ namespace Farmware.WorldGeneration.Presentation
             }
 
             // 影の連続濃度は別処理です。ここでは資源を隠すかどうかだけを従来と同じ上下左右で決めます。
+            if (!neighborhood.TryGetTile(localX - 1, localY, out GeneratedTerrainCell west)
+                || !neighborhood.TryGetTile(localX + 1, localY, out GeneratedTerrainCell east)
+                || !neighborhood.TryGetTile(localX, localY - 1, out GeneratedTerrainCell south)
+                || !neighborhood.TryGetTile(localX, localY + 1, out GeneratedTerrainCell north))
+            {
+                throw new System.InvalidOperationException(
+                    $"完成済み地形近傍から岩壁の4近傍を取得できません: Local=({localX}, {localY})");
+            }
+
             bool touchesOpenTile =
-                !TerrainNeighborHaloUtility.GetTile(localX - 1, localY, terrainCells, halo).WallBlockRuntimeId.IsValid
-                || !TerrainNeighborHaloUtility.GetTile(localX + 1, localY, terrainCells, halo).WallBlockRuntimeId.IsValid
-                || !TerrainNeighborHaloUtility.GetTile(localX, localY - 1, terrainCells, halo).WallBlockRuntimeId.IsValid
-                || !TerrainNeighborHaloUtility.GetTile(localX, localY + 1, terrainCells, halo).WallBlockRuntimeId.IsValid;
+                !west.WallBlockRuntimeId.IsValid
+                || !east.WallBlockRuntimeId.IsValid
+                || !south.WallBlockRuntimeId.IsValid
+                || !north.WallBlockRuntimeId.IsValid;
             return touchesOpenTile ? RockWallAppearance.Exposed : RockWallAppearance.Interior;
         }
 
@@ -3333,13 +3552,13 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// 影の探索半径を含むチャンク周辺を同期Burst Jobで判定し、余白ノイズ計算のC#実行負荷を減らします。
+        /// 影の探索半径を含むチャンク周辺を同期判定し、自然地形と疎な変更差分を同じ影マスクへ反映します。
         /// </summary>
         /// <param name="neighborhood">中心と周囲8チャンクの完成済み地形Bufferです。</param>
         private void FillRockWallShadowMask(
             in CompletedChunkTerrainNeighborhood neighborhood)
         {
-            // 近傍内のAsNativeArrayはBufferを複製しない借用です。同期Run終了まで構造変更しません。
+            // 近傍内のAsNativeArrayはBufferを複製しない借用です。この同期処理中はECSの構造変更を行いません。
             RockWallAppearanceUtility.FillShadowMask(neighborhood, rockWallShadowMaskBuffer);
         }
 
@@ -3631,6 +3850,7 @@ namespace Farmware.WorldGeneration.Presentation
                 observerQuery.Dispose();
                 streamingSettingsQuery.Dispose();
                 terrainCatalogQuery.Dispose();
+                terrainDeltaQuery.Dispose();
                 terrainMaterialCatalogQuery.Dispose();
                 worldGenerationSettingsQuery.Dispose();
             }
@@ -3651,6 +3871,9 @@ namespace Farmware.WorldGeneration.Presentation
             pendingClearCoordinates.Clear();
             seenCoordinates.Clear();
             completedChunkEntities.Clear();
+            terrainDeltaOwnerEntities.Clear();
+            terrainDeltaFingerprints.Clear();
+            displayedTerrainFingerprints.Clear();
             clearQueue.Clear();
             staleOriginClearQueue.Clear();
             coordinateScratch.Clear();
@@ -3715,6 +3938,12 @@ namespace Farmware.WorldGeneration.Presentation
             /// <summary>GeneratedTerrainCell Bufferを読み取る現在のチャンクEntityです。</summary>
             public Entity Entity;
 
+            /// <summary>
+            /// 中心・周囲・直下の完成自然地形Entity寿命とTerrainCellDeltaから作った表示入力の指紋です。
+            /// 反映途中に入力が変わった場合、異なる時点のサブチャンクを混在させず先頭から作り直すために保持します。
+            /// </summary>
+            public readonly ulong TerrainFingerprint;
+
             /// <summary>次に反映する行優先のサブチャンク番号です。範囲は0〜16です。</summary>
             public int NextSubChunkIndex;
 
@@ -3722,9 +3951,11 @@ namespace Farmware.WorldGeneration.Presentation
             /// 新しい反映作業を先頭サブチャンクから開始します。
             /// </summary>
             /// <param name="entity">生成済みタイルを所有するEntityです。</param>
-            public ChunkApplyProgress(Entity entity)
+            /// <param name="terrainFingerprint">反映開始時点の地形差分入力を識別する決定論的な値です。</param>
+            public ChunkApplyProgress(Entity entity, ulong terrainFingerprint)
             {
                 Entity = entity;
+                TerrainFingerprint = terrainFingerprint;
                 NextSubChunkIndex = 0;
             }
         }

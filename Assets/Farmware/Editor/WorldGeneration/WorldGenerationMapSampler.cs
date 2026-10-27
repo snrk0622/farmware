@@ -7,6 +7,7 @@ using System.Threading;
 using Farmware.Simulation;
 using Farmware.WorldGeneration.Presentation;
 using Unity.Collections;
+using Unity.Entities;
 using UnityEngine;
 
 namespace Farmware.WorldGeneration.Editor
@@ -155,15 +156,128 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>BiomeとGround、Wall、Liquid、SurfaceのRuntime IDを保持する完成Blockセルです。</summary>
         public readonly GeneratedTerrainCell TerrainCell;
 
+        /// <summary>Ground Runtime IDから材質カタログで解決した安定材質IDです。地面なしではNoneです。</summary>
+        public readonly TerrainBlockMaterialId GroundMaterialId;
+
+        /// <summary>Wall Runtime IDから材質カタログで解決した安定材質IDです。壁なしではNoneです。</summary>
+        public readonly TerrainBlockMaterialId WallMaterialId;
+
         /// <summary>完成診断チャンクの同じ添字から、破棄後も利用できる値コピーを作ります。</summary>
         /// <param name="tile">完成済み環境・地質タイルです。</param>
-        /// <param name="terrainCell">完成済み自然生成Blockセルです。</param>
+        /// <param name="terrainCell">変更差分を適用した完成Blockセルです。</param>
+        /// <param name="groundMaterialId">Groundの安定材質ID、または地面なしを示すNoneです。</param>
+        /// <param name="wallMaterialId">Wallの安定材質ID、または壁なしを示すNoneです。</param>
         public FinalizedTerrainMapSample(
             in GeneratedTile tile,
-            in GeneratedTerrainCell terrainCell)
+            in GeneratedTerrainCell terrainCell,
+            TerrainBlockMaterialId groundMaterialId,
+            TerrainBlockMaterialId wallMaterialId)
         {
             Tile = tile;
             TerrainCell = terrainCell;
+            GroundMaterialId = groundMaterialId;
+            WallMaterialId = wallMaterialId;
+        }
+    }
+
+    /// <summary>
+    /// Map Viewerのバックグラウンド走査へ渡す、取得時点で不変の地形差分コピーです。
+    /// ECS Dynamic BufferをThreadPoolから読まず、表示要求開始時の有効地形を最後まで一貫して再現します。
+    /// </summary>
+    public sealed class WorldGenerationMapTerrainDeltaSnapshot
+    {
+        /// <summary>レイヤー付きチャンク座標から、LocalTileIndex昇順の疎な差分配列を引く不変索引です。</summary>
+        private readonly Dictionary<ChunkCoordinate, TerrainCellDelta[]> deltasByChunk;
+
+        /// <summary>このSnapshotにコピーされた変更セル総数です。表示元案内とテストに使用します。</summary>
+        public int DeltaCellCount { get; }
+
+        /// <summary>
+        /// 呼び出し元が所有する配列を複製し、サンプリング中に変更されないSnapshotを作ります。
+        /// </summary>
+        /// <param name="source">レイヤー付きチャンク座標ごとの、昇順かつ重複のない差分です。</param>
+        public WorldGenerationMapTerrainDeltaSnapshot(
+            IReadOnlyDictionary<ChunkCoordinate, TerrainCellDelta[]> source)
+        {
+            deltasByChunk = new Dictionary<ChunkCoordinate, TerrainCellDelta[]>();
+            if (source == null)
+            {
+                return;
+            }
+
+            int count = 0;
+            foreach (KeyValuePair<ChunkCoordinate, TerrainCellDelta[]> pair in source)
+            {
+                TerrainCellDelta[] sourceDeltas = pair.Value ?? Array.Empty<TerrainCellDelta>();
+                var copy = new TerrainCellDelta[sourceDeltas.Length];
+                Array.Copy(sourceDeltas, copy, sourceDeltas.Length);
+                ValidateSortedDeltas(pair.Key, copy);
+                deltasByChunk.Add(pair.Key, copy);
+                count += copy.Length;
+            }
+
+            DeltaCellCount = count;
+        }
+
+        /// <summary>指定タイルを担当するチャンクから、同じLocalTileIndexの差分を二分探索します。</summary>
+        /// <param name="coordinate">検索するレイヤー付き絶対タイル座標です。</param>
+        /// <param name="delta">成功時にそのセルへ適用する差分を受け取ります。</param>
+        /// <returns>Snapshot内に対象セルの差分がある場合はtrueです。</returns>
+        public bool TryGetDelta(in WorldTileCoordinate coordinate, out TerrainCellDelta delta)
+        {
+            ChunkCoordinate chunk = WorldGrid.ToChunkCoordinate(coordinate);
+            if (!deltasByChunk.TryGetValue(chunk, out TerrainCellDelta[] deltas))
+            {
+                delta = default;
+                return false;
+            }
+
+            ChunkLocalTileCoordinate local = WorldGrid.ToLocalTileCoordinate(coordinate.X, coordinate.Y);
+            ushort localTileIndex = (ushort)WorldGrid.ToTileIndex(local.X, local.Y);
+            int minimum = 0;
+            int maximum = deltas.Length - 1;
+            while (minimum <= maximum)
+            {
+                int middle = minimum + ((maximum - minimum) / 2);
+                TerrainCellDelta candidate = deltas[middle];
+                if (candidate.LocalTileIndex == localTileIndex)
+                {
+                    delta = candidate;
+                    return true;
+                }
+
+                if (candidate.LocalTileIndex < localTileIndex)
+                {
+                    minimum = middle + 1;
+                }
+                else
+                {
+                    maximum = middle - 1;
+                }
+            }
+
+            delta = default;
+            return false;
+        }
+
+        /// <summary>疎な差分がLocalTileIndex昇順かつ4096セル範囲内であることを構築時に検証します。</summary>
+        private static void ValidateSortedDeltas(
+            ChunkCoordinate coordinate,
+            IReadOnlyList<TerrainCellDelta> deltas)
+        {
+            int previous = -1;
+            for (int index = 0; index < deltas.Count; index++)
+            {
+                int current = deltas[index].LocalTileIndex;
+                if (current >= WorldGridConstants.TilesPerChunk || current <= previous)
+                {
+                    throw new ArgumentException(
+                        $"Map Viewer地形差分はLocalTileIndex昇順かつ重複なしである必要があります: Chunk={coordinate}, Index={current}",
+                        nameof(deltas));
+                }
+
+                previous = current;
+            }
         }
     }
 
@@ -206,6 +320,12 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>C5-C完成地形またはC4派生水文の生成に使用した完成診断チャンク数です。ほかのモードでは0です。</summary>
         public int DiagnosticChunkCount { get; }
 
+        /// <summary>この画像の代表タイルへ実際に適用した変更済み地形セル数です。</summary>
+        public int AppliedTerrainDeltaSampleCount { get; }
+
+        /// <summary>同じSeed・GeneratorVersionの実行中Worldから地形差分Snapshotを取得して生成した場合はtrueです。</summary>
+        public bool UsesTerrainDeltaSnapshot { get; }
+
         /// <summary>
         /// 完成診断チャンクを使うモードのHover表示へ渡す、代表タイル別のC5-C確定地形です。
         /// 元のPersistent NativeArrayはサンプリング終了時に破棄するため、値型のコピーだけを保持します。
@@ -238,6 +358,8 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="viewMode">この結果を生成した地形・環境・地質・水文の表示モードです。</param>
         /// <param name="pixelColors">下端行から行優先で並べた色配列です。</param>
         /// <param name="diagnosticChunkCount">完成地形または派生水文の生成に使用した完成診断チャンク数です。</param>
+        /// <param name="appliedTerrainDeltaSampleCount">画像の代表タイルへ適用した変更済みセル数です。</param>
+        /// <param name="usesTerrainDeltaSnapshot">現在Worldの差分Snapshotを入力に含めた場合はtrueです。</param>
         /// <param name="finalizedTerrainSamples">Hover用に値コピーした代表タイル別C5-C確定地形です。</param>
         /// <param name="derivedHydrologySamples">Hover用に値コピーした代表タイル別派生水文です。</param>
         /// <param name="biomeClassificationSamples">Hover用に値コピーした代表タイル別Biome選択診断です。</param>
@@ -252,6 +374,8 @@ namespace Farmware.WorldGeneration.Editor
             WorldGenerationMapViewMode viewMode,
             Color32[] pixelColors,
             int diagnosticChunkCount,
+            int appliedTerrainDeltaSampleCount,
+            bool usesTerrainDeltaSnapshot,
             Dictionary<long, FinalizedTerrainMapSample> finalizedTerrainSamples,
             Dictionary<long, DerivedHydrologyMapSample> derivedHydrologySamples,
             Dictionary<long, BiomeClassificationMapSample> biomeClassificationSamples)
@@ -266,6 +390,8 @@ namespace Farmware.WorldGeneration.Editor
             ViewMode = viewMode;
             PixelColors = pixelColors;
             DiagnosticChunkCount = diagnosticChunkCount;
+            AppliedTerrainDeltaSampleCount = appliedTerrainDeltaSampleCount;
+            UsesTerrainDeltaSnapshot = usesTerrainDeltaSnapshot;
             this.finalizedTerrainSamples = finalizedTerrainSamples;
             this.derivedHydrologySamples = derivedHydrologySamples;
             this.biomeClassificationSamples = biomeClassificationSamples;
@@ -695,6 +821,7 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="viewMode">最終地形、環境、地質、基礎水文、派生水文の表示モードです。</param>
         /// <param name="cancellationToken">新しい操作で不要になった走査を中止するためのTokenです。</param>
         /// <param name="progress">完了割合0〜1の任意通知先です。呼出元でメインスレッドへ戻すProgressを渡し、省略時は通知しません。</param>
+        /// <param name="terrainDeltaSnapshot">Editorメインスレッドでコピーした現在Worldの疎な地形差分です。省略時は自然生成だけを表示します。</param>
         /// <returns>Texture2Dへ適用できる色配列、レイヤー、座標情報です。</returns>
         /// <exception cref="InvalidOperationException">
         /// 座標端で固定サンプル範囲を安全に確保できない場合や、完成診断チャンクを生成できない場合に発生します。
@@ -710,7 +837,8 @@ namespace Farmware.WorldGeneration.Editor
             int tilesPerPixel,
             WorldGenerationMapViewMode viewMode,
             CancellationToken cancellationToken,
-            IProgress<float> progress = null)
+            IProgress<float> progress = null,
+            WorldGenerationMapTerrainDeltaSnapshot terrainDeltaSnapshot = null)
         {
             if (!WorldLayerUtility.IsPlayable(layer))
             {
@@ -771,8 +899,20 @@ namespace Farmware.WorldGeneration.Editor
                     "完成チャンク表示には、Editorメインスレッドで構築済みの地形カタログが必要です。");
             }
 
-            Color32[] pixelColors = new Color32[width * height];
             bool hasGeneratedData = layer == WorldLayer.Surface;
+            TerrainMaterialPresentationRuntimeLookup materialRuntimeLookup = null;
+            if (requiresDiagnosticChunk
+                && hasGeneratedData
+                && !TerrainMaterialPresentationRuntimeLookup.TryCreate(
+                    terrainCatalogs.MaterialCatalog,
+                    out materialRuntimeLookup,
+                    out string materialLookupError))
+            {
+                throw new InvalidOperationException(
+                    $"Map Viewer用の41材質検索表を構築できません: {materialLookupError}");
+            }
+
+            Color32[] pixelColors = new Color32[width * height];
             Dictionary<long, GeneratedHydrologyCell> hydrologyCellCache =
                 isBaseHydrologyViewMode
                     ? new Dictionary<long, GeneratedHydrologyCell>()
@@ -822,6 +962,7 @@ namespace Farmware.WorldGeneration.Editor
                     : default;
             HydrologyLakeBasinCache hydrologyBasinCache = default;
             int diagnosticChunkCount = 0;
+            int appliedTerrainDeltaSampleCount = 0;
             bool enteredCompletedChunkGenerationGate = false;
 
             try
@@ -909,11 +1050,37 @@ namespace Farmware.WorldGeneration.Editor
                                         diagnosticChunkCache,
                                         cancellationToken,
                                         out BuiltInTerrainBlockRuntimeIds terrainRuntimeIds);
+                                bool appliedTerrainDelta = TryApplyTerrainDelta(
+                                    terrainDeltaSnapshot,
+                                    terrainCatalogs.TerrainCatalog,
+                                    layer,
+                                    worldTileX,
+                                    worldTileY,
+                                    ref finalizedTerrainCell);
+                                if (appliedTerrainDelta)
+                                {
+                                    appliedTerrainDeltaSampleCount++;
+                                }
+
+                                TerrainBlockMaterialId groundMaterialId =
+                                    materialRuntimeLookup.TryResolveGround(
+                                        finalizedTerrainCell.GroundBlockRuntimeId,
+                                        out TerrainBlockMaterialId resolvedGroundMaterial)
+                                        ? resolvedGroundMaterial
+                                        : TerrainBlockMaterialId.None;
+                                TerrainBlockMaterialId wallMaterialId =
+                                    materialRuntimeLookup.TryResolveWall(
+                                        finalizedTerrainCell.WallBlockRuntimeId,
+                                        out TerrainBlockMaterialId resolvedWallMaterial)
+                                        ? resolvedWallMaterial
+                                        : TerrainBlockMaterialId.None;
                                 finalizedTerrainSamples[
                                     CreateCoordinateKey(worldTileX, worldTileY)] =
                                     new FinalizedTerrainMapSample(
                                         finalizedTile,
-                                        finalizedTerrainCell);
+                                        finalizedTerrainCell,
+                                        groundMaterialId,
+                                        wallMaterialId);
                                 if (isFinalTerrainViewMode)
                                 {
                                     GeneratedHydrologyTile finalizedHydrologyTile =
@@ -950,7 +1117,8 @@ namespace Farmware.WorldGeneration.Editor
                                         viewMode == WorldGenerationMapViewMode.Terrain
                                             ? GetTerrainDisplayColor(
                                                 finalizedTerrainCell,
-                                                terrainRuntimeIds)
+                                                terrainRuntimeIds,
+                                                materialRuntimeLookup)
                                             : GetDisplayColor(viewMode, finalizedTile);
                                     continue;
                                 }
@@ -1119,6 +1287,8 @@ namespace Farmware.WorldGeneration.Editor
                 viewMode,
                 pixelColors,
                 diagnosticChunkCount,
+                appliedTerrainDeltaSampleCount,
+                terrainDeltaSnapshot != null,
                 finalizedTerrainSamples,
                 derivedHydrologySamples,
                 biomeClassificationSamples);
@@ -2057,13 +2227,74 @@ namespace Farmware.WorldGeneration.Editor
             return new Color32(30, 30, 36, 255);
         }
 
-        /// <summary>完成済み自然生成BlockセルをMap Viewerの最終地形色へ変換します。</summary>
+        /// <summary>
+        /// 代表タイルの自然生成セルへ、表示開始時にコピーした任意差分を適用します。
+        /// </summary>
+        /// <param name="snapshot">現在Worldの疎な差分コピーです。nullなら自然生成をそのまま使います。</param>
+        /// <param name="terrainCatalog">Runtime IDの区画分類を検証する地形Definitionです。</param>
+        /// <param name="layer">対象タイルの固定ワールドレイヤーです。</param>
+        /// <param name="worldTileX">対象の絶対水平タイル座標です。</param>
+        /// <param name="worldTileY">対象の絶対垂直タイル座標です。</param>
+        /// <param name="terrainCell">入力時は自然生成セル、成功時は有効地形セルです。</param>
+        /// <returns>対象セルに差分が存在して適用した場合はtrueです。</returns>
+        private static bool TryApplyTerrainDelta(
+            WorldGenerationMapTerrainDeltaSnapshot snapshot,
+            BlobAssetReference<TerrainBlockCatalogBlob> terrainCatalog,
+            WorldLayer layer,
+            int worldTileX,
+            int worldTileY,
+            ref GeneratedTerrainCell terrainCell)
+        {
+            if (snapshot == null)
+            {
+                return false;
+            }
+
+            var coordinate = new WorldTileCoordinate(layer, worldTileX, worldTileY);
+            bool hasDelta = snapshot.TryGetDelta(coordinate, out TerrainCellDelta delta);
+            EffectiveTerrainResolveResult result = EffectiveTerrainResolver.TryResolve(
+                terrainCell,
+                hasDelta,
+                delta,
+                terrainCatalog,
+                out EffectiveTerrainCell effectiveCell);
+            if (result != EffectiveTerrainResolveResult.Success)
+            {
+                throw new InvalidOperationException(
+                    $"Map Viewerで有効地形を解決できません: Tile=({worldTileX}, {worldTileY}), Result={result}");
+            }
+
+            terrainCell = new GeneratedTerrainCell
+            {
+                Biome = effectiveCell.Biome,
+                GroundBlockRuntimeId = effectiveCell.GroundBlockRuntimeId,
+                WallBlockRuntimeId = effectiveCell.WallBlockRuntimeId,
+                LiquidRuntimeId = effectiveCell.LiquidRuntimeId,
+                TerrainSurfaceRuntimeId = effectiveCell.TerrainSurfaceRuntimeId
+            };
+            return hasDelta;
+        }
+
+        /// <summary>完成済み自然生成Blockセルを、旧呼び出し元向けのBiome基準地形色へ変換します。</summary>
         /// <param name="terrainCell">Biomeと4区画のRuntime IDを持つ自然生成セルです。</param>
         /// <param name="runtimeIds">淡水、海水、マグマを識別する組み込みIDです。</param>
         /// <returns>液体、壁、地面の優先順を反映した不透明色です。</returns>
         public static Color32 GetTerrainDisplayColor(
             in GeneratedTerrainCell terrainCell,
             in BuiltInTerrainBlockRuntimeIds runtimeIds)
+        {
+            return GetTerrainDisplayColor(terrainCell, runtimeIds, null);
+        }
+
+        /// <summary>差分適用済みBlockセルを、液体種別と41材質を識別できるMap Viewer色へ変換します。</summary>
+        /// <param name="terrainCell">Biomeと4区画のRuntime IDを持つ有効地形セルです。</param>
+        /// <param name="runtimeIds">淡水、海水、マグマを識別する組み込みIDです。</param>
+        /// <param name="materialLookup">Ground／Wall Runtime IDを1〜41の安定材質IDへ解決する検索表です。</param>
+        /// <returns>液体、壁、地面の優先順と安定材質IDを反映した不透明色です。</returns>
+        public static Color32 GetTerrainDisplayColor(
+            in GeneratedTerrainCell terrainCell,
+            in BuiltInTerrainBlockRuntimeIds runtimeIds,
+            TerrainMaterialPresentationRuntimeLookup materialLookup)
         {
             if (terrainCell.LiquidRuntimeId.IsValid
                 && terrainCell.LiquidRuntimeId.Value == runtimeIds.Magma.Value)
@@ -2085,12 +2316,50 @@ namespace Farmware.WorldGeneration.Editor
 
             if (terrainCell.WallBlockRuntimeId.IsValid)
             {
-                return new Color32(52, 52, 60, 255);
+                return materialLookup != null
+                    && materialLookup.TryResolveWall(
+                        terrainCell.WallBlockRuntimeId,
+                        out TerrainBlockMaterialId wallMaterialId)
+                            ? GetTerrainMaterialDisplayColor(wallMaterialId, true)
+                            : new Color32(52, 52, 60, 255);
             }
 
-            return terrainCell.GroundBlockRuntimeId.IsValid
-                ? GetBiomeColor(terrainCell.Biome)
-                : new Color32(30, 30, 36, 255);
+            if (!terrainCell.GroundBlockRuntimeId.IsValid)
+            {
+                return new Color32(30, 30, 36, 255);
+            }
+
+            return materialLookup != null
+                && materialLookup.TryResolveGround(
+                    terrainCell.GroundBlockRuntimeId,
+                    out TerrainBlockMaterialId groundMaterialId)
+                        ? GetTerrainMaterialDisplayColor(groundMaterialId, false)
+                        : GetBiomeColor(terrainCell.Biome);
+        }
+
+        /// <summary>1〜41の安定材質IDを、登録順やRuntime IDに依存しない診断用疑似色へ変換します。</summary>
+        /// <param name="materialId">色で識別する変更禁止の材質IDです。</param>
+        /// <param name="isWall">Wallなら同じ色相を暗くし、Groundとの区画差も読めるようにします。</param>
+        /// <returns>Map本体と凡例で共有する不透明色です。Noneでは未取得色です。</returns>
+        public static Color32 GetTerrainMaterialDisplayColor(
+            TerrainBlockMaterialId materialId,
+            bool isWall)
+        {
+            int stableId = (int)materialId;
+            if (stableId < (int)TerrainBlockMaterialDefinitions.First
+                || stableId > (int)TerrainBlockMaterialDefinitions.Last)
+            {
+                return new Color32(30, 30, 36, 255);
+            }
+
+            // 137度ずつ色相を進めると隣接IDが近い色へ固まらず、41材質を一覧でも区別しやすくなります。
+            float hue = ((stableId * 137) % 360) / 360f;
+            Color color = Color.HSVToRGB(hue, 0.58f, isWall ? 0.48f : 0.78f);
+            return new Color32(
+                (byte)Mathf.RoundToInt(color.r * byte.MaxValue),
+                (byte)Mathf.RoundToInt(color.g * byte.MaxValue),
+                (byte)Mathf.RoundToInt(color.b * byte.MaxValue),
+                byte.MaxValue);
         }
 
         /// <summary>

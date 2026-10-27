@@ -546,23 +546,19 @@ namespace Farmware.WorldGeneration.PlayModeTests
         }
 
         /// <summary>
-        /// Presenterを停止・再開しても外周の保存領域を再利用し、破棄時には所有Native配列を解放することを保証します。
-        /// 配列の借用コピーは破棄せず、所有者が更新したフィールドを毎回読み直して検証します。
+        /// Presenterが有効地形近傍を直接参照し、旧260セル外周コピーを常駐させないことを保証します。
+        /// 外周の差分解決と影分類を二重実行して、表示側のCPU時間とNativeメモリを増やす退行を防ぎます。
         /// </summary>
         [Test]
-        public void TerrainNeighborHalo_PresenterLifetime_ReusesUntilDestroyed()
+        public void EffectiveTerrainNeighborhood_PresenterDoesNotKeepLegacyHaloBuffer()
         {
-            FieldInfo field = Field("terrainNeighborHaloBuffer");
-            var halo = (Unity.Collections.NativeArray<GeneratedTerrainCell>)field.GetValue(presenter);
-            Assert.That(halo.IsCreated, Is.True);
-            Assert.That(halo.Length, Is.EqualTo(TerrainNeighborHaloUtility.TileCount));
-            presenter.enabled = false;
-            presenter.enabled = true;
-            halo = (Unity.Collections.NativeArray<GeneratedTerrainCell>)field.GetValue(presenter);
-            Assert.That(halo.IsCreated, Is.True);
-            Object.DestroyImmediate(gridObject);
-            halo = (Unity.Collections.NativeArray<GeneratedTerrainCell>)field.GetValue(presenter);
-            Assert.That(halo.IsCreated, Is.False, "OnDestroyでPresenter所有の外周配列を解放する必要があります。");
+            FieldInfo field = typeof(ChunkTilemapPresenter).GetField(
+                "terrainNeighborHaloBuffer",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(
+                field,
+                Is.Null,
+                "Presenterは3×3有効地形近傍を直接共有し、旧外周コピーを常駐させてはいけません。");
         }
 
         /// <summary>

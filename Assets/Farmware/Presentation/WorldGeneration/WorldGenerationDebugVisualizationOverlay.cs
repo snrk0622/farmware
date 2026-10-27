@@ -1,6 +1,7 @@
 // このファイルは、ECSで生成済みの可視タイルと固定水文・派生水文をPlayMode中だけ色分けして、生成結果を確認できるようにします。
 // 操作入口はEditor AssemblyのWorldGenerationDebugVisualizationMenuに置き、Simulationとプレイヤー用F3/F4入力から分離します。
 
+using System;
 using System.Collections.Generic;
 using Farmware.Simulation;
 using Farmware.Simulation.Animals;
@@ -193,6 +194,9 @@ namespace Farmware.WorldGeneration.Presentation
         // BlockセルのRuntime ID検証とLiquid種別判定に使う地形定義Singleton Queryです。
         private EntityQuery terrainCatalogQuery;
 
+        // 自然生成へ重ねた変更差分を取得し、Gameビューと同じ有効地形を診断するためのQueryです。
+        private EntityQuery terrainDeltaQuery;
+
         // 確定済み野生動物の整数タイル座標を読むQueryです。Simulation状態は変更しません。
         private EntityQuery animalPositionQuery;
 
@@ -222,6 +226,10 @@ namespace Farmware.WorldGeneration.Presentation
 
         // Rock Wall表示が水文・Biome確定前の生成へ戻らないよう、完成地形Bufferをチャンク座標で引くRepaint内索引です。
         private readonly Dictionary<ChunkCoordinate, Entity> completedTerrainChunkEntities =
+            new Dictionary<ChunkCoordinate, Entity>();
+
+        // Repaint中だけ使う地形差分所有者の座標索引です。毎タイルQueryを避け、中心と周囲8チャンクを一定時間で引きます。
+        private readonly Dictionary<ChunkCoordinate, Entity> terrainDeltaOwnerEntities =
             new Dictionary<ChunkCoordinate, Entity>();
 
         // 生成済み水文Bufferをセル座標で引くRepaint内キャッシュです。水文セルは中心が隣接チャンクに属する場合があるため、
@@ -1103,6 +1111,9 @@ namespace Farmware.WorldGeneration.Presentation
                 ComponentType.ReadOnly<AnimalSpeciesCatalog>());
             terrainCatalogQuery = entityManager.CreateEntityQuery(
                 ComponentType.ReadOnly<TerrainBlockCatalog>());
+            terrainDeltaQuery = entityManager.CreateEntityQuery(
+                ComponentType.ReadOnly<TerrainChunkDeltaOwner>(),
+                ComponentType.ReadOnly<TerrainCellDelta>());
             animalPositionQuery = entityManager.CreateEntityQuery(
                 ComponentType.ReadOnly<WildAnimal>(),
                 ComponentType.ReadOnly<AnimalTilePosition>());
@@ -1189,6 +1200,7 @@ namespace Farmware.WorldGeneration.Presentation
                 coordinates,
                 statuses,
                 entityManager);
+            CacheTerrainDeltaOwnersForCurrentRepaint(entityManager);
 
             // 水文セルの担当範囲は中心から-4〜+3タイルなので、地形タイルと同じチャンクのBufferだけでは
             // 正端4タイルを引けません。水文モード中だけ全ロード済みBufferを座標索引へまとめます。
@@ -1244,12 +1256,15 @@ namespace Farmware.WorldGeneration.Presentation
                     continue;
                 }
 
-                bool hasTerrainNeighborhood =
-                    CompletedChunkTerrainNeighborhoodFactory.TryCreate(
+                CompletedChunkTerrainNeighborhood terrainNeighborhood = default;
+                bool hasTerrainNeighborhood = hasTerrainCatalog
+                    && CompletedChunkTerrainNeighborhoodFactory.TryCreateEffective(
                         entityManager,
                         completedTerrainChunkEntities,
+                        terrainDeltaOwnerEntities,
                         new ChunkCoordinate(coordinate.Layer, coordinate.X, coordinate.Y),
-                        out CompletedChunkTerrainNeighborhood terrainNeighborhood);
+                        terrainCatalog.Value,
+                        out terrainNeighborhood);
 
                 int minimumLocalX = minimumTileX - chunkMinimumX;
                 int maximumLocalX = maximumTileX - chunkMinimumX;
@@ -1265,7 +1280,14 @@ namespace Farmware.WorldGeneration.Presentation
                         int tileX = chunkMinimumX + localX;
                         int tileIndex = (localY * WorldGridConstants.LogicalChunkSize) + localX;
                         GeneratedTile tile = tiles[tileIndex];
-                        GeneratedTerrainCell terrainCell = terrainCells[tileIndex];
+                        // 色面、中央情報、岩壁影はGameビューと同じ有効地形を参照します。
+                        // 近傍を作れない生成途中だけは、確定前の自然地形を診断結果として表示しません。
+                        if (!hasTerrainNeighborhood
+                            || !terrainNeighborhood.TryGetTile(localX, localY, out GeneratedTerrainCell terrainCell))
+                        {
+                            continue;
+                        }
+
                         GeneratedResourceTile resource = resources[tileIndex];
                         GeneratedSurfaceWaterTile surfaceWaterTile = surfaceWaterTiles[tileIndex];
                         GeneratedHydrologyTile hydrologyTile = hydrologyTiles[tileIndex];
@@ -1439,6 +1461,29 @@ namespace Farmware.WorldGeneration.Presentation
                     coordinates[entityIndex].X,
                     coordinates[entityIndex].Y);
                 completedTerrainChunkEntities[coordinate] = entities[entityIndex];
+            }
+        }
+
+        /// <summary>
+        /// 自然生成へ重ねる疎なTerrainCellDeltaの所有者を、チャンク座標で引けるRepaint内索引へまとめます。
+        /// </summary>
+        /// <param name="entityManager">差分所有者とBufferを読み取る現在WorldのEntityManagerです。</param>
+        private void CacheTerrainDeltaOwnersForCurrentRepaint(EntityManager entityManager)
+        {
+            terrainDeltaOwnerEntities.Clear();
+            using NativeArray<Entity> entities = terrainDeltaQuery.ToEntityArray(Allocator.Temp);
+            using NativeArray<TerrainChunkDeltaOwner> owners =
+                terrainDeltaQuery.ToComponentDataArray<TerrainChunkDeltaOwner>(Allocator.Temp);
+            for (int index = 0; index < entities.Length; index++)
+            {
+                TerrainChunkDeltaOwner owner = owners[index];
+                var coordinate = new ChunkCoordinate(owner.Layer, owner.ChunkX, owner.ChunkY);
+                // 重複時にQuery列挙順で表示が変わらないよう、破損状態を明示的に拒否します。
+                if (!terrainDeltaOwnerEntities.TryAdd(coordinate, entities[index]))
+                {
+                    throw new InvalidOperationException(
+                        $"同じチャンク座標の地形差分所有者が重複しています: {coordinate}");
+                }
             }
         }
 
@@ -3482,11 +3527,13 @@ namespace Farmware.WorldGeneration.Presentation
                 resourceSettingsQuery.Dispose();
                 animalCatalogQuery.Dispose();
                 terrainCatalogQuery.Dispose();
+                terrainDeltaQuery.Dispose();
                 animalPositionQuery.Dispose();
             }
 
             animalPositionCache.Clear();
             completedTerrainChunkEntities.Clear();
+            terrainDeltaOwnerEntities.Clear();
             hydrologyCellCache.Clear();
             queriesAreCreated = false;
             presentationWorld = null;

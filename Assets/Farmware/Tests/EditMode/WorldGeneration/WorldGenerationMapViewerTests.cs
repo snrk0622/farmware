@@ -124,9 +124,30 @@ namespace Farmware.WorldGeneration.Tests
                         worldTileX,
                         worldTileY,
                         out FinalizedTerrainMapSample finalizedSample);
-                    Color32 expectedColor = WorldGenerationMapSampler.GetTerrainDisplayColor(
-                        finalizedSample.TerrainCell,
-                        catalogs.RuntimeIds);
+                    Color32 expectedColor;
+                    if (finalizedSample.TerrainCell.LiquidRuntimeId.IsValid)
+                    {
+                        // 液体3種の優先色は従来の公開変換と共有し、材質疑似色より先に表示します。
+                        expectedColor = WorldGenerationMapSampler.GetTerrainDisplayColor(
+                            finalizedSample.TerrainCell,
+                            catalogs.RuntimeIds);
+                    }
+                    else if (finalizedSample.TerrainCell.WallBlockRuntimeId.IsValid)
+                    {
+                        expectedColor = WorldGenerationMapSampler.GetTerrainMaterialDisplayColor(
+                            finalizedSample.WallMaterialId,
+                            true);
+                    }
+                    else if (finalizedSample.TerrainCell.GroundBlockRuntimeId.IsValid)
+                    {
+                        expectedColor = WorldGenerationMapSampler.GetTerrainMaterialDisplayColor(
+                            finalizedSample.GroundMaterialId,
+                            false);
+                    }
+                    else
+                    {
+                        expectedColor = new Color32(30, 30, 36, 255);
+                    }
 
                     Assert.That(found, Is.True, $"tile=({worldTileX}, {worldTileY})");
                     Assert.That(
@@ -152,6 +173,174 @@ namespace Farmware.WorldGeneration.Tests
             }
 
             Assert.That(foundLandBiome, Is.True, "固定テスト範囲に地上Biomeがなく、選択診断を検証できませんでした。");
+        }
+
+        /// <summary>
+        /// 負座標チャンクの右上セルに差分を置き、Snapshotが床除算後の同じ絶対タイルだけを返すことを保証します。
+        /// </summary>
+        [Test]
+        public void TerrainDeltaSnapshot_NegativeChunkBoundary_IsDeterministic()
+        {
+            var chunk = new ChunkCoordinate(WorldLayer.Surface, -2, -3);
+            var expectedDelta = new TerrainCellDelta
+            {
+                LocalTileIndex = (ushort)(WorldGridConstants.TilesPerChunk - 1),
+                ChangeMask = TerrainCellChangeMask.WallBlock,
+                WallBlockRuntimeId = new DefinitionRuntimeId(123)
+            };
+            var source = new Dictionary<ChunkCoordinate, TerrainCellDelta[]>
+            {
+                [chunk] = new[] { expectedDelta }
+            };
+            var snapshot = new WorldGenerationMapTerrainDeltaSnapshot(source);
+            var coordinate = new WorldTileCoordinate(
+                WorldLayer.Surface,
+                (chunk.X * WorldGridConstants.LogicalChunkSize) + 63,
+                (chunk.Y * WorldGridConstants.LogicalChunkSize) + 63);
+
+            Assert.That(snapshot.DeltaCellCount, Is.EqualTo(1));
+            Assert.That(snapshot.TryGetDelta(coordinate, out TerrainCellDelta actual), Is.True);
+            Assert.That(actual.LocalTileIndex, Is.EqualTo(expectedDelta.LocalTileIndex));
+            Assert.That(actual.WallBlockRuntimeId, Is.EqualTo(expectedDelta.WallBlockRuntimeId));
+            Assert.That(
+                snapshot.TryGetDelta(
+                    new WorldTileCoordinate(WorldLayer.Surface, coordinate.X + 1, coordinate.Y),
+                    out _),
+                Is.False,
+                "チャンク正側境界を越えた別セルへ差分を漏らしてはいけません。");
+        }
+
+        /// <summary>
+        /// 1代表タイルを自然生成した後、そのセルの最前面区画を明示除去するSnapshotで再生成します。
+        /// Snapshot検索だけでなく、Map Viewer本体が差分適用済みHover値・色・適用件数を返すことを保証します。
+        /// </summary>
+        [Test]
+        public void Sample_TerrainDeltaSnapshotChangesFinalizedTerrainAndColor()
+        {
+            WorldGenerationSettings settings = WorldGenerationSettings.CreateDefault(
+                WorldSeedUtility.FromString("map-viewer-effective-terrain-test"),
+                WorldGenerationSettings.CurrentGeneratorVersion);
+            Assert.That(
+                HydrologyDiagnosticTerrainCatalogs.TryCreate(
+                    out HydrologyDiagnosticTerrainCatalogs createdDiagnosticCatalogs),
+                Is.True);
+            using HydrologyDiagnosticTerrainCatalogs diagnosticCatalogs =
+                createdDiagnosticCatalogs;
+
+            const int worldTileX = -65;
+            const int worldTileY = 130;
+            WorldGenerationMapSampleResult natural = WorldGenerationMapSampler.Sample(
+                settings,
+                diagnosticCatalogs,
+                worldTileX,
+                worldTileY,
+                1,
+                1,
+                1,
+                WorldGenerationMapViewMode.Terrain,
+                CancellationToken.None);
+            Assert.That(
+                natural.TryGetFinalizedTerrainSample(
+                    worldTileX,
+                    worldTileY,
+                    out FinalizedTerrainMapSample naturalSample),
+                Is.True);
+
+            // 画面色の優先順位と同じLiquid→Wall→Groundの順で、現在見えている区画を明示除去します。
+            // GroundとSurfaceが同時にある将来状態では、Surfaceだけを宙に残さないよう両方を除去します。
+            TerrainCellChangeMask changeMask;
+            if (naturalSample.TerrainCell.LiquidRuntimeId.IsValid)
+            {
+                changeMask = TerrainCellChangeMask.Liquid;
+            }
+            else if (naturalSample.TerrainCell.WallBlockRuntimeId.IsValid)
+            {
+                changeMask = TerrainCellChangeMask.WallBlock;
+            }
+            else
+            {
+                Assert.That(naturalSample.TerrainCell.GroundBlockRuntimeId.IsValid, Is.True);
+                changeMask = naturalSample.TerrainCell.TerrainSurfaceRuntimeId.IsValid
+                    ? TerrainCellChangeMask.GroundBlock | TerrainCellChangeMask.TerrainSurface
+                    : TerrainCellChangeMask.GroundBlock;
+            }
+
+            var coordinate = new WorldTileCoordinate(
+                WorldLayer.Surface,
+                worldTileX,
+                worldTileY);
+            ChunkCoordinate chunk = WorldGrid.ToChunkCoordinate(coordinate);
+            ChunkLocalTileCoordinate local = WorldGrid.ToLocalTileCoordinate(worldTileX, worldTileY);
+            var snapshot = new WorldGenerationMapTerrainDeltaSnapshot(
+                new Dictionary<ChunkCoordinate, TerrainCellDelta[]>
+                {
+                    [chunk] = new[]
+                    {
+                        new TerrainCellDelta
+                        {
+                            LocalTileIndex = (ushort)WorldGrid.ToTileIndex(local.X, local.Y),
+                            ChangeMask = changeMask
+                        }
+                    }
+                });
+
+            WorldGenerationMapSampleResult effective = WorldGenerationMapSampler.Sample(
+                settings,
+                diagnosticCatalogs,
+                WorldLayer.Surface,
+                worldTileX,
+                worldTileY,
+                1,
+                1,
+                1,
+                WorldGenerationMapViewMode.Terrain,
+                CancellationToken.None,
+                terrainDeltaSnapshot: snapshot);
+            Assert.That(
+                effective.TryGetFinalizedTerrainSample(
+                    worldTileX,
+                    worldTileY,
+                    out FinalizedTerrainMapSample effectiveSample),
+                Is.True);
+
+            Assert.That(effective.UsesTerrainDeltaSnapshot, Is.True);
+            Assert.That(effective.AppliedTerrainDeltaSampleCount, Is.EqualTo(1));
+            Assert.That(effective.PixelColors[0], Is.Not.EqualTo(natural.PixelColors[0]));
+            if ((changeMask & TerrainCellChangeMask.Liquid) != 0)
+            {
+                Assert.That(effectiveSample.TerrainCell.LiquidRuntimeId.IsValid, Is.False);
+            }
+            else if ((changeMask & TerrainCellChangeMask.WallBlock) != 0)
+            {
+                Assert.That(effectiveSample.TerrainCell.WallBlockRuntimeId.IsValid, Is.False);
+            }
+            else
+            {
+                Assert.That(effectiveSample.TerrainCell.GroundBlockRuntimeId.IsValid, Is.False);
+                Assert.That(effectiveSample.GroundMaterialId, Is.EqualTo(TerrainBlockMaterialId.None));
+            }
+        }
+
+        /// <summary>材質疑似色が安定IDを区別し、同じ材質のWallだけを暗く表示することを保証します。</summary>
+        [Test]
+        public void TerrainMaterialDisplayColor_DistinguishesStableMaterialAndWallRole()
+        {
+            Color32 grassGround = WorldGenerationMapSampler.GetTerrainMaterialDisplayColor(
+                TerrainBlockMaterialId.GrassLoam,
+                false);
+            Color32 basaltGround = WorldGenerationMapSampler.GetTerrainMaterialDisplayColor(
+                TerrainBlockMaterialId.Basalt,
+                false);
+            Color32 grassWall = WorldGenerationMapSampler.GetTerrainMaterialDisplayColor(
+                TerrainBlockMaterialId.GrassLoam,
+                true);
+
+            Assert.That(basaltGround, Is.Not.EqualTo(grassGround));
+            Assert.That(grassWall, Is.Not.EqualTo(grassGround));
+            Assert.That(
+                grassWall.r + grassWall.g + grassWall.b,
+                Is.LessThan(grassGround.r + grassGround.g + grassGround.b),
+                "Wallは同じ材質色相を維持しながらGroundより暗く表示する必要があります。");
         }
 
         /// <summary>
@@ -407,10 +596,10 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// Map ViewerのUXMLを読み、WORLD-01Cで追加したレイヤー選択欄が名前付き要素として取得できることを保証します。
+        /// Map ViewerのUXMLを読み、レイヤー選択欄、生成案内、横へはみ出さない凡例領域を取得できることを保証します。
         /// </summary>
         [Test]
-        public void MapViewerUxml_ContainsLayerSelector()
+        public void MapViewerUxml_ContainsRequiredControlsAndVerticalLegend()
         {
             VisualTreeAsset tree = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(
                 "Assets/Farmware/Editor/WorldGeneration/WorldGenerationMapViewerWindow.uxml");
@@ -419,6 +608,17 @@ namespace Farmware.WorldGeneration.Tests
             DropdownField layerField = root.Q<DropdownField>("layerField");
 
             Assert.That(layerField, Is.Not.Null);
+            ScrollView sidePanel = root.Q<ScrollView>("sidePanel");
+            Assert.That(sidePanel, Is.Not.Null);
+            Assert.That(
+                sidePanel.horizontalScrollerVisibility,
+                Is.EqualTo(ScrollerVisibility.Hidden),
+                "凡例の長い材質名は横へはみ出さず、サイドパネル内で折り返す必要があります。");
+            VisualElement legendContainer = root.Q<VisualElement>("legendContainer");
+            Assert.That(
+                legendContainer,
+                Is.Not.Null,
+                "長い41材質名を折り返して表示する凡例コンテナが必要です。");
             Label generationLabel = root.Q<Label>("generationLabel");
             Assert.That(generationLabel, Is.Not.Null, "初回生成中に地図領域へ進捗を示す案内が必要です。");
             Assert.That(generationLabel.pickingMode, Is.EqualTo(PickingMode.Ignore));

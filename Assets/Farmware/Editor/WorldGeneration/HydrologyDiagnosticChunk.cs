@@ -67,6 +67,12 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>完成セル確定へ読み取り専用で渡す、構築済みPalette Blobです。</summary>
         internal BlobAssetReference<TerrainBlockPaletteCatalogBlob> PaletteCatalog => paletteCatalog;
 
+        /// <summary>Map Viewerが自然生成へ変更差分を適用するときに参照する地形分類Blobです。</summary>
+        internal BlobAssetReference<TerrainBlockCatalogBlob> TerrainCatalog => terrainCatalog;
+
+        /// <summary>Map ViewerがGround／Wall Runtime IDを安定材質IDへ解決するときに参照する材質Blobです。</summary>
+        internal BlobAssetReference<TerrainBlockMaterialCatalogBlob> MaterialCatalog => materialCatalog;
+
         /// <summary>淡水、海水、マグマ等の組み込みBlockを解決したRuntime ID一式です。</summary>
         public BuiltInTerrainBlockRuntimeIds RuntimeIds { get; private set; }
 
