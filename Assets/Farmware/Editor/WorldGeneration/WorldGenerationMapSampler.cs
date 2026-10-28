@@ -2290,27 +2290,24 @@ namespace Farmware.WorldGeneration.Editor
             return hasDelta;
         }
 
-        /// <summary>完成済み自然生成Blockセルを、旧呼び出し元向けのBiome基準地形色へ変換します。</summary>
-        /// <param name="terrainCell">Biomeと4区画のRuntime IDを持つ自然生成セルです。</param>
-        /// <param name="runtimeIds">淡水、海水、マグマを識別する組み込みIDです。</param>
-        /// <returns>液体、壁、地面の優先順を反映した不透明色です。</returns>
-        public static Color32 GetTerrainDisplayColor(
-            in GeneratedTerrainCell terrainCell,
-            in BuiltInTerrainBlockRuntimeIds runtimeIds)
-        {
-            return GetTerrainDisplayColor(terrainCell, runtimeIds, null);
-        }
-
         /// <summary>差分適用済みBlockセルを、液体種別と41材質を識別できるMap Viewer色へ変換します。</summary>
         /// <param name="terrainCell">Biomeと4区画のRuntime IDを持つ有効地形セルです。</param>
         /// <param name="runtimeIds">淡水、海水、マグマを識別する組み込みIDです。</param>
-        /// <param name="materialLookup">Ground／Wall Runtime IDを1〜41の安定材質IDへ解決する検索表です。</param>
-        /// <returns>液体、壁、地面の優先順と安定材質IDを反映した不透明色です。</returns>
+        /// <param name="materialLookup">Ground／Wall Runtime IDを1〜41の安定材質IDへ解決する必須検索表です。</param>
+        /// <returns>液体、壁、地面の優先順と安定材質IDを反映した不透明色です。未知材質は未取得色になります。</returns>
+        /// <exception cref="ArgumentNullException">材質検索表がなく、製品の41材質を解決できない場合に投げられます。</exception>
         public static Color32 GetTerrainDisplayColor(
             in GeneratedTerrainCell terrainCell,
             in BuiltInTerrainBlockRuntimeIds runtimeIds,
             TerrainMaterialPresentationRuntimeLookup materialLookup)
         {
+            if (materialLookup == null)
+            {
+                // 検索表なしでBiome色や固定Wall色へ戻すと、同じセルを製品表示と別の意味で描けてしまいます。
+                // 製品の41材質契約を満たせない呼び出しは入口で拒否し、旧表示経路を再び実行可能にしません。
+                throw new ArgumentNullException(nameof(materialLookup));
+            }
+
             if (terrainCell.LiquidRuntimeId.IsValid
                 && terrainCell.LiquidRuntimeId.Value == runtimeIds.Magma.Value)
             {
@@ -2331,12 +2328,11 @@ namespace Farmware.WorldGeneration.Editor
 
             if (terrainCell.WallBlockRuntimeId.IsValid)
             {
-                return materialLookup != null
-                    && materialLookup.TryResolveWall(
+                return materialLookup.TryResolveWall(
                         terrainCell.WallBlockRuntimeId,
                         out TerrainBlockMaterialId wallMaterialId)
                             ? GetTerrainMaterialDisplayColor(wallMaterialId, true)
-                            : new Color32(52, 52, 60, 255);
+                            : new Color32(30, 30, 36, 255);
             }
 
             if (!terrainCell.GroundBlockRuntimeId.IsValid)
@@ -2344,12 +2340,11 @@ namespace Farmware.WorldGeneration.Editor
                 return new Color32(30, 30, 36, 255);
             }
 
-            return materialLookup != null
-                && materialLookup.TryResolveGround(
+            return materialLookup.TryResolveGround(
                     terrainCell.GroundBlockRuntimeId,
                     out TerrainBlockMaterialId groundMaterialId)
                         ? GetTerrainMaterialDisplayColor(groundMaterialId, false)
-                        : GetBiomeColor(terrainCell.Biome);
+                        : new Color32(30, 30, 36, 255);
         }
 
         /// <summary>1〜41の安定材質IDを、登録順やRuntime IDに依存しない診断用疑似色へ変換します。</summary>

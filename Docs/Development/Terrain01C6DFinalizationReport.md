@@ -36,12 +36,14 @@ Map ViewerのHoverのRuntime IDは診断カタログ内の値である。ゲー�
 | Unity 6000.3.8f1 全Assembly再コンパイル | 成功 |
 | 地形関連EditMode | 281件成功、失敗0、49.93秒 |
 | World Generation PlayMode Assembly | 52件成功、失敗0、87.06秒 |
-| Map Viewer | 66件成功、失敗0、334.89秒（追加ID回帰を含む） |
+| Map Viewer | 67件成功、失敗0・Skip 0、133.16秒（PR #52レビュー後の材質検索表必須化を含む） |
 | Scene構築ツール | 11件成功、失敗0・Skip 0、0.76秒（読み取り専用の製品Scene検査を含む） |
 | 製品分離・比較／検品インフラ削除ゲート | 最終整理後の3件も全成功、失敗0・Skip 0、13.88秒 |
 | macOS Development Playerビルド | 成功、134.269秒、エラー0・警告1、約353 MB |
 
 最初の地形関連実行は283件中281件成功・2件失敗だった。失敗は削除済み旧一体型PNGの存在を要求する専用テストであり、そのテストを削除した後の281件は全成功した。Map ViewerはID対応修正前にも65件成功したが、実製品Worldで追加定義がある条件を網羅していなかったため、実画面照合で不具合を発見して回帰を追加した。
+
+PR #52のレビューでは、テストだけが呼べる2引数のTerrain色変換と、検索表がnullの場合にGroundを旧Biome色、Wallを旧固定色へ戻す分岐が残っていると指摘された。2引数入口を削除し、41材質検索表を必須化した。未知のGround／Wallは旧色へ読み替えず未取得色とし、検索表なしを明示例外にする。旧Biome同一性だけを保証していたテストは、GrassLoamの安定材質色、TerrainSurface差分の非影響、検索表なしの拒否、未知Ground／Wallの非代替を保証する2件へ置換した。Unity 6000.3.8f1で厳格再コンパイルはエラー0・警告0、`WorldGenerationMapViewerTests`は上表の67件すべて成功した。有効な製品カタログを使う表示結果は変わらないため、追加の実画面確認と性能再計測は不要と判断する。
 
 ビルドは`/private/tmp/farmware-c6d-final-build/Farmware.app`へ出力した。警告1件は、Player用RuntimePipelineConfigが未設定で、開発用Pipeline接続をPlayerで無効にするという通知だった。付随するCloud Diagnosticsのシンボル送信は`GameAssembly.dSYM`不在で失敗するログがあり、ビルド本体のエラー件数は0だった。Player実行時の追加性能測定は今回行わない。ビルド後の最後のコード修正はEditorの保存後検査だけであり、Runtime・Shader・Atlas・製品Sceneの内容はビルド成功版から変更していない。
 

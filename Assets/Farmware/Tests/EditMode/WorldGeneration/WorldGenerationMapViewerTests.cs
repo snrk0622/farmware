@@ -165,6 +165,8 @@ namespace Farmware.WorldGeneration.Tests
                 Is.True);
             using HydrologyDiagnosticTerrainCatalogs diagnosticCatalogs =
                 createdDiagnosticCatalogs;
+            TerrainMaterialPresentationRuntimeLookup materialLookup =
+                CreateMaterialRuntimeLookup(catalogs.DefinitionCatalog);
             WorldGenerationMapSampleResult result = WorldGenerationMapSampler.Sample(
                 settings,
                 diagnosticCatalogs,
@@ -191,30 +193,11 @@ namespace Farmware.WorldGeneration.Tests
                         worldTileX,
                         worldTileY,
                         out FinalizedTerrainMapSample finalizedSample);
-                    Color32 expectedColor;
-                    if (finalizedSample.TerrainCell.LiquidRuntimeId.IsValid)
-                    {
-                        // 液体3種の優先色は従来の公開変換と共有し、材質疑似色より先に表示します。
-                        expectedColor = WorldGenerationMapSampler.GetTerrainDisplayColor(
-                            finalizedSample.TerrainCell,
-                            catalogs.RuntimeIds);
-                    }
-                    else if (finalizedSample.TerrainCell.WallBlockRuntimeId.IsValid)
-                    {
-                        expectedColor = WorldGenerationMapSampler.GetTerrainMaterialDisplayColor(
-                            finalizedSample.WallMaterialId,
-                            true);
-                    }
-                    else if (finalizedSample.TerrainCell.GroundBlockRuntimeId.IsValid)
-                    {
-                        expectedColor = WorldGenerationMapSampler.GetTerrainMaterialDisplayColor(
-                            finalizedSample.GroundMaterialId,
-                            false);
-                    }
-                    else
-                    {
-                        expectedColor = new Color32(30, 30, 36, 255);
-                    }
+                    // Map本体と同じ必須検索表を通し、液体・Wall・Groundの優先順を旧Biome色なしで比較します。
+                    Color32 expectedColor = WorldGenerationMapSampler.GetTerrainDisplayColor(
+                        finalizedSample.TerrainCell,
+                        catalogs.RuntimeIds,
+                        materialLookup);
 
                     Assert.That(found, Is.True, $"tile=({worldTileX}, {worldTileY})");
                     Assert.That(
@@ -705,44 +688,120 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 同じ論理Biomeと地面へ異なる地表Blockを重ねても、TerrainとBiomeの両表示が所属色だけを維持することを保証します。
+        /// 同じ41材質の地面へ異なる地表Blockを重ねても、Terrain表示が材質色を維持することを保証します。
         /// </summary>
         [Test]
-        public void DisplayColor_PlayerTerrainIgnoresSurfaceAndKeepsBiomeIdentity()
+        public void TerrainDisplayColor_UsesMaterialAndIgnoresSurface()
         {
-            BuiltInTerrainBlockRuntimeIds runtimeIds = new BuiltInTerrainBlockRuntimeIds
-            {
-                FreshWater = new DefinitionRuntimeId(1),
-                SaltWater = new DefinitionRuntimeId(2),
-                Magma = new DefinitionRuntimeId(3)
-            };
-            GeneratedTile forestTile = new GeneratedTile
-            {
-                Biome = BiomeId.TemperateDeciduousForest
-            };
+            using TerrainGenerationTestCatalogSet catalogs =
+                TerrainGenerationTestCatalogSet.Create();
+            TerrainMaterialPresentationRuntimeLookup materialLookup =
+                CreateMaterialRuntimeLookup(catalogs.DefinitionCatalog);
             GeneratedTerrainCell forestWithoutSurface = new GeneratedTerrainCell
             {
                 Biome = BiomeId.TemperateDeciduousForest,
-                GroundBlockRuntimeId = new DefinitionRuntimeId(4)
+                GroundBlockRuntimeId = catalogs.GroundRuntimeId
             };
             GeneratedTerrainCell forestWithSurface = forestWithoutSurface;
             forestWithSurface.TerrainSurfaceRuntimeId = new DefinitionRuntimeId(5);
 
             Color32 terrainWithoutSurface = WorldGenerationMapSampler.GetTerrainDisplayColor(
                 forestWithoutSurface,
-                runtimeIds);
+                catalogs.RuntimeIds,
+                materialLookup);
             Color32 terrainWithSurface = WorldGenerationMapSampler.GetTerrainDisplayColor(
                 forestWithSurface,
-                runtimeIds);
-            Color32 biomeColor = WorldGenerationMapSampler.GetDisplayColor(
-                WorldGenerationMapViewMode.Biome,
-                forestTile);
+                catalogs.RuntimeIds,
+                materialLookup);
+            Color32 expectedMaterialColor =
+                WorldGenerationMapSampler.GetTerrainMaterialDisplayColor(
+                    TerrainBlockMaterialId.GrassLoam,
+                    false);
 
             Assert.That(
                 terrainWithoutSurface,
                 Is.EqualTo(terrainWithSurface),
-                "プレイヤー向けTerrain表示は地表Block差分ではなく基礎地形のBiome色を維持します。");
-            Assert.That(terrainWithoutSurface, Is.EqualTo(biomeColor));
+                "Terrain表示は地表Block差分ではなくGround材質を維持します。");
+            Assert.That(terrainWithoutSurface, Is.EqualTo(expectedMaterialColor));
+        }
+
+        /// <summary>
+        /// Terrain色変換が41材質検索表を必須とし、未知のGround／Wallを旧Biome色や旧固定Wall色へ代替しないことを保証します。
+        /// </summary>
+        [Test]
+        public void TerrainDisplayColor_RejectsMissingLookupAndUnknownMaterials()
+        {
+            using TerrainGenerationTestCatalogSet catalogs =
+                TerrainGenerationTestCatalogSet.Create();
+            TerrainMaterialPresentationRuntimeLookup materialLookup =
+                CreateMaterialRuntimeLookup(catalogs.DefinitionCatalog);
+            var unknownGround = new GeneratedTerrainCell
+            {
+                Biome = BiomeId.TemperateDeciduousForest,
+                GroundBlockRuntimeId = new DefinitionRuntimeId(int.MaxValue)
+            };
+            var unknownWall = new GeneratedTerrainCell
+            {
+                Biome = BiomeId.TemperateDeciduousForest,
+                WallBlockRuntimeId = new DefinitionRuntimeId(int.MaxValue)
+            };
+            Color32 unavailableColor = new Color32(30, 30, 36, 255);
+
+            Assert.That(
+                () => WorldGenerationMapSampler.GetTerrainDisplayColor(
+                    unknownGround,
+                    catalogs.RuntimeIds,
+                    null),
+                Throws.ArgumentNullException);
+            Assert.That(
+                WorldGenerationMapSampler.GetTerrainDisplayColor(
+                    unknownGround,
+                    catalogs.RuntimeIds,
+                    materialLookup),
+                Is.EqualTo(unavailableColor));
+            Assert.That(
+                WorldGenerationMapSampler.GetTerrainDisplayColor(
+                    unknownWall,
+                    catalogs.RuntimeIds,
+                    materialLookup),
+                Is.EqualTo(unavailableColor));
+        }
+
+        /// <summary>
+        /// テスト用共通Definitionから製品と同じ41材質Blobを一時構築し、Runtime ID検索表だけを返します。
+        /// Blobは検索表へのコピー完了後に破棄し、各テストのPersistent領域を残しません。
+        /// </summary>
+        /// <param name="definitionCatalog">Ground／Wall Runtime IDを解決済みのテスト用共通Definitionです。</param>
+        /// <returns>41材質のGround／Wallを役割別に解決できるManaged検索表です。</returns>
+        private static TerrainMaterialPresentationRuntimeLookup CreateMaterialRuntimeLookup(
+            BlobAssetReference<DefinitionCatalogBlob> definitionCatalog)
+        {
+            BlobAssetReference<TerrainBlockMaterialCatalogBlob> materialCatalog = default;
+            try
+            {
+                Assert.That(
+                    TerrainBlockMaterialCatalogBuilder.TryBuild(
+                        definitionCatalog,
+                        TerrainBlockMaterialDefinitions.CreateDefault(),
+                        out materialCatalog),
+                    Is.True,
+                    "テスト用の41材質Blobを構築できませんでした。");
+                Assert.That(
+                    TerrainMaterialPresentationRuntimeLookup.TryCreate(
+                        materialCatalog,
+                        out TerrainMaterialPresentationRuntimeLookup materialLookup,
+                        out string materialLookupError),
+                    Is.True,
+                    materialLookupError);
+                return materialLookup;
+            }
+            finally
+            {
+                if (materialCatalog.IsCreated)
+                {
+                    materialCatalog.Dispose();
+                }
+            }
         }
 
         /// <summary>
