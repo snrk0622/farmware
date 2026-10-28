@@ -105,6 +105,21 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 "画面上端外の土地断面が下へはみ出すため、直上チャンクも表示対象に含める必要があります。");
         }
 
+        /// <summary>製品Wall 2段とGround崖面3段が、正負のチャンク境界から画面内へ届く場合に読込対象へ含まれることを保証します。</summary>
+        /// <param name="baseY">正負の論理チャンク境界です。単位はタイルです。</param>
+        [TestCase(0)]
+        [TestCase(-64)]
+        public void CalculateChunkBounds_ProductProjectionIncludesFullOverhang(int baseY)
+        {
+            // 下端の2セル下のWallと、上端の3セル上のGroundから、画面内へ投影が届きます。
+            ChunkStreamingObserver lower = CameraChunkStreamingBridge.CalculateChunkBoundsFromVisibleTileBounds(
+                0, 0, baseY + 1, baseY + 10);
+            ChunkStreamingObserver upper = CameraChunkStreamingBridge.CalculateChunkBoundsFromVisibleTileBounds(
+                0, 0, baseY + 50, baseY + 61);
+            Assert.That(lower.MinimumVisibleChunkY, Is.EqualTo(WorldGrid.ToChunkCoordinate(0, baseY - 1).Y));
+            Assert.That(upper.MaximumVisibleChunkY, Is.EqualTo(WorldGrid.ToChunkCoordinate(0, baseY + 64).Y));
+        }
+
         /// <summary>
         /// CameraのViewportをGridの64タイル境界へ正確に揃え、面積を持たない右上側セルと隣接チャンクを要求しないことを保証します。
         /// 正負両側で、上下方向はSpriteのはみ出し用チャンクだけが加わり、水平方向へ余分なチャンクが増えないことを確認します。
@@ -465,123 +480,6 @@ namespace Farmware.WorldGeneration.PlayModeTests
         }
 
         /// <summary>
-        /// 自動原点変更前のチャンク表示を準備し、新原点側の同じ論理チャンクを残したまま旧相対セルだけを分割消去できることを保証します。
-        /// 旧表示の掃除が新しい可視セルを消すと原点変更直後に空白が出るため、2つの表示原点を明示して回帰確認します。
-        /// </summary>
-        [Test]
-        public void AutomaticRebase_DeferredCleanupClearsOnlyStaleOriginCells()
-        {
-            GameObject cameraObject = null;
-            GameObject gridObject = null;
-            GameObject tilemapObject = null;
-            GameObject presenterObject = null;
-            Tile testTile = null;
-
-            try
-            {
-                cameraObject = new GameObject("Automatic Rebase Test Camera");
-                cameraObject.transform.position = new Vector3(0f, 0f, -10f);
-                cameraObject.AddComponent<Camera>();
-                CameraPanController panController =
-                    cameraObject.AddComponent<CameraPanController>();
-
-                gridObject = new GameObject("Automatic Rebase Test Grid");
-                gridObject.AddComponent<Grid>();
-                tilemapObject = new GameObject("Automatic Rebase Test Tilemap");
-                tilemapObject.transform.SetParent(gridObject.transform, false);
-                Tilemap tilemap = tilemapObject.AddComponent<Tilemap>();
-                tilemapObject.AddComponent<TilemapRenderer>();
-
-                presenterObject = new GameObject("Automatic Rebase Test Presenter");
-                ChunkTilemapPresenter presenter =
-                    presenterObject.AddComponent<ChunkTilemapPresenter>();
-                presenter.ConfigureDisplayOrigin(panController);
-
-                FieldInfo targetTilemapField = typeof(ChunkTilemapPresenter).GetField(
-                    "targetTilemap",
-                    BindingFlags.NonPublic | BindingFlags.Instance);
-                FieldInfo displayedCoordinatesField = typeof(ChunkTilemapPresenter).GetField(
-                    "displayedCoordinates",
-                    BindingFlags.NonPublic | BindingFlags.Instance);
-                FieldInfo staleClearQueueField = typeof(ChunkTilemapPresenter).GetField(
-                    "staleOriginClearQueue",
-                    BindingFlags.NonPublic | BindingFlags.Instance);
-                MethodInfo synchronizeDisplayOrigin = typeof(ChunkTilemapPresenter).GetMethod(
-                    "SynchronizeDisplayOrigin",
-                    BindingFlags.NonPublic | BindingFlags.Instance);
-                MethodInfo processStaleClearQueue = typeof(ChunkTilemapPresenter).GetMethod(
-                    "ProcessStaleOriginClearQueue",
-                    BindingFlags.NonPublic | BindingFlags.Instance);
-                Assert.That(targetTilemapField, Is.Not.Null);
-                Assert.That(displayedCoordinatesField, Is.Not.Null);
-                Assert.That(staleClearQueueField, Is.Not.Null);
-                Assert.That(synchronizeDisplayOrigin, Is.Not.Null);
-                Assert.That(processStaleClearQueue, Is.Not.Null);
-                targetTilemapField.SetValue(presenter, tilemap);
-
-                // Presenterへ旧原点0を記録し、絶対チャンク(8, 0)を相対セルX=512へ表示済みとして準備します。
-                synchronizeDisplayOrigin.Invoke(presenter, null);
-                HashSet<ChunkCoordinate> displayedCoordinates =
-                    (HashSet<ChunkCoordinate>)displayedCoordinatesField.GetValue(presenter);
-                displayedCoordinates.Add(new ChunkCoordinate(8, 0));
-                testTile = ScriptableObject.CreateInstance<Tile>();
-                Vector3Int staleCell = new Vector3Int(512, 0, 0);
-                tilemap.SetTile(staleCell, testTile);
-
-                // Cameraの絶対位置544.5を変えず、表示原点だけ512へ進めて旧チャンクを分割消去Queueへ移します。
-                panController.SetWorldPosition(new Vector2(544.5f, 0.5f));
-                synchronizeDisplayOrigin.Invoke(presenter, null);
-                object staleClearQueue = staleClearQueueField.GetValue(presenter);
-                Assert.That(staleClearQueue, Is.InstanceOf<System.Collections.ICollection>());
-                int queuedChunkCount = ((System.Collections.ICollection)staleClearQueue).Count;
-                Assert.That(queuedChunkCount, Is.EqualTo(1));
-                Assert.That(tilemap.GetTile(staleCell), Is.SameAs(testTile));
-
-                // 新原点512では同じ絶対チャンクの先頭が相対セル0になります。旧セル掃除後もこの新表示を残します。
-                Vector3Int currentCell = Vector3Int.zero;
-                tilemap.SetTile(currentCell, testTile);
-                processStaleClearQueue.Invoke(
-                    presenter,
-                    new object[] { WorldGridConstants.SubChunksPerChunk });
-                Assert.That(
-                    tilemap.GetTile(staleCell),
-                    Is.Null,
-                    "旧表示原点の相対セルはフレーム予算内で消去される必要があります。");
-                Assert.That(
-                    tilemap.GetTile(currentCell),
-                    Is.SameAs(testTile),
-                    "旧原点セルの消去で新原点側の同じ論理チャンクを消してはいけません。");
-            }
-            finally
-            {
-                if (presenterObject != null)
-                {
-                    Object.DestroyImmediate(presenterObject);
-                }
-
-                if (tilemapObject != null)
-                {
-                    Object.DestroyImmediate(tilemapObject);
-                }
-
-                if (gridObject != null)
-                {
-                    Object.DestroyImmediate(gridObject);
-                }
-
-                if (cameraObject != null)
-                {
-                    Object.DestroyImmediate(cameraObject);
-                }
-
-                if (testTile != null)
-                {
-                    Object.DestroyImmediate(testTile);
-                }
-            }
-        }
-
-        /// <summary>
         /// 自動原点変更前に作成した岩壁影Meshを準備し、同じ論理チャンクの新表示でGameObjectとMeshを再利用することを保証します。
         /// 毎回の影マスク計算とMesh再生成が戻ると原点変更スパイクが再発するため、位置変更と再利用候補の消費まで確認します。
         /// </summary>
@@ -619,28 +517,18 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 FieldInfo displayedCoordinatesField = typeof(ChunkTilemapPresenter).GetField(
                     "displayedCoordinates",
                     BindingFlags.NonPublic | BindingFlags.Instance);
-                FieldInfo reusableShadowsField = typeof(ChunkTilemapPresenter).GetField(
-                    "reusableRockWallShadowCoordinates",
-                    BindingFlags.NonPublic | BindingFlags.Instance);
                 MethodInfo synchronizeDisplayOrigin = typeof(ChunkTilemapPresenter).GetMethod(
                     "SynchronizeDisplayOrigin",
                     BindingFlags.NonPublic | BindingFlags.Instance);
                 MethodInfo getOrCreateShadow = typeof(ChunkTilemapPresenter).GetMethod(
                     "GetOrCreateRockWallShadowPresentation",
                     BindingFlags.NonPublic | BindingFlags.Instance);
-                MethodInfo tryReuseShadow = typeof(ChunkTilemapPresenter).GetMethod(
-                    "TryReuseRockWallShadowAfterAutomaticRebase",
-                    BindingFlags.NonPublic | BindingFlags.Instance);
-                MethodInfo destroyUnusedShadows = typeof(ChunkTilemapPresenter).GetMethod(
-                    "DestroyUnusedRebasedRockWallShadows",
-                    BindingFlags.NonPublic | BindingFlags.Instance);
+
+
                 Assert.That(targetTilemapField, Is.Not.Null);
                 Assert.That(displayedCoordinatesField, Is.Not.Null);
-                Assert.That(reusableShadowsField, Is.Not.Null);
                 Assert.That(synchronizeDisplayOrigin, Is.Not.Null);
                 Assert.That(getOrCreateShadow, Is.Not.Null);
-                Assert.That(tryReuseShadow, Is.Not.Null);
-                Assert.That(destroyUnusedShadows, Is.Not.Null);
                 targetTilemapField.SetValue(presenter, tilemap);
 
                 // 旧原点0で絶対チャンク(8, 0)を表示済みにし、実際のPresenter経路で影GameObjectとMeshを1組作ります。
@@ -671,7 +559,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Mesh originalShadowMesh = (Mesh)shadowMeshField.GetValue(originalPresentation);
                 originalShadowObject.transform.localPosition = new Vector3(
                     WorldGridConstants.LogicalChunkSize * 8,
-                    TerrainLayerPresentationUtility.RockWallElevationInCells,
+                    TerrainMaterialVerticalProjectionUtility.WallTopOffsetInTiles,
                     0f);
 
                 // 絶対Camera位置は保ったまま表示原点を512へ進め、影の形状を作り直さず相対セル0へ移します。
@@ -689,24 +577,10 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     Is.SameAs(originalShadowMesh));
                 Assert.That(originalShadowObject.transform.localPosition.x, Is.EqualTo(0f));
 
-                // 新Tilemap反映完了を模擬して再利用候補を消費し、未使用影の掃除から採用済み影が除外されることを確認します。
-                HashSet<ChunkCoordinate> reusableShadows =
-                    (HashSet<ChunkCoordinate>)reusableShadowsField.GetValue(presenter);
-                Assert.That(reusableShadows.Count, Is.EqualTo(2));
-                Assert.That(
-                    tryReuseShadow.Invoke(presenter, new object[] { coordinate }),
-                    Is.EqualTo(true));
-                Assert.That(reusableShadows.Count, Is.EqualTo(1));
-                destroyUnusedShadows.Invoke(presenter, null);
-                Assert.That(reusableShadows.Count, Is.EqualTo(0));
-                Assert.That(
-                    getOrCreateShadow.Invoke(presenter, new object[] { coordinate }),
-                    Is.SameAs(originalPresentation),
-                    "新表示で採用した影は原点変更フレーム末の未使用掃除で破棄してはいけません。");
-                Assert.That(
-                    getOrCreateShadow.Invoke(presenter, new object[] { unusedCoordinate }),
-                    Is.Not.SameAs(unusedPresentation),
-                    "新Viewportで採用しなかった旧影は辞書から除き、表示・メモリへ残してはいけません。");
+                // 自動原点変更では表示中の影を直接移動し、形状と所有者を保持します。
+                Assert.That(getOrCreateShadow.Invoke(presenter, new object[] { coordinate }), Is.SameAs(originalPresentation));
+                Assert.That(getOrCreateShadow.Invoke(presenter, new object[] { unusedCoordinate }), Is.SameAs(unusedPresentation));
+
             }
             finally
             {
@@ -1341,78 +1215,6 @@ namespace Farmware.WorldGeneration.PlayModeTests
         }
 
         /// <summary>
-        /// 同じBiomeとGroundへ地表Blockを重ねても、Presenterが同じプレイヤー向け土地Tileを選ぶことを保証します。
-        /// </summary>
-        [Test]
-        public void ChunkTilemapPresenter_IgnoresSoilForPlayerTerrainTile()
-        {
-            GameObject presenterRoot = null;
-            Tile grasslandBase = null;
-            Tile forestBase = null;
-
-            try
-            {
-                ChunkTilemapPresenter presenter = CreateLifecycleTestPresenter(
-                    out presenterRoot,
-                    out Tilemap terrainTilemap);
-                grasslandBase = ScriptableObject.CreateInstance<Tile>();
-                forestBase = ScriptableObject.CreateInstance<Tile>();
-                TileBase[] biomeTiles = new TileBase[BiomeStableIds.Count];
-                biomeTiles[(int)BiomeId.TemperateGrassland - BiomeStableIds.First] = grasslandBase;
-                biomeTiles[(int)BiomeId.TemperateDeciduousForest - BiomeStableIds.First] = forestBase;
-
-                presenter.Configure(
-                    terrainTilemap,
-                    null,
-                    biomeTiles,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null);
-                MethodInfo selectLandTile = typeof(ChunkTilemapPresenter).GetMethod(
-                    "SelectLandTile",
-                    BindingFlags.Instance | BindingFlags.NonPublic);
-                Assert.That(selectLandTile, Is.Not.Null);
-
-                GeneratedTerrainCell forestWithoutSurface = new GeneratedTerrainCell
-                {
-                    Biome = BiomeId.TemperateDeciduousForest,
-                    GroundBlockRuntimeId = new DefinitionRuntimeId(1)
-                };
-                GeneratedTerrainCell forestWithSurface = forestWithoutSurface;
-                forestWithSurface.TerrainSurfaceRuntimeId = new DefinitionRuntimeId(2);
-
-                // 地表Blockは土地基準Tileを置き換えないため、どちらも森林の同じTileへ到達する必要があります。
-                Assert.That(
-                    selectLandTile.Invoke(presenter, new object[] { forestWithoutSurface }),
-                    Is.SameAs(forestBase));
-                Assert.That(
-                    selectLandTile.Invoke(presenter, new object[] { forestWithSurface }),
-                    Is.SameAs(forestBase));
-            }
-            finally
-            {
-                if (presenterRoot != null)
-                {
-                    Object.DestroyImmediate(presenterRoot);
-                }
-
-                if (grasslandBase != null)
-                {
-                    Object.DestroyImmediate(grasslandBase);
-                }
-
-                if (forestBase != null)
-                {
-                    Object.DestroyImmediate(forestBase);
-                }
-            }
-        }
-
-        /// <summary>
         /// F4グリッドの縦線と横線が、Windowbox内でGUI.matrixを回転せず描画できる正の矩形へ変換されることを検証します。
         /// 開始・終了の向きを逆にしたケースも含め、縦線だけ消える不具合の再発を防ぎます。
         /// </summary>
@@ -1810,15 +1612,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
         [UnityTest]
         public IEnumerator SampleScene_StreamsAndDeterministicallyRegeneratesTerrainTiles()
         {
-            return VerifySampleSceneStreaming(true);
-        }
-
-        /// <summary>旧共有方式でも同じScene連携・決定論・表示契約を維持することを確認します。</summary>
-        /// <returns>共有方式に切り替えて共通の縦切り検証を進めるIEnumeratorです。</returns>
-        [UnityTest]
-        public IEnumerator SampleScene_SharedModeStreamsAndRegeneratesTerrainTiles()
-        {
-            return VerifySampleSceneStreaming(false);
+            return VerifySampleSceneStreaming();
         }
 
         /// <summary>
@@ -1849,8 +1643,6 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(groundTilemap, Is.Not.Null, "SampleSceneにGround Tilemapがありません。");
             Assert.That(liquidBaseTilemap, Is.Not.Null, "SampleSceneにLiquid Base Tilemapがありません。");
 
-            // MAP-02Dで採用した方式だけを継続回帰の対象にし、診断用の旧共有方式との二重実行で通常テストを重くしません。
-            terrainPresenter.ConfigureChunkLocalPresentation(true);
 
             World world = null;
             EntityQuery settingsQuery = default;
@@ -2137,10 +1929,9 @@ namespace Farmware.WorldGeneration.PlayModeTests
             }
         }
 
-        /// <summary>Sceneを読み込み、指定表示方式で地形・液面・資源・診断表示と再生成を実際に検証します。</summary>
-        /// <param name="local">既定のチャンク別方式ならtrue、旧共有方式を検証するときはfalseです。</param>
+        /// <summary>Sceneを読み込み、製品表示方式で地形・液面・資源・診断表示と再生成を実際に検証します。</summary>
         /// <returns>SceneロードとECS・表示の完了をフレーム上限付きで待つIEnumeratorです。</returns>
-        private IEnumerator VerifySampleSceneStreaming(bool local)
+        private IEnumerator VerifySampleSceneStreaming()
         {
             AsyncOperation loadOperation = SceneManager.LoadSceneAsync("SampleScene", LoadSceneMode.Single);
             Assert.That(loadOperation, Is.Not.Null, "Build SettingsからSampleSceneを読み込めませんでした。");
@@ -2163,47 +1954,16 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Is.Not.Null,
                 "SampleSceneに地形Tileを割り当てるChunkTilemapPresenterがありません。");
 
-            FieldInfo biomeTilesField = typeof(ChunkTilemapPresenter).GetField(
-                "biomeTiles",
-                BindingFlags.NonPublic | BindingFlags.Instance);
-            Assert.That(biomeTilesField, Is.Not.Null, "新18BiomeのTile配列が見つかりません。");
-            TileBase[] biomeTiles = biomeTilesField.GetValue(terrainPresenter) as TileBase[];
-            Assert.That(biomeTiles, Is.Not.Null);
-            Assert.That(biomeTiles.Length, Is.EqualTo(BiomeStableIds.Count));
-
-            // 18要素を個別確認し、未制作Biomeを旧7種の近似Tileへ黙って寄せる回帰を防ぎます。
-            for (int biomeIndex = 0; biomeIndex < biomeTiles.Length; biomeIndex++)
-            {
-                Tile biomeTile = biomeTiles[biomeIndex] as Tile;
-                Assert.That(
-                    biomeTile,
-                    Is.Not.Null,
-                    $"SampleSceneのBiome Tile参照がありません: ID {biomeIndex + 1}");
-                Assert.That(
-                    biomeTile.sprite,
-                    Is.Not.Null,
-                    $"SampleSceneのBiome TileにSpriteがありません: ID {biomeIndex + 1}");
-                Assert.That(
-                    biomeTile.sprite.name,
-                    Is.EqualTo(((BiomeId)(biomeIndex + BiomeStableIds.First)).ToString()),
-                    $"SampleSceneの仮Tileが安定ID順に並んでいません: ID {biomeIndex + 1}");
-            }
-
-            // 専用TileアセットとSceneの参照を同時に確認し、構築ツールの再実行でFallback岩壁へ戻る回帰を検出します。
-            FieldInfo rockWallTileField = typeof(ChunkTilemapPresenter).GetField(
-                "rockWallTile",
-                BindingFlags.NonPublic | BindingFlags.Instance);
-            Assert.That(rockWallTileField, Is.Not.Null, "岩壁Tileフィールドが見つかりません。");
-            Tile productionRockWallTile = rockWallTileField.GetValue(terrainPresenter) as Tile;
-            Assert.That(productionRockWallTile, Is.Not.Null, "SampleSceneの岩壁Tile参照がありません。");
-            Assert.That(
-                productionRockWallTile.sprite,
-                Is.Not.Null,
-                "SampleSceneの岩壁TileにSpriteがありません。");
-            Assert.That(
-                productionRockWallTile.sprite.name,
-                Is.EqualTo("terrain_rock_wall_01"),
-                "SampleSceneが本番用岩壁Spriteを参照していません。");
+            // 材質と液体の製品カタログが保存され、旧Biome Tile配列へ戻らないことを実Sceneから確認します。
+            var presenterFlags = BindingFlags.NonPublic | BindingFlags.Instance;
+            var materialCatalog = (TerrainMaterialPresentationCatalog)typeof(ChunkTilemapPresenter)
+                .GetField("materialPresentationCatalog", presenterFlags).GetValue(terrainPresenter);
+            var liquidCatalog = (TerrainLiquidPresentationCatalog)typeof(ChunkTilemapPresenter)
+                .GetField("liquidPresentationCatalog", presenterFlags).GetValue(terrainPresenter);
+            Assert.That(materialCatalog, Is.Not.Null);
+            Assert.That(materialCatalog.TryInitialize(out string materialError), Is.True, materialError);
+            Assert.That(liquidCatalog, Is.Not.Null);
+            Assert.That(liquidCatalog.TryInitialize(out string liquidError), Is.True, liquidError);
 
             GameObject resourceTilemapObject = GameObject.Find("World Grid/Resource Tilemap");
             Tilemap resourceTilemap = resourceTilemapObject == null
@@ -2335,19 +2095,19 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(
                 groundRenderer.mode,
                 Is.EqualTo(TilemapRenderer.Mode.Individual),
-                "16×24土地はセルごとの行ソートが必要なためIndividual Modeで描画してください。");
+                "製品Groundはセルごとの行ソートが必要なためIndividual Modeで描画してください。");
             Assert.That(
                 rockWallRenderer.mode,
                 Is.EqualTo(TilemapRenderer.Mode.Individual),
-                "16×28岩壁はセルごとの行ソートが必要なためIndividual Modeで描画してください。");
+                "製品Wallはセルごとの行ソートが必要なためIndividual Modeで描画してください。");
             Assert.That(
                 groundRenderer.sortOrder,
                 Is.EqualTo(TilemapRenderer.SortOrder.TopLeft),
-                "16×24土地は奥の高いYから先に描き、手前の低いYを後から重ねてください。");
+                "製品Groundは奥の高いYから先に描き、手前の低いYを後から重ねてください。");
             Assert.That(
                 rockWallRenderer.sortOrder,
                 Is.EqualTo(TilemapRenderer.SortOrder.TopLeft),
-                "16×28岩壁は奥の高いYから先に描き、手前の低いYを後から重ねてください。");
+                "製品Wallは奥の高いYから先に描き、手前の低いYを後から重ねてください。");
             Assert.That(
                 resourceBehindRockWallRenderer.sortingLayerName,
                 Is.EqualTo("Default"),
@@ -2393,10 +2153,6 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 "水際線は反射より手前へ描画してください。");
             CameraPanController cameraPanController = Object.FindFirstObjectByType<CameraPanController>();
             Assert.That(cameraPanController, Is.Not.Null, "Main CameraにCameraPanControllerがありません。");
-            Assert.That(typeof(ChunkTilemapPresenter).GetField("useChunkLocalTilemaps",
-                BindingFlags.Instance | BindingFlags.NonPublic).GetValue(terrainPresenter), Is.True,
-                "SampleSceneの保存値も既定ONへそろえる必要があります。");
-            terrainPresenter.ConfigureChunkLocalPresentation(local);
             // ローカル方式のScene見本は空です。表示原点基準セルから、実際に描くチャンク内セルへ読取だけを変換します。
             // 方式にかかわらず以降の検証内容を共通にし、表示されていない見本を成功条件へ使わないようにします。
             System.Func<Tilemap, Vector3Int, TileBase> readPresentedTile = (layer, cell) =>
@@ -2959,10 +2715,6 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     displayedWallTile,
                     Is.Not.Null,
                     $"Wallセル {cellPosition} に製品材質Tileがありません。");
-                Assert.That(
-                    displayedWallTile,
-                    Is.Not.SameAs(productionRockWallTile),
-                    $"Wallセル {cellPosition} が旧一体型岩壁Tileへ戻っています。");
                 Assert.That(
                     displayedWallTile.sprite,
                     Is.Not.Null,
@@ -3734,7 +3486,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
         /// <param name="presenter">Sceneの表示キャッシュ所有者です。</param>
         /// <param name="template">Sceneの対応レイヤー見本です。</param>
         /// <param name="coordinate">確認する絶対チャンク座標です。</param>
-        /// <returns>描画先のTilemap、まだ未割当ならnullです。共有方式では見本自身です。</returns>
+        /// <returns>描画先のTilemap、まだ未割当ならnullです。見本自身には描画しません。</returns>
         private static Tilemap GetPresentedTilemap(ChunkTilemapPresenter presenter, Tilemap template, ChunkCoordinate coordinate)
         {
             var flags = BindingFlags.Instance | BindingFlags.NonPublic;
@@ -3755,11 +3507,9 @@ namespace Farmware.WorldGeneration.PlayModeTests
             ChunkCoordinate coordinate = WorldGrid.ToChunkCoordinate(absoluteX, absoluteY);
             Tilemap map = GetPresentedTilemap(presenter, template, coordinate);
             if (map == null) return null;
-            var flags = BindingFlags.Instance | BindingFlags.NonPublic;
-            bool local = (bool)typeof(ChunkTilemapPresenter).GetField("chunkLocalTilemapsAreActive", flags).GetValue(presenter);
-            // 両方式とも論理セルは同じです。ローカル方式だけ、負座標にも対応する床除算の余りで0〜63へ戻します。
+            // 論理セルから、負座標にも対応する床除算の余りで0〜63へ戻します。
             ChunkLocalTileCoordinate cell = WorldGrid.ToLocalTileCoordinate(absoluteX, absoluteY);
-            return map.GetTile(local ? new Vector3Int(cell.X, cell.Y, 0) : relativeCell);
+            return map.GetTile(new Vector3Int(cell.X, cell.Y, 0));
         }
 
         /// <summary>
@@ -3924,18 +3674,11 @@ namespace Farmware.WorldGeneration.PlayModeTests
             tilemapObject.AddComponent<TilemapRenderer>();
 
             ChunkTilemapPresenter presenter = rootObject.AddComponent<ChunkTilemapPresenter>();
-            presenter.Configure(
-                terrainTilemap,
-                null,
-                new TileBase[BiomeStableIds.Count],
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null);
+            presenter.Configure(terrainTilemap, null, null, null, null);
             rootObject.SetActive(true);
+            terrainTilemap = (Tilemap)typeof(ChunkTilemapPresenter).GetMethod(
+                "GetTilemapForChunk", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(
+                    presenter, new object[] { new ChunkCoordinate(0, 0), terrainTilemap, true });
             return presenter;
         }
 

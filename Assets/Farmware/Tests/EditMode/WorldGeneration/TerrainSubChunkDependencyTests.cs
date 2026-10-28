@@ -8,6 +8,7 @@ using Farmware.Simulation;
 using Farmware.WorldGeneration.Presentation;
 using NUnit.Framework;
 using Unity.Entities;
+using UnityEditor;
 using UnityEngine;
 using UnityEngine.Tilemaps;
 
@@ -24,8 +25,6 @@ namespace Farmware.WorldGeneration.Tests
         private GameObject grid;
         /// <summary>確認対象の実Presenterです。Scene Assetは使用しません。</summary>
         private ChunkTilemapPresenter presenter;
-        /// <summary>全Biomeへ割り当て、完成セルがTilemapへ書かれたことを確認する一時Tileです。</summary>
-        private Tile tile;
         /// <summary>実Presenterが同期参照する完成Entityの索引です。</summary>
         private Dictionary<ChunkCoordinate, Entity> completed;
 
@@ -45,12 +44,26 @@ namespace Farmware.WorldGeneration.Tests
             Field("presentationWorld").SetValue(presenter, world);
             Field("terrainCatalogBlob").SetValue(presenter, catalogs.TerrainCatalog);
             Field("terrainRuntimeIds").SetValue(presenter, catalogs.RuntimeIds);
-            presenter.ConfigureChunkLocalPresentation(true);
             completed = (Dictionary<ChunkCoordinate, Entity>)Field("completedChunkEntities").GetValue(presenter);
-            tile = ScriptableObject.CreateInstance<Tile>();
-            var biomeTiles = new TileBase[BiomeStableIds.Count];
-            for (int i = 0; i < biomeTiles.Length; i++) biomeTiles[i] = tile;
-            Field("biomeTiles").SetValue(presenter, biomeTiles);
+            // 実製品と同じ41材質・液体カタログとRuntime ID検索表を使い、旧Biome代用表示を検証へ持ち込みません。
+            var product = AssetDatabase.LoadAssetAtPath<TerrainMaterialPresentationCatalog>(
+                "Assets/Farmware/Art/WorldGeneration/Terrain/Published/TerrainMaterialPresentationCatalog.asset");
+            Assert.That(product, Is.Not.Null);
+            Assert.That(product.TryInitialize(out string productError), Is.True, productError);
+            Field("materialPresentationCatalog").SetValue(presenter, product);
+            Assert.That(TerrainBlockMaterialCatalogBuilder.TryBuild(catalogs.DefinitionCatalog,
+                TerrainBlockMaterialDefinitions.CreateDefault(), out var materials), Is.True);
+            try
+            {
+                Assert.That(TerrainMaterialPresentationRuntimeLookup.TryCreate(materials, out var lookup, out string error), Is.True, error);
+                Field("materialRuntimeLookup").SetValue(presenter, lookup);
+            }
+            finally { materials.Dispose(); }
+            Field("materialTileCache").SetValue(presenter, Activator.CreateInstance(Field("materialTileCache").FieldType, true));
+            Field("liquidTileCache").SetValue(presenter, new TerrainLiquidRuntimeTileCache());
+            Field("liquidPresentationCatalog").SetValue(presenter, AssetDatabase.LoadAssetAtPath<TerrainLiquidPresentationCatalog>(
+                "Assets/Farmware/Art/WorldGeneration/Liquids/Published/TerrainLiquidPresentationCatalog.asset"));
+
         }
 
         /// <summary>各テスト後にUnity Object、World、Blobを所有順に解放します。</summary>
@@ -58,7 +71,6 @@ namespace Farmware.WorldGeneration.Tests
         public void TearDown()
         {
             UnityEngine.Object.DestroyImmediate(grid);
-            UnityEngine.Object.DestroyImmediate(tile);
             world.Dispose();
             catalogs.Dispose();
         }
@@ -127,7 +139,7 @@ namespace Farmware.WorldGeneration.Tests
             bool interiorWasWritten = false;
             foreach (Tilemap map in grid.GetComponentsInChildren<Tilemap>())
             {
-                interiorWasWritten |= map.GetTile(new Vector3Int(16, 16, 0)) == tile;
+                interiorWasWritten |= map.HasTile(new Vector3Int(16, 16, 0));
                 Assert.That(map.GetTile(Vector3Int.zero), Is.Null,
                     "未完成近傍が必要な外周へ仮のTileを書いてはいけません。");
             }
@@ -177,11 +189,7 @@ namespace Farmware.WorldGeneration.Tests
             var deltas = new Dictionary<ChunkCoordinate, Entity>();
             CompletedChunkTerrainNeighborhoodFactory.TryCreateEffectiveAvailable(world.EntityManager, completed,
                 deltas, new ChunkCoordinate(0, 0), catalogs.TerrainCatalog, out var partial);
-            var reusable = (HashSet<ChunkCoordinate>)Field("reusableRockWallShadowCoordinates").GetValue(presenter);
-            reusable.Add(new ChunkCoordinate(0, 0));
             Invoke("BuildRockWallShadowMeshForSubChunks", new ChunkCoordinate(0, 0), partial, (ushort)0x0660);
-            Assert.That(reusable.Contains(new ChunkCoordinate(0, 0)), Is.False,
-                "部分Meshへ更新した後に、旧原点の完成Meshとして再利用してはいけません。");
             var shadows = (IDictionary)Field("rockWallShadowByCoordinate").GetValue(presenter);
             object shadow = shadows[new ChunkCoordinate(0, 0)];
             Mesh mesh = (Mesh)shadow.GetType().GetField("Mesh").GetValue(shadow);

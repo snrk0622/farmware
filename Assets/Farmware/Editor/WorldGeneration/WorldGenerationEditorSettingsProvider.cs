@@ -99,7 +99,7 @@ namespace Farmware.WorldGeneration.Editor
             errorMessage =
                 "実ゲームと同じ生成設定を取得できませんでした。"
                 + $" {authoringError}"
-                + " Build Fallback Map Prototypeで設定SubSceneを再構築してください。";
+                + " Build Map Prototypeで設定SubSceneを再構築してください。";
             return false;
         }
 

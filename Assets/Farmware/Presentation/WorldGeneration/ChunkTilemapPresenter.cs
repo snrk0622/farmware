@@ -1,5 +1,5 @@
 // このファイルは、ECSで生成済みの地形・資源チャンクデータを、上面・断面・液体・水際・Wall影のTilemapと反射Meshへ16×16サブチャンク単位で反映・消去します。
-// 既定のチャンク別ローカルTilemapを自動原点変更で再利用し、比較・診断用に旧共有Tilemap方式へ切り替えられます。
+// チャンク別ローカルTilemapを自動原点変更で再利用し、製品カタログの上面・断面・液体を描画します。
 // Tilemapは表示専用キャッシュであり、地形はGeneratedTerrainCell、資源はGeneratedResourceTileを正として参照します。
 // 分類は中心と周囲8チャンクの完成自然地形へ永続差分を重ねた有効地形を直接参照します。
 
@@ -11,7 +11,6 @@ using Unity.Mathematics;
 using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.Rendering;
-using UnityEngine.Serialization;
 using UnityEngine.Tilemaps;
 
 namespace Farmware.WorldGeneration.Presentation
@@ -79,7 +78,7 @@ namespace Farmware.WorldGeneration.Presentation
         private static readonly ProfilerMarker TerrainWallDynamicShadowUpdateProfilerMarker =
             new ProfilerMarker("Farmware.WorldGeneration.TerrainWallDynamicShadowUpdate");
 
-        // 比較方式で、タイル内容を変更せず既存表示ルートだけを移動した時間です。
+        // 自動原点変更時に、タイル内容を変更せず既存表示ルートだけを移動した時間です。
         private static readonly ProfilerMarker ChunkTilemapRepositionProfilerMarker =
             new ProfilerMarker("Farmware.WorldGeneration.ChunkTilemapReposition");
 
@@ -94,8 +93,8 @@ namespace Farmware.WorldGeneration.Presentation
         // URP固有Shaderが見つからない場合にも、黒い頂点色を透明合成できる標準Sprite Shader名です。
         private const string FallbackRockWallShadowShaderName = "Sprites/Default";
 
-        // 上面16pxと前面断面8pxを一体化した旧土地ブロックを描画します。製品材質経路では16×16上面だけを書き込みます。
-        [Tooltip("水・マグマを除く16×24の土地ブロックを描画する専用Tilemapです。行単位の重なりを正しく処理するためIndividual Modeで使用してください。")]
+        // 41材質の16×16 Ground上面を描画する設定見本です。実セルはチャンク別Tilemapへ書き込みます。
+        [Tooltip("41材質の16×16 Ground上面を描画する専用Tilemapです。行単位の重なりを正しく処理するためIndividual Modeで使用してください。")]
         [SerializeField] private Tilemap targetTilemap;
 
         // 水・マグマの静止Surfaceを描画します。製品Sceneは論理セル位置を維持し、岸側だけShaderで上端3pxを隠します。
@@ -165,8 +164,7 @@ namespace Farmware.WorldGeneration.Presentation
         [Tooltip("淡水・海水・マグマの奥・左・右接触線を描く水際アニメーションTilemapです。画面手前辺は描きません。")]
         [SerializeField] private Tilemap liquidEdgeWaveTilemap;
 
-        // 製品経路では論理Wall根元の2タイル奥へGroundTopを描画し、未接続時だけ旧一体型Spriteを使います。
-        [FormerlySerializedAs("rockWallTopTilemap")]
+        // 論理Wall根元の2タイル奥へ、製品カタログのGroundTopを描画します。
         [Tooltip("製品Wall上面のGroundTopを描画するTilemapです。Scene側で論理根元から画面奥へ2タイル持ち上げます。")]
         [SerializeField] private Tilemap rockWallTilemap;
 
@@ -206,25 +204,18 @@ namespace Farmware.WorldGeneration.Presentation
         [Tooltip("CameraとTilemapで共有する表示原点の所有者です。未指定時は絶対原点(0, 0)を使用します。")]
         [SerializeField] private CameraPanController cameraPanController;
 
-        // 自動原点変更で既存表示を再利用する既定方式です。OFFは旧共有方式との診断・比較用に残します。
-        [Tooltip("既定ONです。64×64チャンクごとのTilemapを保持し、自動原点変更では位置だけ更新します。OFFは旧共有方式で、切替時は表示を作り直します。")]
-        [SerializeField] private bool useChunkLocalTilemaps = true;
-
         // 消去済みの表示単位だけを保持する上限です。可視チャンク数の上限やSimulationの保持範囲ではありません。
         [Min(0)]
         [Tooltip("消去済みチャンク表示を再利用する空きプールの上限（チャンク数）です。小さくするとメモリを減らせますが、再作成が増えます。")]
         [SerializeField] private int maximumPooledChunkPresentations = 8;
 
-        // 41材質を完全登録した場合だけ製品上面・断面経路を有効にします。未完成中は旧Presenterを変更しません。
-        [Tooltip("41材質を完全登録した製品表示カタログです。未設定なら旧表示を維持し、設定時は不足や不正値をフォールバックせず拒否します。")]
+        // 41材質を完全登録した必須カタログです。未設定または不完全なら描画を開始しません。
+        [Tooltip("41材質を完全登録した製品表示カタログです。未設定・不足・不正値を拒否し、別素材へ読み替えません。")]
         [SerializeField] private TerrainMaterialPresentationCatalog materialPresentationCatalog;
 
         // 3液体の基礎Tile、水際色、深度色を現行カタログへ完全登録した場合だけ製品Liquid経路を有効にします。
-        [Tooltip("淡水・海水・マグマを各1件登録した製品Liquid表示カタログです。未設定中は既存液面表示を維持します。")]
+        [Tooltip("淡水・海水・マグマを各1件登録した製品Liquid表示カタログです。未設定・不足・不正値を拒否します。")]
         [SerializeField] private TerrainLiquidPresentationCatalog liquidPresentationCatalog;
-
-        // Inspectorの要求と実際にセルを書いた方式を区別し、切替前の方式で古い表示を消去します。
-        private bool chunkLocalTilemapsAreActive;
 
         // 可視・部分構築・消去途中の表示単位を論理座標で保持します。Simulation状態は所有しません。
         private readonly Dictionary<ChunkCoordinate, ChunkLocalTilemapPresentation> chunkLocalPresentations =
@@ -233,27 +224,6 @@ namespace Farmware.WorldGeneration.Presentation
         // 全16サブチャンクの消去が完了した表示単位だけを再貸し出しする、上限付き空きプールです。
         private readonly Stack<ChunkLocalTilemapPresentation> pooledChunkLocalPresentations =
             new Stack<ChunkLocalTilemapPresentation>();
-
-        // 配列の0番をBiomeId 1へ対応させ、新18Biomeのどれを描いたかを旧7種の近似へ潰さず保持します。
-        [Tooltip("BiomeId 1〜18の順に対応する土地Tileです。18要素すべてを設定し、未設定Biomeを別Biomeへフォールバックさせないでください。")]
-        [SerializeField] private TileBase[] biomeTiles = new TileBase[BiomeStableIds.Count];
-
-        // マグマLiquidへ使用する表示専用Tileで、水域や火山地面とは別のゲームルールを視覚化します。
-        [Tooltip("マグマ地形に表示するTileです。通常設備・通常ベルト・通常移動の禁止と、橋の耐熱要件はECSデータで判定します。")]
-        [SerializeField] private TileBase magmaTile;
-
-        // 淡水Liquidへ使用する表示専用Tileです。
-        [Tooltip("川と池の淡水域に表示するTileです。採水種別はECSデータで判定し、この参照には依存しません。")]
-        [SerializeField] private TileBase freshWaterTile;
-
-        // 海水Liquidへ使用する表示専用Tileです。旧waterTile参照は海水表示として引き継ぎます。
-        [FormerlySerializedAs("waterTile")]
-        [Tooltip("海の海水域に表示するTileです。採水種別はECSデータで判定し、この参照には依存しません。")]
-        [SerializeField] private TileBase saltWaterTile;
-
-        // 製品経路では論理Wall根元から2タイル上へ描画する上面、未接続の旧開発Sceneでは16×28一体型Wallを保持します。
-        [Tooltip("製品では論理Wall根元から2タイル上の上面を表示するTileです。製品カタログ未設定の開発Sceneだけ、16×28の共通Tileを使います。")]
-        [SerializeField] private TileBase rockWallTile;
 
         // GeneratedResourceType.Treeへ使用する透明背景の表示専用Tileです。
         [Tooltip("樹木資源に表示する仮Tileです。資源の種類と存在はECSバッファを正とします。")]
@@ -323,9 +293,6 @@ namespace Farmware.WorldGeneration.Presentation
         // 製品カタログ、Runtime検索表、WorldSeedの初期化を現在World向けに完了した場合はtrueです。
         private bool materialPresentationIsReady;
 
-        // Liquidカタログと5レイヤーを検証し、現在WorldのRuntime IDから分類できる場合はtrueです。
-        private bool liquidPresentationIsReady;
-
         // 不完全な製品設定を毎フレームConsoleへ繰り返さないため、最初の拒否理由を報告済みか保持します。
         private bool materialPresentationFailureWasLogged;
 
@@ -374,10 +341,6 @@ namespace Farmware.WorldGeneration.Presentation
         // 消去を要求した順番と途中位置を保持し、フレーム予算を超えないよう分割処理します。
         private readonly Queue<ChunkClearProgress> clearQueue = new Queue<ChunkClearProgress>();
 
-        // 自動原点変更前の相対セルを画面外で分割消去し、新原点側の表示を先に完成させるための待ち行列です。
-        private readonly Queue<StaleOriginClearProgress> staleOriginClearQueue =
-            new Queue<StaleOriginClearProgress>();
-
         // DictionaryとHashSetを走査中に変更しないため、削除対象を一時退避する再利用Listです。
         private readonly List<ChunkCoordinate> coordinateScratch = new List<ChunkCoordinate>();
 
@@ -393,7 +356,7 @@ namespace Farmware.WorldGeneration.Presentation
         // 手前岩壁に隠す資源Tilemapへ渡す256要素の再利用配列です。遠方座標でも透明ソート値に依存しません。
         private TileBase[] resourceBehindRockWallSubChunkTileBuffer;
 
-        // 8px下げた静止液面Tilemapへ渡す256要素の再利用配列です。土地セルにはnullを設定します。
+        // 論理セル原点の基礎液面Tilemapへ渡す256要素の再利用配列です。土地セルにはnullを設定します。
         private TileBase[] liquidBaseSubChunkTileBuffer;
 
         // マグマ模様Tilemapへ渡す256要素の再利用配列です。マグマ以外のセルにはnullを設定します。
@@ -423,7 +386,7 @@ namespace Farmware.WorldGeneration.Presentation
         // 7bit接触形状に対応する静止水際Tileを置く256要素の再利用配列です。
         private TileBase[] liquidEdgeWaveSubChunkTileBuffer;
 
-        // 岩壁セルだけへ一体型ブロックTileを置く256要素の再利用配列です。下層の土地はGround Tilemapへ残します。
+        // 岩壁セルだけへ製品Wall上面Tileを置く256要素の再利用配列です。下層の土地はGround Tilemapへ残します。
         private TileBase[] rockWallSubChunkTileBuffer;
 
         // 製品Ground崖面を投影先セルへ置く256要素の再利用配列です。
@@ -478,11 +441,6 @@ namespace Farmware.WorldGeneration.Presentation
             rockWallShadowByCoordinate =
                 new Dictionary<ChunkCoordinate, RockWallShadowChunkPresentation>();
 
-        // 自動原点変更前から存在し、新原点側の同じ論理チャンクで再利用できる岩壁影座標です。
-        // 原点変更フレームだけ保持し、再反映されなかった座標は同じフレーム末に破棄します。
-        private readonly HashSet<ChunkCoordinate> reusableRockWallShadowCoordinates =
-            new HashSet<ChunkCoordinate>();
-
         // 影距離の探索半径を含む80×80の岩壁有無です。GC確保せず同期更新するためNative配列を使います。
         // Awakeで一度確保し、全チャンクで再利用してOnDestroyで破棄します。フレーム間の借用参照は保持しません。
         private NativeArray<bool> rockWallShadowMaskBuffer;
@@ -501,10 +459,6 @@ namespace Farmware.WorldGeneration.Presentation
 
         // 全チャンク影が共有する実行時Materialです。このComponentが作成し、OnDestroyで破棄します。
         private Material generatedRockWallShadowMaterial;
-
-        // 旧Sceneが淡水Tile参照をまだ保存していない場合だけ、既存水面Spriteを着色して作る実行時フォールバックです。
-        // 正式なTileアセットが設定されている場合は作成せず、このComponentが作成した場合だけOnDestroyで破棄します。
-        private Tile generatedFreshWaterFallbackTile;
 
         // 現在Tilemapセルと岩壁影Meshの配置に使用している表示原点です。Camera側の変更検出と旧セル消去に使います。
         private DisplayOrigin presentedDisplayOrigin;
@@ -563,56 +517,17 @@ namespace Farmware.WorldGeneration.Presentation
         // presentedDisplayOriginを初期化済みか示し、絶対原点(0, 0)自体も有効値として区別します。
         private bool hasPresentedDisplayOrigin;
 
-        /// <summary>
-        /// 比較実行時に表示方式を切り替えます。旧方式の表示を消してから切り替え、次のUpdateでECSから再反映します。
-        /// </summary>
-        /// <param name="enabled">チャンク内ローカルTilemapを使用する場合はtrueです。</param>
-        public void ConfigureChunkLocalPresentation(bool enabled)
-        {
-            if (chunkLocalTilemapsAreActive == enabled && useChunkLocalTilemaps == enabled)
-            {
-                return;
-            }
-
-            ClearAllPresentedChunksImmediately();
-            useChunkLocalTilemaps = enabled;
-            chunkLocalTilemapsAreActive = enabled;
-        }
-
-        /// <summary>
-        /// Editor構築ツールまたはテストから、地形・資源TilemapとBiomeごとの基準Tileをまとめて設定します。
-        /// ゲームルールは変更せず、ECSのBiomeをどのTileで見せるかだけを更新します。
-        /// </summary>
-        /// <param name="terrainTilemap">水・マグマを除く生成地形だけを描画する専用Tilemapです。</param>
-        /// <param name="generatedResourceTilemap">生成資源だけを描画する専用Tilemapです。</param>
-        /// <param name="biomeBaseTiles">BiomeId 1〜18の順に対応する18枚の土地Tileです。</param>
-        /// <param name="magma">マグマLiquidの全セルに表示するTileです。</param>
-        /// <param name="freshWater">淡水の川と池に表示するTileです。</param>
-        /// <param name="saltWater">海水の海に表示するTileです。</param>
-        /// <param name="rockWall">WallBlockを持つ全セルで、専用上面Tilemapへ表示する共通Tileです。</param>
-        /// <param name="treeResource">樹木資源に表示するTileです。</param>
-        /// <param name="stoneResource">石資源に表示するTileです。</param>
-        /// <param name="sandResource">砂資源に表示するTileです。</param>
-        public void Configure(
-            Tilemap terrainTilemap,
-            Tilemap generatedResourceTilemap,
-            TileBase[] biomeBaseTiles,
-            TileBase magma,
-            TileBase freshWater,
-            TileBase saltWater,
-            TileBase rockWall,
-            TileBase treeResource,
-            TileBase stoneResource,
-            TileBase sandResource)
+        /// <summary>構築ツールまたはテストから、地面・資源の表示先と資源Tileを設定します。地形の見た目は製品カタログから選びます。</summary>
+        /// <param name="terrainTilemap">Ground上面の描画設定見本です。</param>
+        /// <param name="generatedResourceTilemap">Wallより手前に描く資源レイヤーの見本です。</param>
+        /// <param name="treeResource">樹木の仮資源Tileです。</param>
+        /// <param name="stoneResource">石の仮資源Tileです。</param>
+        /// <param name="sandResource">砂の仮資源Tileです。</param>
+        public void Configure(Tilemap terrainTilemap, Tilemap generatedResourceTilemap,
+            TileBase treeResource, TileBase stoneResource, TileBase sandResource)
         {
             targetTilemap = terrainTilemap;
             resourceTilemap = generatedResourceTilemap;
-            // 呼び出し元の配列が後から差し替えられて表示契約が変わらないよう、参照配列だけを複製します。
-            biomeTiles = biomeBaseTiles == null ? null : (TileBase[])biomeBaseTiles.Clone();
-            magmaTile = magma;
-            freshWaterTile = freshWater;
-            saltWaterTile = saltWater;
-            rockWallTile = rockWall;
             treeResourceTile = treeResource;
             stoneResourceTile = stoneResource;
             sandResourceTile = sandResource;
@@ -633,7 +548,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// </summary>
         /// <param name="baseLiquidTilemap">淡水・海水・マグマの静止した基礎Tile専用Tilemapです。</param>
         /// <param name="magmaPatternTilemap">マグマだけへ手続き型の網状模様を描くTilemapです。</param>
-        /// <param name="combinedRockWallTilemap">16×28の岩壁ブロックを基準セルへ描画する専用Tilemapです。</param>
+        /// <param name="combinedRockWallTilemap">製品Wall上面を根元の2タイル奥へ描画する専用Tilemapです。</param>
         /// <param name="raisedRockWallResourceTilemap">露出したWall上の資源を、製品では論理根元から2タイル上へ持ち上げる専用Tilemapです。</param>
         public void ConfigureTerrainEffects(
             Tilemap baseLiquidTilemap,
@@ -825,7 +740,6 @@ namespace Farmware.WorldGeneration.Presentation
             rockWallResourceSubChunkTileBuffer = new TileBase[tileCount];
             AllocateRockWallShadowBuffers();
             EnsureWallDynamicShadowUnitSprite();
-            EnsureFreshWaterFallbackTile();
         }
 
         /// <summary>
@@ -901,28 +815,6 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// 淡水参照が未保存の旧Sceneでも川と池を海と見分けられるよう、既存水面Spriteから一時Tileを1つだけ作ります。
-        /// Editor構築ツールでFreshWater.assetを割り当てた後は、この処理は何も変更しません。
-        /// </summary>
-        private void EnsureFreshWaterFallbackTile()
-        {
-            if (freshWaterTile != null || !(saltWaterTile is Tile saltWaterSource))
-            {
-                return;
-            }
-
-            generatedFreshWaterFallbackTile = ScriptableObject.CreateInstance<Tile>();
-            generatedFreshWaterFallbackTile.name = "Generated Fresh Water Fallback";
-            generatedFreshWaterFallbackTile.sprite = saltWaterSource.sprite;
-            generatedFreshWaterFallbackTile.transform = saltWaterSource.transform;
-            generatedFreshWaterFallbackTile.flags = saltWaterSource.flags;
-            generatedFreshWaterFallbackTile.colliderType = saltWaterSource.colliderType;
-            // 元の海水色へ少し緑を残した明色を掛け、仮素材の段階でも淡水と海水を目視で区別します。
-            generatedFreshWaterFallbackTile.color = new Color32(190, 255, 230, 255);
-            freshWaterTile = generatedFreshWaterFallbackTile;
-        }
-
-        /// <summary>
         /// MonoBehaviourの各描画フレームで呼ばれ、表示対象の収集と予算分割された反映・消去を実行します。
         /// </summary>
         private void Update()
@@ -937,56 +829,21 @@ namespace Farmware.WorldGeneration.Presentation
                     return;
                 }
 
-                // Inspectorでの比較切替も同じ消去経路を通し、異なるセル座標方式を混在させません。
-                if (useChunkLocalTilemaps != chunkLocalTilemapsAreActive)
+                // カタログ未設定のSceneを旧表示へ読み替えません。設定漏れは一度だけ具体的に通知し、描画を開始しません。
+                if (materialPresentationCatalog == null || liquidPresentationCatalog == null)
                 {
-                    ConfigureChunkLocalPresentation(useChunkLocalTilemaps);
+                    LogMaterialPresentationFailureOnce("41材質と3液体の製品表示カタログを両方設定してください。");
+                    return;
                 }
-
-                bool usesProductMaterialPresentation = materialPresentationCatalog != null;
-                bool usesProductLiquidPresentation = liquidPresentationCatalog != null;
-                bool missingMaterialForProductLiquid = usesProductLiquidPresentation
-                    && !usesProductMaterialPresentation;
-                bool missingRequiredProductLayer = usesProductMaterialPresentation
-                    && (groundFaceTilemap == null
-                        || wallFaceTilemap == null
-                        || dryCliffDeepBlackTilemap == null);
-                bool missingRequiredLiquidLayer = usesProductLiquidPresentation
-                    && (magmaSurfacePatternTilemap == null
-                        || liquidDepthWithFloorTilemap == null
-                        || liquidDepthWithoutFloorTilemap == null
-                        || underwaterFloorPreviewTilemap == null
-                        || submergedGroundFaceTilemap == null
-                        || waterSurfacePatternTilemap == null
-                        || waterReflectionTilemap == null
-                        || waterReflectionAtlas == null
-                        || liquidEdgeWaveTilemap == null);
-                if (targetTilemap == null
-                    || liquidBaseTilemap == null
-                    || resourceTilemap == null
-                    || resourceBehindRockWallTilemap == null
-                    || missingRequiredProductLayer
-                    || missingRequiredLiquidLayer
-                    || missingMaterialForProductLiquid)
+                if (targetTilemap == null || liquidBaseTilemap == null || resourceTilemap == null
+                    || resourceBehindRockWallTilemap == null || rockWallTilemap == null
+                    || groundFaceTilemap == null || wallFaceTilemap == null || dryCliffDeepBlackTilemap == null
+                    || magmaSurfacePatternTilemap == null || liquidDepthWithFloorTilemap == null
+                    || liquidDepthWithoutFloorTilemap == null || underwaterFloorPreviewTilemap == null
+                    || submergedGroundFaceTilemap == null || waterSurfacePatternTilemap == null
+                    || waterReflectionTilemap == null || waterReflectionAtlas == null || liquidEdgeWaveTilemap == null)
                 {
-                    if (missingRequiredProductLayer)
-                    {
-                        LogMaterialPresentationFailureOnce(
-                            "製品材質表示にはGround Face、Wall Face、乾燥穴深部黒の3 Tilemapが必要です。");
-                    }
-
-                    if (missingRequiredLiquidLayer)
-                    {
-                        LogMaterialPresentationFailureOnce(
-                            "製品Liquid表示には基底色、直下床、水中断面、水面模様、マグマ模様、水際、反射設定見本と製品Atlasの参照が必要です。");
-                    }
-
-                    if (missingMaterialForProductLiquid)
-                    {
-                        LogMaterialPresentationFailureOnce(
-                            "製品Liquid表示には通常Faceと反射元を解決する41材質の製品表示カタログが必要です。");
-                    }
-
+                    LogMaterialPresentationFailureOnce("製品の上面・断面・液体・反射のTilemapと製品Atlasの参照をすべて設定してください。");
                     return;
                 }
 
@@ -1014,8 +871,7 @@ namespace Farmware.WorldGeneration.Presentation
                     return;
                 }
 
-                if (usesProductMaterialPresentation
-                    && !TryPrepareMaterialPresentation())
+                if (!TryPrepareMaterialPresentation())
                 {
                     return;
                 }
@@ -1035,11 +891,10 @@ namespace Farmware.WorldGeneration.Presentation
                 // 異なるLayerは同じX/Yでも別の論理場所です。通常の消去予算へ回すと旧地形が数フレーム残るため、
                 // レイヤー変更フレームだけ全表示を同期消去してから新しいLayerを収集します。
                 SynchronizePresentedLayer(observer.Layer);
-                bool requiresImmediateVisibleRebuild = displayOriginChange != DisplayOriginChangeKind.None
-                    && !(chunkLocalTilemapsAreActive && displayOriginChange == DisplayOriginChangeKind.Automatic);
+                bool requiresImmediateVisibleRebuild = displayOriginChange == DisplayOriginChangeKind.Explicit;
                 using (PresentationWorkCollectionProfilerMarker.Auto())
                 {
-                    // 共有方式の原点変更と明示移動では、余白まで同期再構築して停止を増やさないよう可視範囲だけに限定します。
+                    // 明示移動では、余白まで同期再構築して停止を増やさないよう可視範囲だけに限定します。
                     // 先行準備は次の通常フレームから同じ予算で再開します。
                     CollectPresentationWork(observer, requiresImmediateVisibleRebuild);
                 }
@@ -1049,11 +904,9 @@ namespace Farmware.WorldGeneration.Presentation
                     using (FloatingOriginRebaseProfilerMarker.Auto())
                     {
                         // 原点変更直後は新しいCamera周辺を同じフレームに完成させ、空白フレームを見せません。
-                        // 自動変更の旧セルは設定閾値以上離れた画面外にあるため、通常予算で後から消去します。
+                        // 自動変更は既存表示の位置だけを変え、この再構築を行いません。
                         int unlimitedVisibleBudget = ProcessClearQueue(int.MaxValue);
                         ProcessApplyQueue(unlimitedVisibleBudget);
-                        DestroyUnusedRebasedRockWallShadows();
-                        ProcessStaleOriginClearQueue(GetSubChunkBudget());
                     }
 
                     return;
@@ -1062,7 +915,6 @@ namespace Farmware.WorldGeneration.Presentation
                 int remainingBudget = GetSubChunkBudget();
                 remainingBudget = ProcessClearQueue(remainingBudget);
                 remainingBudget = ProcessApplyQueue(remainingBudget);
-                ProcessStaleOriginClearQueue(remainingBudget);
             }
         }
 
@@ -1314,7 +1166,7 @@ namespace Farmware.WorldGeneration.Presentation
             return true;
         }
 
-        /// <summary>全反射Meshを破棄します。World・方式切替とComponent無効化から呼びます。</summary>
+        /// <summary>全反射Meshを破棄します。World・設定変更とComponent無効化から呼びます。</summary>
         private void DestroyReflectionMeshes()
         {
             foreach (TerrainWaterReflectionMesh mesh in reflectionMeshes.Values) mesh.Dispose();
@@ -1323,8 +1175,8 @@ namespace Farmware.WorldGeneration.Presentation
 
         /// <summary>
         /// Camera側の表示原点変更を検出し、旧相対セルを片付けて新しい原点で再収集できる状態へ戻します。
-        /// 旧共有方式の自動変更では旧セルを分割消去へ移します。既定のローカル方式では位置だけ更新し、反映進捗を保ちます。
-        /// 明示テレポートでは両方式とも重なりを避けるため即時消去します。
+        /// 自動変更では位置だけ更新し、セル内容・影・反映進捗を保ちます。
+        /// 明示テレポートでは旧Viewportとの重なりを避けるため即時消去します。
         /// </summary>
         /// <returns>変更なし、自動変更、明示変更のいずれかです。</returns>
         private DisplayOriginChangeKind SynchronizeDisplayOrigin()
@@ -1355,39 +1207,31 @@ namespace Farmware.WorldGeneration.Presentation
                     && cameraPanController.LastDisplayOriginChangeWasAutomatic;
                 if (isAutomaticRebase)
                 {
-                    if (chunkLocalTilemapsAreActive)
-                    {
-                        // 同じ論理チャンクの内容は変化しないため、完成済み集合と構築途中の番号を保持します。
-                        // 原点変更だけを理由に分類・SetTilesBlock・旧セル消去を予約しません。
-                        using (FloatingOriginRebaseProfilerMarker.Auto())
-                        {
-                            using (ChunkTilemapRepositionProfilerMarker.Auto())
-                            {
-                                foreach (KeyValuePair<ChunkCoordinate, ChunkLocalTilemapPresentation> pair in chunkLocalPresentations)
-                                {
-                                    pair.Value.Reposition(CalculateRockWallShadowMinimumCell(pair.Key, currentOrigin));
-                                }
 
-                                foreach (KeyValuePair<ChunkCoordinate, TerrainWallDynamicShadowChunkPresentation> pair in
-                                         wallDynamicShadowByCoordinate)
-                                {
-                                    // Casterはチャンク内ローカル形状なので、原点変更ではルート位置だけを動かして再利用します。
-                                    pair.Value.Reposition(
-                                        targetTilemap.CellToLocal(
-                                            CalculateRockWallShadowMinimumCell(pair.Key, currentOrigin)));
-                                }
+                    // 同じ論理チャンクの内容は変化しないため、完成済み集合と構築途中の番号を保持します。
+                    // 原点変更だけを理由に分類・SetTilesBlock・旧セル消去を予約しません。
+                    using (FloatingOriginRebaseProfilerMarker.Auto())
+                    {
+                        using (ChunkTilemapRepositionProfilerMarker.Auto())
+                        {
+                            foreach (KeyValuePair<ChunkCoordinate, ChunkLocalTilemapPresentation> pair in chunkLocalPresentations)
+                            {
+                                pair.Value.Reposition(CalculateRockWallShadowMinimumCell(pair.Key, currentOrigin));
                             }
 
-                            PrepareRockWallShadowsForAutomaticRebase(currentOrigin);
-                            reusableRockWallShadowCoordinates.Clear();
+                            foreach (KeyValuePair<ChunkCoordinate, TerrainWallDynamicShadowChunkPresentation> pair in
+                                     wallDynamicShadowByCoordinate)
+                            {
+                                // Casterはチャンク内ローカル形状なので、原点変更ではルート位置だけを動かして再利用します。
+                                pair.Value.Reposition(
+                                    targetTilemap.CellToLocal(
+                                        CalculateRockWallShadowMinimumCell(pair.Key, currentOrigin)));
+                            }
                         }
+
+                        RepositionRockWallShadows(currentOrigin);
                     }
-                    else
-                    {
-                        MoveCurrentPresentationToStaleClearQueue(
-                            presentedDisplayOrigin,
-                            currentOrigin);
-                    }
+
                 }
                 else
                 {
@@ -1427,60 +1271,6 @@ namespace Farmware.WorldGeneration.Presentation
             ClearAllPresentedChunksImmediately();
             presentedLayer = currentLayer;
             return true;
-        }
-
-        /// <summary>
-        /// 現在の原点でTilemapへ書いた可能性があるチャンクを、旧原点付きの分割消去Queueへ移します。
-        /// 新しい可視チャンクと同じ論理座標でも別の相対セルへ書けるよう、通常の表示管理キャッシュは直ちに空にします。
-        /// 岩壁影は論理チャンク内容が変わらないため、新原点へ移動して再利用候補として保持します。
-        /// </summary>
-        /// <param name="staleOrigin">旧Tilemapセルの計算に使用した表示原点です。</param>
-        /// <param name="currentOrigin">Cameraが変更した新しい表示原点です。</param>
-        private void MoveCurrentPresentationToStaleClearQueue(
-            DisplayOrigin staleOrigin,
-            DisplayOrigin currentOrigin)
-        {
-            coordinateScratch.Clear();
-            foreach (ChunkCoordinate coordinate in displayedCoordinates)
-            {
-                coordinateScratch.Add(coordinate);
-            }
-
-            foreach (ChunkCoordinate coordinate in applyProgressByCoordinate.Keys)
-            {
-                if (!coordinateScratch.Contains(coordinate))
-                {
-                    coordinateScratch.Add(coordinate);
-                }
-            }
-
-            foreach (ChunkCoordinate coordinate in pendingClearCoordinates)
-            {
-                if (!coordinateScratch.Contains(coordinate))
-                {
-                    coordinateScratch.Add(coordinate);
-                }
-            }
-
-            // 影Meshの頂点はチャンク内ローカル座標なので、GameObjectの位置だけを新原点へ合わせれば再生成せず使えます。
-            // 同じフレームに新Tilemapも完成するため、Cameraへ古い位置の影だけが描画される中間フレームは発生しません。
-            PrepareRockWallShadowsForAutomaticRebase(currentOrigin);
-            applyProgressByCoordinate.Clear();
-            applyQueue.Clear();
-            displayedCoordinates.Clear();
-            pendingClearCoordinates.Clear();
-            seenCoordinates.Clear();
-            clearQueue.Clear();
-
-            for (int index = 0; index < coordinateScratch.Count; index++)
-            {
-                staleOriginClearQueue.Enqueue(
-                    new StaleOriginClearProgress(
-                        coordinateScratch[index],
-                        staleOrigin));
-            }
-
-            coordinateScratch.Clear();
         }
 
         /// <summary>
@@ -1532,13 +1322,6 @@ namespace Farmware.WorldGeneration.Presentation
             {
                 DestroyUnityObject(generatedRockWallShadowMaterial);
                 generatedRockWallShadowMaterial = null;
-            }
-
-            // Sceneアセットから参照したTileは破棄せず、このComponentがAwakeで作った一時Tileだけを所有者として破棄します。
-            if (generatedFreshWaterFallbackTile != null)
-            {
-                DestroyUnityObject(generatedFreshWaterFallbackTile);
-                generatedFreshWaterFallbackTile = null;
             }
 
             // Texture2D.whiteTextureはUnity共有物なので破棄せず、そこから作ったSpriteだけを所有者として破棄します。
@@ -1662,7 +1445,6 @@ namespace Farmware.WorldGeneration.Presentation
                 liquidTileCache = new TerrainLiquidRuntimeTileCache();
             }
 
-            liquidPresentationIsReady = liquidPresentationCatalog != null;
             materialPresentationIsReady = true;
             return true;
         }
@@ -1672,7 +1454,6 @@ namespace Farmware.WorldGeneration.Presentation
         private void ResetMaterialPresentationState(bool disposeTileCache)
         {
             materialPresentationIsReady = false;
-            liquidPresentationIsReady = false;
             materialPresentationFailureWasLogged = false;
             materialRuntimeLookup = null;
             presentationWorldSeed = 0UL;
@@ -2165,7 +1946,7 @@ namespace Farmware.WorldGeneration.Presentation
                     appliedAny = true;
                 }
                 bool complete = progress.AppliedSubChunkMask == ushort.MaxValue;
-                if (appliedAny && (!complete || !TryReuseRockWallShadowAfterAutomaticRebase(coordinate)))
+                if (appliedAny)
                 {
                     // 影も同じ完成部分の三角形だけを公開し、未完成範囲の仮地形を画面へ混ぜません。
                     BuildRockWallShadowMeshForSubChunks(coordinate, neighborhood, progress.AppliedSubChunkMask);
@@ -2184,34 +1965,6 @@ namespace Farmware.WorldGeneration.Presentation
                 }
                 else applyQueue.Enqueue(coordinate);
             }
-            return remainingBudget;
-        }
-
-        /// <summary>
-        /// 自動Floating Origin前の画面外セルを、通常のサブチャンク予算内で古い表示原点から消去します。
-        /// 新しい可視セルの反映を先に行うことで、掃除のために現在画面へ空白を作らないようにします。
-        /// </summary>
-        /// <param name="remainingBudget">このフレームで処理できる残りサブチャンク数です。</param>
-        /// <returns>消去後の残り予算です。</returns>
-        private int ProcessStaleOriginClearQueue(int remainingBudget)
-        {
-            while (remainingBudget > 0 && staleOriginClearQueue.Count > 0)
-            {
-                StaleOriginClearProgress progress = staleOriginClearQueue.Peek();
-                ClearSubChunk(
-                    progress.Coordinate,
-                    progress.NextSubChunkIndex,
-                    progress.DisplayOrigin,
-                    false);
-                progress.NextSubChunkIndex++;
-                remainingBudget--;
-
-                if (progress.NextSubChunkIndex >= WorldGridConstants.SubChunksPerChunk)
-                {
-                    staleOriginClearQueue.Dequeue();
-                }
-            }
-
             return remainingBudget;
         }
 
@@ -2260,12 +2013,12 @@ namespace Farmware.WorldGeneration.Presentation
                                 $"完成済み地形近傍から中心セルを取得できません: Chunk=({coordinate.X}, {coordinate.Y}), Local=({tileLocalX}, {tileLocalY})");
                         }
 
+                        bool isRockWall = terrainCell.WallBlockRuntimeId.IsValid;
                         RockWallAppearance rockWallAppearance = ClassifyRockWallAppearance(
                             tileLocalX,
                             tileLocalY,
                             terrainCell,
                             terrainNeighborhood);
-                        bool isLiquid = terrainCell.LiquidRuntimeId.IsValid;
 
                         groundFaceSubChunkTileBuffer[destinationIndex] = null;
                         wallFaceSubChunkTileBuffer[destinationIndex] = null;
@@ -2283,93 +2036,67 @@ namespace Farmware.WorldGeneration.Presentation
                         waterSurfacePatternSubChunkTileBuffer[destinationIndex] = null;
                         liquidEdgeWaveSubChunkTileBuffer[destinationIndex] = null;
 
-                        bool isRockWall = terrainCell.WallBlockRuntimeId.IsValid;
-                        if (materialPresentationIsReady)
-                        {
-                            // 製品経路は上面・断面・深部黒を分離し、境界あり1段目も合成済みSprite 1枚として選びます。
-                            int wallFaceDepth = ClassifyProductMaterialTiles(
-                                coordinate,
-                                tileLocalX,
-                                tileLocalY,
-                                destinationIndex,
-                                terrainCell,
-                                terrainNeighborhood);
+                        // 製品経路は上面・断面・深部黒を分離し、境界あり1段目も合成済みSprite 1枚として選びます。
+                        int wallFaceDepth = ClassifyProductMaterialTiles(
+                            coordinate,
+                            tileLocalX,
+                            tileLocalY,
+                            destinationIndex,
+                            terrainCell,
+                            terrainNeighborhood);
 
-                            if (wallShadowPresentationIsConfigured)
+                        if (wallShadowPresentationIsConfigured)
+                        {
+                            // 左右の固定影は同じ結合シルエットを別Tilemapへ渡し、Scene側の±1px・手前3px Transformで表示します。
+                            // Wall上面とFace投影先は同時に成立しないため、nullでない方を1セルのシルエットとして使用できます。
+                            TileBase wallSilhouetteTile = rockWallSubChunkTileBuffer[destinationIndex]
+                                ?? wallFaceSubChunkTileBuffer[destinationIndex];
+                            wallContactShadowLeftSubChunkTileBuffer[destinationIndex] = wallSilhouetteTile;
+                            wallContactShadowRightSubChunkTileBuffer[destinationIndex] = wallSilhouetteTile;
+
+                            // 折れ目影は段別Materialで開始行0／16を固定し、段境界でAlphaが濃く戻らないようにします。
+                            if (wallFaceDepth == 0)
                             {
-                                // 左右の固定影は同じ結合シルエットを別Tilemapへ渡し、Scene側の±1px・手前3px Transformで表示します。
-                                // Wall上面とFace投影先は同時に成立しないため、nullでない方を1セルのシルエットとして使用できます。
-                                TileBase wallSilhouetteTile = rockWallSubChunkTileBuffer[destinationIndex]
-                                    ?? wallFaceSubChunkTileBuffer[destinationIndex];
-                                wallContactShadowLeftSubChunkTileBuffer[destinationIndex] = wallSilhouetteTile;
-                                wallContactShadowRightSubChunkTileBuffer[destinationIndex] = wallSilhouetteTile;
-
-                                // 折れ目影は段別Materialで開始行0／16を固定し、段境界でAlphaが濃く戻らないようにします。
-                                if (wallFaceDepth == 0)
-                                {
-                                    wallFoldShadowTopSubChunkTileBuffer[destinationIndex] =
-                                        wallFaceSubChunkTileBuffer[destinationIndex];
-                                }
-                                else if (wallFaceDepth == 1)
-                                {
-                                    wallFoldShadowBottomSubChunkTileBuffer[destinationIndex] =
-                                        wallFaceSubChunkTileBuffer[destinationIndex];
-                                }
-
+                                wallFoldShadowTopSubChunkTileBuffer[destinationIndex] =
+                                    wallFaceSubChunkTileBuffer[destinationIndex];
                             }
-                        }
-                        else
-                        {
-                            // 製品カタログ未設定の開発用Sceneでは、一体型土地・岩壁表示だけを維持します。
-                            // 旧境界レイヤーは新しい材質別境界へ置き換えたため、互換経路として残しません。
-                            subChunkTileBuffer[destinationIndex] = isLiquid
-                                ? null
-                                : SelectLandTile(terrainCell);
-                            rockWallSubChunkTileBuffer[destinationIndex] = isRockWall
-                                ? rockWallTile
-                                : null;
+                            else if (wallFaceDepth == 1)
+                            {
+                                wallFoldShadowBottomSubChunkTileBuffer[destinationIndex] =
+                                    wallFaceSubChunkTileBuffer[destinationIndex];
+                            }
+
                         }
 
-                        if (liquidPresentationIsReady)
-                        {
-                            TerrainLiquidVisualKind liquidKind =
-                                TerrainLiquidPresentationUtility.Classify(
-                                    terrainCell,
-                                    terrainRuntimeIds);
-                            liquidBaseSubChunkTileBuffer[destinationIndex] =
-                                SelectProductLiquidSurfaceTile(
-                                    liquidKind,
-                                    terrainNeighborhood,
-                                    tileLocalX,
-                                    tileLocalY);
-                            // 手続き模様Shaderは基礎液面と同じSprite・岸側クリップ印を使い、マグマ以外には描きません。
-                            magmaSurfacePatternSubChunkTileBuffer[destinationIndex] =
-                                liquidKind == TerrainLiquidVisualKind.Magma
-                                    ? liquidBaseSubChunkTileBuffer[destinationIndex]
-                                    : null;
-                            // Tilemapと同じ差分込み近傍から岸を収集し、照明のためにTilemapを再走査しません。
-                            if (liquidKind == TerrainLiquidVisualKind.Magma)
-                                magmaShoreLighting?.CollectMagmaCell(coordinate, subChunkIndex,
-                                    tileLocalX, tileLocalY, terrainNeighborhood);
-                            ClassifyProductLiquidTiles(
-                                coordinate,
-                                subChunkIndex,
-                                tileLocalX,
-                                tileLocalY,
-                                destinationIndex,
+                        TerrainLiquidVisualKind liquidKind =
+                            TerrainLiquidPresentationUtility.Classify(
                                 terrainCell,
+                                terrainRuntimeIds);
+                        liquidBaseSubChunkTileBuffer[destinationIndex] =
+                            SelectProductLiquidSurfaceTile(
+                                liquidKind,
                                 terrainNeighborhood,
-                                hasLowerNeighborhood,
-                                lowerNeighborhood);
-                        }
-                        else
-                        {
-                            liquidBaseSubChunkTileBuffer[destinationIndex] = isLiquid
-                                ? SelectLiquidBaseTile(terrainCell)
+                                tileLocalX,
+                                tileLocalY);
+                        // 手続き模様Shaderは基礎液面と同じSprite・岸側クリップ印を使い、マグマ以外には描きません。
+                        magmaSurfacePatternSubChunkTileBuffer[destinationIndex] =
+                            liquidKind == TerrainLiquidVisualKind.Magma
+                                ? liquidBaseSubChunkTileBuffer[destinationIndex]
                                 : null;
-                            // 製品液体が未接続の開発表示では基礎色だけを描き、製品Shaderへ旧素材を流用しません。
-                            magmaSurfacePatternSubChunkTileBuffer[destinationIndex] = null;
-                        }
+                        // Tilemapと同じ差分込み近傍から岸を収集し、照明のためにTilemapを再走査しません。
+                        if (liquidKind == TerrainLiquidVisualKind.Magma)
+                            magmaShoreLighting?.CollectMagmaCell(coordinate, subChunkIndex,
+                                tileLocalX, tileLocalY, terrainNeighborhood);
+                        ClassifyProductLiquidTiles(
+                            coordinate,
+                            subChunkIndex,
+                            tileLocalX,
+                            tileLocalY,
+                            destinationIndex,
+                            terrainCell,
+                            terrainNeighborhood,
+                            hasLowerNeighborhood,
+                            lowerNeighborhood);
 
                         // 内部影に覆われる資源アイコンだけを隠します。ECSの資源データと露出面の表示は維持します。
                         TileBase selectedResource =
@@ -2977,18 +2704,18 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// 1レイヤーの分類済み配列を反映します。比較ONだけ既知の空領域へのnull書込を省き、共有方式は従来どおり反映します。
+        /// 1レイヤーの分類済み配列を反映します。既知の空領域へのnull書込だけを省きます。
         /// </summary>
         /// <param name="coordinate">対象チャンクの絶対座標です。</param>
         /// <param name="template">対象レイヤーのScene見本です。未設定なら反映しません。</param>
-        /// <param name="bounds">現在の表示方式で作成した16×16のセル範囲です。</param>
+        /// <param name="bounds">チャンク内の16×16セル範囲です。</param>
         /// <param name="tiles">全256セルの分類済み配列です。呼び出し中だけ参照します。</param>
         /// <param name="colors">水種・床・投影段数などのセルデータ色です。通常レイヤーはnullです。</param>
         /// <returns>一括書込を実行した場合はtrue、省略した場合はfalseです。</returns>
         private bool WriteSubChunkLayer(ChunkCoordinate coordinate, Tilemap template, BoundsInt bounds, TileBase[] tiles, Color[] colors = null)
         {
             if (template == null) return false;
-            Tilemap target = GetTilemapForChunk(coordinate, template, true);
+            GetTilemapForChunk(coordinate, template, true);
             if (colors != null)
             {
                 // Spriteとデータを別々に更新せず、同じDirtyサブチャンクの一括書込で揃えます。
@@ -2999,211 +2726,40 @@ namespace Farmware.WorldGeneration.Presentation
                     waterTileChangeBuffer[index] = new TileChangeData(position, tiles[index], colors[index], Matrix4x4.identity);
                 }
             }
-            if (chunkLocalTilemapsAreActive)
-            {
-                // 空であるという履歴はチャンク表示が所有します。絶対座標で別Dictionaryを持たず、プールと一緒に寿命を管理します。
-                return chunkLocalPresentations[coordinate].WriteSubChunk(template, bounds, tiles,
-                    colors == null ? null : waterTileChangeBuffer);
-            }
-
-            // 共有方式は旧原点の遅延消去とセル範囲が交差し得るため、この局所的な履歴管理を適用しません。
-            if (colors == null) target.SetTilesBlock(bounds, tiles);
-            else TerrainWaterRenderUtility.ApplyTiles(target, waterTileChangeBuffer);
-            return true;
+            // 空セル履歴は表示単位が所有し、プール返却時に消去します。Tilemapへセルごとの再確保は行いません。
+            return chunkLocalPresentations[coordinate].WriteSubChunk(template, bounds, tiles,
+                colors == null ? null : waterTileChangeBuffer);
         }
 
-        /// <summary>
-        /// 1つの16×16サブチャンクをnull配列で上書きし、表示オブジェクトだけを消去します。
-        /// </summary>
-        /// <param name="coordinate">対象の論理チャンク座標です。</param>
-        /// <param name="subChunkIndex">行優先の0〜15サブチャンク番号です。</param>
+        /// <summary>通常予算または全消去から呼び、チャンク内の1部分を消去します。最初の部分で影・反射・照明も外します。</summary>
+        /// <param name="coordinate">表示を所有する絶対チャンク座標です。</param>
+        /// <param name="subChunkIndex">0〜15のサブチャンク番号です。</param>
         private void ClearSubChunk(ChunkCoordinate coordinate, int subChunkIndex)
         {
-            ClearSubChunk(
-                coordinate,
-                subChunkIndex,
-                presentedDisplayOrigin,
-                true);
-        }
-
-        /// <summary>
-        /// 指定した表示原点で配置した16×16サブチャンクをnull配列で上書きします。
-        /// 自動Floating Origin後の旧セルは現在の岩壁影Dictionaryと別寿命なので、影破棄を無効にして使用します。
-        /// </summary>
-        /// <param name="coordinate">対象の論理チャンク座標です。</param>
-        /// <param name="subChunkIndex">行優先の0〜15サブチャンク番号です。</param>
-        /// <param name="cellDisplayOrigin">対象セルを書き込んだ時点の表示原点です。</param>
-        /// <param name="destroyCurrentShadow">現在の論理座標に対応する岩壁影も破棄する場合はtrueです。</param>
-        private void ClearSubChunk(
-            ChunkCoordinate coordinate,
-            int subChunkIndex,
-            DisplayOrigin cellDisplayOrigin,
-            bool destroyCurrentShadow)
-        {
-            if (subChunkIndex == 0 && destroyCurrentShadow)
+            if (subChunkIndex == 0)
             {
                 magmaShoreLighting?.RemoveChunk(coordinate);
-                // 反射も現在チャンクの表示寿命へ従わせ、旧原点Tileの遅延消去では新しいMeshを消しません。
                 if (reflectionMeshes.Remove(coordinate, out TerrainWaterReflectionMesh reflection)) reflection.Dispose();
-                // Tilemap消去を分割している間に古い影だけが残らないよう、チャンク影は消去開始時にまとめて外します。
                 DestroyRockWallShadow(coordinate);
                 ReleaseWallDynamicShadowPresentation(coordinate);
             }
-
             using (SubChunkTilemapClearProfilerMarker.Auto())
             {
-                if (chunkLocalTilemapsAreActive)
+                if (chunkLocalPresentations.TryGetValue(coordinate, out ChunkLocalTilemapPresentation presentation))
                 {
-                    if (chunkLocalPresentations.TryGetValue(coordinate, out ChunkLocalTilemapPresentation presentation))
-                    {
-                        // 消去中の断片が画面へ残らないよう、最初に非表示にしてから通常予算でセルを空にします。
-                        presentation.ClearSubChunk(
-                            CreateSubChunkBounds(coordinate, subChunkIndex),
-                            emptySubChunkTileBuffer);
-                    }
-
-                    return;
+                    // 最初に非表示にし、分割消去中の断片を画面へ残さないようにします。
+                    presentation.ClearSubChunk(CreateSubChunkBounds(coordinate, subChunkIndex), emptySubChunkTileBuffer);
                 }
-
-                BoundsInt bounds = CreateSubChunkBounds(
-                    coordinate,
-                    subChunkIndex,
-                    cellDisplayOrigin);
-                if (targetTilemap != null)
-                {
-                    targetTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
-                }
-
-                if (resourceTilemap != null)
-                {
-                    resourceTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
-                }
-
-                if (resourceBehindRockWallTilemap != null)
-                {
-                    resourceBehindRockWallTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
-                }
-
-                if (liquidBaseTilemap != null)
-                {
-                    liquidBaseTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
-                }
-
-                if (magmaSurfacePatternTilemap != null)
-                {
-                    magmaSurfacePatternTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
-                }
-
-                if (liquidDepthWithFloorTilemap != null)
-                {
-                    liquidDepthWithFloorTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
-                }
-
-                if (liquidDepthWithoutFloorTilemap != null)
-                {
-                    liquidDepthWithoutFloorTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
-                }
-
-                if (submergedGroundFaceTilemap != null)
-                {
-                    submergedGroundFaceTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
-                }
-                if (underwaterFloorPreviewTilemap != null)
-                {
-                    underwaterFloorPreviewTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
-                }
-
-                if (waterSurfacePatternTilemap != null)
-                {
-                    waterSurfacePatternTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
-                }
-
-                if (liquidEdgeWaveTilemap != null)
-                {
-                    liquidEdgeWaveTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
-                }
-
-                if (rockWallTilemap != null)
-                {
-                    rockWallTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
-                }
-
-                if (groundFaceTilemap != null)
-                {
-                    groundFaceTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
-                }
-
-                if (wallFaceTilemap != null)
-                {
-                    wallFaceTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
-                }
-
-                if (wallContactShadowLeftTilemap != null)
-                {
-                    wallContactShadowLeftTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
-                }
-
-                if (wallContactShadowRightTilemap != null)
-                {
-                    wallContactShadowRightTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
-                }
-
-                if (wallFoldShadowTopTilemap != null)
-                {
-                    wallFoldShadowTopTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
-                }
-
-                if (wallFoldShadowBottomTilemap != null)
-                {
-                    wallFoldShadowBottomTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
-                }
-
-                if (dryCliffDeepBlackTilemap != null)
-                {
-                    dryCliffDeepBlackTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
-                }
-
-                if (rockWallResourceTilemap != null)
-                {
-                    rockWallResourceTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
-                }
-
             }
         }
 
-        /// <summary>
-        /// Component無効化時に1チャンク分を即時消去し、次回有効化時の古い表示を残しません。
-        /// </summary>
-        /// <param name="coordinate">消去する論理チャンク座標です。</param>
+        /// <summary>無効化・World切替時に、同じ論理チャンクの全表示を同期消去します。</summary>
+        /// <param name="coordinate">消去する絶対チャンク座標です。</param>
         private void ClearWholeChunkImmediately(ChunkCoordinate coordinate)
         {
-            ClearWholeChunkImmediately(
-                coordinate,
-                presentedDisplayOrigin,
-                true);
-        }
-
-        /// <summary>
-        /// 指定表示原点で配置した1チャンク分を即時消去します。
-        /// World切替時には、分割消去途中の旧原点セルも残さず片付けるために使用します。
-        /// </summary>
-        /// <param name="coordinate">消去する論理チャンク座標です。</param>
-        /// <param name="cellDisplayOrigin">対象セルを書き込んだ時点の表示原点です。</param>
-        /// <param name="destroyCurrentShadow">現在の論理座標に対応する岩壁影も破棄する場合はtrueです。</param>
-        private void ClearWholeChunkImmediately(
-            ChunkCoordinate coordinate,
-            DisplayOrigin cellDisplayOrigin,
-            bool destroyCurrentShadow)
-        {
-            for (int subChunkIndex = 0;
-                 subChunkIndex < WorldGridConstants.SubChunksPerChunk;
-                 subChunkIndex++)
+            for (int index = 0; index < WorldGridConstants.SubChunksPerChunk; index++)
             {
-                ClearSubChunk(
-                    coordinate,
-                    subChunkIndex,
-                    cellDisplayOrigin,
-                    destroyCurrentShadow);
+                ClearSubChunk(coordinate, index);
             }
         }
 
@@ -3243,51 +2799,27 @@ namespace Farmware.WorldGeneration.Presentation
                 ClearWholeChunkImmediately(coordinateScratch[index]);
             }
 
-            // 自動原点変更後の分割消去が残っていても、Component無効化やWorld切替では全旧セルを即時消去します。
-            while (staleOriginClearQueue.Count > 0)
-            {
-                StaleOriginClearProgress staleProgress = staleOriginClearQueue.Dequeue();
-                ClearWholeChunkImmediately(
-                    staleProgress.Coordinate,
-                    staleProgress.DisplayOrigin,
-                    false);
-            }
-
             DestroyAllRockWallShadows();
             DestroyAllWallDynamicShadowPresentations();
-            // 即時消去は方式切替・テレポート・World切替に限ります。空きプールも破棄して設定やWorldを持ち越しません。
+            // 即時消去は設定変更・テレポート・World切替に限ります。空きプールも破棄して設定やWorldを持ち越しません。
             DestroyChunkLocalPresentations();
             ResetPresentationCaches();
         }
 
-        /// <summary>
-        /// 論理チャンク座標とサブチャンク番号から、現在の方式に対応する16×16 BoundsIntを作ります。
-        /// 比較方式では0〜63のチャンク内セルを使い、原点変更によってセル位置を変更しません。
-        /// </summary>
-        /// <param name="coordinate">親となる論理チャンク座標です。</param>
-        /// <param name="subChunkIndex">行優先の0〜15サブチャンク番号です。</param>
-        /// <returns>Z=0平面にある16×16×1セルの範囲です。</returns>
+        /// <summary>表示原点から独立した、チャンク内0〜63セルの部分範囲を返します。</summary>
+        /// <param name="coordinate">呼び出し元が処理している絶対チャンク座標です。セル範囲には混ぜません。</param>
+        /// <param name="subChunkIndex">行優先の0〜15部分番号です。</param>
+        /// <returns>16×16×1のローカルセル範囲です。</returns>
         private BoundsInt CreateSubChunkBounds(ChunkCoordinate coordinate, int subChunkIndex)
         {
-            if (chunkLocalTilemapsAreActive)
-            {
-                return new BoundsInt(
-                    (subChunkIndex % WorldGridConstants.SubChunksPerAxis) * WorldGridConstants.SubChunkSize,
-                    (subChunkIndex / WorldGridConstants.SubChunksPerAxis) * WorldGridConstants.SubChunkSize,
-                    0,
-                    WorldGridConstants.SubChunkSize,
-                    WorldGridConstants.SubChunkSize,
-                    1);
-            }
-
-            return CreateSubChunkBounds(
-                coordinate,
-                subChunkIndex,
-                presentedDisplayOrigin);
+            return new BoundsInt(
+                (subChunkIndex % WorldGridConstants.SubChunksPerAxis) * WorldGridConstants.SubChunkSize,
+                (subChunkIndex / WorldGridConstants.SubChunksPerAxis) * WorldGridConstants.SubChunkSize,
+                0, WorldGridConstants.SubChunkSize, WorldGridConstants.SubChunkSize, 1);
         }
 
         /// <summary>
-        /// 新しい表示単位を作るときだけ、Scene上の旧レイヤー、製品断面、製品Liquidレイヤーを固定順で取得します。毎フレームの反映・消去では配列を作りません。
+        /// 新しい表示単位を作るときだけ、Scene上の上面、製品断面、製品Liquidレイヤーを固定順で取得します。毎フレームの反映・消去では配列を作りません。
         /// </summary>
         /// <returns>表示設定の見本です。セル内容はコピーしません。</returns>
         private Tilemap[] GetTilemapTemplates()
@@ -3302,15 +2834,15 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// 現在の比較方式に対応する書き込み先を取得します。新方式の初回反映だけ空き表示を借ります。
+        /// チャンク内の書き込み先を取得します。新方式の初回反映だけ空き表示を借ります。
         /// </summary>
         /// <param name="coordinate">対象の絶対チャンク座標です。</param>
         /// <param name="template">Scene上のレイヤー設定見本です。</param>
         /// <param name="createIfMissing">未割当チャンクへ表示単位を貸し出してよい場合はtrueです。</param>
-        /// <returns>旧方式では見本そのもの、新方式ではチャンク専用Tilemapです。</returns>
+        /// <returns>チャンク専用Tilemapです。未割当ならnullです。</returns>
         private Tilemap GetTilemapForChunk(ChunkCoordinate coordinate, Tilemap template, bool createIfMissing)
         {
-            if (!chunkLocalTilemapsAreActive || template == null)
+            if (template == null)
             {
                 return template;
             }
@@ -3445,105 +2977,6 @@ namespace Farmware.WorldGeneration.Presentation
             }
         }
 
-        /// <summary>
-        /// 論理チャンク座標、サブチャンク番号、書き込み時の表示原点からTilemapセル範囲を作ります。
-        /// 自動原点変更後も旧セルだけを正しい相対位置から消去できるよう、原点を引数で受け取ります。
-        /// </summary>
-        /// <param name="coordinate">親となる論理チャンク座標です。</param>
-        /// <param name="subChunkIndex">行優先の0〜15サブチャンク番号です。</param>
-        /// <param name="cellDisplayOrigin">Tilemapセル位置の基準とする表示原点です。</param>
-        /// <returns>Z=0平面にある16×16×1セルの範囲です。</returns>
-        private static BoundsInt CreateSubChunkBounds(
-            ChunkCoordinate coordinate,
-            int subChunkIndex,
-            DisplayOrigin cellDisplayOrigin)
-        {
-            int subChunkX = subChunkIndex % WorldGridConstants.SubChunksPerAxis;
-            int subChunkY = subChunkIndex / WorldGridConstants.SubChunksPerAxis;
-            int worldTileX = WorldGrid.ToWorldTileX(
-                coordinate.X,
-                subChunkX * WorldGridConstants.SubChunkSize);
-            int worldTileY = WorldGrid.ToWorldTileY(
-                coordinate.Y,
-                subChunkY * WorldGridConstants.SubChunkSize);
-
-            RelativeCellCoordinate relativeCell =
-                WorldCoordinateConversion.ToRelativeCellCoordinate(
-                    new int2(worldTileX, worldTileY),
-                    cellDisplayOrigin);
-            if (relativeCell.X < int.MinValue
-                || relativeCell.X > int.MaxValue
-                || relativeCell.Y < int.MinValue
-                || relativeCell.Y > int.MaxValue)
-            {
-                throw new System.InvalidOperationException(
-                    $"表示原点から離れ過ぎたチャンクをTilemapへ配置できません: Chunk=({coordinate.X}, {coordinate.Y}), Relative=({relativeCell.X}, {relativeCell.Y})");
-            }
-
-            return new BoundsInt(
-                (int)relativeCell.X,
-                (int)relativeCell.Y,
-                0,
-                WorldGridConstants.SubChunkSize,
-                WorldGridConstants.SubChunkSize,
-                1);
-        }
-
-        /// <summary>
-        /// Liquid Runtime IDを、8px下げる静止液面Tileへ変換します。
-        /// </summary>
-        /// <param name="terrainCell">ECSを正とする水またはマグマ1セル分のBlockセルです。</param>
-        /// <returns>淡水・海水・マグマの基礎Tileです。液体でなければnullです。</returns>
-        private TileBase SelectLiquidBaseTile(GeneratedTerrainCell terrainCell)
-        {
-            if (terrainCell.LiquidRuntimeId.Value == terrainRuntimeIds.FreshWater.Value)
-            {
-                // 移行直後の旧Sceneでも淡水を空表示にしないよう、淡水参照が未設定なら海水Tileへフォールバックします。
-                return freshWaterTile != null
-                    ? freshWaterTile
-                    : saltWaterTile;
-            }
-
-            if (terrainCell.LiquidRuntimeId.Value == terrainRuntimeIds.SaltWater.Value)
-            {
-                return saltWaterTile;
-            }
-
-            return terrainCell.LiquidRuntimeId.Value == terrainRuntimeIds.Magma.Value
-                ? magmaTile
-                : null;
-        }
-
-        /// <summary>
-        /// 液体を除くBlockセルを、論理バイオームに対応する一体型土地Tileへ変換します。
-        /// </summary>
-        /// <param name="terrainCell">ECSを正とする1タイル分の自然生成Blockセルです。</param>
-        /// <returns>岩壁セルを含めて論理バイオームに対応する土地の基準面Tileです。</returns>
-        private TileBase SelectLandTile(GeneratedTerrainCell terrainCell)
-        {
-            return SelectBiomeBaseTile(terrainCell.Biome);
-        }
-
-        /// <summary>
-        /// 論理Biomeを安定ID順の18枚の基準土地Tileへ変換します。
-        /// </summary>
-        /// <param name="biome">Simulationが決定した論理バイオームです。</param>
-        /// <returns>指定Biomeの基準Tileです。範囲外ID、要素不足、未設定参照ではnullを返します。</returns>
-        private TileBase SelectBiomeBaseTile(BiomeId biome)
-        {
-            int stableId = (int)biome;
-            if (stableId < BiomeStableIds.First
-                || stableId > BiomeStableIds.Last
-                || biomeTiles == null
-                || biomeTiles.Length != BiomeStableIds.Count)
-            {
-                // 旧草原Tileへ黙って読み替えると欠落した新Biomeを発見できないため、描画なしを明示します。
-                return null;
-            }
-
-            return biomeTiles[stableId - BiomeStableIds.First];
-        }
-
         /// <summary>変更差分適用済み近傍の4方向を調べ、資源を残す露出面と内部を区別します。</summary>
         /// <param name="localX">中心セルの水平ローカル座標です。</param>
         /// <param name="localY">中心セルの垂直ローカル座標です。</param>
@@ -3598,8 +3031,6 @@ namespace Farmware.WorldGeneration.Presentation
         private void BuildRockWallShadowMeshForSubChunks(ChunkCoordinate coordinate,
             in CompletedChunkTerrainNeighborhood neighborhood, ushort visibleSubChunks)
         {
-            // 部分Meshで上書きした後に、原点変更前の完成Meshとして再利用してはいけません。
-            reusableRockWallShadowCoordinates.Remove(coordinate);
             // using宣言は早期returnを含むメソッド終了時に自動で閉じ、影構築全体を漏れなく計測します。
             using ProfilerMarker.AutoScope buildScope =
                 RockWallShadowBuildProfilerMarker.Auto();
@@ -3671,7 +3102,7 @@ namespace Farmware.WorldGeneration.Presentation
                     return;
                 }
 
-                // 現行の製品Wallは根元から2タイル、未接続の旧一体型は12px持ち上げ、上面と内部影をそろえます。
+                // 製品Wallの根元から2タイル持ち上げ、上面と内部影をそろえます。
                 presentation.GameObject.transform.localPosition = meshOrigin
                     + (Vector3.up * GetRockWallVisualElevationInCells());
                 presentation.Mesh.Clear();
@@ -3697,12 +3128,11 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// 自動Floating Origin前の岩壁影を、新しい表示原点からの相対位置へ移して再利用候補として記録します。
+        /// 自動Floating Origin前の岩壁影を、新しい表示原点からの相対位置へ移します。
         /// </summary>
         /// <param name="currentOrigin">Cameraが変更した新しい表示原点です。</param>
-        private void PrepareRockWallShadowsForAutomaticRebase(DisplayOrigin currentOrigin)
+        private void RepositionRockWallShadows(DisplayOrigin currentOrigin)
         {
-            reusableRockWallShadowCoordinates.Clear();
             using (RockWallShadowRepositionProfilerMarker.Auto())
             {
                 foreach (KeyValuePair<ChunkCoordinate, RockWallShadowChunkPresentation> pair in
@@ -3713,12 +3143,9 @@ namespace Farmware.WorldGeneration.Presentation
                         targetTilemap.CellToLocal(
                             CalculateRockWallShadowMinimumCell(pair.Key, currentOrigin))
                         + (Vector3.up * GetRockWallVisualElevationInCells());
-                    reusableRockWallShadowCoordinates.Add(pair.Key);
                 }
             }
         }
-
-
 
         /// <summary>指定セルの直下1層に、Wallで塞がれていないGround上面があるか判定します。</summary>
         /// <param name="hasLowerNeighborhood">直下WorldLayerの近傍を利用できる場合はtrueです。</param>
@@ -3741,52 +3168,11 @@ namespace Farmware.WorldGeneration.Presentation
                 && !lowerCell.WallBlockRuntimeId.IsValid;
         }
 
-        /// <summary>
-        /// 現在の表示経路に合わせ、岩壁上面と内部影を根元から持ち上げる高さを返します。
-        /// </summary>
-        /// <returns>製品の2段Wallは2タイル、カタログ未接続の一体型フォールバックは12px相当です。</returns>
+        /// <summary>岩壁内部影を製品Wall上面と同じ位置へ持ち上げる、固定の表示高を返します。</summary>
+        /// <returns>論理Wall根元から画面奥へ2タイルです。</returns>
         private float GetRockWallVisualElevationInCells()
         {
-            return materialPresentationIsReady
-                ? TerrainMaterialVerticalProjectionUtility.WallTopOffsetInTiles
-                : TerrainLayerPresentationUtility.RockWallElevationInCells;
-        }
-
-        /// <summary>
-        /// 新原点側で同じ論理チャンクが完成したとき、移動済みの岩壁影Meshを再構築せず採用します。
-        /// </summary>
-        /// <param name="coordinate">新しいTilemap反映が完了した論理チャンク座標です。</param>
-        /// <returns>再利用可能な既存影を採用した場合はtrue、新規構築が必要な場合はfalseです。</returns>
-        private bool TryReuseRockWallShadowAfterAutomaticRebase(ChunkCoordinate coordinate)
-        {
-            if (!reusableRockWallShadowCoordinates.Remove(coordinate))
-            {
-                return false;
-            }
-
-            // 座標集合と辞書は同時に更新しますが、将来の破棄経路追加で不整合が起きても影を省略しないよう辞書も確認します。
-            return rockWallShadowByCoordinate.ContainsKey(coordinate);
-        }
-
-        /// <summary>
-        /// 自動原点変更後の新しい可視範囲で採用されなかった旧岩壁影を破棄します。
-        /// </summary>
-        private void DestroyUnusedRebasedRockWallShadows()
-        {
-            coordinateScratch.Clear();
-            foreach (ChunkCoordinate coordinate in reusableRockWallShadowCoordinates)
-            {
-                // HashSetを列挙中に変更しないよう、一度既存の再利用Listへ座標だけを退避します。
-                coordinateScratch.Add(coordinate);
-            }
-
-            for (int index = 0; index < coordinateScratch.Count; index++)
-            {
-                DestroyRockWallShadow(coordinateScratch[index]);
-            }
-
-            reusableRockWallShadowCoordinates.Clear();
-            coordinateScratch.Clear();
+            return TerrainMaterialVerticalProjectionUtility.WallTopOffsetInTiles;
         }
 
         /// <summary>
@@ -4000,7 +3386,6 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="coordinate">アンロードまたは再構築する論理チャンク座標です。</param>
         private void DestroyRockWallShadow(ChunkCoordinate coordinate)
         {
-            reusableRockWallShadowCoordinates.Remove(coordinate);
             if (!rockWallShadowByCoordinate.Remove(
                     coordinate,
                     out RockWallShadowChunkPresentation presentation))
@@ -4023,7 +3408,6 @@ namespace Farmware.WorldGeneration.Presentation
             }
 
             rockWallShadowByCoordinate.Clear();
-            reusableRockWallShadowCoordinates.Clear();
         }
 
         /// <summary>
@@ -4147,14 +3531,12 @@ namespace Farmware.WorldGeneration.Presentation
             terrainDeltaFingerprints.Clear();
             displayedTerrainFingerprints.Clear();
             clearQueue.Clear();
-            staleOriginClearQueue.Clear();
             coordinateScratch.Clear();
-            reusableRockWallShadowCoordinates.Clear();
         }
 
         /// <summary>
         /// Camera側で検出した表示原点変更の種類です。
-        /// 変更理由により、旧セルを画面外で分割消去できるか、即時消去が必要かを区別します。
+        /// 変更理由により、位置だけ変更できるか、即時消去が必要かを区別します。
         /// </summary>
         private enum DisplayOriginChangeKind : byte
         {
@@ -4262,34 +3644,5 @@ namespace Farmware.WorldGeneration.Presentation
             }
         }
 
-        /// <summary>
-        /// 自動Floating Origin前の相対セルと消去途中位置を保持するPresentation専用の参照型です。
-        /// 論理チャンクが新原点側へ再表示されても、旧原点を使って古い画面外セルだけを消去します。
-        /// </summary>
-        private sealed class StaleOriginClearProgress
-        {
-            /// <summary>消去対象の論理チャンク座標です。</summary>
-            public readonly ChunkCoordinate Coordinate;
-
-            /// <summary>対象セルを書き込んだ時点の表示原点です。</summary>
-            public readonly DisplayOrigin DisplayOrigin;
-
-            /// <summary>次に消去する行優先のサブチャンク番号です。範囲は0〜16です。</summary>
-            public int NextSubChunkIndex;
-
-            /// <summary>
-            /// 旧原点に残った1チャンクの消去を、先頭サブチャンクから開始します。
-            /// </summary>
-            /// <param name="coordinate">消去対象の論理チャンク座標です。</param>
-            /// <param name="displayOrigin">対象セルを書き込んだ時点の表示原点です。</param>
-            public StaleOriginClearProgress(
-                ChunkCoordinate coordinate,
-                DisplayOrigin displayOrigin)
-            {
-                Coordinate = coordinate;
-                DisplayOrigin = displayOrigin;
-                NextSubChunkIndex = 0;
-            }
-        }
     }
 }

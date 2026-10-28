@@ -1,4 +1,4 @@
-// このファイルは、フォールバックScene構築メニューがユーザーの未保存Sceneと複数Scene構成を保護することを検証します。
+// このファイルは、製品Scene構築メニューがユーザーの未保存Sceneと複数Scene構成を保護することを検証します。
 // 実際のSceneやアセットを変更せず、保存確認、構築、復元の各処理をDelegateで差し替えて実行順と例外経路を保証します。
 
 using System;
@@ -20,6 +20,28 @@ namespace Farmware.WorldGeneration.Tests
     /// </summary>
     public sealed class WorldGenerationSceneBootstrapTests
     {
+        /// <summary>製品Sceneを読み取り専用で検査し、採用済みの水中レイヤーを旧条件で拒否しないことを保証します。</summary>
+        [Test]
+        public void ValidateProductSceneReferences_AcceptsPublishedProductScene()
+        {
+            const string path = "Assets/Scenes/SampleScene.unity";
+            var scene = UnityEngine.SceneManagement.SceneManager.GetSceneByPath(path);
+            bool openedByTest = !scene.IsValid() || !scene.isLoaded;
+            try
+            {
+                // 既存Sceneを閉じず、必要な場合だけ追加読込します。ユーザーやTest Runnerの未保存Sceneは触りません。
+                if (openedByTest) scene = EditorSceneManager.OpenScene(path, OpenSceneMode.Additive);
+                MethodInfo validate = typeof(WorldGenerationSceneBootstrap).GetMethod(
+                    "ValidateProductSceneReferences", BindingFlags.Static | BindingFlags.NonPublic);
+                Assert.That(validate, Is.Not.Null);
+                Assert.DoesNotThrow(() => validate.Invoke(null, new object[] { scene }));
+            }
+            finally
+            {
+                if (openedByTest && scene.IsValid() && scene.isLoaded) EditorSceneManager.CloseScene(scene, true);
+            }
+        }
+
         /// <summary>
         /// 保存確認をキャンセルした場合、Scene構成の取得、アセット構築、Scene復元のいずれも開始しないことを検証します。
         /// </summary>

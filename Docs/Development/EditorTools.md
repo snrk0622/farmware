@@ -7,7 +7,7 @@
 
 本書のメニュー・設定・表示は、TERRAIN-01C2-Bまでのdevelop、TERRAIN-01C3-D2、水文Lake表示へ先行反映したTERRAIN-01C4-C、派生水文分布監査、Gameビュー診断、Map Viewer診断を追加したTERRAIN-01C4-E3、最終18Biomeを接続したTERRAIN-01C5-C、Map Viewerモード契約とBiome選択診断を整理したTERRAIN-01C5-D、完成チャンクの分布・境界監査へ置換したTERRAIN-01C5-E、可変Blockを通常表示・診断・Map Viewerへ接続するTERRAIN-01C6-D5の現行実装境界を説明する。C3-A〜D1がSimulationへ追加した固定水文の基礎格子、D8流向、固定下流終端、集水面積、自然流出、閉鎖流域境界、基礎湖面を、C3-D2で複数Seed分布監査、Debug Visualization、Map Viewerへ接続した。C4-E1bは地下水、土壌飽和、最終湖区分、泉、自然冠水、湿原候補を複数Seed分布監査へ接続し、C4-E2とE3は残る5分類をGameビューとMap Viewerへ接続した。C5-CはC4完成チャンクを18Biomeへ確定し、GameビューとMap ViewerのTerrain・Biome表示へ接続した。C5-Dは製品分類器と同じ最終理由・通常上位候補・8軸適性を両画面の中央情報へ追加し、Map Viewer全27モードの生成契約を単一Catalogへ集約した。C5-Eは停止中だった分布メニューを再有効化し、製品と同じ完成チャンクから候補・面積・境界・領域を集計する。C6-D5ではGameビューと開発者可視化が自然生成と永続差分を合成した同じ有効地形近傍を読み、Map Viewerは同じ生成設定の実行中Worldがある場合だけ差分Snapshotを適用する。Level 0〜6集約Summaryの利用・分解・キャッシュ統計は性能テストだけで記録し、Editor表示へは渡さない。
 
-開発者専用のUnity Editorツールは、ワールド生成結果の調査、調整前後の比較、確認用Sceneとフォールバック素材の構築に使用する。
+開発者専用のUnity Editorツールは、ワールド生成結果の調査、調整前後の比較、確認用Sceneと製品素材・仮資源の接続に使用する。
 これらは製品版のプレイヤー操作へ含めず、ランタイムのゲーム状態を変更するデバッグ操作にも使用しない。
 
 プレイヤーへ提供するF3座標表示とF4グリッド表示はEditorツールではない。
@@ -17,24 +17,22 @@
 
 `Farmware > World Generation`直下は、広域確認用の`Map Viewer`と、用途別の`Analysis`、`Debug Visualization`、`Generation`、`Inspection Scenes`へ分ける。分布集計は`Analysis`、素材・Scene生成は`Generation`、固定検品・比較Sceneは`Inspection Scenes`から実行する。`Inspection Scenes > Open ...`は入力Assetを検証して保存済みSceneを開くだけで、SceneやMaterialを再保存しない。素材または配置規則を変更した場合だけ、`Generation > Rebuild ...`を実行して追跡対象の生成物を更新する。保存済みSceneが存在しない初回だけは、`Open ...`も不足Sceneを構築する。
 
-### 2.1 Build Fallback Map Prototype
+### 2.1 Build Map Prototype
 
-- メニュー: `Farmware > World Generation > Generation > Build Fallback Map Prototype`
+- メニュー: `Farmware > World Generation > Generation > Build Map Prototype`
 - 実装: `WorldGenerationSceneBootstrap`
 - PlayMode: 不要。EditModeで実行する。
 
 #### 用途
 
-- 上面16pxと断面8pxを結合した16×24の仮色土地Tile、16×16の仮色液体・資源Tileを生成または更新する。土地上面は安定`BiomeId` 1〜18に対応する18種類の仮色だけで塗り、未制作Biomeを別BiomeのTileへフォールバックさせない。草、葉、砂紋などの固有模様や旧土壌分類別の派生Tileは生成しない。旧7種の土地フォールバックと旧14枚の肥沃・砂質派生アセットが存在する場合は削除する。
-- 上面16pxと側面12pxを結合した16×28フォールバック岩壁Tile、液体の静止基礎Tileを生成または更新する。液面アニメーション用の旧4フレーム素材は生成しない。フォールバックは構築確認用として維持し、本番用`terrain_rock_wall_01.png`を上書きしない。
-- 本番用`terrain_rock_wall_01.png`へPoint、PPU 16、Mip Maps Off、Compression None、Full Rect、Pivot Y `8/28`を設定し、専用Tileを作成または更新する。Sprite PivotはSprite Editor Data Provider経由で設定する。
-- 新18Biomeの仮色土地Spriteを同じTextureページへ収める`GroundTerrainAtlas.spriteatlasv2`、本番用岩壁を収める`RockWallAtlas.spriteatlasv2`、共通境界14 Spriteを収める`BoundaryHighlightAtlas.spriteatlasv2`を生成または更新し、現在のBuild Target向けにパックする。C6のBlock用本番素材が未制作の間だけ、18枚の仮色土地を表示契約とAtlas検証に使う。境界PNGの画素と14分割は専用の境界生成ツールが担当し、このツールはImport済みTextureの検証・Atlas登録・同一ページ検証を担当する。
+- 仮資源アイコン（樹木・石・砂）のPNGとTileだけを`Fallback/`へ生成・更新する。置換済みのBiome土地・一体型岩壁・仮液体は生成しない。
+- 完成41材質と液体3種を製品カタログへ公開し、通常候補328枚と用途別境界完成候補352枚の計680枚を製品`TerrainMaterialAtlas`へ接続する。カタログ未設定・不完全なら構築を失敗させ、旧素材で代用しない。
 - `WorldGenerationSettingsSubScene`へ生成設定のAuthoringと、最初の動物種である鶏の共通定義・生成条件を配置する。鶏は草原の通常陸地、群れ3〜6羽、有効地形4096タイル当たり8羽、待機20〜80固定Tick、1タイル移動5固定Tick、最大徘徊8タイル、外見差分3種類を開発用初期値とする。
 - `DefinitionCatalogAuthoring`の専用Inspectorでは、`animalSpeciesDefinitions`の各要素を共通定義GUIDで照合し、`0: Chicken`のように`definitions`側の表示名を見出しへ表示する。表示名を動物種固有設定へ重複保存しないため、名称変更は`definitions`側だけで行う。GUID未設定または参照切れの場合は、見出しへ未解決理由と短縮GUIDを表示する。固定3液体とC6-Bの41材質に属するItem・Ground・Wall Definitionに加え、18Biome表層と8地質の露出Ground・自然WallパレットはBakerが固定表から自動登録するため、Inspectorの`definitions`へ重複追加しない。置換済みの共通Ground・Wall互換Definitionは登録しない。パレットは同じBaker内で材質・地形カタログへ解決し、行欠落、重複、重み合計、分類、自然Wall属性に不整合があればBakeを失敗させる。
-- `SampleScene`へCamera、原点固定のGrid、Ground・静止液面・マグマ模様・岩壁・岩壁背面資源・通常前面資源・岩壁上資源のTilemap、表示用Component、SubScene参照を接続する。Cameraの`CameraPanController`を全Tilemap Presenterの共通表示原点として接続し、絶対初期位置をTransformへ直接保存しない。通常移動では512タイル未満の間はCameraの相対座標だけを更新し、閾値へ達するとGridを動かさず表示原点を所属チャンク境界へ自動更新する。構築途中の静止液面は仮配置し、製品接続後は静止液面とマグマ模様を論理セル原点へ固定する。岩壁上資源は製品接続後にWall根元から2タイル上へ揃える。GroundとRock WallはIndividual ModeかつTop Left順で描画する。土地境界はOrder 1、岩壁境界はOrder 4とし、生成済みの共通境界14 Spriteを両方へ接続する。通常資源は直前方の岩壁有無からOrder 2の背面用TilemapとOrder 10の前面用Tilemapへ振り分ける。
-- 上記の一体型地形・12px・14形状境界の説明は構築途中のフォールバックに限定する。その後、41材質を製品カタログへ公開して製品地形表示を接続する。最終Sceneでは論理Wallセルを最下段Faceの根元とし、Wall上面・前面・折れ目影・Wall上資源を+2Yへ、固定接地影をその基準から手前3 pxへ配置する。通常資源は手前側2セル以内のWall根元で遮蔽される場合だけ背面用Tilemapへ振り分ける。
+- `SampleScene`へCamera、原点固定Grid、製品上面・断面・深部黒・液体・反射・影・資源の表示とSubScene参照を接続する。Wall上面・前面・折れ目影・Wall上資源は根元から+2Y、固定接地影はその基準から手前3pxへ配置する。通常資源は手前2セルのWallに隠れる場合だけ背面レイヤーへ分ける。
+- Cameraと全Presenterで表示原点を共有し、通常移動で512タイルの閾値へ達すると所属チャンク境界へ原点を更新する。Gridは固定し、チャンク内セル・影・構築進捗を保持して表示ルートだけを移動する。可視範囲はWallの上向き2タイルとGround断面の下向き3タイルの張り出しを含む。
 - Pixel Perfect Cameraの基準解像度480×270を含む、再現可能な確認環境を構築する。
-- `Use Chunk Local Tilemaps`を既定ON、空き表示プール上限を8とする。自動原点変更では既存Tilemap・影と画面外の先行表示を再配置する。Presenterは可視範囲の外側1チャンクまで準備し、反映・消去合計4サブチャンク/フレームを維持する。OFFは旧共有方式との診断・比較用であり、原点変更直後の表示遅れが残る。
+- チャンク別Tilemap方式だけを使用し、空き表示プール上限8、外側1チャンクの表示準備、反映・消去合計4サブチャンク/フレームを維持する。旧共有方式への切替設定・APIはない。
 
 #### 実行後の注意
 
@@ -48,8 +46,8 @@
 
 - `WorldGenerationAuthoring`の設定項目、既定値、Baker変換を変更した。
 - `DefinitionCatalogAuthoring`または鶏の定義GUID、生成条件、移動パラメータ、外見差分を変更した。
-- バイオーム、地面、水域、マグマ、岩壁、資源の種類またはフォールバック色を変更した。
-- Ground、Liquid Base、Magma Surface Pattern、Land Boundary Highlight、Rock Wall、Rock Wall Boundary Highlight、Resource、Rock Wall ResourceのTilemapレイヤー構成、Transform、描画Mode、Sorting Order、参照関係を変更した。
+- 材質、地面、水域、マグマ、岩壁、資源の種類または資源アイコンを変更した。
+- Ground、Ground Face、Wall Face、Liquid Base、Magma Surface Pattern、Rock Wall、Resource、Rock Wall ResourceのTilemapレイヤー構成、Transform、描画Mode、Sorting Order、参照関係を変更した。
 - Camera、Pixel Perfect Camera、共通表示原点、480×270の基準解像度、黒帯処理を変更した。
 - `SampleScene`または`WorldGenerationSettingsSubScene`の生成構成を変更した。
 - 土地・岩壁の元Texture、Sprite Slice、Atlas容量、Pixel Art向けAtlas設定を変更した。境界ハイライトの再制作時は、Sprite、Slice、Atlas、Scene参照を同じ変更で確認する。
@@ -58,7 +56,7 @@
 
 1. Consoleに例外または新規警告が出ていない。
 2. メニュー実行をキャンセルした場合はアセットやSceneが変更されず、実行した場合は成功・失敗のどちらでも元の複数Scene構成、読込状態、Active Sceneへ戻る。
-3. 必要なPNG、Tile、Material、Sprite Atlas、`.meta`が揃っている。18枚の土地フォールバックは安定`BiomeId` 1〜18と一対一で、上面はBiome別の仮色一色とし、草・葉・砂紋やSoil模様を含まない。旧7種の土地フォールバックは存在せず、18枚が`GroundTerrainAtlas`の同じパック後Textureを参照する。本番用`terrain_rock_wall_01.png`と専用Tileが16×28、Pivot Y `8/28`で同じSpriteを参照し、`RockWallAtlas`へ収録される。共通境界PNGは16×16の14区画を持ち、`BoundaryHighlightAtlas`の同じパック後Textureへ収録され、Sceneの境界Sprite配列へ14件すべて接続される。
+3. 製品41材質・液体3種のカタログ、680枚を収録する1ページの製品Atlas、Material、仮資源Tileと各metaが揃う。旧地形Tile、旧土地・岩壁Atlas、旧表示参照は存在しない。
 4. SampleSceneとSubSceneの参照がMissingになっていない。`WorldGenerationSettingsSubScene`の`DefinitionCatalogAuthoring`が鶏の定義GUIDと開発用初期値を保持し、共通定義の分類が`AnimalSpecies`になっている。Inspectorの`animalSpeciesDefinitions`を展開すると要素見出しが`0: Chicken`になり、GUIDが未設定または不一致なら未解決表示になる。World GridのTransformが原点・無回転・等倍で、Cameraの`CameraPanController`が`ChunkTilemapPresenter`と`InitialCameraPositionController`へ接続され、自動Floating Origin距離が512タイルになっている。
 5. PlayModeで土地が16×24、岩壁が16×28の一体型ブロックとして表示される。土地は論理Biomeだけを反映し、同じBiome内では標準・肥沃・砂質のいずれも同じTileに見える。製品の静止液面・マグマ模様は同じ論理セル原点、岩壁内部影・露出資源は12px上へ表示される。Ground／Wallの境界ハイライトは14基本形と回転から選ばれ、20%のAlphaで表示される。液体はGround Tilemapへ重複せず、液面下辺と奥側ブロックの断面・側面は手前ブロックに隠れる。直前方が岩壁の通常資源は背面用Tilemapへ入り、それ以外は前面用へ入る。カメラをサブチャンク・チャンク境界へ寄せても立体Spriteが途中で消えない。
    ただし上記の一体型Wall・12px・14形状境界は中間フォールバックの検査である。最終製品Sceneでは41材質のWall上面と前面2段を使い、論理Wall根元が最下段Face、Y+1が1段目Face、Y+2がWall上面とWall上資源になること、動的Casterが論理根元と一致することを確認する。
@@ -71,7 +69,7 @@
 
 Profilerでは、全体の`Farmware.WorldGeneration.TilemapPresentation`と原点変更本体の`Farmware.WorldGeneration.FloatingOriginRebase`に加え、`DisplayOriginSynchronization`、`PresentationWorkCollection`、`SubChunkClassification`、`SubChunkTilemapWrite`、`SubChunkTilemapClear`、`RockWallShadowBuild`を確認できる。岩壁影は`RockWallShadowMask`、`RockWallShadowOpacity`、`RockWallShadowGeometry`、`RockWallShadowUpload`へ分かれ、自動原点変更で既存Meshを移した時間は`RockWallShadowReposition`へ記録する。いずれも名前空間接頭辞は`Farmware.WorldGeneration.`である。子Markerは親Markerの時間に含まれるため、合算時に二重計上しない。C6-D5以降は旧`TerrainNeighborHaloBuild`を廃止し、有効地形の近傍参照費用を`SubChunkClassification`と`RockWallShadowMask`へ含める。
 
-地形表示再利用の比較は、PlayMode中に`World Grid / Ground Tilemap`の`ChunkTilemapPresenter`で`Use Chunk Local Tilemaps`をONにして行う。既定はOFFで、比較用変更をSceneへ保存しない。切替直後は旧表示を消去して通常予算で再反映するため、表示完了を待ってから移動を始める。新方式では実行時の`Chunk Local Terrain`以下へチャンク内0〜63のTilemapを作り、自動原点変更は`ChunkTilemapReposition`で位置更新だけを計測する。消去済みの空きプール上限は`Maximum Pooled Chunk Presentations`（候補8）であり、可視範囲やECS保持数の上限ではない。停止・無効化・World切替で実行時表示を破棄する。
+地形表示はチャンク別Tilemap方式に統一した。実行時の`Chunk Local Terrain`以下へ0〜63セルの表示を作り、自動原点変更は`ChunkTilemapReposition`で位置更新を計測する。空きプール上限`Maximum Pooled Chunk Presentations`は8であり、可視範囲やECS保持数の上限ではない。停止・無効化・World切替で表示を破棄する。旧共有方式との比較は[当時の計測記録](./Map02DPerformanceReport.md)だけに残す。
 
 比較方式では、通常の原点変更2地点に加え、Y=64付近の上下チャンク境界、岩壁と影、水面、F3/F4、開発者可視化を確認する。現行URP 2DのOrthographic距離ソートへ小さい相対Z差を与えて上下順を保っているため、Camera方向や透明ソート設定を変える場合は再検証する。最大ズームとGPU / SetPass評価が残るため、既定方式への採用は未確定である。
 
@@ -85,11 +83,13 @@ ANIMAL-01Bの個体群Worldでは、通常フレームで座標順の有限バ�
 
 影なしの停止を調べる場合は、`SubChunkClassification`と`SubChunkTilemapWrite`の同フレーム内の回数も確認する。書込MarkerにはTilemapの取得・再利用処理も含まれ、子の`ITilemap.FindAllRefreshPositions`だけを全書込時間とはしない。フレーム間隔はMain／Render ThreadのTimelineで`WaitForTargetFPS`、描画コマンド待ち、Renderer更新と照合し、表示Markerの時間やGPU時間と混同しない。CSV／PNGの出力と終了時の大きな停止は移動区間から除外する。詳しい帰属と制約は[影なしのスパイク切り分け](./Map02DPerformanceReport.md#影構築なしの表示スパイクとフレーム待機の切り分け)を参照する。製品の目標FPSや予算の既定値は、この診断だけで変更しない。
 
+Map Viewerへ渡す編集差分のRuntime IDは、実Worldの定義GUIDから診断カタログのIDへ対応付けてコピーする。動物・設備などの定義追加でIDの数値がずれても同じ材質を表示し、明示除去のInvalidを保持する。HoverのRuntime IDは診断カタログ内の値であり、ゲーム側との材質比較には安定材質IDを使う。
+
 2026-10-28の現行地形表示は、通常12／高速36タイル毎秒をDevelopment Playerでも比較した。表示待ちとCPU・GPU・GC・メモリの費用、停止後の収束、観測コードの負荷、対象範囲は[地形表示の遅延調査](./Terrain01C6D5PerformanceReport.md)の第8章を参照する。計測は一時コピーの専用Componentで行い、製品メニュー・Scene・操作キーは追加していない。
 
 分類用近傍の改善後は、`SubChunkClassification`を中心に比較する。内部・外周とも周囲8チャンクの完成自然地形と疎な差分から同じ有効地形を直接読み、旧260要素Haloの構築・フレーム間再利用は行わない。基礎生成へ戻るフォールバックはなく、ワールド内の必要近傍が未完成なら、その入力を読むサブチャンクだけ反映を待つ。通常表示は参照半径11タイルの必要Maskで部分ごとに判定し、待機座標をQueueの末尾へ戻す。Simulation側の不足要求も、可視矩形からの距離を優先して、先読み角より可視辺の入力を先に準備する。新しい近傍の到着時にも反映済み部分を維持し、地形編集や使用済みEntity世代の変更時には再反映する。最終Water／Magmaと変更済みGround／Wallの境界、露出岩壁の資源、岩壁手前の資源レイヤー、負座標、方式切替・停止再開を確認する。キー、メニュー、カメラ、開発者可視化の凡例は変更しない。
 
-空レイヤーへの書込省略は比較ONのチャンク別Tilemapだけに適用する。`SubChunkTilemapWrite`は配列の空判定も含めて測り、`SubChunkTilemapClear`の全レイヤー消去は従来どおりである。以前タイルがあった領域へのnull書込は省かない。資源・液面・境界が残らないこと、部分反映からの消去とプール再利用、正負の原点変更、比較OFFへの切替を確認する。見た目の間引きやレイヤー削除ではなく、既知の空領域へ同じ空配列を再送しない処理である。
+空レイヤーへの書込省略は製品チャンク別Tilemapへ適用する。`SubChunkTilemapWrite`は配列の空判定も含めて測り、`SubChunkTilemapClear`の全レイヤー消去は従来どおりである。以前タイルがあった領域へのnull書込は省かない。資源・液面・境界が残らないこと、部分反映からの消去とプール再利用、正負の原点変更、World切替を確認する。見た目の間引きやレイヤー削除ではなく、既知の空領域へ同じ空配列を再送しない処理である。
 
 ### 2.2 World Generation Sprite Atlas Prebuild
 
@@ -99,13 +99,13 @@ ANIMAL-01Bの個体群Worldでは、通常フレームで座標順の有限バ�
 #### 用途
 
 - Sprite Packer Modeを`Sprite Atlas V2`へ統一する。
-- 新18Biomeの仮色土地PNG 18枚を`GroundTerrainAtlas`、旧フォールバック確認用`terrain_rock_wall_01.png`を`RockWallAtlas`のPackableへ登録する。続いて製品公開処理を実行し、41材質の通常候補328枚と境界あり11材質の完成候補352枚を`TerrainMaterialAtlas`へ登録する。削除済みの旧共通境界TextureとAtlasは再生成しない。
-- Built-in配信、Point、Mip Maps Off、Read/Write Off、RGBA32、無圧縮、Padding 4 px、Rotation/Tight Packing/Alpha Dilation Off、Max Texture Size 512を再適用する。
-- 対象Build Target向けにパックし、各Atlas内のSpriteが1枚のTextureページへ収まらない場合はビルドを中止する。製品`TerrainMaterialAtlas`は最大1024 px、そのほかは最大512 pxで検証する。
+- 製品公開処理で41材質の通常候補328枚と境界完成候補352枚を`TerrainMaterialAtlas`へ登録する。ビルド前処理も同じ公開処理を使用し、削除済みの旧土地・岩壁Atlasを再生成しない。
+- Built-in配信、Point、Mip Maps Off、Read/Write Off、RGBA32、無圧縮、Padding 4 px、Rotation/Tight Packing/Alpha Dilation Off、Max Texture Size 1024を再適用する。
+- 対象Build Target向けにパックし、各Atlas内のSpriteが1枚のTextureページへ収まらない場合はビルドを中止する。製品`TerrainMaterialAtlas`は最大1024 pxで検証する。
 
 #### 確認内容
 
-1. `WorldGenerationSpriteAtlasTests`が成功する。
+1. `TerrainMaterialProductPublisherTests`と`TerrainProductIsolationTests`が成功する。
 2. Playerビルド前処理後もAtlasのPackableとImporter設定が維持される。
 3. Gameビューで異なる土地バイオームが上下に接する場所でも、奥側断面が手前側上面を隠さない。
 
@@ -488,7 +488,7 @@ SampleSceneをPlayして、マグマのない場所の全体照明、網目の�
 
 | 変更内容 | 最低限確認するEditorツール |
 | --- | --- |
-| Authoring、Scene、Tileアセット、Camera、Tilemapレイヤー | Build Fallback Map Prototype |
+| Authoring、Scene、Tileアセット、Camera、Tilemapレイヤー | Build Map Prototype |
 | 個別タイルの分類、色、境界、凡例 | Debug Visualization |
 | バイオームや地形の広域分布、隣接関係、決定性 | Analyze Distribution |
 | 動物の候補地形、確定位置、群れ・密度・重複 | Animal Population表示、Analyze Animal Population |

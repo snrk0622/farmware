@@ -320,13 +320,9 @@ TERRAIN-01C5-Dでは、全27モードの表示名、実行経路、解像度方�
 
 16×24土地の上面16px・断面8px・Pivot Y 2/3、16×28岩壁の上面16px・側面12px・Pivot Y 2/7、液面を8px下へ移す`-0.5セル`をSceneなしの純粋計算として検証する。淡水・海水・マグマを別の液面アニメーションへ分類する規則も保証する。
 
-#### `WorldGenerationFallbackArtTests`
+旧一体型PNGだけを保証した`WorldGenerationFallbackArtTests`と旧土地・岩壁Atlasの`WorldGenerationSpriteAtlasTests`は削除済みである。製品41材質・680枚のAtlasは`TerrainMaterialProductPublisherTests`、旧素材・参照・APIの削除は`TerrainProductIsolationTests`で保証する。
 
-Editor構築ツールが生成した7種類の16×24土地PNGと16×28岩壁PNGを直接読み込み、上面と前面の全ピクセルが一枚の不透明ブロックとして存在することを検証する。旧土・砂・岩・雪断面と旧岩壁側面PNGが残っていないことも保証する。
-
-#### `WorldGenerationSpriteAtlasTests`
-
-Sprite Packer ModeがV2であること、土地Atlasが現行Biome仮色Textureだけ、岩壁Atlasが岩壁TextureだけをPackableに持つこと、両AtlasがBuilt-in配信とPixel Art向け設定を持つことを検証する。製品41材質の`TerrainMaterialAtlas`は`TerrainMaterialProductPublisherTests`と公開処理自身で別に検証する。旧共通境界Atlasと比較・検品専用AtlasはC6-D6で削除済みであり、再生成対象へ含めない。
+`WorldGenerationMapViewerTests.CaptureTerrainDeltaSnapshot_RebindsWorldLocalIdsAndRetainsRemovals`は、地形よりGUID順が前の追加定義で全Runtime IDをずらしたWorldを作る。実WindowのSnapshot取得からサンプラーまで通し、負座標のGround／Wall材質・Liquidと明示除去が一致し、元の差分Bufferが変わらないことを保証する。
 
 #### `TerrainTileArtGeneratorTests`
 
@@ -496,15 +492,20 @@ GPUを使えるEditorのEditModeで、未保存のPreview Sceneの製品Tilemap�
 
 #### `ChunkLocalTilemapPresentationTests`
 
-`PresentationPreload_`の5ケースは、通常・負座標・遠方について可視優先の予約、外側1チャンクまでの先行準備、Inactive完成データの再利用、画面へ入った表示の維持、範囲外の消去予約、生成中の非公開、同期原点再構築の可視限定と予算4を確認する。共有・ローカル両方式を含む。`NewPresenter_DefaultsToChunkLocalTilemaps`は新規Componentの既定ONを保証する。SampleScene縦切りテストは、設定SubSceneからBakeされた鶏の共通実行時ID、草原・通常陸地条件、群れ、密度、固定Tick移動、外見差分も実際のDefault Worldで確認する。以下の既定OFFという記載は比較時点の履歴であり、現在は既定ONを採用している。
+`PresentationPreload_`は通常・負座標・遠方の可視優先予約、外側1チャンクの準備、Inactive完成データの再利用、画面へ入った表示の維持、範囲外消去、生成中の非公開、明示移動での可視限定と予算4を確認する。旧共有方式と切替設定は削除し、製品チャンク別方式だけを検証する。SampleScene縦切りは設定SubScene・鶏・地形・液体・資源・診断表示も確認する。
 
 有効地形近傍の回帰テストは、Presenterが旧260要素Haloフィールドを持たず、周囲8チャンクの完成自然地形と疎な差分を直接参照することを確認する。停止・再開、Presenter破棄、World切替では表示Fingerprintと借用参照だけを破棄し、表示専用の永続外周配列を所有しない。
 
-`SparseWrite_`の追加6ケースは、実際のPresenter書込経路で空→空だけを省くこと、末尾1セルを含む非空配列を書き込むこと、非空→空の実消去、レイヤーとサブチャンクごとの履歴分離、部分消去とプール再貸出、正負原点変更後の履歴維持、共有方式の無条件書込と方式切替を保証する。空判定時間も性能比較へ含め、見た目・GPUの合否はこれらのテストだけで決定しない。
+`SparseWrite_`は、実際のPresenter書込経路で空→空だけを省くこと、末尾1セルを含む非空配列を書き込むこと、非空→空の実消去、レイヤーとサブチャンクごとの履歴分離、部分消去とプール再貸出、正負原点変更後の履歴維持を保証する。空判定時間も性能比較へ含め、見た目・GPUの合否はこれらのテストだけで決定しない。
 
-既定OFFの比較方式について、正方向・負方向と斜め・遠方の自動原点変更で同じTilemap・セル内容・完成済み集合・部分反映番号を保持することを検証する。消去途中ではプールへ返さず、全16サブチャンク消去後だけ空の表示単位を別チャンクへ再利用すること、プール上限0、方式切替、World切替で表示とプールを残さないことも保証する。上下チャンクの相対Z順は現行Orthographic描画の継ぎ目対策であり、XY位置とSorting Orderを変えないことを確認する。実際の描画ピクセル、GPU、メモリ帰属は別途Gameビューと性能計測で確認する。
+製品チャンク別表示について、正方向・負方向と斜め・遠方の自動原点変更で同じTilemap・セル内容・完成済み集合・部分反映番号を保持することを検証する。消去途中ではプールへ返さず、全16サブチャンク消去後だけ空の表示単位を別チャンクへ再利用すること、プール上限0、設定変更、World切替で表示とプールを残さないことも保証する。上下チャンクの相対Z順は現行Orthographic描画の継ぎ目対策であり、XY位置とSorting Orderを変えないことを確認する。実際の描画ピクセル、GPU、メモリ帰属は別途Gameビューと性能計測で確認する。
 
 2026-10-17に比較方式の7ケースを含むPlayMode全38件と、関連ワールド生成EditMode 163件がUnity 6000.3.8f1で成功した。原点変更前後と拡大・負座標・遠方の44画像確認、前面EditorのCPU比較、未検証事項は[性能計測レポート](./Map02DPerformanceReport.md)を参照する。
+
+
+`WorldGenerationSceneBootstrapTests.ValidateProductSceneReferences_AcceptsPublishedProductScene`は、必要な場合だけ製品Sceneを追加読込し、構築ツール自身の読み取り専用検査を実行する。ユーザーやTest Runnerの未保存Sceneを閉じず、追加読込したSceneだけを終了時に閉じる。水中断面と直下床の採用済み`WaterSurface`を旧`Default`条件で拒否する回帰も防ぐ。
+
+2026-10-28の製品切替整理では、製品カタログ未設定時に1回だけエラーを通知して描画を拒否すること、旧素材・Atlas・API・保存済み参照が残らないことを`TerrainProductIsolationTests`へ追加した。`WorldGenerationScenePlayModeTests.CalculateChunkBounds_ProductProjectionIncludesFullOverhang`は、正負のチャンク境界でWall 2段とGround崖面3段の張り出し全体が可視要求へ含まれることを検証する。旧表示の寸法・Biome代用・共有方式だけを保証したケースは削除した。
 
 #### `WorldGenerationScenePlayModeTests`
 

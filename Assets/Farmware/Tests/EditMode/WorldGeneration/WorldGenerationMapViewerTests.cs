@@ -10,6 +10,7 @@ using Farmware.WorldGeneration.Editor;
 using Farmware.WorldGeneration.Presentation;
 using NUnit.Framework;
 using UnityEditor;
+using Unity.Entities;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -20,6 +21,72 @@ namespace Farmware.WorldGeneration.Tests
     /// </summary>
     public sealed class WorldGenerationMapViewerTests
     {
+        /// <summary>動物などの定義追加でRuntime IDがずれたWorldから差分を取得し、同じGUIDの診断IDと明示除去へ解決することを保証します。</summary>
+        [Test]
+        public void CaptureTerrainDeltaSnapshot_RebindsWorldLocalIdsAndRetainsRemovals()
+        {
+            DefinitionBuildEntry[] common = BuiltInTerrainBlockDefinitions.CreateCommonDefinitions(0, out DefinitionBuildReference[] references);
+            var input = new DefinitionBuildEntry[common.Length + 1];
+            System.Array.Copy(common, input, common.Length);
+            // 地形よりGUID順が前の定義を追加し、実製品の動物定義があるときと同じIDのずれを必ず作ります。
+            input[common.Length] = new DefinitionBuildEntry
+            {
+                Guid = new DefinitionGuid(0, 1), Kind = DefinitionKind.Item,
+                ReferenceStartIndex = references.Length, ReferenceCount = 0
+            };
+            BlobAssetReference<DefinitionCatalogBlob> sourceDefinitions = default;
+            BlobAssetReference<TerrainBlockMaterialCatalogBlob> sourceMaterials = default;
+            HydrologyDiagnosticTerrainCatalogs diagnostic = null;
+            World previous = World.DefaultGameObjectInjectionWorld;
+            using var world = new World("Map Viewer Runtime ID Boundary Test");
+            try
+            {
+                Assert.That(DefinitionCatalogBuilder.TryBuild(input, references, out sourceDefinitions, out _), Is.True);
+                Assert.That(TerrainBlockMaterialCatalogBuilder.TryBuild(sourceDefinitions,
+                    TerrainBlockMaterialDefinitions.CreateDefault(), out sourceMaterials), Is.True);
+                Assert.That(HydrologyDiagnosticTerrainCatalogs.TryCreate(out diagnostic), Is.True);
+                World.DefaultGameObjectInjectionWorld = world;
+                var settings = WorldGenerationSettings.CreateDefault(123, WorldGenerationSettings.CurrentGeneratorVersion);
+                world.EntityManager.CreateSingleton(settings);
+                world.EntityManager.CreateSingleton(new DefinitionCatalog { Value = sourceDefinitions });
+                TerrainBlockMaterialCatalogLookup.TryGetDefinition(sourceMaterials, TerrainBlockMaterialId.GrassLoam, out var grass);
+                Assert.That(DefinitionCatalogLookup.TryResolve(sourceDefinitions, BuiltInTerrainBlockDefinitions.FreshWaterGuid, out var freshWater), Is.True);
+                Entity owner = world.EntityManager.CreateEntity(typeof(TerrainChunkDeltaOwner));
+                world.EntityManager.SetComponentData(owner, new TerrainChunkDeltaOwner { Layer = WorldLayer.Surface, ChunkX = -1, ChunkY = -1 });
+                var deltas = world.EntityManager.AddBuffer<TerrainCellDelta>(owner);
+                deltas.Add(new TerrainCellDelta { LocalTileIndex = 0, ChangeMask = TerrainCellChangeMask.All,
+                    GroundBlockRuntimeId = grass.GroundRuntimeId, WallBlockRuntimeId = grass.WallRuntimeId });
+                deltas.Add(new TerrainCellDelta { LocalTileIndex = 1, ChangeMask = TerrainCellChangeMask.All, LiquidRuntimeId = freshWater });
+                var capture = typeof(WorldGenerationMapViewerWindow).GetMethod("CaptureTerrainDeltaSnapshot", BindingFlags.Static | BindingFlags.NonPublic);
+                var snapshot = (WorldGenerationMapTerrainDeltaSnapshot)capture.Invoke(null, new object[] { settings, WorldLayer.Surface, diagnostic });
+                Assert.That(snapshot.DeltaCellCount, Is.EqualTo(2));
+                Assert.That(snapshot.TryGetDelta(new WorldTileCoordinate(WorldLayer.Surface, -64, -64), out var groundDelta), Is.True);
+                Assert.That(snapshot.TryGetDelta(new WorldTileCoordinate(WorldLayer.Surface, -63, -64), out var waterDelta), Is.True);
+                // 別カタログの添字をそのまま採用せず、診断カタログの材質分類へ接続していることを確認します。
+                Assert.That(groundDelta.GroundBlockRuntimeId, Is.Not.EqualTo(grass.GroundRuntimeId));
+                Assert.That(groundDelta.WallBlockRuntimeId.Value, Is.EqualTo(groundDelta.GroundBlockRuntimeId.Value + 1));
+                Assert.That(waterDelta.LiquidRuntimeId, Is.EqualTo(diagnostic.RuntimeIds.FreshWater));
+                Assert.That(waterDelta.GroundBlockRuntimeId.IsValid, Is.False, "明示除去を未変更へ読み替えてはいけません。");
+                Assert.That(groundDelta.LiquidRuntimeId.IsValid, Is.False);
+                Assert.That(groundDelta.ChangeMask, Is.EqualTo(TerrainCellChangeMask.All));
+                Assert.That(deltas[0].GroundBlockRuntimeId, Is.EqualTo(grass.GroundRuntimeId), "ゲーム側の差分を書き換えてはいけません。");
+                WorldGenerationMapSampleResult result = WorldGenerationMapSampler.Sample(settings, diagnostic, WorldLayer.Surface,
+                    -63, -64, 2, 1, 1, WorldGenerationMapViewMode.Terrain, CancellationToken.None, terrainDeltaSnapshot: snapshot);
+                Assert.That(result.TryGetFinalizedTerrainSample(-64, -64, out var sample), Is.True);
+                Assert.That(sample.GroundMaterialId, Is.EqualTo(TerrainBlockMaterialId.GrassLoam));
+                Assert.That(sample.WallMaterialId, Is.EqualTo(TerrainBlockMaterialId.GrassLoam));
+                Assert.That(result.TryGetFinalizedTerrainSample(-63, -64, out var water), Is.True);
+                Assert.That(water.TerrainCell.LiquidRuntimeId, Is.EqualTo(diagnostic.RuntimeIds.FreshWater));
+            }
+            finally
+            {
+                World.DefaultGameObjectInjectionWorld = previous;
+                diagnostic?.Dispose();
+                if (sourceMaterials.IsCreated) sourceMaterials.Dispose();
+                if (sourceDefinitions.IsCreated) sourceDefinitions.Dispose();
+            }
+        }
+
         /// <summary>
         /// Map Viewerの最小Window寸法を取得し、地図と17行Hover診断を上下の固定UIと同時表示できる高さを保証します。
         /// レビュー対応前の480pxへ戻り、最小サイズで地図または診断が切れる退行を防ぎます。

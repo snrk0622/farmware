@@ -64,6 +64,9 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>18Biomeと8地質の自然生成候補を保持し、この所有者だけが破棄するPalette Blobです。</summary>
         private BlobAssetReference<TerrainBlockPaletteCatalogBlob> paletteCatalog;
 
+        /// <summary>World固有Runtime IDをGUIDから診断用IDへ対応付けるための共通定義です。Snapshot作成中だけ借用します。</summary>
+        internal BlobAssetReference<DefinitionCatalogBlob> DefinitionCatalog => definitionCatalog;
+
         /// <summary>完成セル確定へ読み取り専用で渡す、構築済みPalette Blobです。</summary>
         internal BlobAssetReference<TerrainBlockPaletteCatalogBlob> PaletteCatalog => paletteCatalog;
 

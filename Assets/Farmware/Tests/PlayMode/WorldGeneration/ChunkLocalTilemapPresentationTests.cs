@@ -1,4 +1,4 @@
-// このファイルは、比較用のチャンク内ローカルTilemapについて、原点変更で表示と構築進捗を再利用できることを検証します。
+// このファイルは、製品用のチャンク内ローカルTilemapについて、原点変更で表示と構築進捗を再利用できることを検証します。
 // ECSの地形生成規則ではなく、Presenterが所有する表示キャッシュ・空きプール・World切替時の寿命を対象とします。
 
 using System;
@@ -45,7 +45,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
         private BlobAssetReference<DefinitionCatalogBlob> definitionCatalog;
 
         /// <summary>
-        /// 各テスト前に空の表示とCameraを作り、比較方式を有効にします。ECS WorldやSceneアセットは変更しません。
+        /// 各テスト前に空の表示とCameraを作り、チャンク内表示へ接続します。ECS WorldやSceneアセットは変更しません。
         /// </summary>
         [SetUp]
         public void SetUp()
@@ -58,7 +58,6 @@ namespace Farmware.WorldGeneration.PlayModeTests
             template.GetComponent<TilemapRenderer>().sortOrder = TilemapRenderer.SortOrder.TopLeft;
             presenter = layer.AddComponent<ChunkTilemapPresenter>();
             Field("targetTilemap").SetValue(presenter, template);
-            presenter.ConfigureChunkLocalPresentation(true);
 
             cameraObject = new GameObject("Chunk Local Test Camera", typeof(Camera));
             cameraObject.transform.position = new Vector3(0f, 0f, -10f);
@@ -78,22 +77,6 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Object.DestroyImmediate(tile);
             if (terrainCatalog.IsCreated) terrainCatalog.Dispose();
             if (definitionCatalog.IsCreated) definitionCatalog.Dispose();
-        }
-
-        /// <summary>新規Componentの保存前の既定値がONで、生成ツールからの新規追加も採用方式になることを保証します。</summary>
-        [Test]
-        public void NewPresenter_DefaultsToChunkLocalTilemaps()
-        {
-            GameObject temporary = new GameObject("Default Presenter Test");
-            try
-            {
-                var component = temporary.AddComponent<ChunkTilemapPresenter>();
-                Assert.That(Field("useChunkLocalTilemaps").GetValue(component), Is.True);
-            }
-            finally
-            {
-                Object.DestroyImmediate(temporary);
-            }
         }
 
         /// <summary>
@@ -141,7 +124,6 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(progressType.GetField("NextSubChunkIndex").GetValue(partial), Is.EqualTo(3));
             Assert.That(progressType.GetField("AppliedSubChunkMask").GetValue(partial), Is.EqualTo((ushort)0x0007));
             Assert.That(GetTilemap(partialCoordinate, false), Is.SameAs(partialTilemap));
-            Assert.That(((ICollection)Field("staleOriginClearQueue").GetValue(presenter)).Count, Is.Zero);
             Assert.That(gridObject.transform.position, Is.EqualTo(Vector3.zero));
             Assert.That(original.GetComponent<TilemapRenderer>().mode, Is.EqualTo(TilemapRenderer.Mode.Individual));
             Assert.That(original.GetComponent<TilemapRenderer>().sortOrder, Is.EqualTo(TilemapRenderer.SortOrder.TopLeft));
@@ -199,7 +181,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
         }
 
         /// <summary>
-        /// 空きプール上限0では返却物を保持せず、方式切替とWorld切替用の即時掃除でも全表示を解放することを保証します。
+        /// 空きプール上限0では返却物を保持せず、World切替用の即時掃除でも全表示を解放することを保証します。
         /// </summary>
         [Test]
         public void ImmediateCleanupAndPoolLimit_DoNotRetainOldPresentations()
@@ -215,7 +197,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(((IDictionary)Field("chunkLocalPresentations").GetValue(presenter)).Count, Is.Zero);
 
             GetTilemap(new ChunkCoordinate(1, 0), true).SetTile(Vector3Int.zero, tile);
-            presenter.ConfigureChunkLocalPresentation(false);
+            Invoke("ClearAllPresentedChunksImmediately");
             Assert.That(((IDictionary)Field("chunkLocalPresentations").GetValue(presenter)).Count, Is.Zero);
             Assert.That(((ICollection)Field("pooledChunkLocalPresentations").GetValue(presenter)).Count, Is.Zero);
             Assert.That(template.GetTile(Vector3Int.zero), Is.Null);
@@ -357,22 +339,6 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(WriteLayer(nextCoordinate, template, 15, oneTile), Is.True);
         }
 
-        /// <summary>共有方式では空配列も従来どおり書き、比較方式への切替時には新しい空履歴を使うことを保証します。</summary>
-        [Test]
-        public void SparseWrite_SharedModeKeepsUnconditionalWrite()
-        {
-            presenter.ConfigureChunkLocalPresentation(false);
-            Invoke("SynchronizeDisplayOrigin");
-            ChunkCoordinate coordinate = new ChunkCoordinate(0, 0);
-            TileBase[] empty = new TileBase[256];
-            template.SetTile(Vector3Int.zero, tile);
-            Assert.That(WriteLayer(coordinate, template, 0, empty), Is.True);
-            Assert.That(template.GetTile(Vector3Int.zero), Is.Null);
-            Assert.That(WriteLayer(coordinate, template, 0, empty), Is.True);
-            presenter.ConfigureChunkLocalPresentation(true);
-            Assert.That(WriteLayer(coordinate, template, 0, empty), Is.False);
-        }
-
         /// <summary>正負の自動原点変更を挟んでも非空履歴を維持し、その後のnull書込で旧セルを消せることを保証します。</summary>
         /// <param name="relativeX">自動原点変更を起こす相対Xです。</param>
         /// <param name="chunkX">移動後も同じ表示を使うチャンクXです。</param>
@@ -397,22 +363,19 @@ namespace Farmware.WorldGeneration.PlayModeTests
 
         /// <summary>
         /// 完成した画面外データを先に作り、可視優先・中心が完成した範囲だけの予約・Inactive再利用・範囲外消去を保証します。
-        /// 共有方式とローカル方式で同じ有限範囲を使い、Observer自身は変更しません。
+        /// 正・負・遠方で同じ有限範囲を使い、Observer自身は変更しません。
         /// </summary>
-        /// <param name="local">チャンク別Tilemapを使う場合はtrueです。</param>
         /// <param name="center">可視中心の絶対チャンク座標です。正負・遠方を確認します。</param>
-        [TestCase(true, 0)]
-        [TestCase(false, 0)]
-        [TestCase(true, -7)]
-        [TestCase(false, 15625000)]
-        public void PresentationPreload_SchedulesVisibleFirstAndRetainsOnlyOneChunkMargin(bool local, int center)
+        [TestCase(0)]
+        [TestCase(-7)]
+        [TestCase(15625000)]
+        public void PresentationPreload_SchedulesVisibleFirstAndRetainsOnlyOneChunkMargin(int center)
         {
             World previous = World.DefaultGameObjectInjectionWorld;
             using World world = new World("Presentation Preload Test");
             try
             {
                 World.DefaultGameObjectInjectionWorld = world;
-                presenter.ConfigureChunkLocalPresentation(local);
                 EntityManager manager = world.EntityManager;
                 // Queryの順序が画面外を先に返しても、可視1件を先頭に予約できるよう外側から作ります。
                 for (int y = -2; y <= 2; y++)
@@ -522,6 +485,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(BuiltInTerrainBlockDefinitions.TryCreateTerrainDefinitions(definitionCatalog, out TerrainBlockDefinitionBuildEntry[] terrain), Is.True);
             Assert.That(TerrainBlockCatalogBuilder.TryBuild(definitionCatalog, terrain, out terrainCatalog), Is.True);
             Field("terrainCatalogBlob").SetValue(presenter, terrainCatalog);
+            Field("materialTileCache").SetValue(presenter, Activator.CreateInstance(Field("materialTileCache").FieldType, true));
         }
 
         /// <summary>表示予約に必要なComponentと確定BufferをテストWorldへ作り、指定状態を設定します。</summary>

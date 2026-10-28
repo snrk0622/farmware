@@ -1,5 +1,5 @@
-// このファイルは、一体型の土地・岩壁Sprite、液面アニメーション、岩壁際の資源レイヤー分類をSceneなしのEditModeで検証します。
-// ChunkTilemapPresenterとEditor構築ツールが同じ定数を使い、Pivotや表示高がずれないことを素早く保証します。
+// このファイルは、製品Wall際の資源レイヤー分類と岩壁内部影をSceneなしのEditModeで検証します。
+// 製品Presenterと同じ有効地形を参照し、資源遮蔽と影マスクのチャンク境界での一致を保証します。
 // 影マスクの同期Burst処理も、チャンク境界で水文・Biome確定後の完成地形と一致することを保証します。
 
 using System;
@@ -11,7 +11,7 @@ using Unity.Collections;
 namespace Farmware.WorldGeneration.Tests
 {
     /// <summary>
-    /// 地形の寸法・分類と、確定済み地形から影マスクを構築する表示専用計算を保証します。
+    /// 資源の前後分類と、確定済み地形から影マスクを構築する表示専用計算を保証します。
     /// </summary>
     public sealed class TerrainLayerPresentationUtilityTests
     {
@@ -113,46 +113,6 @@ namespace Farmware.WorldGeneration.Tests
             using var mask = new NativeArray<bool>(maskCount, Allocator.TempJob);
             Assert.Throws<ArgumentException>(() => RockWallAppearanceUtility.FillShadowMask(
                 default, mask));
-        }
-
-        /// <summary>
-        /// 土地Spriteが上面16pxと断面8pxを持ち、論理セル下端へ合わせるPivotが2/3になることを検証します。
-        /// </summary>
-        [Test]
-        public void CombinedTerrainSprite_UsesSixteenPixelSurfaceAndEightPixelFace()
-        {
-            Assert.That(TerrainLayerPresentationUtility.TerrainSurfaceHeightInPixels, Is.EqualTo(16));
-            Assert.That(TerrainLayerPresentationUtility.TerrainFrontFaceHeightInPixels, Is.EqualTo(8));
-            Assert.That(TerrainLayerPresentationUtility.CombinedTerrainSpriteHeightInPixels, Is.EqualTo(24));
-            Assert.That(
-                TerrainLayerPresentationUtility.CombinedTerrainPivotY,
-                Is.EqualTo(2f / 3f).Within(0.0001f));
-        }
-
-        /// <summary>
-        /// 岩壁Spriteが上面16pxと側面12pxを持ち、基準セルへ合わせるPivotが8/28になることを検証します。
-        /// </summary>
-        [Test]
-        public void CombinedRockWallSprite_UsesSixteenPixelSurfaceAndTwelvePixelFace()
-        {
-            Assert.That(TerrainLayerPresentationUtility.RockWallElevationInPixels, Is.EqualTo(12));
-            Assert.That(TerrainLayerPresentationUtility.CombinedRockWallSpriteHeightInPixels, Is.EqualTo(28));
-            Assert.That(
-                TerrainLayerPresentationUtility.CombinedRockWallPivotY,
-                Is.EqualTo(2f / 7f).Within(0.0001f));
-            Assert.That(TerrainLayerPresentationUtility.RockWallElevationInCells, Is.EqualTo(0.75f));
-        }
-
-        /// <summary>
-        /// 液面が16pxセルの半分に当たる8pxだけ画面下へ移動し、整数ピクセル境界を維持することを検証します。
-        /// </summary>
-        [Test]
-        public void LiquidSurfaceOffset_MovesDownByHalfTile()
-        {
-            Assert.That(TerrainLayerPresentationUtility.LiquidSurfaceDepthInPixels, Is.EqualTo(8));
-            Assert.That(
-                TerrainLayerPresentationUtility.LiquidSurfaceOffsetInCells,
-                Is.EqualTo(-0.5f));
         }
 
         /// <summary>

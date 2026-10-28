@@ -33,7 +33,7 @@ MonoBehaviour:
     - {fileID: -1765189702, guid: 2379daebd48f74b2e83d5dfef9eff0d2, type: 3}
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: 4f42b4511868bc8755d570e58ed22a8e
+    lastGeneratedFingerprint: 19d150951d193eeacdfb6d9e156338b2
     lastGeneratedAssetPaths:
     - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/FaceBoundary/GrassLoam_GroundFace_f00_b00.png
     - Assets/Farmware/Art/Generated/TerrainTiles/GrassLoam/FaceBoundary/GrassLoam_WallFace_f00_b00.png
@@ -86,7 +86,7 @@ MonoBehaviour:
     - {fileID: -789143684, guid: 7ac6c27c591be48c9862d399cedb89f1, type: 3}
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: 3c87c167ea732cb14664953e05ad673b
+    lastGeneratedFingerprint: 045271c4fbfd6603b4f286e314a371c3
     lastGeneratedAssetPaths:
     - Assets/Farmware/Art/Generated/TerrainTiles/MeadowSoil/FaceBoundary/MeadowSoil_GroundFace_f00_b00.png
     - Assets/Farmware/Art/Generated/TerrainTiles/MeadowSoil/FaceBoundary/MeadowSoil_WallFace_f00_b00.png
@@ -135,7 +135,7 @@ MonoBehaviour:
     faceBoundaryOverlays: []
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: 8ae98c3584139f98b335613f279942c6
+    lastGeneratedFingerprint: d3a9bd5627243bf4946aacda6fe156db
     lastGeneratedAssetPaths: []
   - materialId: DryGrassSoil
     japaneseName: "\u4E7E\u71E5\u8349\u5730\u571F\u58CC\t"
@@ -156,7 +156,7 @@ MonoBehaviour:
     - {fileID: 207566391, guid: 7cd7749ba7fc54648aebd949ed96e5e1, type: 3}
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: 23e3b82fc0bd4069adff510f3f6804c9
+    lastGeneratedFingerprint: 7774b51187e1a095d92880bac7dcd2dc
     lastGeneratedAssetPaths:
     - Assets/Farmware/Art/Generated/TerrainTiles/DryGrassSoil/FaceBoundary/DryGrassSoil_GroundFace_f00_b00.png
     - Assets/Farmware/Art/Generated/TerrainTiles/DryGrassSoil/FaceBoundary/DryGrassSoil_WallFace_f00_b00.png
@@ -205,7 +205,7 @@ MonoBehaviour:
     faceBoundaryOverlays: []
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: 80ce18455b1c7937cb53947ef84e02a0
+    lastGeneratedFingerprint: 81ebba7d1cbe419d73d71bf62daca6de
     lastGeneratedAssetPaths: []
   - materialId: SandySoil
     japaneseName: "\u7802\u8CEA\u571F\u58CC"
@@ -222,7 +222,7 @@ MonoBehaviour:
     faceBoundaryOverlays: []
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: 5da24017f104fa86715141705434c577
+    lastGeneratedFingerprint: 398056e71b7e21d0ca2f74725f8c4207
     lastGeneratedAssetPaths: []
   - materialId: ForestLoam
     japaneseName: "\u68EE\u6797\u30ED\u30FC\u30E0"
@@ -243,7 +243,7 @@ MonoBehaviour:
     - {fileID: 1718153987, guid: cfe95fe51c97945f08dc6fb657361fc4, type: 3}
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: edd2b16568450e4290f01a0d0e6912c5
+    lastGeneratedFingerprint: ae92a19b2cb14390de0b6bdd70c4309a
     lastGeneratedAssetPaths:
     - Assets/Farmware/Art/Generated/TerrainTiles/ForestLoam/FaceBoundary/ForestLoam_GroundFace_f00_b00.png
     - Assets/Farmware/Art/Generated/TerrainTiles/ForestLoam/FaceBoundary/ForestLoam_WallFace_f00_b00.png
@@ -296,7 +296,7 @@ MonoBehaviour:
     - {fileID: 48867849, guid: 01f2463f82c4f46cc954ab0ab9e1b62f, type: 3}
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: 284b7fd12a741478ace385fbe87ac66b
+    lastGeneratedFingerprint: 65ba8459901a0dd6f7b93a6c7536e57c
     lastGeneratedAssetPaths:
     - Assets/Farmware/Art/Generated/TerrainTiles/HumusSoil/FaceBoundary/HumusSoil_GroundFace_f00_b00.png
     - Assets/Farmware/Art/Generated/TerrainTiles/HumusSoil/FaceBoundary/HumusSoil_WallFace_f00_b00.png
@@ -349,7 +349,7 @@ MonoBehaviour:
     - {fileID: -1625753224, guid: 52e4f7d944d184d49803dd97a7e2bdd5, type: 3}
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: 4e136e11216defa028f38b3ac98d3009
+    lastGeneratedFingerprint: f2944a688acac46d768bfaa2dc5510a2
     lastGeneratedAssetPaths:
     - Assets/Farmware/Art/Generated/TerrainTiles/MountainLoam/FaceBoundary/MountainLoam_GroundFace_f00_b00.png
     - Assets/Farmware/Art/Generated/TerrainTiles/MountainLoam/FaceBoundary/MountainLoam_WallFace_f00_b00.png
@@ -402,7 +402,7 @@ MonoBehaviour:
     - {fileID: -1127467410, guid: 59f347f300c7c4965964e759f1ff492e, type: 3}
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: e4b3dee89903ed5839b08cd3036d3ec2
+    lastGeneratedFingerprint: 2da425265270c5d68d792de9c20ea66b
     lastGeneratedAssetPaths:
     - Assets/Farmware/Art/Generated/TerrainTiles/IslandLoam/FaceBoundary/IslandLoam_GroundFace_f00_b00.png
     - Assets/Farmware/Art/Generated/TerrainTiles/IslandLoam/FaceBoundary/IslandLoam_WallFace_f00_b00.png
@@ -455,7 +455,7 @@ MonoBehaviour:
     - {fileID: 1445522829, guid: 854fb00033f1c4603bccab48813b9092, type: 3}
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: 4bae86bef194da9963bdc51587656f36
+    lastGeneratedFingerprint: d68ad074916d60a0b17a61293122d8f9
     lastGeneratedAssetPaths:
     - Assets/Farmware/Art/Generated/TerrainTiles/PodzolSoil/FaceBoundary/PodzolSoil_GroundFace_f00_b00.png
     - Assets/Farmware/Art/Generated/TerrainTiles/PodzolSoil/FaceBoundary/PodzolSoil_WallFace_f00_b00.png
@@ -504,7 +504,7 @@ MonoBehaviour:
     faceBoundaryOverlays: []
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: 1dee8b51b2927b43dbb58b5484f8acf0
+    lastGeneratedFingerprint: d6b538fedc1fd6b74ee9b65242c17869
     lastGeneratedAssetPaths: []
   - materialId: SteppeSoil
     japaneseName: "\u30B9\u30C6\u30C3\u30D7\u571F\u58CC"
@@ -525,7 +525,7 @@ MonoBehaviour:
     - {fileID: -1477421147, guid: 3d85e5c6af52e44dcb1034b8feb9fed1, type: 3}
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: 5bb823c16bd70f5ef5bffbe591a0c16f
+    lastGeneratedFingerprint: 8e910368040a42321f8f2c6cca5b5636
     lastGeneratedAssetPaths:
     - Assets/Farmware/Art/Generated/TerrainTiles/SteppeSoil/FaceBoundary/SteppeSoil_GroundFace_f00_b00.png
     - Assets/Farmware/Art/Generated/TerrainTiles/SteppeSoil/FaceBoundary/SteppeSoil_WallFace_f00_b00.png
@@ -578,7 +578,7 @@ MonoBehaviour:
     - {fileID: 1197691378, guid: e055c169bee3f49a78e41fcd9749fedc, type: 3}
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: 253c41c3ca7346d4e385cef5cc9dbfcd
+    lastGeneratedFingerprint: 9ff895dfe78cc098b84d511b561bead0
     lastGeneratedAssetPaths:
     - Assets/Farmware/Art/Generated/TerrainTiles/DryScrubSoil/FaceBoundary/DryScrubSoil_GroundFace_f00_b00.png
     - Assets/Farmware/Art/Generated/TerrainTiles/DryScrubSoil/FaceBoundary/DryScrubSoil_WallFace_f00_b00.png
@@ -627,7 +627,7 @@ MonoBehaviour:
     faceBoundaryOverlays: []
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: aca699620b490a854d508a8af9b1dfd0
+    lastGeneratedFingerprint: 13d0bea34829a239e6609accb8a3f656
     lastGeneratedAssetPaths: []
   - materialId: AlluvialSoil
     japaneseName: "\u6C96\u7A4D\u571F"
@@ -644,7 +644,7 @@ MonoBehaviour:
     faceBoundaryOverlays: []
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: 7f084e224fd848144583d3cfd7030a0c
+    lastGeneratedFingerprint: 879fe15021c709198bdfffc4078c303b
     lastGeneratedAssetPaths: []
   - materialId: PermafrostSoil
     japaneseName: "\u6C38\u4E45\u51CD\u571F"
@@ -661,7 +661,7 @@ MonoBehaviour:
     faceBoundaryOverlays: []
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: f628de24901917bcb75b4cbddb1c5296
+    lastGeneratedFingerprint: 393b266e96c01edcd9b68731ef29630c
     lastGeneratedAssetPaths: []
   - materialId: TundraSoil
     japaneseName: "\u30C4\u30F3\u30C9\u30E9\u571F\u58CC"
@@ -682,7 +682,7 @@ MonoBehaviour:
     - {fileID: -1647321659, guid: 862f0c8a41fb24cacb0e9049b49b963d, type: 3}
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: a6f177f554a753833a55c472453094c3
+    lastGeneratedFingerprint: f94ebcb8cc94e170e2025f347d34664a
     lastGeneratedAssetPaths:
     - Assets/Farmware/Art/Generated/TerrainTiles/TundraSoil/FaceBoundary/TundraSoil_GroundFace_f00_b00.png
     - Assets/Farmware/Art/Generated/TerrainTiles/TundraSoil/FaceBoundary/TundraSoil_WallFace_f00_b00.png
@@ -731,7 +731,7 @@ MonoBehaviour:
     faceBoundaryOverlays: []
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: 147ff48098fe9f9609e69a9630c70f5d
+    lastGeneratedFingerprint: e94b5a60b0e83d93a31734007d8776ad
     lastGeneratedAssetPaths: []
   - materialId: AlpineScree
     japaneseName: "\u9AD8\u5C71\u5CA9\u5C51"
@@ -748,7 +748,7 @@ MonoBehaviour:
     faceBoundaryOverlays: []
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: 4e3d87b1d9dcbd3725ba6eeda590d3f2
+    lastGeneratedFingerprint: 274ed14f0420e28d3de0a1507222e178
     lastGeneratedAssetPaths: []
   - materialId: Gravel
     japaneseName: "\u792B"
@@ -765,7 +765,7 @@ MonoBehaviour:
     faceBoundaryOverlays: []
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: 076f0ca4b1b26da78558171ba2a69ce5
+    lastGeneratedFingerprint: 6718cced8c196ec0c72f62391b084a3b
     lastGeneratedAssetPaths: []
   - materialId: DesertGravel
     japaneseName: "\u7802\u6F20\u792B"
@@ -782,7 +782,7 @@ MonoBehaviour:
     faceBoundaryOverlays: []
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: 76288aaba17a6327382a076515ff6138
+    lastGeneratedFingerprint: a24ac27067a022cfbfc68277a8f7f197
     lastGeneratedAssetPaths: []
   - materialId: DesertSand
     japaneseName: "\u7802\u6F20\u7802"
@@ -799,7 +799,7 @@ MonoBehaviour:
     faceBoundaryOverlays: []
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: d7821aab582387d7a42b9759126a8b0a
+    lastGeneratedFingerprint: f7fe403d5b03032fa2c6525b578e5242
     lastGeneratedAssetPaths: []
   - materialId: Scoria
     japaneseName: "\u30B9\u30B3\u30EA\u30A2"
@@ -816,7 +816,7 @@ MonoBehaviour:
     faceBoundaryOverlays: []
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: 54b3731a877bd99343b83ee070b8363a
+    lastGeneratedFingerprint: e9ba0d3844c32e8570f3fcae27d55067
     lastGeneratedAssetPaths: []
   - materialId: CompactedSediment
     japaneseName: "\u5727\u5BC6\u5806\u7A4D\u7269"
@@ -833,7 +833,7 @@ MonoBehaviour:
     faceBoundaryOverlays: []
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: 35c0b10523cf4f2f7dbba3d1f7b7aa20
+    lastGeneratedFingerprint: 510fa9568edad000fef1d1f4c4ef21a6
     lastGeneratedAssetPaths: []
   - materialId: Sandstone
     japaneseName: "\u7802\u5CA9"
@@ -850,7 +850,7 @@ MonoBehaviour:
     faceBoundaryOverlays: []
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: a8b3f0c4326f790cdd36ac4237b57d8d
+    lastGeneratedFingerprint: 135a64e198d847da0710acc97ab3b3cd
     lastGeneratedAssetPaths: []
   - materialId: Conglomerate
     japaneseName: "\u792B\u5CA9"
@@ -867,7 +867,7 @@ MonoBehaviour:
     faceBoundaryOverlays: []
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: acb27d3ad96312b428d9afcd819d86f2
+    lastGeneratedFingerprint: c0ec0455c9a8d65ecc517931cd056265
     lastGeneratedAssetPaths: []
   - materialId: Limestone
     japaneseName: "\u77F3\u7070\u5CA9"
@@ -884,7 +884,7 @@ MonoBehaviour:
     faceBoundaryOverlays: []
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: 4bbce9c580dcb0e179f59d0a72f80009
+    lastGeneratedFingerprint: 05e17172868e4dc84a6527cd60b5563a
     lastGeneratedAssetPaths: []
   - materialId: Dolomite
     japaneseName: "\u82E6\u7070\u5CA9"
@@ -901,7 +901,7 @@ MonoBehaviour:
     faceBoundaryOverlays: []
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: 235935edfa217f17b55a50aa5a6c06f1
+    lastGeneratedFingerprint: 830678f3a416dc747278ebcafbd30c87
     lastGeneratedAssetPaths: []
   - materialId: Mudstone
     japaneseName: "\u6CE5\u5CA9"
@@ -918,7 +918,7 @@ MonoBehaviour:
     faceBoundaryOverlays: []
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: 5bb79029e4a40efe94ac067b37b213f8
+    lastGeneratedFingerprint: 0fb19ddb013cb13bbbbf1de8d9667dbe
     lastGeneratedAssetPaths: []
   - materialId: Slate
     japaneseName: "\u7C98\u677F\u5CA9"
@@ -935,7 +935,7 @@ MonoBehaviour:
     faceBoundaryOverlays: []
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: 0fe1fff609524bbe5d79944874c2e41f
+    lastGeneratedFingerprint: 9203aed2d31f92e1e5e04570b2fd32f8
     lastGeneratedAssetPaths: []
   - materialId: Granite
     japaneseName: "\u82B1\u5D17\u5CA9"
@@ -952,7 +952,7 @@ MonoBehaviour:
     faceBoundaryOverlays: []
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: 21cdef2b76ffd493d9ab298311e684f6
+    lastGeneratedFingerprint: 4d020c811affc493b86cdb6640663355
     lastGeneratedAssetPaths: []
   - materialId: Granodiorite
     japaneseName: "\u82B1\u5D17\u9583\u7DD1\u5CA9"
@@ -969,7 +969,7 @@ MonoBehaviour:
     faceBoundaryOverlays: []
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: 09ea3fc7d6c7b5c3ff9051ddf550b432
+    lastGeneratedFingerprint: 4a8861f874f15b60615848e4a2184f9d
     lastGeneratedAssetPaths: []
   - materialId: Schist
     japaneseName: "\u7247\u5CA9"
@@ -986,7 +986,7 @@ MonoBehaviour:
     faceBoundaryOverlays: []
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: a4106551bf4eedb75bf3fa84e78b0d52
+    lastGeneratedFingerprint: d8439adcab4c2602bd55ed142d88248f
     lastGeneratedAssetPaths: []
   - materialId: Gneiss
     japaneseName: "\u7247\u9EBB\u5CA9"
@@ -1003,7 +1003,7 @@ MonoBehaviour:
     faceBoundaryOverlays: []
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: 16fbabe5b9e0d67f711e5d53ef205a52
+    lastGeneratedFingerprint: 64d61d89f2149212406c9dcebf3c70db
     lastGeneratedAssetPaths: []
   - materialId: Quartzite
     japaneseName: "\u73EA\u5CA9"
@@ -1020,7 +1020,7 @@ MonoBehaviour:
     faceBoundaryOverlays: []
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: 4f605b1ca2c198544a6671e380e17ae9
+    lastGeneratedFingerprint: 9477b361d42aef87690bf1761bbd729e
     lastGeneratedAssetPaths: []
   - materialId: Basalt
     japaneseName: "\u7384\u6B66\u5CA9"
@@ -1037,7 +1037,7 @@ MonoBehaviour:
     faceBoundaryOverlays: []
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: 6c6e794091828875d64e08b2b94ee383
+    lastGeneratedFingerprint: 98ee8e0e08955dc931aa2e1f9604ed3a
     lastGeneratedAssetPaths: []
   - materialId: Andesite
     japaneseName: "\u5B89\u5C71\u5CA9"
@@ -1054,7 +1054,7 @@ MonoBehaviour:
     faceBoundaryOverlays: []
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: 8e7400373249cbdad2d7add13645c6fe
+    lastGeneratedFingerprint: be615439ca7de1388444b2f3b3009bbb
     lastGeneratedAssetPaths: []
   - materialId: Tuff
     japaneseName: "\u51DD\u7070\u5CA9"
@@ -1071,7 +1071,7 @@ MonoBehaviour:
     faceBoundaryOverlays: []
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: 0e90b249a5456b74875e7ad8f12f1b84
+    lastGeneratedFingerprint: 372068abf352f00617e22da68d69d7b0
     lastGeneratedAssetPaths: []
   - materialId: Serpentinite
     japaneseName: "\u86C7\u7D0B\u5CA9"
@@ -1088,7 +1088,7 @@ MonoBehaviour:
     faceBoundaryOverlays: []
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: 94731f90f7d2fa3247b7cd3313e8762a
+    lastGeneratedFingerprint: 306ff78e8fa5c5f6ef7ada9b2e331134
     lastGeneratedAssetPaths: []
   - materialId: Peridotite
     japaneseName: "\u304B\u3093\u3089\u3093\u5CA9"
@@ -1105,5 +1105,5 @@ MonoBehaviour:
     faceBoundaryOverlays: []
     darkenWallSurface: 1
     wallDarkenFactor: 0.85
-    lastGeneratedFingerprint: d1a21254802dcbd140d48c1c815c55c3
+    lastGeneratedFingerprint: 46c6e72db99bae6d62fb39051528bfbd
     lastGeneratedAssetPaths: []

@@ -184,3 +184,9 @@ GPUとCPU Main/RenderはFrameTimingManagerを用い、元フレーム開始times
 成果物は `/private/tmp/farmware-terrain-player-h_j_4iuv/` にある。`Current.app`・`Baseline.app`、両ビルドJSON、共通`TerrainTravelBenchmark.cs`、`BuildTerrainMeasurement.cs`、`run_players.py`、`analyze.py`、`summary.json`、各`cases/<条件>/`の`frames.csv`・`gpu.csv`・`rss.csv`・`metadata.txt`・`player.log`・`process.json`・`final.png`を保持する。`smoke/`はビルドと同時の予備実行なので性能統計から除いた。元プロジェクトのAssets・Packages・ProjectSettingsは開始時SHA-256と全一致した。一時Editor・Playerは終了し、計測用Componentは元リポジトリへ追加していない。専用コピー内の計測C#とmetaも削除し、ソース控えは同領域のAssets外へ保持した。元EditorはPlay停止・SampleScene未変更・コンパイル失敗なしだった。CLIの既知の`editor status`互換照会エラー3件だけを内容保存後に整理した。
 
 生データは `/private/tmp/farmware-d5-priority.csv`、`/private/tmp/farmware-d5-final.csv`、`/private/tmp/farmware-d5-map-deferred-final.json`、`/private/tmp/farmware-d5-baseline.csv`、`farmware-d5-preload2.csv`、`farmware-d5-partial.csv`、`farmware-d5-map-baseline.json`、`farmware-d5-map-cached.json`、`farmware-d5-map-deferred.json`、`farmware-d5-map-window.json`、`farmware-d5-map-window-texture.png`。一時領域のため永続保存は保証しない。
+
+## 9. 製品切替整理への引き継ぎ
+
+2026-10-28の性能改善commit後、C6-D残作業として旧表示・比較切替・旧素材を削除し、Cameraの投影張り出しと、実Worldの追加定義でMap Viewerの差分Runtime IDがずれる問題を修正した。変更と最終検証は[製品切替の最終検証](./Terrain01C6DFinalizationReport.md)に記録する。本書の局所性能値は測定時の履歴として保持し、追加変更後の全機器・全画面条件の性能合格へ読み替えない。
+
+2026-10-28に最終の人間確認で問題なし・commit承認を受け、D5・D6、C6-DおよびC6全体を完了とした。高速移動、対象機器・最大Viewport等の未評価条件は上記の後続課題として維持する。

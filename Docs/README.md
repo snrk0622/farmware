@@ -37,7 +37,9 @@ v0.54では地上18種を維持し、アフリカサバンナを熱帯サバン�
 
 ## 開発・検証
 
-通常カメラ移動とMap Viewerの遅延は[地形表示の遅延調査](./Development/Terrain01C6D5PerformanceReport.md)に計測条件・変更・未解決範囲を記録する。通常表示は必要入力が揃ったサブチャンクから反映し、Map Viewerは製品Burst Jobによる初回生成と最大32チャンクの自然地形再利用へ変更した。通常表示の改善は人間確認済みで、Development Buildの通常・高速の局所比較も実施した。通常移動の表示待ちは0となり、高速で残る待ちとCPU・GC・表示メモリ増加を記録した。全条件の表示確認と正式な対象機器・最大Viewportの性能評価は分離し、C6-D5は継続中である。
+C6-Dの旧表示削除・製品表示の最終AI確認と人間確認結果は[製品切替の最終検証](./Development/Terrain01C6DFinalizationReport.md)に記録する。製品カタログ必須のチャンク別表示へ統一し、Map Viewerの編集差分は定義GUIDで診断用IDへ対応付ける。
+
+通常カメラ移動とMap Viewerの遅延は[地形表示の遅延調査](./Development/Terrain01C6D5PerformanceReport.md)に計測条件・変更・未解決範囲を記録する。通常表示は必要入力が揃ったサブチャンクから反映し、Map Viewerは製品Burst Jobによる初回生成と最大32チャンクの自然地形再利用へ変更した。通常表示の改善は人間確認済みで、Development Buildの通常・高速の局所比較も実施した。通常移動の表示待ちは0となり、高速で残る待ちとCPU・GC・表示メモリ増加を記録した。表示の最終AI確認と人間確認を経てC6-D5は完了した。正式な対象機器・最大Viewportの性能評価と高速乗り物への対応は後続項目として分離する。
 
 TERRAIN-01C7への申し送りとして、火山バイオームなどでの水の温泉化、マグマと水の接触による黒曜石などへの自動変換を未確定の追加仕様として検討する。[実装ロードマップ](./Development/ImplementationRoadmap.md)と[マップ仕様](./GameSpecification/RandomMapGenerationSpecification.md)に検討範囲を記録している。
 

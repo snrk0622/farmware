@@ -556,7 +556,7 @@ namespace Farmware.WorldGeneration.Editor
                 if (requiresCompletedTerrain && layer == WorldLayer.Surface)
                 {
                     // ECSのDynamic BufferはThreadPoolから読めないため、同じ生成設定のWorldだけをメインスレッドで値コピーします。
-                    terrainDeltaSnapshot = CaptureTerrainDeltaSnapshot(renderSettings, layer);
+                    terrainDeltaSnapshot = CaptureTerrainDeltaSnapshot(renderSettings, layer, terrainCatalogs);
                 }
 
                 if (requiresCompletedTerrain && layer == WorldLayer.Surface)
@@ -649,12 +649,14 @@ namespace Farmware.WorldGeneration.Editor
         /// </summary>
         /// <param name="renderSettings">Map Viewerが今回使うSeedと全生成設定です。</param>
         /// <param name="layer">コピー対象の固定ワールドレイヤーです。</param>
+        /// <param name="destinationCatalogs">診断側Runtime IDの解決元です。呼び出し元がSnapshot作成中も所有します。</param>
         /// <returns>
         /// 同じ設定を持つDefault Worldが存在する場合は空を含むSnapshot、それ以外は自然生成だけを示すnullです。
         /// </returns>
         private static WorldGenerationMapTerrainDeltaSnapshot CaptureTerrainDeltaSnapshot(
             in WorldGenerationSettings renderSettings,
-            WorldLayer layer)
+            WorldLayer layer,
+            HydrologyDiagnosticTerrainCatalogs destinationCatalogs)
         {
             World world = World.DefaultGameObjectInjectionWorld;
             if (world == null || !world.IsCreated)
@@ -679,6 +681,16 @@ namespace Farmware.WorldGeneration.Editor
             {
                 settingsQuery.Dispose();
             }
+
+            // Runtime IDは定義をGUID順へ並べた、そのWorld内だけの添字です。
+            // 動物・設備の定義が加わると地形の数値も動くため、同じ整数を別カタログへ直接渡してはいけません。
+            using EntityQuery definitionQuery = entityManager.CreateEntityQuery(ComponentType.ReadOnly<DefinitionCatalog>());
+            if (definitionQuery.CalculateEntityCount() != 1 || destinationCatalogs == null || !destinationCatalogs.IsCreated)
+            {
+                throw new InvalidOperationException("有効地形差分の取得には、実WorldとMap Viewer両方の定義カタログが必要です。");
+            }
+            BlobAssetReference<DefinitionCatalogBlob> sourceCatalog = definitionQuery.GetSingleton<DefinitionCatalog>().Value;
+            var runtimeIdMap = new Dictionary<int, DefinitionRuntimeId>();
 
             var copiedDeltas =
                 new Dictionary<ChunkCoordinate, TerrainCellDelta[]>();
@@ -710,7 +722,17 @@ namespace Farmware.WorldGeneration.Editor
                     var copy = new TerrainCellDelta[source.Length];
                     for (int deltaIndex = 0; deltaIndex < source.Length; deltaIndex++)
                     {
-                        copy[deltaIndex] = source[deltaIndex];
+                        TerrainCellDelta delta = source[deltaIndex];
+                        // 未変更区画は参照せず、Invalidによる明示除去はInvalidのまま保持します。
+                        delta.GroundBlockRuntimeId = (delta.ChangeMask & TerrainCellChangeMask.GroundBlock) == 0 ? default
+                            : ResolveMapRuntimeId(sourceCatalog, destinationCatalogs.DefinitionCatalog, delta.GroundBlockRuntimeId, DefinitionKind.GroundBlock, runtimeIdMap);
+                        delta.WallBlockRuntimeId = (delta.ChangeMask & TerrainCellChangeMask.WallBlock) == 0 ? default
+                            : ResolveMapRuntimeId(sourceCatalog, destinationCatalogs.DefinitionCatalog, delta.WallBlockRuntimeId, DefinitionKind.WallBlock, runtimeIdMap);
+                        delta.LiquidRuntimeId = (delta.ChangeMask & TerrainCellChangeMask.Liquid) == 0 ? default
+                            : ResolveMapRuntimeId(sourceCatalog, destinationCatalogs.DefinitionCatalog, delta.LiquidRuntimeId, DefinitionKind.Liquid, runtimeIdMap);
+                        delta.TerrainSurfaceRuntimeId = (delta.ChangeMask & TerrainCellChangeMask.TerrainSurface) == 0 ? default
+                            : ResolveMapRuntimeId(sourceCatalog, destinationCatalogs.DefinitionCatalog, delta.TerrainSurfaceRuntimeId, DefinitionKind.TerrainSurface, runtimeIdMap);
+                        copy[deltaIndex] = delta;
                     }
 
                     copiedDeltas.Add(coordinate, copy);
@@ -722,6 +744,37 @@ namespace Farmware.WorldGeneration.Editor
             }
 
             return new WorldGenerationMapTerrainDeltaSnapshot(copiedDeltas);
+        }
+
+        /// <summary>Snapshot作成時だけ、実WorldのIDを定義GUIDで診断側へ対応付けます。未知定義や区画違いを代用品で隠しません。</summary>
+        /// <param name="source">実行中Worldが所有する共通定義です。</param>
+        /// <param name="destination">呼び出し元が所有する診断用の共通定義です。</param>
+        /// <param name="sourceId">実Worldの区画に保存されているIDです。0は明示除去です。</param>
+        /// <param name="expectedKind">変更区画が要求する定義分類です。</param>
+        /// <param name="resolvedIds">同じ定義をセルごとにGUID検索しないため、今回要求中だけ再利用する対応表です。</param>
+        /// <returns>診断カタログ内の同じ定義を指すIDです。元Blobやゲーム状態は変更しません。</returns>
+        private static DefinitionRuntimeId ResolveMapRuntimeId(
+            BlobAssetReference<DefinitionCatalogBlob> source,
+            BlobAssetReference<DefinitionCatalogBlob> destination,
+            DefinitionRuntimeId sourceId,
+            DefinitionKind expectedKind,
+            Dictionary<int, DefinitionRuntimeId> resolvedIds)
+        {
+            if (sourceId.Value == DefinitionRuntimeId.InvalidValue) return default;
+            if (!DefinitionCatalogLookup.TryGetDefinition(source, sourceId, out DefinitionBlobRecord sourceRecord)
+                || sourceRecord.Kind != expectedKind)
+            {
+                throw new InvalidOperationException($"実Worldの地形差分IDが区画に一致しません: ID={sourceId.Value}, Kind={expectedKind}");
+            }
+            if (resolvedIds.TryGetValue(sourceId.Value, out DefinitionRuntimeId cached)) return cached;
+            if (!DefinitionCatalogLookup.TryResolve(destination, sourceRecord.Guid, out DefinitionRuntimeId destinationId)
+                || !DefinitionCatalogLookup.TryGetDefinition(destination, destinationId, out DefinitionBlobRecord destinationRecord)
+                || destinationRecord.Kind != expectedKind)
+            {
+                throw new InvalidOperationException($"Map Viewerに地形差分の定義がありません: GUID={sourceRecord.Guid}, Kind={expectedKind}");
+            }
+            resolvedIds.Add(sourceId.Value, destinationId);
+            return destinationId;
         }
 
         /// <summary>
