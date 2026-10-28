@@ -7,6 +7,8 @@ using NUnit.Framework;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 using UnityEngine.SceneManagement;
 using UnityEngine.Tilemaps;
 
@@ -302,6 +304,63 @@ namespace Farmware.WorldGeneration.Tests
                 Is.True, "基底色の前へ移したLit水中床もGlobal Lightの対象に含めます。");
         }
 
+        /// <summary>製品CameraがHDRとBloom 0.4を受け取り、岸照明がGround Presenterへ接続されていることを保証します。</summary>
+        [Test]
+        public void SampleScene_UsesAdoptedMagmaGlowAndShoreLighting()
+        {
+            Camera camera = FindRoot("Main Camera").GetComponent<Camera>();
+            Assert.That(camera.allowHDR, Is.True);
+            var cameraData = camera.GetComponent<UniversalAdditionalCameraData>();
+            Assert.That(cameraData.renderPostProcessing, Is.True);
+            Volume volume = FindRoot(TerrainProductSceneConnector.MagmaBloomVolumeName).GetComponent<Volume>();
+            Assert.That(volume.isGlobal && volume.enabled, Is.True);
+            Assert.That(cameraData.volumeLayerMask.value & (1 << volume.gameObject.layer), Is.Not.Zero);
+            Assert.That(AssetDatabase.GetAssetPath(volume.sharedProfile), Is.EqualTo(TerrainProductSceneConnector.MagmaBloomProfilePath));
+            Assert.That(volume.sharedProfile.TryGet(out Bloom bloom), Is.True);
+            Assert.That(bloom.intensity.overrideState && bloom.threshold.overrideState, Is.True);
+            Assert.That(bloom.intensity.value, Is.EqualTo(0.4f));
+            Assert.That(bloom.threshold.value, Is.EqualTo(1.15f));
+            Assert.That(bloom.scatter.value, Is.EqualTo(0.25f));
+            Assert.That(bloom.maxIterations.value, Is.EqualTo(3));
+            GameObject ground = FindRoot(TerrainProductSceneConnector.WorldGridName).transform.Find(
+                TerrainProductSceneConnector.GroundTilemapName).gameObject;
+            var lighting = ground.GetComponent<TerrainMagmaShoreLighting>();
+            Assert.That(lighting, Is.Not.Null);
+            var serialized = new SerializedObject(ground.GetComponent<ChunkTilemapPresenter>());
+            Assert.That(serialized.FindProperty("magmaShoreLighting").objectReferenceValue, Is.EqualTo(lighting));
+            Assert.That(new SerializedObject(lighting).FindProperty("cameraController").objectReferenceValue,
+                Is.EqualTo(camera.GetComponent<CameraPanController>()));
+            Material material = AssetDatabase.LoadAssetAtPath<Material>(TerrainProductSceneConnector.MagmaSurfacePatternMaterialPath);
+            Assert.That(material.GetColor("_CoreColor").maxColorComponent, Is.GreaterThan(1f));
+        }
+
+        /// <summary>再接続で製品Volumeを重複生成せず、同じProfileを使うことを保証します。</summary>
+        [Test]
+        public void ConfigureMagmaBloom_ReusesExistingVolumeAndProfile()
+        {
+            // 製品Sceneを変更しないよう、専用Preview Sceneへ最小の接続対象だけを準備します。
+            Scene preview = EditorSceneManager.NewPreviewScene();
+            try
+            {
+                var cameraObject = new GameObject("Magma Connection Test Camera", typeof(Camera), typeof(UniversalAdditionalCameraData), typeof(CameraPanController));
+                cameraObject.tag = "MainCamera";
+                SceneManager.MoveGameObjectToScene(cameraObject, preview);
+                var grid = new GameObject(TerrainProductSceneConnector.WorldGridName);
+                SceneManager.MoveGameObjectToScene(grid, preview);
+                var ground = new GameObject(TerrainProductSceneConnector.GroundTilemapName, typeof(ChunkTilemapPresenter));
+                SceneManager.MoveGameObjectToScene(ground, preview);
+                ground.transform.SetParent(grid.transform);
+                TerrainProductSceneConnector.ConfigureMagmaBloom(preview);
+                TerrainProductSceneConnector.ConfigureMagmaBloom(preview);
+                int count = 0;
+                foreach (GameObject root in preview.GetRootGameObjects())
+                    if (root.name == TerrainProductSceneConnector.MagmaBloomVolumeName) count++;
+                Assert.That(count, Is.EqualTo(1));
+                Assert.That(ground.GetComponents<TerrainMagmaShoreLighting>().Length, Is.EqualTo(1));
+            }
+            finally { EditorSceneManager.ClosePreviewScene(preview); }
+        }
+
         /// <summary>Scene直下から指定名のGameObjectを探します。</summary>
         /// <param name="name">検索するRoot名です。</param>
         /// <returns>一意に見つかったRootです。</returns>
@@ -344,7 +403,7 @@ namespace Farmware.WorldGeneration.Tests
                         continue;
                     }
 
-                    // EditMode Test AssemblyへURP Runtime参照を増やさず、Unityが保存する実フィールドを検査します。
+                    // Sorting Layer一覧はUnityが保存する実フィールドを検査し、Scene接続の欠落を検出します。
                     SerializedObject serializedLight = new SerializedObject(component);
                     SerializedProperty lightType = serializedLight.FindProperty("m_LightType");
                     SerializedProperty targetLayers = serializedLight.FindProperty(

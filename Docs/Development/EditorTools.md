@@ -379,6 +379,18 @@ Projectビューの`Create > Farmware > Terrain Tile Art Generation Settings`か
 
 既存のSprite区画とSprite IDは、Sceneや設定Assetの参照を維持するため自動で作り直さない。境界なしの既存材質は上2行だけの8区画、境界候補を持つ材質は全3行の12区画を許可する。初回Import完了後に規定位置、中央Pivot、規定名と一致しなくなった場合は、自動修復せずConsoleへ理由を表示する。`.meta`を削除せず、画素修正は同じPNGパスへの上書きで行う。別フォルダーのPNG、液体、動物、植物、UI、Animation Spriteにはこの規則を適用しない。
 
+#### マグマHDR発光・Bloom・岸照明
+
+2026-10-28にHDR色、Bloom Intensity 0.4、岸の橙色照明を採用した。接続は`Connect Product Terrain Presentation`の`ConfigureMagmaBloom`で行う。製品CameraのHDRとPost Processingを有効にし、Default LayerのGlobal Volume `Terrain Magma Bloom`へ`Assets/Settings/TerrainMagmaBloom.asset`を割り当てる。再接続は同じVolumeとProfileを再利用し、ProfileのInspector調整値を上書きしない。採用後の一時比較ウィンドウと専用テストは削除した。
+
+表面の色は`TerrainMagmaSurfacePattern.mat`のHDR Colorで調整する。採用RGBは暗部`(0.5, 0.06, 0.008)`、面`(1, 0.26, 0.018)`、帯`(2, 0.8, 0.045)`、芯`(3.2, 2.1, 0.18)`。Bloom ProfileはThreshold 1.15、Intensity 0.4、Scatter 0.25、最大3反復、暖色Tint `(1, 0.72, 0.35)`、Half解像度、高品質フィルタとする。全体照明の0.85倍調整は採用せず、元のGlobal Light強度を維持する。
+
+岸照明はGround Tilemap上の`TerrainMagmaShoreLighting`で調整する。初期値は固定3×3タイル区画から1灯、橙色`(1, 0.22, 0.035)`、Intensity 0.12、内半径0.25・外半径3ワールド単位、静止時の可視範囲再確認間隔0.5実時間秒（カメラ移動・ズーム・地形変更時は即時）。既存の全体照明を暗くせず光を足すため、Renderer2DのAdditive Blend Style（index 1）でDefault・TerrainWallを照らす。今回は動的投影影を有効にしない。
+
+`ChunkTilemapPresenter`がDirtyサブチャンクの差分込み有効地形を分類するとき、Wall前面・上面によって画面上で隠れるマグマを除外し、異種地形または投影されたWallと接する可視の岸セルだけを絶対座標で記録する。Wallの表示高は共通の2タイルを使い、隠れたマグマからWall中央へ点状の光を出さない。光源の配置は絶対座標の3×3タイル区画ごとに決め、中心に最も近い可視の岸を1セル選ぶ。同距離はY・X順で固定し、チャンク境界は完成近傍で参照する。カメラは配置には使わず、可視矩形に光が届く固定光源をすべて表示する。カメラ移動・ズームの同じフレームで範囲を更新し、URP Light2DのLateUpdateより前に位置を反映する。Camera距離による16灯への絞り込み・最小間隔による選び直しは廃止する。必要灯数は画面へ届く固定区画数以下で、プールは過去の最大表示灯数まで増加して再利用する。Tilemapの全走査や全Object検索は行わない。チャンク消去・WorldLayer変更・Presenter無効化で候補を除去し、Floating Originのフレームは選択周期を待たず同じ絶対地点へ光源を相対配置し直す。光源GameObjectは増加時だけ生成して再利用し、Component破棄時に所有光源を破棄する。Simulationや保存値へ書き戻さない。
+
+SampleSceneをPlayして、マグマのない場所の全体照明、網目の動き、岸へのにじみ、地面・壁への橙色の光、チャンク移動後の光の消え残りを確認する。既定Seedの確認地点は絶対タイル`(144, -476)`だが、Seedや設定変更後のマグマ存在は保証しない。CLIの比較画像は合成済みフレームの`capture_game_view --source screen`を使い、LDR RenderTextureへCameraを直接描く`screenshot`は使わない。照明のCPU処理は`Farmware.WorldGeneration.MagmaShoreLighting` Markerで計測できる。Development PlayerでのGPU負荷・製品最大Viewport・全岸の均等な照明や動的遮蔽の評価は別途行う。
+
 #### 液体製品Assetと水際Shaderの公開
 
 - メニュー: `Farmware > World Generation > Generation > Publish Liquid Presentation Assets`

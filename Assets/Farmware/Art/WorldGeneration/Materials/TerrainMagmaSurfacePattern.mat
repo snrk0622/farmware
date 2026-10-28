@@ -35,15 +35,15 @@ Material:
     - _BodyBrightnessLevels: 4
     - _CellSizePixels: 6
     - _CoreWidthPixels: 0.25
-    - _FlowPeriodSeconds: 12
+    - _FlowPeriodSeconds: 15
     - _HaloWidthPixels: 0.75
     - _PointMotion: 0.22
     - _PulseAmount: 0.16
     m_Colors:
-    - _BodyColor: {r: 0.55, g: 0.075, b: 0.015, a: 1}
-    - _CoreColor: {r: 1, g: 0.72, b: 0.16, a: 1}
-    - _DarkColor: {r: 0.1, g: 0.015, b: 0.008, a: 1}
-    - _HaloColor: {r: 1, g: 0.22, b: 0.015, a: 1}
+    - _BodyColor: {r: 1, g: 0.26, b: 0.018, a: 1}
+    - _CoreColor: {r: 3.2, g: 2.1, b: 0.18, a: 1}
+    - _DarkColor: {r: 0.5, g: 0.06, b: 0.008, a: 1}
+    - _HaloColor: {r: 2, g: 0.8, b: 0.045, a: 1}
     - _WorldPixelOffset: {r: 0, g: 0, b: 0, a: 0}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

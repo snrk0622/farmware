@@ -5,10 +5,11 @@ Shader "Farmware/Terrain/Magma Surface Pattern"
     Properties
     {
         [PerRendererData] _MainTex ("共有Sprite", 2D) = "white" {}
-        _DarkColor ("セル中心の暗色", Color) = (0.10, 0.015, 0.008, 1)
-        _BodyColor ("溶岩面の基調色", Color) = (0.55, 0.075, 0.015, 1)
-        _HaloColor ("網の外側色", Color) = (1.0, 0.22, 0.015, 1)
-        _CoreColor ("網の中心色", Color) = (1.0, 0.72, 0.16, 1)
+        // HDR色の1を超える輝度をBloomへ渡します。地面や壁を直接照らすLightとは別の表面発光です。
+        [HDR] _DarkColor ("セル中心の暗色", Color) = (0.5, 0.06, 0.008, 1)
+        [HDR] _BodyColor ("溶岩面の基調色", Color) = (1.0, 0.26, 0.018, 1)
+        [HDR] _HaloColor ("網の外側色", Color) = (2.0, 0.8, 0.045, 1)
+        [HDR] _CoreColor ("網の中心色", Color) = (3.2, 2.1, 0.18, 1)
         _CellSizePixels ("網目の基準寸法 (px、1タイル=16px)", Range(4, 128)) = 6
         _PointMotion ("網目中心の移動量 (セル比)", Range(0, 0.25)) = 0.22
         _CoreWidthPixels ("明るい網線の半幅 (px)", Range(0.25, 4)) = 0.25

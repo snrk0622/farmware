@@ -37,6 +37,10 @@ v0.54では地上18種を維持し、アフリカサバンナを熱帯サバン�
 
 ## 開発・検証
 
+TERRAIN-01C7への申し送りとして、火山バイオームなどでの水の温泉化、マグマと水の接触による黒曜石などへの自動変換を未確定の追加仕様として検討する。[実装ロードマップ](./Development/ImplementationRoadmap.md)と[マップ仕様](./GameSpecification/RandomMapGenerationSpecification.md)に検討範囲を記録している。
+
+マグマはHDR表面色とBloom Intensity 0.4を採用し、Wallに隠れない表示上の岸に、絶対座標の固定3×3タイル区画ごとの橙色照明（強度0.12）を再利用する。カメラ移動で同じ岸の光源位置・強度を変えない。全体照明の明るさは維持する。調整先と動作確認は[Editorツール](./Development/EditorTools.md#マグマhdr発光bloom岸照明)、採用色と描画契約は[地形タイル表現仕様](./Art/TerrainTileArtSpecification.md#マグマ網状模様)を参照する。
+
 短い水面模様は淡水・海水専用の独立Shader・Tilemap・Materialで追加画像なしに描画する。素材1px・低FPSで固定位置の線が非同期に出現・消失する。水際の調整済みMaterialと水中断面の合成は維持する。調整先は`TerrainWaterSurfacePattern.mat`とし、詳細は地形タイル表現仕様の「短い水面模様」、検証はTestingの`TerrainLiquidRenderingTests`を参照する。
 
 - [実装ロードマップ](./Development/ImplementationRoadmap.md)

@@ -1262,6 +1262,34 @@ namespace Farmware.WorldGeneration.Tests
             }
         }
 
+        /// <summary>製品のマグマMaterialが、Bloom用の1を超える網目輝度をGPU出力へ保持することを保証します。</summary>
+        [Test]
+        public void MagmaPattern_PreservesHdrNetworkBrightness()
+        {
+            using (var cache = new TerrainLiquidRuntimeTileCache())
+            {
+                var material = new Material(AssetDatabase.LoadAssetAtPath<Material>(
+                    Farmware.WorldGeneration.Editor.TerrainProductSceneConnector.MagmaSurfacePatternMaterialPath));
+                try
+                {
+                    renderCamera.allowHDR = true;
+                    material.SetFloat("_Animate", 0f);
+                    CreateSurfacePatternTestTilemap(material, cache);
+                    RenderPixels();
+                    float maximum = 0f;
+                    float minimum = float.MaxValue;
+                    foreach (Color pixel in readback.GetPixels())
+                    {
+                        maximum = Mathf.Max(maximum, pixel.maxColorComponent);
+                        minimum = Mathf.Min(minimum, pixel.maxColorComponent);
+                    }
+                    Assert.That(maximum, Is.GreaterThan(2f), "HDRの網目が描画途中で1へ切り詰められています。");
+                    Assert.That(minimum, Is.LessThan(1f), "暗い内部まで全面HDR色に潰れています。");
+                }
+                finally { Object.DestroyImmediate(material); }
+            }
+        }
+
         /// <summary>負の原点・4096px周期と16px原点移動でも、同じ絶対画素の網目が一致することを保証します。</summary>
         [Test]
         public void MagmaPattern_PreservesAbsolutePixelsAcrossOriginsAndTiles()

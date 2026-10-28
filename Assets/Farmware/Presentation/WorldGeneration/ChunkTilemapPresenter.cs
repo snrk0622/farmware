@@ -270,6 +270,17 @@ namespace Farmware.WorldGeneration.Presentation
         // World再作成を検知し、EntityQueryを作り直すために保持する現在のDefault Worldです。
         private World presentationWorld;
 
+        /// <summary>有効地形から抽出した岸へ照明を配置する表示専用Componentです。Scene接続時に設定します。</summary>
+        [Tooltip("マグマ岸の有効地形を受け取る照明Presenterです。地形のDirty更新と同じ寿命で岸候補を更新します。")]
+        [SerializeField] private TerrainMagmaShoreLighting magmaShoreLighting;
+
+        /// <summary>製品Scene接続時に岸の照明の受け取り先を設定します。</summary>
+        /// <param name="lighting">同じGround GameObjectに配置する照明Presenterです。</param>
+        public void ConfigureMagmaShoreLighting(TerrainMagmaShoreLighting lighting)
+        {
+            magmaShoreLighting = lighting;
+        }
+
         // 座標、状態、タイルBufferを持つチャンクだけを取得する、World寿命中再利用するQueryです。
         private EntityQuery chunkQuery;
 
@@ -2221,6 +2232,7 @@ namespace Farmware.WorldGeneration.Presentation
             int subChunkY = subChunkIndex / WorldGridConstants.SubChunksPerAxis;
             int localStartX = subChunkX * WorldGridConstants.SubChunkSize;
             int localStartY = subChunkY * WorldGridConstants.SubChunkSize;
+            magmaShoreLighting?.BeginSubChunk(coordinate, subChunkIndex);
             bool wallShadowPresentationIsConfigured =
                 HasCompleteTerrainWallShadowConfiguration();
             if (reflectionMeshes.TryGetValue(coordinate, out TerrainWaterReflectionMesh reflectionMesh))
@@ -2331,6 +2343,10 @@ namespace Farmware.WorldGeneration.Presentation
                                 liquidKind == TerrainLiquidVisualKind.Magma
                                     ? liquidBaseSubChunkTileBuffer[destinationIndex]
                                     : null;
+                            // Tilemapと同じ差分込み近傍から岸を収集し、照明のためにTilemapを再走査しません。
+                            if (liquidKind == TerrainLiquidVisualKind.Magma)
+                                magmaShoreLighting?.CollectMagmaCell(coordinate, subChunkIndex,
+                                    tileLocalX, tileLocalY, terrainNeighborhood);
                             ClassifyProductLiquidTiles(
                                 coordinate,
                                 subChunkIndex,
@@ -3022,6 +3038,7 @@ namespace Farmware.WorldGeneration.Presentation
         {
             if (subChunkIndex == 0 && destroyCurrentShadow)
             {
+                magmaShoreLighting?.RemoveChunk(coordinate);
                 // 反射も現在チャンクの表示寿命へ従わせ、旧原点Tileの遅延消去では新しいMeshを消しません。
                 if (reflectionMeshes.Remove(coordinate, out TerrainWaterReflectionMesh reflection)) reflection.Dispose();
                 // Tilemap消去を分割している間に古い影だけが残らないよう、チャンク影は消去開始時にまとめて外します。
@@ -3192,6 +3209,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// </summary>
         private void ClearAllPresentedChunksImmediately()
         {
+            magmaShoreLighting?.ClearCandidates();
             coordinateScratch.Clear();
             foreach (ChunkCoordinate coordinate in displayedCoordinates)
             {

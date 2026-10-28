@@ -1,5 +1,5 @@
 // このファイルは、公開済み41材質・液体カタログと採用済み断面・液面模様・Wall影レイヤーを製品SampleSceneへ接続します。
-// Sprite生成やSimulation状態は変更せず、ChunkTilemapPresenterが製品表示へ書き込むTilemap、Material、描画順だけを構成します。
+// Sprite生成やSimulation状態は変更せず、Tilemap、Material、描画順とHDR発光用のCamera・Bloomを構成します。
 
 using System;
 using Farmware.WorldGeneration.Authoring;
@@ -7,6 +7,7 @@ using Farmware.WorldGeneration.Presentation;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 using UnityEngine.SceneManagement;
 using UnityEngine.Tilemaps;
@@ -46,6 +47,12 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>網目を絶対座標から生成するマグマ模様Materialの保存先です。</summary>
         public const string MagmaSurfacePatternMaterialPath =
             "Assets/Farmware/Art/WorldGeneration/Materials/TerrainMagmaSurfacePattern.mat";
+
+        /// <summary>マグマのHDR色へにじみを加える製品Bloom Profileの保存先です。</summary>
+        public const string MagmaBloomProfilePath = "Assets/Settings/TerrainMagmaBloom.asset";
+
+        /// <summary>製品SceneでBloomを提供するGlobal Volumeのルート名です。</summary>
+        public const string MagmaBloomVolumeName = "Terrain Magma Bloom";
 
         /// <summary>直下床あり水域の基底色レイヤー名です。45pxの光学減衰は断面側で評価します。</summary>
         public const string LiquidDepthWithFloorTilemapName =
@@ -458,6 +465,7 @@ namespace Farmware.WorldGeneration.Editor
                     "Rock Wall Resource Tilemap",
                     wallLayerOffset);
                 EnsureGlobalLightIlluminatesTerrain(scene);
+                ConfigureMagmaBloom(scene);
 
                 presenter.ConfigureTerrainMaterialPresentation(
                     catalog,
@@ -496,6 +504,78 @@ namespace Farmware.WorldGeneration.Editor
                     EditorSceneManager.CloseScene(scene, removeScene: true);
                 }
             }
+        }
+
+        /// <summary>製品Sceneへ採用済みBloomとCamera設定を接続します。既存ProfileのInspector調整値は保持します。</summary>
+        /// <param name="scene">未保存変更を確認済みの製品Sceneです。変更を保存する責任は呼び出し元が持ちます。</param>
+        public static void ConfigureMagmaBloom(Scene scene)
+        {
+            if (UniversalRenderPipeline.asset == null || !UniversalRenderPipeline.asset.supportsHDR)
+                throw new InvalidOperationException("マグマ発光にはHDRを有効にしたURP設定が必要です。");
+
+            Camera camera = null;
+            GameObject volumeObject = null;
+            foreach (GameObject root in scene.GetRootGameObjects())
+            {
+                if (root.name == MagmaBloomVolumeName) volumeObject = root;
+                foreach (Camera candidate in root.GetComponentsInChildren<Camera>(true))
+                    if (candidate.CompareTag("MainCamera")) camera = candidate;
+            }
+            if (camera == null || !camera.TryGetComponent(out UniversalAdditionalCameraData cameraData)
+                || cameraData.renderType != CameraRenderType.Base)
+                throw new InvalidOperationException("製品SceneにURPのBase MainCameraが必要です。");
+
+            VolumeProfile profile = AssetDatabase.LoadAssetAtPath<VolumeProfile>(MagmaBloomProfilePath);
+            if (profile == null)
+            {
+                // 初回だけ採用値で作成します。再接続で調整値やGUIDを上書きしないため、既存Profileは再生成しません。
+                profile = ScriptableObject.CreateInstance<VolumeProfile>();
+                profile.name = "TerrainMagmaBloom";
+                AssetDatabase.CreateAsset(profile, MagmaBloomProfilePath);
+                Bloom bloom = profile.Add<Bloom>(true);
+                bloom.threshold.value = 1.15f;
+                bloom.intensity.value = 0.4f;
+                bloom.scatter.value = 0.25f;
+                bloom.maxIterations.value = 3;
+                bloom.tint.value = new Color(1f, 0.72f, 0.35f);
+                bloom.downscale.value = BloomDownscaleMode.Half;
+                bloom.highQualityFiltering.value = true;
+                // VolumeComponentは別のUnity Objectなので、ProfileのSubAssetとして保存して参照切れを防ぎます。
+                AssetDatabase.AddObjectToAsset(bloom, profile);
+                EditorUtility.SetDirty(bloom);
+                EditorUtility.SetDirty(profile);
+                AssetDatabase.SaveAssetIfDirty(profile);
+            }
+            if (!profile.TryGet(out Bloom _))
+                throw new InvalidOperationException("製品マグマBloom ProfileにBloom overrideがありません。");
+
+            if (volumeObject == null)
+            {
+                volumeObject = new GameObject(MagmaBloomVolumeName);
+                SceneManager.MoveGameObjectToScene(volumeObject, scene);
+            }
+            if (!volumeObject.TryGetComponent(out Volume volume)) volume = volumeObject.AddComponent<Volume>();
+            volumeObject.layer = 0;
+            volume.enabled = true;
+            volume.isGlobal = true;
+            volume.weight = 1f;
+            volume.priority = 0f;
+            volume.sharedProfile = profile;
+            // HDR色を1より大きいままBloomへ渡し、Default Layerの製品VolumeをCameraが受け取るようにします。
+            camera.allowHDR = true;
+            cameraData.renderPostProcessing = true;
+            cameraData.volumeLayerMask |= 1;
+            GameObject ground = FindRoot(scene, WorldGridName).transform.Find(GroundTilemapName).gameObject;
+            if (!ground.TryGetComponent(out TerrainMagmaShoreLighting lighting)) lighting = ground.AddComponent<TerrainMagmaShoreLighting>();
+            lighting.Configure(camera.GetComponent<CameraPanController>());
+            ChunkTilemapPresenter presenter = ground.GetComponent<ChunkTilemapPresenter>();
+            presenter.ConfigureMagmaShoreLighting(lighting);
+            EditorUtility.SetDirty(lighting);
+            EditorUtility.SetDirty(presenter);
+            EditorUtility.SetDirty(camera);
+            EditorUtility.SetDirty(cameraData);
+            EditorUtility.SetDirty(volume);
+            EditorSceneManager.MarkSceneDirty(scene);
         }
 
         /// <summary>指定Scene直下から固定名のルートGameObjectを探します。</summary>

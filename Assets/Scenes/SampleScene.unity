@@ -683,7 +683,7 @@ MonoBehaviour:
     m_Bits: 1
   m_VolumeTrigger: {fileID: 0}
   m_VolumeFrameworkUpdateModeOption: 2
-  m_RenderPostProcessing: 0
+  m_RenderPostProcessing: 1
   m_Antialiasing: 0
   m_AntialiasingQuality: 2
   m_StopNaN: 0
@@ -748,7 +748,7 @@ Camera:
   m_TargetTexture: {fileID: 0}
   m_TargetDisplay: 0
   m_TargetEye: 0
-  m_HDR: 0
+  m_HDR: 1
   m_AllowMSAA: 0
   m_AllowDynamicResolution: 0
   m_ForceIntoRT: 0
@@ -2606,6 +2606,55 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1842852791
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1842852793}
+  - component: {fileID: 1842852792}
+  m_Layer: 0
+  m_Name: Terrain Magma Bloom
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1842852792
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1842852791}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 172515602e62fb746b5d573b38a5fe58, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Unity.RenderPipelines.Core.Runtime::UnityEngine.Rendering.Volume
+  m_IsGlobal: 1
+  priority: 0
+  blendDistance: 0
+  weight: 1
+  sharedProfile: {fileID: 11400000, guid: 00be102b135ce410ab6c3c2492c688c7, type: 2}
+--- !u!4 &1842852793
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1842852791}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1923410983
 GameObject:
   m_ObjectHideFlags: 0
@@ -2872,6 +2921,7 @@ GameObject:
   - component: {fileID: 2049644692}
   - component: {fileID: 2049644691}
   - component: {fileID: 2049644690}
+  - component: {fileID: 2049644693}
   m_Layer: 0
   m_Name: Ground Tilemap
   m_TagString: Untagged
@@ -2959,6 +3009,7 @@ MonoBehaviour:
   treeResourceTile: {fileID: 11400000, guid: d0ed51681421f401c8cbd24b40cc37aa, type: 2}
   stoneResourceTile: {fileID: 11400000, guid: dd83e286027f74f4587d09fe3dc7e45d, type: 2}
   sandResourceTile: {fileID: 11400000, guid: b8e65db995c3f4fde88b4cdbf5b3169c, type: 2}
+  magmaShoreLighting: {fileID: 2049644693}
 --- !u!483693784 &2049644691
 TilemapRenderer:
   serializedVersion: 2
@@ -3053,6 +3104,25 @@ Tilemap:
     e31: 0
     e32: 0
     e33: 1
+--- !u!114 &2049644693
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2049644688}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a9653db30ec9044ffbf40699f8896acf, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Farmware.WorldGeneration.Presentation::Farmware.WorldGeneration.Presentation.TerrainMagmaShoreLighting
+  cameraController: {fileID: 519420035}
+  lightColor: {r: 1, g: 0.22, b: 0.035, a: 1}
+  intensity: 0.12
+  innerRadius: 0.25
+  outerRadius: 3
+  placementCellSize: 3
+  refreshInterval: 0.5
 --- !u!1 &2050193500
 GameObject:
   m_ObjectHideFlags: 0
@@ -3315,3 +3385,4 @@ SceneRoots:
   - {fileID: 619394802}
   - {fileID: 1794082024}
   - {fileID: 1659629451}
+  - {fileID: 1842852793}
