@@ -42,7 +42,7 @@
                 </ui:VisualElement>
                 <ui:Label name="hoverLabel" text="カーソルを地図へ移動すると座標と地形を表示します" class="hover-label" />
             </ui:VisualElement>
-            <ui:ScrollView name="sidePanel" class="side-panel">
+            <ui:ScrollView name="sidePanel" class="side-panel" horizontal-scroller-visibility="Hidden" vertical-scroller-visibility="Auto">
                 <ui:Label text="表示情報" class="section-title" />
                 <ui:Label name="sourceLabel" class="info-label" />
                 <ui:Label name="zoomLabel" class="info-label" />

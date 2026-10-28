@@ -1,5 +1,5 @@
-// このファイルは、一体型の土地・岩壁Sprite、液面アニメーション、岩壁際の資源レイヤー分類をSceneなしのEditModeで検証します。
-// ChunkTilemapPresenterとEditor構築ツールが同じ定数を使い、Pivotや表示高がずれないことを素早く保証します。
+// このファイルは、製品Wall際の資源レイヤー分類と岩壁内部影をSceneなしのEditModeで検証します。
+// 製品Presenterと同じ有効地形を参照し、資源遮蔽と影マスクのチャンク境界での一致を保証します。
 // 影マスクの同期Burst処理も、チャンク境界で水文・Biome確定後の完成地形と一致することを保証します。
 
 using System;
@@ -11,7 +11,7 @@ using Unity.Collections;
 namespace Farmware.WorldGeneration.Tests
 {
     /// <summary>
-    /// 地形の寸法・分類と、確定済み地形から影マスクを構築する表示専用計算を保証します。
+    /// 資源の前後分類と、確定済み地形から影マスクを構築する表示専用計算を保証します。
     /// </summary>
     public sealed class TerrainLayerPresentationUtilityTests
     {
@@ -116,84 +116,7 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 土地Spriteが上面16pxと断面8pxを持ち、論理セル下端へ合わせるPivotが2/3になることを検証します。
-        /// </summary>
-        [Test]
-        public void CombinedTerrainSprite_UsesSixteenPixelSurfaceAndEightPixelFace()
-        {
-            Assert.That(TerrainLayerPresentationUtility.TerrainSurfaceHeightInPixels, Is.EqualTo(16));
-            Assert.That(TerrainLayerPresentationUtility.TerrainFrontFaceHeightInPixels, Is.EqualTo(8));
-            Assert.That(TerrainLayerPresentationUtility.CombinedTerrainSpriteHeightInPixels, Is.EqualTo(24));
-            Assert.That(
-                TerrainLayerPresentationUtility.CombinedTerrainPivotY,
-                Is.EqualTo(2f / 3f).Within(0.0001f));
-        }
-
-        /// <summary>
-        /// 岩壁Spriteが上面16pxと側面12pxを持ち、基準セルへ合わせるPivotが8/28になることを検証します。
-        /// </summary>
-        [Test]
-        public void CombinedRockWallSprite_UsesSixteenPixelSurfaceAndTwelvePixelFace()
-        {
-            Assert.That(TerrainLayerPresentationUtility.RockWallElevationInPixels, Is.EqualTo(12));
-            Assert.That(TerrainLayerPresentationUtility.CombinedRockWallSpriteHeightInPixels, Is.EqualTo(28));
-            Assert.That(
-                TerrainLayerPresentationUtility.CombinedRockWallPivotY,
-                Is.EqualTo(2f / 7f).Within(0.0001f));
-            Assert.That(TerrainLayerPresentationUtility.RockWallElevationInCells, Is.EqualTo(0.75f));
-        }
-
-        /// <summary>
-        /// 液面が16pxセルの半分に当たる8pxだけ画面下へ移動し、整数ピクセル境界を維持することを検証します。
-        /// </summary>
-        [Test]
-        public void LiquidSurfaceOffset_MovesDownByHalfTile()
-        {
-            Assert.That(TerrainLayerPresentationUtility.LiquidSurfaceDepthInPixels, Is.EqualTo(8));
-            Assert.That(
-                TerrainLayerPresentationUtility.LiquidSurfaceOffsetInCells,
-                Is.EqualTo(-0.5f));
-        }
-
-        /// <summary>
-        /// 淡水・海水・マグマが別のアニメーション種類へ分類され、通常地形には何も重ならないことを検証します。
-        /// </summary>
-        [Test]
-        public void ClassifyLiquidAnimation_DistinguishesLiquidTypes()
-        {
-            GeneratedTerrainCell freshWater = new GeneratedTerrainCell
-            {
-                LiquidRuntimeId = RuntimeIds.FreshWater
-            };
-            GeneratedTerrainCell saltWater = new GeneratedTerrainCell
-            {
-                LiquidRuntimeId = RuntimeIds.SaltWater
-            };
-            GeneratedTerrainCell magma = new GeneratedTerrainCell
-            {
-                LiquidRuntimeId = RuntimeIds.Magma
-            };
-            GeneratedTerrainCell land = new GeneratedTerrainCell
-            {
-                GroundBlockRuntimeId = GroundRuntimeId
-            };
-
-            Assert.That(
-                TerrainLayerPresentationUtility.ClassifyLiquidAnimation(freshWater, RuntimeIds),
-                Is.EqualTo(LiquidAnimationKind.FreshWater));
-            Assert.That(
-                TerrainLayerPresentationUtility.ClassifyLiquidAnimation(saltWater, RuntimeIds),
-                Is.EqualTo(LiquidAnimationKind.SaltWater));
-            Assert.That(
-                TerrainLayerPresentationUtility.ClassifyLiquidAnimation(magma, RuntimeIds),
-                Is.EqualTo(LiquidAnimationKind.Magma));
-            Assert.That(
-                TerrainLayerPresentationUtility.ClassifyLiquidAnimation(land, RuntimeIds),
-                Is.EqualTo(LiquidAnimationKind.None));
-        }
-
-        /// <summary>
-        /// 通常地面の資源だけが、画面手前方向の隣接岩壁によって背面レイヤーへ振り分けられることを検証します。
+        /// 通常地面の資源だけが、画面手前1〜2セルのWall根元によって背面レイヤーへ振り分けられることを検証します。
         /// </summary>
         [Test]
         public void ShouldRenderResourceBehindRockWall_RequiresResourceOnLandAndFrontWall()
@@ -212,25 +135,37 @@ namespace Farmware.WorldGeneration.Tests
                 GroundBlockRuntimeId = GroundRuntimeId,
                 WallBlockRuntimeId = WallRuntimeId
             };
+            GeneratedTerrainCell empty = default;
 
             Assert.That(
                 TerrainLayerPresentationUtility.ShouldRenderResourceBehindRockWall(
                     tree,
                     land,
-                    rockWall),
+                    rockWall,
+                    empty),
                 Is.True,
-                "通常地面の木は、直前方の岩壁より後ろへ描画する必要があります。");
+                "通常地面の木は、手前1セル目のWallより後ろへ描画する必要があります。");
             Assert.That(
                 TerrainLayerPresentationUtility.ShouldRenderResourceBehindRockWall(
                     tree,
                     land,
-                    land),
+                    empty,
+                    rockWall),
+                Is.True,
+                "2段Wallの上面は根元から2タイル伸びるため、手前2セル目のWallも資源を隠します。");
+            Assert.That(
+                TerrainLayerPresentationUtility.ShouldRenderResourceBehindRockWall(
+                    tree,
+                    land,
+                    land,
+                    empty),
                 Is.False,
-                "直前方が通常地面なら、資源を岩壁背面レイヤーへ移してはいけません。");
+                "手前2セルにWallがなければ、資源をWall背面レイヤーへ移してはいけません。");
             Assert.That(
                 TerrainLayerPresentationUtility.ShouldRenderResourceBehindRockWall(
                     noResource,
                     land,
+                    rockWall,
                     rockWall),
                 Is.False,
                 "資源のないセルを背面レイヤーへ分類してはいけません。");
@@ -238,9 +173,10 @@ namespace Farmware.WorldGeneration.Tests
                 TerrainLayerPresentationUtility.ShouldRenderResourceBehindRockWall(
                     tree,
                     rockWall,
+                    rockWall,
                     rockWall),
                 Is.False,
-                "岩壁上資源は高さ12pxの専用レイヤーを使うため、通常資源の背面レイヤーへ分類してはいけません。");
+                "Wall上資源は上面まで持ち上げる専用レイヤーを使うため、通常資源の背面レイヤーへ分類してはいけません。");
         }
 
         /// <summary>全セルを同じ完成Blockセルで埋めた、呼び出し側所有の4096要素配列を作ります。</summary>

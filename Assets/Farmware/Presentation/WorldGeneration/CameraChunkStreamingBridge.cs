@@ -17,21 +17,17 @@ namespace Farmware.WorldGeneration.Presentation
     {
         /// <summary>
         /// 画面下端より下に接地した岩壁が上方向へはみ出す量を、読み込み対象へ追加するタイル数です。
-        /// ピクセル数をタイル数へ切り上げることで、1ピクセルでも画面内へ入るSpriteの所属チャンクを保持します。
+        /// 製品Wallの上面オフセット2タイルを参照し、上面または前面が画面へ届く接地点を保持します。
         /// </summary>
         private const int LowerViewportSpriteOverhangInTiles =
-            (TerrainLayerPresentationUtility.RockWallElevationInPixels
-                + TerrainLayerPresentationUtility.TerrainSurfaceHeightInPixels - 1)
-            / TerrainLayerPresentationUtility.TerrainSurfaceHeightInPixels;
+            TerrainMaterialVerticalProjectionUtility.WallTopOffsetInTiles;
 
         /// <summary>
-        /// 画面上端より上に接地した土地断面が下方向へはみ出す量を、読み込み対象へ追加するタイル数です。
-        /// 現在の8ピクセル断面では1タイルとなり、チャンク境界直外の土地Spriteが途中で消えることを防ぎます。
+        /// 画面上端のGroundから下へ伸びる崖面3段を読み込み対象へ含めます。
+        /// 上面が画面外でも断面が画面内へ届くため、論理接地点を逆方向へ3セル広げます。
         /// </summary>
         private const int UpperViewportSpriteOverhangInTiles =
-            (TerrainLayerPresentationUtility.TerrainFrontFaceHeightInPixels
-                + TerrainLayerPresentationUtility.TerrainSurfaceHeightInPixels - 1)
-            / TerrainLayerPresentationUtility.TerrainSurfaceHeightInPixels;
+            TerrainMaterialVerticalProjectionUtility.GroundFaceDepth;
 
         /// <summary>
         /// Camera行列から得た連続セル座標を整数境界へ戻す許容幅です。単位はタイルです。

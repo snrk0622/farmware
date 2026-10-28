@@ -191,6 +191,62 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(report.HasErrors, Is.False, string.Join("\n", report.Errors));
         }
 
+        /// <summary>境界なし材質は派生PNGを持たないため、初回でも生成不要と判定することを確認します。</summary>
+        [Test]
+        public void RequiresRegeneration_WithoutBoundaryAndOldOutputs_ReturnsFalse()
+        {
+            TerrainMaterialArtSource material = CreateMaterial(1, 1, 0, true);
+            SetPrivateField(material, "materialId", "Granite");
+            TerrainTileArtGenerationSettings settings =
+                ScriptableObject.CreateInstance<TerrainTileArtGenerationSettings>();
+            createdObjects.Add(settings);
+            SetPrivateField(settings, "materials", new[] { material });
+
+            Assert.That(
+                TerrainTileArtGenerator.RequiresRegeneration(settings, material),
+                Is.False);
+        }
+
+        /// <summary>境界ありから境界なしへ変えた材質は、以前の合成PNGを整理するまで更新必要と判定することを確認します。</summary>
+        [Test]
+        public void RequiresRegeneration_WithoutBoundaryButWithOldOutputs_ReturnsTrue()
+        {
+            TerrainMaterialArtSource material = CreateMaterial(1, 1, 0, true);
+            SetPrivateField(material, "materialId", "Granite");
+            SetPrivateField(
+                material,
+                "lastGeneratedAssetPaths",
+                new[] { "Assets/Farmware/Art/Generated/TerrainTiles/Granite/FaceBoundary/Old.png" });
+            TerrainTileArtGenerationSettings settings =
+                ScriptableObject.CreateInstance<TerrainTileArtGenerationSettings>();
+            createdObjects.Add(settings);
+            SetPrivateField(settings, "materials", new[] { material });
+
+            Assert.That(
+                TerrainTileArtGenerator.RequiresRegeneration(settings, material),
+                Is.True);
+        }
+
+        /// <summary>GroundTopは境界合成PNGへ使わないため、上面差分数だけ変えても生成Fingerprintが変わらないことを確認します。</summary>
+        [Test]
+        public void CalculateFingerprint_GroundTopOnlyChange_DoesNotRequireBoundaryRegeneration()
+        {
+            TerrainMaterialArtSource oneGround = CreateMaterial(1, 1, 1, true);
+            TerrainMaterialArtSource twoGrounds = CreateMaterial(2, 1, 1, true);
+            SetPrivateField(oneGround, "materialId", "GrassLoam");
+            SetPrivateField(twoGrounds, "materialId", "GrassLoam");
+            TerrainTileArtGenerationSettings settings =
+                ScriptableObject.CreateInstance<TerrainTileArtGenerationSettings>();
+            createdObjects.Add(settings);
+
+            string firstFingerprint =
+                TerrainTileArtGenerator.CalculateFingerprint(settings, oneGround);
+            string secondFingerprint =
+                TerrainTileArtGenerator.CalculateFingerprint(settings, twoGrounds);
+
+            Assert.That(secondFingerprint, Is.EqualTo(firstFingerprint));
+        }
+
         /// <summary>指定数の透明／不透明16×16 Spriteを持つ材質設定を組み立てます。</summary>
         /// <param name="groundCount">GroundTop数です。</param>
         /// <param name="faceCount">Face数です。</param>

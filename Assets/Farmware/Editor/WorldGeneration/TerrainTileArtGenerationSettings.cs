@@ -49,8 +49,8 @@ namespace Farmware.WorldGeneration.Authoring
         [Range(0.01f, 1f)]
         [SerializeField] private float wallDarkenFactor = DefaultWallDarkenFactor;
 
-        // 最後に生成した入力Fingerprintです。現在値と異なる場合だけInspectorへ要再生成と表示します。
-        [Tooltip("Editor生成ツールが管理する最終生成Fingerprintです。手入力せず、要再生成判定に使用します。")]
+        // 最後に生成したFace・境界・暗化設定のFingerprintです。GroundTopは派生PNGへ使わないため含めません。
+        [Tooltip("Editor生成ツールが管理する境界合成Fingerprintです。手入力せず、Face・境界・暗化設定の要更新判定に使用します。")]
         [HideInInspector]
         [SerializeField] private string lastGeneratedFingerprint;
 
@@ -89,7 +89,7 @@ namespace Farmware.WorldGeneration.Authoring
         /// <summary>
         /// 全出力のImport完了後に、要再生成判定と古い出力整理に使う記録を更新します。
         /// </summary>
-        /// <param name="fingerprint">生成へ使用した全入力と調整値のFingerprintです。</param>
+        /// <param name="fingerprint">境界合成へ使用したFace・境界・暗化設定のFingerprintです。</param>
         /// <param name="generatedAssetPaths">今回この材質が生成したプロジェクト相対Assetパスです。</param>
         public void RecordSuccessfulGeneration(string fingerprint, string[] generatedAssetPaths)
         {

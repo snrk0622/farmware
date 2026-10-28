@@ -1,6 +1,6 @@
 # テスト
 
-- 最終更新日: 2026-10-26
+- 最終更新日: 2026-10-28
 - 対象: `Assets/Farmware/Tests/`
 
 2026-10-19にゲーム方針を改訂した。第3章・第5章の既存テストと計測履歴は当時の実装に対する記録として保持し、今後の適用範囲は第4章と[新ロードマップ](./ImplementationRoadmap.md)を正とする。旧ANIMAL-01C〜Eの未着手計画はECO-01へ移し、PERF-GATE-BはECO-01C後・ECO-01E前、Cは段階的な縦切り、DはRELEASE-01Bで実施する。
@@ -62,7 +62,7 @@ Sceneを使わない最小ECS Worldで、受付番号が1から単調増加し�
 
 通常実行の`EnabledBuildScenes_DoNotDependOnDevelopmentOnlyAssets`は、Build Settingsで有効な全Sceneの再帰依存を`AssetDatabase.GetDependencies`で検査する。`Assets/Scenes/Development/`、`Assets/Farmware/Editor/`、`Assets/Farmware/Tests/`、`Assets/Farmware/Shaders/Development/`、`Assets/Farmware/Art/WorldGeneration/Generated/Inspection/`、手描き制作入力、`TerrainTileArtGenerationSettings.asset`のいずれかを製品Sceneが直接・間接に参照した場合は失敗する。検証SceneをBuild Settingsへ誤登録した場合も、そのScene自身のパスから検出する。地形タイル生成設定の型が`Farmware.WorldGeneration.Editor`へ所属することは`TerrainTileArtGeneratorTests`でも保証し、Player対応Authoring Assemblyへ戻さない。
 
-`LegacyBoundaryHighlightRemovalGate_RemovesAllImplementation`は、C6-Dの表示置換が終わるまでは失敗するため`Explicit`とする。C6-D完了確認ではこのテストに加え、地形タイルの比較・検品専用インフラ全体の不存在を確認する製品分離テストを明示実行する。旧14形状境界ハイライトのPNG、Atlas、Runtime選択Utilityだけでなく、採用方式を含む比較・検品専用のScene、Builder、Editorメニュー、Material／Shader、生成Asset、設定および専用テストが存在せず、Assets配下のC#・Scene・Prefab・Material・Shader・Atlasなどに旧型名、SerializedProperty名、旧PNG／Atlas GUIDや検品専用参照が残っていないことを一括確認する。通常テストから除外されていることを削除延期の根拠にはせず、採用方式の本番接続と本番経路の回帰テスト成功後に検品専用インフラを0件にすることをC6-Dの完了条件とする。
+`ComparisonInspectionRemovalGate_RemovesAllInfrastructure`は通常のEditMode実行へ含める。旧14形状境界ハイライトのPNG、Atlas、Runtime選択Utilityだけでなく、採用方式を確認した比較・検品専用のScene、Builder、Editorメニュー、Development Material／Shader、生成Asset、設定および専用テストが存在せず、Assets配下のC#・Scene・Prefab・Material・Shader・Atlasなどに旧型名、SerializedProperty名、旧PNG／Atlas GUIDや検品専用参照が残っていないことを一括確認する。
 
 #### `WorldLayerWaterContractTests`
 
@@ -83,7 +83,7 @@ WORLD-01Bの製品用`WorldLayer`と`WorldLayerWaterContract`を、Sceneを使�
 | 岩壁 | 水域上の抑制、適度な被覆率、チャンク境界、凹凸、通路を保証する。 |
 | 固定水文 | 8×8セル、固定9地点の標高・基礎湿度、中心タイルの海洋流出口、専用Saltの同点順、D8流向、負座標、循環拒否、最大4,096辺の下流終端、最大4,096セルの集水・自然流出、Level 0〜6の空間集約Summary、外部入口、分解条件、キャッシュ同値性、閉鎖流域境界、越流辺、基礎湖面、64件のECS Bufferと状態ハッシュに加え、複数Seed監査と診断表示の色写像を保証する。 |
 | 地形配置属性 | 陸地は通常設備＋通常ベルト、水は橋、マグマは橋＋耐熱必須、岩壁と未知IDは配置不可になることを純粋計算で保証する。 |
-| 有効地形 | 組み込みBlock定義、TERRAIN-01C前のInspector追加地形定義の明示拒否、完成Biome・地質・固定水文からの直接Block確定、4096件の生成Buffer、明示除去を含む疎な差分、自然状態への復帰時削除、レイヤー分離、移動・建築の独立判定、地形定義・Blockパレット・差分状態ハッシュの作成順非依存、Owner／Buffer片側欠落の拒否を保証する。 |
+| 有効地形 | 組み込みBlock定義、TERRAIN-01C前のInspector追加地形定義の明示拒否、完成Biome・地質・固定水文からの直接Block確定、4096件の生成Buffer、明示除去を含む疎な差分、自然状態への復帰時削除、レイヤー分離、移動・建築の独立判定、地形定義・Blockパレット・差分状態ハッシュの作成順非依存、Owner／Buffer片側欠落の拒否に加え、Gameビュー・開発者可視化・Map Viewerが同じ変更後セルを読むことを保証する。 |
 | 資源 | 地形適性、最低間隔、群生半径、競合解決、決定性を保証する。 |
 | 初期スポーン | 完成ECSチャンクの初期スポーン許可Biome、乾いた通行可能地面、資源なしを満たす1セルを、原点から有限のチャンクリングで決定論的に選ぶ。原点チャンクの候補だけで打ち切らず、より近い負側候補と同距離時のY・X昇順を保証する。探索中に既存地点が現れた場合もSingletonを二重作成しない。旧12×8建築可能領域、3×3中央コア、近傍資源は要求しない。 |
 | ECS生成・ストリーミング | 生成要求、同時生成上限、範囲外キャンセル、保持、非表示化、再有効化を保証する。同じチャンクX/Yの別Layerを既存要求として再利用せず、Surface要求へ別層Entityを混ぜないことも確認する。先読み順は可視矩形の中心を最優先とし、同じリングの上下左右を角より先に要求する。旧Observerの未設定Layerと逆順矩形をSurfaceの正規化結果としてSingletonへ反映し、未生成レイヤーへの切替では実行中Jobの完了を待って旧Surfaceチャンクを解放し、新規要求を作らないことを検証する。Camera Bridgeは外部から選択されたObserver Layerをカメラ移動後も保持し、PresenterはLayer変更フレーム内に旧Tilemapと途中Queueを即時消去する。32bit絶対タイル座標域の正負端では、先読み・保持余白を安全に変換できる論理チャンク範囲へ収め、反対側へ整数周回したチャンクを要求しない。境界ハイライトの1セル近傍と岩壁影の8セル余白は範囲検査付き座標変換を使い、ワールド外を反対端の地形として参照せず非接続にする。初期スポーン、チャンク要求、チャンク生成がUnity標準Groupへ直接所属せず、用途に対応するFarmware共通Groupを使うことも確認する。 |
@@ -204,9 +204,9 @@ C3-D1の局所性能診断`ClosedBasinResolution_ReportsScalingAndLakeDistributi
 
 レビュー対応後の再実行では、明示実行テスト1件、通常の水文回帰24件、World Generation EditMode Assembly 371件がすべて成功した。全Assembly実行中に、`AnimalPopulationGenerationTests`のテスト用World構築から既存のSystem Group順序属性警告2種類が各3回、合計6件出た。同じ警告は変更前の全Assembly実行ログにもあり、今回変更した水文性能テストからの新規警告ではない。Consoleエラーとコンパイル失敗は0件だった。
 
-#### `TerrainNeighborHaloUtilityTests`
+#### `CompletedChunkTerrainNeighborhoodTests`
 
-分類用外周1セルを、中心と周囲8チャンクの完成済み`GeneratedTerrainCell` Bufferから複写する契約を検証する。`Fill_EveryContiguousBatch_MatchesCompletedNeighborhood`は連続サブチャンク範囲136通りについて、BiomeとGround、Wall、Liquid、TerrainSurfaceのRuntime IDが対応する近傍チャンクから一致することを保証する。出力を不正値にした同一配列の再利用、中心完成値の優先、不正な配列長と範囲の拒否、4サブチャンク反映時100／36／36／100セル、内部1サブチャンクだけなら0セルとなる準備範囲も確認する。Factoryはワールド内の3×3から1件でも欠ければ表示へ渡さず、intワールド左下端では外側Entityを要求せず非接続として返す。`WorldGenerationTests.TerrainNeighborHalo_WorldEdge_TreatsOutsideNeighborAsDisconnected`も外周値を独立して保証する。見た目と停止感は別途人間が確認する。
+中心と周囲8チャンクの完成自然地形へ疎な`TerrainCellDelta`を適用し、表示と診断が同じ有効地形を直接参照する契約を検証する。Factoryはワールド内の3×3から1件でも欠ければ表示へ渡さず、自然生成へフォールバックしない。中心セルと負座標側のチャンク境界へWall差分を置き、どちらも同じRuntime IDへ解決することを確認する。intワールド左下端では外側Entityを要求せず、近傍取得を非接続として返す。`WorldGenerationTests.TerrainNeighborHalo_WorldEdge_TreatsOutsideNeighborAsDisconnected`も正負のintワールド端を独立して保証する。旧260要素外周配列の生成・再利用APIと、それだけを保証するテストはC6-D5で削除した。見た目と停止感は別途人間が確認する。
 
 #### `WorldCoordinateConversionTests`
 
@@ -236,7 +236,7 @@ C6-B2の18Biome表層Groundパレットと8地質の露出基盤Ground・自然W
 
 C6-B3の純粋Blockパレット選択について、表層64／32／16タイル・4：2：1、地質32／16タイル・2：1、露出32／16タイル・2：1の固定設定と用途別Saltを、負座標の明示ノイズ合成と照合する。0〜255へ変換した累積重み区間の全境界、露出式の64bit合成、境界39,320／39,321／39,322、露出率0／65,535の端点、中間値だけの厳密な未満比較を保証する。`SwampForest`で選ばれた`PeatSoil`は自然土壌飽和39,320で最初の非泥炭候補`MarshMud`へ置換し、39,321では維持する。同一入力の再実行とBiome・地質行の逆登録順で、途中ノイズ、候補材質、最終Ground、自然Wallがすべて一致することも確認する。C6-C1では同じテストFixtureへ、陸上Ground・自然Wallの直接RuntimeId、河道の淡水Liquid、海域の`BiomeId.None`・海水Liquid、未確定湖候補の拒否を追加し、旧Ground／水域分類を経由せず自然生成セルを確定することを保証する。
 
-2026-10-26のC6-B3 AI確認では、Unity 6000.3.8f1 Editorで`DeterministicTerrainBlockPaletteSelectorTests` 7件、B2・B3の`TerrainBlockPalette`関連14件、共有既定設定1件がすべて成功し、対象実行後のConsoleはエラー0件・警告0件だった。生成済みプロジェクト参照を使うRuntime・World Generation Testsの静的ビルドも警告0件・エラー0件で成功した。World Generation EditMode Assembly 622件の一括実行は約52分31秒で完走し、620件成功・2件失敗だった。失敗のうち`WorldGenerationMapViewerTests.Sample_ReportsDiagnosticChunksAndCompletedRowsWithoutChangingPixels`は一括実行時に180秒でTimeoutとなったが、単独再実行では90.55秒で成功した。もう1件の`TerrainProductIsolationTests.LegacyBoundaryHighlightRemovalGate_RemovesAllImplementation`は、後続C6-Dで旧境界ハイライトを削除した後に成功させる明示実行用`Explicit`ゲートであり、現時点では仕様どおり旧表示が残るため失敗する。全体実行後のConsoleはエラー0件で、警告6件は既存ECS Systemの無効な更新順属性2種類が各3回出力されたもので、C6-B3の変更箇所からの新規警告はなかった。
+2026-10-26のC6-B3 AI確認では、Unity 6000.3.8f1 Editorで`DeterministicTerrainBlockPaletteSelectorTests` 7件、B2・B3の`TerrainBlockPalette`関連14件、共有既定設定1件がすべて成功し、対象実行後のConsoleはエラー0件・警告0件だった。生成済みプロジェクト参照を使うRuntime・World Generation Testsの静的ビルドも警告0件・エラー0件で成功した。World Generation EditMode Assembly 622件の一括実行は約52分31秒で完走し、620件成功・2件失敗だった。失敗のうち`WorldGenerationMapViewerTests.Sample_ReportsDiagnosticChunksAndCompletedRowsWithoutChangingPixels`は一括実行時に180秒でTimeoutとなったが、単独再実行では90.55秒で成功した。もう1件は当時まだ残していた旧境界ハイライトの削除待ちゲートであり、C6-D6で削除対象を全比較・検品インフラへ広げた通常テスト`TerrainProductIsolationTests.ComparisonInspectionRemovalGate_RemovesAllInfrastructure`へ置き換えて成功済みである。全体実行後のConsoleはエラー0件で、警告6件は既存ECS Systemの無効な更新順属性2種類が各3回出力されたもので、C6-B3の変更箇所からの新規警告はなかった。
 
 #### `WorldGenerationDistributionAuditTests`
 
@@ -283,11 +283,23 @@ C3-C1の水文生成は、8水文行と地形・資源を9つの`IJobParallelFor
 
 Runtimeと同じ資源予約を生成して候補から除外するEditorのAnalyzerを、負座標を含む2組のSeed・18地域で2回実行し、適格タイル・目標数・生成候補が存在すること、群れ契約違反と位置重複が0件であること、署名と集計値が一致することを保証する。約100万タイルの既定監査は通常テストへ含めず、`Farmware > World Generation > Analysis > Analyze Animal Population`から明示実行する。
 
+#### `WorldGenerationMapChunkCacheTests`
+
+Editor専用の上限付き完成自然地形キャッシュを7件で検証する。5種類の出力配列を元Native配列から値コピーし、元の破棄・復元先の編集・復元先の破棄が次の要求へ影響しないこと、Seed・GeneratorVersion・海面閾値それぞれの変更で失効すること、同じX/Yの別Layerを混ぜないこと、最大32チャンクを超えた古い値を除去し、今回必要な最古の値は不足分追加の前に保護することを保証する。生成器の速度やメモリの合格値をテストへ持ち込まず、規定長のテスト所有配列だけを使う。
+
+`WorldGenerationMapViewerTests.Sample_TerrainDeltaSnapshotChangesFinalizedTerrainAndColor`は同じ自然地形キャッシュを3要求で共有し、自然地形、編集差分あり、差分なしへ戻した場合の色・Hover・差分件数を検証する。キャッシュへ編集結果を混ぜないことを統合経路で保証する。通常表示とMap Viewerの遅延計測・残件は[地形表示の遅延調査](./Terrain01C6D5PerformanceReport.md)を参照する。
+
+2026-10-28、Unity 6000.3.8f1で新規キャッシュ6件が0.68秒、更新したMap Viewer関連65件が128.14秒ですべて成功した。再コンパイル成功、最終Console実状態のエラー0・警告0、Play停止・Scene未変更・背景実行falseを確認した。この時点はキャッシュだけの変更の確認である。続く部分表示と初回Job生成の検証は下記および遅延調査記録を参照する。実画面の人間確認とDevelopment Buildの性能評価は残す。
+
+#### `WorldGenerationMapChunkGeneratorTests`
+
+未訪問地形の専用Editor World生成を4件で検証する。製品Burst Jobの5出力配列が従来の同期診断と全要素一致し、Default Worldを置換せず終了後のWorld数も不変であることを確認する。投入直後の取消では実行中Jobの終了を待って破棄し、後続チャンクとキャッシュ公開を行わないこと、事前生成必須のSamplerが不足データを同期生成しないこと、32件超の要求をWorld確保前に拒否することを保証する。Unity 6000.3.8f1で4件が14.22秒で成功した。容量境界の回帰追加後、生成4件とキャッシュ7件の合計11件も14.36秒ですべて成功した。専用WorldのJob明示送出を追加した後にも生成4件が19.71秒で再成功した。
+
 #### `WorldGenerationMapViewerTests`
 
 WORLD-01Cでは、UnderwaterがLayer付きの未生成結果となり、Surface Generatorを複製せず固定の未接続色を返すことと、UXMLにLayer選択欄が存在することを検証する。
 
-Map Viewerの全ピクセルが、同じ座標について完成診断チャンクへ保存した`GeneratedTerrainCell`のBlock参照から求めた色と一致することを保証する。Terrain表示はLiquid、Wall、Groundの優先順を使い、Ground表示とBiome表示は地表Blockの有無に左右されず同じ論理Biomeの所属色を保つことを検証する。
+Map Viewerの全ピクセルが、同じ座標について完成診断チャンクへ保存した`GeneratedTerrainCell`と任意の差分Snapshotから求めた色と一致することを保証する。Terrain表示はLiquid、Wall、Groundの優先順を使い、Ground／Wall Runtime IDを41材質の安定IDへ解決した色を表示し、同じ材質のWallはGroundより暗くする。Hoverへ同じ安定材質IDを保存し、画像生成後にRuntime IDを再推測しない。差分Snapshotは負座標の床除算、チャンク正側境界、LocalTileIndex昇順を検証し、別セルや別レイヤーへ漏らさない。Biome表示は地表Blockの有無や変更可能Blockに左右されず同じ論理Biomeを保つ。
 完成地形と派生水文のThreadPool統合テストは、Definition、Terrain、材質、Paletteの各BlobをMain Threadで先に完成させ、実Windowと同じ管理スレッドへ読み取り専用で渡して完成診断チャンクを生成する。ThreadPool内でBlobを再構築せず、Unity Entities内部のMain Thread限定`Allocator.Temp`へ到達しないことと、処理完了前に共有Blobを破棄しないことを保証する。
 TERRAIN-01C1では、標高、基礎気温、地形気温、基礎湿度、木本植生ポテンシャル、地形起伏、海洋影響、火山活動度の値域両端がそれぞれ異なる不透明色になり、GameビューのDebug Visualizationと同じRGBを使うことを確認する。Dropdownの`int`選択Indexは`byte`基底の表示モードへ型を合わせてから検証し、定義値を保持しつつ未選択・範囲外値を`Terrain`へ戻すことも保証する。
 TERRAIN-01C2-Bでは、地質3特性の値域両端、8分類、Definitionフラグ、異なる支配サイト、サイト内部・境界が不透明な別色になることを確認する。支配サイト診断は固定Seedの広域格子で同じ座標の`DeterministicGeologyGenerator`結果と一致し、上下左右のサイト差から少なくとも1つの境界を検出できることを保証する。Dropdownの有効上限も`Geology Site Boundary`まで拡張し、その次の値は`Terrain`へ戻す。
@@ -308,45 +320,169 @@ TERRAIN-01C5-Dでは、全27モードの表示名、実行経路、解像度方�
 
 16×24土地の上面16px・断面8px・Pivot Y 2/3、16×28岩壁の上面16px・側面12px・Pivot Y 2/7、液面を8px下へ移す`-0.5セル`をSceneなしの純粋計算として検証する。淡水・海水・マグマを別の液面アニメーションへ分類する規則も保証する。
 
-#### `TerrainBoundaryHighlightUtilityTests`
+旧一体型PNGだけを保証した`WorldGenerationFallbackArtTests`と旧土地・岩壁Atlasの`WorldGenerationSpriteAtlasTests`は削除済みである。製品41材質・680枚のAtlasは`TerrainMaterialProductPublisherTests`、旧素材・参照・APIの削除は`TerrainProductIsolationTests`で保証する。
 
-8方向の256入力が斜め接続制約によって47状態へ正規化され、完全接続を除く46状態が14基本形と時計回り90度回転へ割り当てられることを検証する。左右反転を使わない回転方向、画像の左から右への形状表、異なる土地Biome・岩壁を陸続きとして扱う規則、水・マグマ境界、斜めだけが欠ける内角、岩壁領域の境界もSceneなしの純粋計算として保証する。
-
-#### `WorldGenerationFallbackArtTests`
-
-Editor構築ツールが生成した7種類の16×24土地PNGと16×28岩壁PNGを直接読み込み、上面と前面の全ピクセルが一枚の不透明ブロックとして存在することを検証する。旧土・砂・岩・雪断面と旧岩壁側面PNGが残っていないことも保証する。
-
-#### `WorldGenerationSpriteAtlasTests`
-
-Sprite Packer ModeがV2であること、土地Atlasが現行Biome仮色Textureだけ、岩壁Atlasが岩壁TextureだけをPackableに持つこと、両AtlasがBuilt-in配信とPixel Art向け設定を持つことを検証する。共通境界ハイライトは8px／16px／32px折れ目影との最終比較が終わるまで、専用の`TerrainBoundaryHighlightArtGeneratorTests`でPNGと`BoundaryHighlightAtlas`の既存契約を検証する。C6-Dでは本番接続と製品回帰テストの成功後、不採用となった補助表現だけでなく、採用方式を含む比較・検品専用の素材、Material／Shader、Atlas、Scene参照、選択処理および専用テストを削除し、並行する検品経路が残らないことを確認する。
-
-#### `TerrainBoundaryHighlightArtGeneratorTests`
-
-再制作した共通境界ハイライトについて、224×16 pxのPNGが16×16 pxの14区画へ順番どおり分割され、Point、16 PPU、非圧縮、Mip Mapなし、`Full Rect`、中央PivotでImportされることを検証する。PNGの全画素を論理特徴マスクと照合し、可視画素が不透明白、非表示画素が完全透明、外周と内角がともに1 pxであることを保証する。
-
-`BoundaryHighlightAtlas`が境界PNGだけをPackableに持ち、14 Spriteを同一Textureページへ収録することもC6-Dまでの旧経路回帰として確認する。固定検品Sceneの入力契約は、14基本形、正規化済み47状態、完全接続を除く46表示状態として検証する。SampleSceneでは置換前のWall境界専用TilemapのRGBが既定の0.85、Alphaが1であり、各境界Tileの20% Alphaを二重に弱めないことをPlayModeで保証する。専用のWall影比較Sceneについては、3区画、各13 Wallセル、手前へ露出する各5列×2段の合計10 Face Sprite、合計39 `ShadowCaster2D`、3 `CompositeShadowCaster2D`、真上の主光3個と左手前検証光3個の合計6 Point Light 2D、右区画だけの固定接地影36枚という固定契約をEditModeで検証する。動的影用CasterのY位置はWall上面からFace 2段分、つまり2タイル手前とする。1段目にWall用`FaceBoundaryOverlay`合成結果、2段目に通常`Face`を使う。Face用の固定接地影は上下段の継ぎ目に置かず、各列の2段目下端にだけ置く。採用した接地影は左右各1px・手前3px・各レイヤーAlpha 22%である。Scene内の色の見え方、動的影が最下段Faceの根元から伸びること、C区画で旧ハイライトなしでもWallを識別できることは自動テストだけで合否を決めず、Gameビューで人間が確認する。
+`WorldGenerationMapViewerTests.CaptureTerrainDeltaSnapshot_RebindsWorldLocalIdsAndRetainsRemovals`は、地形よりGUID順が前の追加定義で全Runtime IDをずらしたWorldを作る。実WindowのSnapshot取得からサンプラーまで通し、負座標のGround／Wall材質・Liquidと明示除去が一致し、元の差分Bufferが変わらないことを保証する。
 
 #### `TerrainTileArtGeneratorTests`
 
 専用`WallTop`、材質別7外周部品、共通暗色内部、47枚のWall完成Spriteを対象とした旧試作テストは削除済みである。現行テストは、sRGB 8bit RGBの0.85暗色化と最近傍丸め、Alpha維持、`Face`を変えず不透明な`FaceBoundaryOverlay`だけを暗色化するGround／Wall合成、半透明Overlay拒否を検証する。
 
-可変長配列については、手描き入力`G + F + B`、生成結果`F×B×(1 + D)`、Runtime候補数の計算を確認する。設定検証では16×16 px、Read/Write、Point、16 PPU、非圧縮、Mip Mapなし、sRGB、`Full Rect`、Alpha 0／255、材質ID、暗色化係数を対象とする。差分配列が個別Weightを持たず全候補を均等に扱うこと、暗色化ON・0.85、専用WallTop設定が存在しないことを専用テストとInspector確認で保証する。生成PNGの実Import、再生成時のGUID維持、Fingerprintによる要再生成、旧出力整理はGeneratorの実操作で確認する。固定検品Sceneの構築前検証では、境界生成物を持つ材質だけ現在Fingerprintと最終正常生成Fingerprintを比較し、画像や設定が変わったままなら同数の旧生成物を受理しない。境界なし材質は現在の入力Spriteを直接使うため、生成物がないことを理由に拒否しない。代表材質のInspector操作では、Ground／Wall境界の全`F×B`組合せが用途別に64×64の整数4倍で表示されることを確認する。
+可変長配列については、手描き入力`G + F + B`、生成結果`F×B×(1 + D)`、Runtime候補数の計算を確認する。設定検証では16×16 px、Read/Write、Point、16 PPU、非圧縮、Mip Mapなし、sRGB、`Full Rect`、Alpha 0／255、材質ID、暗色化係数を対象とする。差分配列が個別Weightを持たず全候補を均等に扱うこと、暗色化ON・0.85、専用WallTop設定が存在しないことを専用テストとInspector確認で保証する。生成PNGの実Import、再生成時のGUID維持、Fingerprintによる要再生成、旧出力整理はGeneratorの実操作で確認する。境界なし材質は旧生成物が残らない限り初回から生成不要であり、GroundTopだけの変更は境界Fingerprintを変えない。境界ありから境界なしへ変えた場合は、以前の生成物を整理するまで更新必要と判定する。製品公開前検証では、境界生成物を持つ材質だけ現在Fingerprintと最終正常生成Fingerprintを比較し、画像や設定が変わったままなら同数の旧生成物を受理しない。境界なし材質は現在の入力Spriteを直接使うため、生成物がないことを理由に拒否しない。代表材質のInspector操作では、Ground／Wall境界の全`F×B`組合せが用途別に64×64の整数4倍で表示されることを確認する。
 
-#### `TerrainTileArtInspectionMapBuilderTests`
+#### `TerrainMaterialSpriteImportUtilityTests`
 
-代表5材質の固定検品Sceneを開閉せず、構築に必要なAsset契約を検証する。`GrassLoam`、`DesertSand`、`Sandstone`、`Granite`、`Basalt`の固定順と、各材質の可変長`GroundTop`・通常`Face`・全`Face×FaceBoundaryOverlay`合成結果を、固定差分数ではなく現在の登録数から保証する。境界なし材質の生成結果0枚も正常な契約として扱う。代表材質パネルは最小横8×奥行7セル、Wall前面2段、Wallの左右・奥・手前に各2セル以上の同一材質Groundを固定契約とする。同一材質のGround、暗色化Wall上面、1段目境界合成結果または通常Face、2段目通常Face、固定接地影、設置面起点の動的影の順で重ねる。動的影用`Shadow Caster 2D`はWall上面からFace 2段分手前へ置き、材質パネルごとに`Composite Shadow Caster 2D`を1個、真上と左手前のPoint Light 2Dを各1個、Scene全体にGlobal Light 2Dを1個配置することも固定契約として確認する。実景検品穴は`GrassLoam`を使い、横3×手前方向10セル、Ground崖面3段、Wall前面2段、Underwaterプレビュー開始位置が0始まり3（4段目）、水面上端のクリップが3 pxであることを固定契約として確認する。Wall折れ目影は前面2段の32pxを対象に、上端Alpha 35%、2段目開始の16px地点で連続減衰中、31px地点と到達後で0%となり、負の画素行を拒否することを検証する。1段目と2段目のMaterialには開始行0px／16pxを保存し、段境界でAlphaが濃く戻らないことを保証する。乾燥崖は上端のFace可視Alpha 100%、24 px地点50%、48 px地点0%とし、到達後のClampと負の画素深度拒否を検証する。淡水・海水の連続`Liquid深度Overlay`は、Underwater床ありでクリップ後45 px・最大Alpha 50%、床なしでクリップ後93 px・最大Alpha 100%とし、上端、到達点、到達後のClamp、負の画素深度拒否を検証する。連続深度Shader、水際波線Shader、Wall折れ目影Shader、乾燥崖用1種類、水深用3種類、波線用4種類、折れ目影用2種類の生成MaterialをAssetとして再読込できることも保証する。波線は太さ1 px、2色、奥辺48 px、左右辺157 pxを固定契約とし、置換した旧飛沫Animation資産を受理しない。淡水・海水・マグマのFallback Sprite 3枚とUnderwater配置物の仮Spriteも検証する。比較Sceneで使用する暗色化係数0.85、0.70、0.55も固定契約として検証する。固定接地影と`Shadow Caster 2D`による動的影は、代表材質パネルと専用Wall影比較Sceneの両方で扱う。本番Runtimeのサブチャンク輪郭生成と差分選択は現段階の検品Sceneテストに含めない。
+材質専用Sourceフォルダー配下のPNGだけを対象とし、他用途の画像を変更しないことを保証する。新規64×48 px PNGへSprite Multiple、Point、16 PPU、Clamp、非圧縮、Mip Mapなし、sRGB、Read/Write有効、`Full Rect`を適用し、16×16 pxの4列×3行を上段左から安定した名前で分割する。初回Import中に透明領域基準の横長2区画が作られた状態を再現し、参照が作られる前だけ12区画へ置換できることも検証する。同じパスへ修正版PNGを書き戻して再Importした後は設定変更なしとなり、全12区画のSprite IDが維持されることを確認する。既存の境界なし材質は上2行の8区画も許可する。規約外寸法と初回Import完了後の8／12以外の既存分割はSerialized参照保護のため自動修復せず、区画とSprite IDが変化しないことを保証する。
 
-実際のScene保存、720×360 Pixel Perfect表示、色・模様・継ぎ目・固定接地影と動的影の見え方は自動テストだけで決めず、`Open Terrain Tile Inspection Map`実行後のGameビューで人間が確認する。検品Sceneの折れ目影32pxは採用結果を再現する初期値としてテストし、本番Presentationでも全材質共通値として接続する。将来調整する場合も材質別の値には分けない。
+#### `TerrainMaterialProductPresentationTests`
 
-#### `TerrainWaterReflectionComparisonMapBuilderTests`
+C6-D2の製品上面・断面経路を、41材質の完成Spriteを製品Sceneへ割り当てる前に純粋分類とRuntime Asset契約へ分けて検証する。Wall前面が手前2セルだけ、Ground崖面が連続する乾燥穴3セルだけへ投影され、液体やWallを越えないこと、北側チャンク境界を越えて同じ完成地形を参照することを確認する。穴上端0 px、段境界16／32 px、下端48 pxのFace Alphaが1、2/3、1/3、0となり、段ごとに濃さが戻らないことも保証する。
 
-水面反射の比較Sceneを開閉せず、垂直面反射Proxy方式の前提と生成Assetを確認する。`WaterSurface`が`Default`より後にあることを保証し、Camera Sorting Layer Textureは前提としない。初期比較値は最大反射深度32 px、縦圧縮0.75、最大Alpha 0.22、整数Pixel変位速度4 px/秒とし、反射軸上と軸より1 unit奥にある垂直面の投影座標、軸より手前にある不正な反射元の拒否を検証する。再構築後は反射Shaderにコンパイルエラーがなく、生成Materialの最大深度を含む値と専用比較SceneをAssetDatabaseから再読込できることを保証する。
+製品Resolverについては、GroundとWall上面が同じ`GroundTop` Spriteを選び、Wall上面だけへ0.85 Tintを掛けること、Ground／Wallの1段目が用途別境界合成済みSpriteを選ぶこと、通常`Face`を暗色化しないことを確認する。Runtime Tile Cacheは同じSprite・Tint組と深部黒Tileを再利用し、セル数に比例してUnity Objectを生成しない。乾燥崖Materialが検品用ではなく製品用`Farmware/Terrain/Dry Cliff Face` Shaderを参照することもAssetDatabaseから検証する。
 
-自動テストは水平な`GroundTop`／`WallTop`が映っていない見た目、鏡像の向き、反射の強さ、波線との重なり、ドットの読みやすさを合格判定しない。これらは`Open Water Reflection Comparison`を実行し、Edit Modeで左右差、Play Modeで0／+1／0／-1 pxの段階移動を人間が確認する。採用前の検証値なので、本番Runtimeの描画契約や性能合格値には含めない。
+41材質カタログ、液体3種カタログ、Ground／Wall断面、乾燥崖深部黒、液体専用レイヤー、AtlasはC6-D6でSampleSceneへ接続済みである。`TerrainProductSceneConnectionTests`は両製品カタログと採用レイヤーのSerialized参照、Material、Transform、Sorting Layerに加え、`TerrainWall`を照らすGlobal Light 2D、Wall背後資源と通常資源の前後関係、液体Surface→深度→反射→水際の順を確認する。2026-10-28に採用したマグマ網状模様は、専用の`magmaSurfacePatternTilemap`参照と`Magma Surface Pattern Tilemap`を使い、専用Material、Renderer有効状態、WaterSurface Order 2、反射より後ろであることを追加で保証する。網目6pxへの縮尺調整後、見た目はユーザー確認済みである。GPU描画テストは4fpsのコマ保持、明滅を止めても網目が変形すること、停止、負原点と4096px周期、16px原点移動、奥岸3pxクリップを検証する。SampleSceneのPlayMode回帰ではマグマ模様の共通時計、Material共有、水セルへの非描画も検証する。旧AnimatedTile分類専用テストを削除し、対象プラットフォームのGPU負荷計測は未実施として残す。マグマ岸の断面回帰では、全3液体・Wall有無の奥岸投影、実PresenterがWall前面を消さずGroundの縁を分類すること、模様の表示有無にかかわらずGPU出力の上端3pxだけに断面が残ることを追加検証する。
 
-`Open Wall Surface Darken Comparison`では0.85、0.70、0.55を比較し、0.85を採用した。`Open Wall Shadow Comparison`では同じ13セル形状を3区画へ置き、「旧ハイライト＋動的影」「動的影のみ」「左右各1px・手前3px・各レイヤーAlpha 22%の固定接地影＋動的影」を同じ照明条件で比較し、2026-10-25の人間確認で固定接地影と動的影を組み合わせるCを採用した。追加の`Open Wall Edge Cue Comparison`では、代表5材質を5列、8px折れ目影、16px折れ目影、32px折れ目影、1px境界ハイライトを4行へ並べる。全20パネルは最大横5セルを含む同じ13セルWall形状を使い、CのGround、Wall暗化、Face 2段、固定接地影、動的影、照明を共通配置する。8px／16px行では各露出列の1段目へ折れ目影を各1枚、32px行では1段目と2段目へ各1枚、境界ハイライト行ではハイライトを各12枚置く。32pxのShader値は2段目で開始行を16px進め、段境界でAlphaが濃く戻らないことを保証する。自動テストは20パネル、各13 Wallセル、露出Face 5列、Face 10枚、固定接地影36枚、Caster 13個、Composite 1個、Point Light 2個が方式間で一致し、補助表現だけが異なることを保証する。2026-10-26の初回確認では16pxを最有力としたが、32pxが全体暗化に見えた現象には比較用動的影の不安定な挙動が混在していた。折れ目影自体を再評価して32pxを正式採用し、8px、16px、1px境界ハイライトを不採用とした。比較SceneのPoint Light配置とセル別Casterは製品照明の正ではなく、方式を同条件で比較するための仮構成である。動的影用CasterはWall上面からFace段数だけ手前の設置面へ移し、影が最下段Faceの根元から伸びて上面から始まらないことを確認する。本番の固定接地影と`Shadow Caster 2D`は材質境界で分割せず、Dirtyな16×16サブチャンクのWall設置面輪郭から結合形状を更新すること、移動する`Light 2D`へ動的影だけが追従すること、アンロード・再利用後に旧影が残らないことをEditMode／PlayMode／Gameビューで検証する。不採用となった8px／16px折れ目影と境界ハイライトの素材、Material／Shader、Atlas、Scene参照、選択処理、専用テストがC6-D後に残っていないことも検索と参照確認で保証する。水面反射の回帰では、反射Shaderが`SpriteRenderer.flipY`をWorld座標変換前に適用し、上下非対称なFaceも鏡像になる契約をShaderソースとGameビューで確認する。
+2026-10-28のマグマ正式採用時のAI確認では、Unity 6000.3.8f1で`TerrainLiquidRenderingTests` 38件（追加マグマ4ケースを含む）、`TerrainProductSceneConnectionTests` 4件、`TerrainLayerPresentationUtilityTests` 8件、`WorldGenerationSceneBootstrapTests` 10件がすべて成功した。SampleSceneのストリーミング・決定論回帰はチャンク別・共有Tilemapの各1件、合計2件が成功し、実行時の共通時計とMaterial共有も確認した。最終のUnity ConsoleとマグマShaderはエラー0件・警告0件だった。全プロジェクトの全テスト、製品ビルド、対象環境のGPU性能測定は今回の実行範囲に含めない。
 
-C6-Dで採用方式の本番接続と製品回帰テストが成功した後は、不採用経路に加えて、採用32px折れ目影、壁影、水面反射などを確認した比較・検品専用のScene、Builder、Editorメニュー、Material／Shader、生成Asset、設定および専用テストもすべて削除する。本番実装と本番挙動を保証するテストだけを残し、比較・検品専用インフラが0件であることを検索、Serialized参照確認および製品分離テストで保証する。水面反射の回帰では、削除する検品用Shaderではなく製品用反射Shaderを対象にする。
+2026-10-28のマグマ奥岸断面の修正では、共通岸判定を含む`TerrainLiquidPresentationUtilityTests` 58件、実Presenter分類を含む`TerrainMaterialProductPresentationTests` 9件、GPU読戻しの`TerrainLiquidRenderingTests` 40件が成功した。製品SampleSceneのPlayModeストリーミング回帰1件も成功した。マグマの奥にGroundだけがある場合とWallを持つ場合を検査し、水面より下を透視させない契約を維持する。奥岸の断面修正後、ユーザーが実際の見た目に問題ないことを確認済みである。
+
+2026-10-26のC6-D2 AI確認では、Unity 6000.3.8f1 Editorの再コンパイルが警告0件・エラー0件、`TerrainMaterialProductPresentationTests` 7件、`TerrainMaterialPresentationCatalogTests` 9件、`TerrainNeighborHaloUtilityTests` 12件、`ChunkLocalTilemapPresentationTests` 21件がすべて成功した。PlayMode回帰の準備BufferとPresenter所有HaloをC6-C3以前の`GeneratedTile`から現行`GeneratedTerrainCell`へ更新し、Dirtyサブチャンク、チャンク単位カリング、Floating Origin、表示プールの既存契約を再確認した。Presentation、EditMode Test、PlayMode Test Assemblyの静的ビルドも警告0件・エラー0件で、最終Consoleはエラー0件・警告0件だった。C6-D6で41材質とAtlasの自動接続は完了し、製品Sceneの実Sprite、Sorting Order、48 px Shader描画だけを人間確認へ残す。
+
+#### `TerrainMaterialProductPublisherTests`
+
+C6-D6の素材公開について、今回の画像で確定した境界あり11材質が安定IDまで一致し、製品カタログが全41材質を境界あり11・なし30で初期化できることを保証する。各行の`GroundTop`、通常`Face`、Ground／Wall境界完成Spriteを走査し、製品カタログがEditor専用`Source`または生成設定を直接参照しないことを確認する。製品Atlasは41材質×通常8枚の328 Textureと、境界あり11材質×Face 4×境界4×Ground／Wall 2用途の352 Texture、合計680 TextureだけをPackableに持つことを検証する。Atlasの実パックと1ページ化は公開処理自体でも検証し、製品Sceneを接続する前に失敗させる。
+
+#### `TerrainWallShadowUtilityTests`
+
+C6-D4の製品Wall影を、41材質と製品Sceneを接続する前に純粋形状、Runtime表示再利用、製品Materialへ分けて検証する。完成済み中心チャンクと南隣Haloから「Wallかつ画面手前側の南隣が非Wall」の露出根元だけを抽出し、同一行で隣接する根元を1区間へ圧縮する。奥側Wallを除外すること、チャンク境界でも南隣Wallを参照すること、空きセルと行境界で区間を分割すること、入力へ材質IDを含めないため異材質Wallも連続区間になることを確認する。32 px折れ目影は1段目上端Alpha 35%から31 px目の0%へ単調減衰し、15／16 px境界で濃く戻らないことを保証する。固定接地影の左右1 px・手前3 px・各Alpha 22%、動的Casterの論理Wall根元に対する追加補正0タイルも共通定数として固定する。
+
+Runtime表示テストは、同じDirtyサブチャンクを再反映してもCaster GameObjectを増やさず、既存Casterの位置と長さを更新し、論理Wallセルと最下段Face根元が同じ座標になることを確認する。PlayModeでは、プールから戻ったRootを先に有効化し、`ShadowCaster2D`を有効なHierarchy内で初期化してから非表示へ戻すことで、初回区間生成時に内部輪郭未初期化のNullReferenceを出さないこともSampleScene縦切りで確認する。Assetテストは製品用固定接地影と折れ目影Materialが製品Shaderを参照し、Shaderエラーがなく、開始行0／16 pxと採用Alphaを保持することを確認する。C6-D6では製品SceneへWall上面・前面・折れ目影の+2Y、固定影の+2Yから手前3 px、動的Casterの根元座標、Sorting Order、全41材質、Atlasを接続し、比較Sceneの仮`Light 2D`と検品用生成Assetを削除した。正式な環境光・局所光はTIME-01Bで接続する。
+
+#### `TerrainSubChunkDependencyTests`
+
+必要近傍Maskと実Presenterの部分反映を10件で検証する。中心だけなら内部4部分を表示できること、必要な辺だけを待つこと、正負ワールド端で域外を要求しないこと、不正な部分Indexを拒否することを確認する。実Tilemapへ内部だけが描かれ、近傍到着時に進捗を捨てず残りを反映すること、待機先頭が後続を止めないこと、使用済みEntity置換で進捗を失効させることを保証する。部分影は完成入力のある三角形だけを公開し、その頂点Alphaが全体完成時と一致すること、途中Meshを完成済みの原点変更再利用候補に残さないことも検証する。10件が0.32秒で成功し、関連Terrain全288件も48.09秒で成功した（包含関係のある実行であり件数は合算しない）。
+
+生成Systemのパレット寿命回帰`WorldGenerationTests.ChunkGenerationSystem_KeepsPaletteAliveAfterSourceDisposal`は、Job投入直後に元カタログを解放してから完成を待つ。同じ値の再読込では所有Blobを再利用し、重みを変更した入力では新しい値を保持することを3回の投入で保証する。生成System関連10件が12.54秒で成功した。これは部分表示で完了が早まった後のScene連続読込から検出した寿命問題への回帰である。修正後のPlayMode Assembly全56件も128.98秒で成功し、連続Scene読込、正負の原点変更、アンロード再訪、共有／チャンク別表示を含む回帰を確認した。さらに可視辺を角より先に生成する回帰を東西南北4条件で追加し、`ChunkStreamingSystem`関連15件が5.62秒で成功した。優先順位変更後もPlayMode Assembly全56件が132.46秒で再成功した。`WorldGenerationTests`全61件もEditorログでは全成功したが、同期CLI応答は30秒で期限を超えて結果本文を受け取れなかったため、実行時間は記録しない。
+
+#### C6-D5 有効地形・診断・境界回帰
+
+Gameビューの通常表示、開発者可視化、岩壁影、Map Viewerが、完成自然地形と`TerrainCellDelta`を合成した同じ有効地形を読むことを保証する。中心と周囲8チャンクの自然地形Bufferに、同じ所有チャンクの疎な差分Bufferを重ね、負座標とチャンク境界でも同じ絶対セルへ解決する。表示Fingerprintは中心・周囲8チャンクと直下層の自然地形・差分を含み、差分変更、アンロード、Entity再利用、World切替後に古いサブチャンクを残さない。製品Presenterは旧260要素Haloと`TerrainNeighborHaloBuild` Markerを保持せず、必要な近傍が未完成なら自然生成へフォールバックせず、その入力を読む部分だけ反映を待つ。
+
+Map Viewerの`Terrain`は同じ生成設定の実行中Worldがある場合だけ、メインスレッドで取得した不変の差分Snapshotをバックグラウンド生成へ渡す。表示色はLiquidを優先し、Ground／WallはRuntime IDから41材質の安定IDへ解決して、Wallだけ同色相を暗くする。Hover、凡例、取得元、実際に適用した差分サンプル数を同じ結果へ固定する。設定不一致またはEditModeでは自然生成であることを明示し、実行中の現在地形と誤表示しない。41材質凡例では長い名前を行内で折り返し、14pxの色見本を横方向にも縮小しないことを最小Window幅で確認する。
+
+2026-10-27のC6-D5 AI確認では、Unity 6000.3.8f1 Editorの再コンパイルが警告0件・エラー0件、旧Halo削除前の有効地形近傍13件と、Map Viewerの負座標差分Snapshot、安定材質色、完成地形全画素一致、有効地形・色の統合回帰がすべて成功した。その後、製品から到達不能になった旧260要素Halo APIと旧挙動だけのテストを削除し、現行`CompletedChunkTerrainNeighborhoodTests` 3件と正負ワールド端2件もすべて再成功した。PlayModeでは、旧Presenter Haloを持たないこと、同一論理チャンクの自動原点変更で岩壁影を再利用すること、チャンク境界の連続影、自動原点変更の往復・負座標横断の4回帰が成功した。最後の回帰は、任意の差分配列を既定値のままUnity Jobへ渡せない安全性エラーを初回に検出したため、岩壁影マスクを完了済みBufferだけ読む同期ループへ修正して再成功した。自然地形Entity世代のFingerprint追加と近傍コンストラクタ整理後にも、`CompletedChunkTerrainNeighborhoodTests` 3件を0.020秒、往復・負座標横断PlayMode回帰1件を56.675秒で再実行し、どちらも成功した。Gameビュー、Map Viewer、F4、負座標、Floating Origin、アンロード・再利用の実表示一致と、ProfilerでのCPU時間・GC Alloc確認は人間確認へ残す。
+
+#### 地形表示のDevelopment Player局所計測
+
+2026-10-28、元プロジェクトを変更しない一時コピーで、現在実装と`b05e817f`の通常12／高速36タイル毎秒を比較した。各ケースは初期周辺16チャンク完成後に5秒静止・30秒移動・20秒静止し、macOS Universal／Mono Development、M3／24GiB、Metal、1920×1080、基準30×16.875タイル、先読み1・同時生成2・表示予算4を共通とした。専用引数だけで有効になる一時Componentを使い、ECS・Presenterの未反映Mask、ProfilerRecorderのCPU／GC／メモリ、重複timestampを除くFrameTimingManagerのGPU、OS RSSを記録した。行配列を事前確保し、観測ループ自身のmanaged allocationは全ケース0 byteだった。元Sceneや製品設定を変更せず、終了後は専用コピー内のC#・metaも削除した。
+
+通常は比較元594/1,792フレームで未反映、現在版0/1,792、追加実行も0/1,794だった。高速の現在版は937/1,788フレームで未反映を検出し、停止後1.607秒で収束した（比較元7.235秒）。表示CPUとGC・表示メモリの増加、単発フレーム間隔66.269msと追加確認の35.573ms、既知の終了時ComputeBuffer警告も隠さず記録する。両ビルド成功、計5 Playerの区間中エラー・警告0、終了コード0を確認した。正式なFPS・全機器・最大Viewportの合格判定とは分離し、条件・全数値・制約・成果物は[遅延調査記録](./Terrain01C6D5PerformanceReport.md)を参照する。今回追加したのは計測と文書であり、製品C#・Scene・Assetは前回の確認時点から変更していないため、自動回帰全体の再実行は行っていない。
+
+#### `TerrainLiquidPresentationUtilityTests`
+
+C6-D3の製品Liquid表示を、製品Sceneへ全素材を割り当てる前に純粋分類、カタログ検証、Runtime Tile共有、製品Shader Assetへ分けて検証する。淡水・海水・マグマで共通する上端3 pxクリップは画面奥側がGroundまたはWallへ接する先頭セルだけを対象とし、連続液体の内部セルを切らないことを確認する。直下床ありのクリップ後45 px・最大Alpha 50%、床なしのクリップ後93 px・最大Alpha 100%も境界値で確認する。基底色を投影距離から独立させ、断面が各列の奥岸の真下だけへ描かれることを純粋計算とGPU描画で保証する。通常の奥・左・右接触辺に左右内角と左右の裏側終端クリップを加えた7bit形状を使い、画面手前辺や異種液体への接続を含まないことも保証する。カタログは現行形式の3液体と有効な水際RGB色を要求し、液体種別の重複・不正な色・旧カタログ形式を拒否する。基礎液面Tileは同じ入力とクリップ有無、深度Tileは深度データの組合せによらず全水域で1件、反射はTileではなく、Atlasの借用SpriteとDirtyなサブチャンクMeshで描画する。
+
+通常Faceは淡水・海水が連続する最大6段だけ投影し、両者の境目は越えるが、マグマ・未知液体、GroundのないWall、空セルを越えない。交互に混在する全6段の断面・距離・元の液体種の維持、両向きの水種境界を挟むWall反射、マグマ・未知液体・空セルでの探索停止を検証する。Wallの下にGroundがある岸では、そのGroundを全6段の投影元に使い、Wallのある列だけ水中断面が欠けないことを確認する。マグマは液面より下のFaceと青深度を表示しない。液面より上のGroundの縁3pxとWall前面は残す。反射は淡水・海水から最大2段・32 px以内のWall Faceだけを対象とし、水平なGroundTop、WallTop、直下床、マグマを対象外にする。製品Materialが`Farmware/Terrain/Liquid Surface`、`Farmware/Terrain/Liquid Depth Overlay`、`Farmware/Terrain/Water Reflection Proxy`を参照し、水の基底色Materialに旧勾配設定が残らないことをAssetDatabaseから検証する。45／93pxと50／100%は断面Shaderの光学的被覆率としてGPU合成で検証し、反射の最大Alpha 0.22を維持し、更新頻度はMaterialの毎秒2コマを初期値とする。固定中心ごとの位相・周期を使う整数px変位、変位後に元Sprite矩形内だけをPoint Sampleすること、外周と透明部分の移動、水セル境界による固定した切り抜きを検証する。
+
+直下床あり経路は、Presenterが同じX/Yの直下WorldLayerに完成済み3×3チャンク近傍を取得できる場合だけ使用する。現在のSurface専用ストリーミングでは直下層を同時常駐させないため、床あり45 pxと4段目以降の床プレビューのGameビュー確認は、Surface以外の自然生成・複数層ストリーミング接続後に行う。未準備時は床なし93 pxへ入り、現在層の材質を直下床へ読み替えないことを確認する。
+
+#### `TerrainLiquidRenderingTests`
+
+輪郭の揺れは、元位置のAlphaを固定マスクとして掛ける旧契約を廃止し、変位後の色とAlphaを一緒に読む。GPUテストでは振幅1px・濃度0.22と上限2pxを使い、外周が水面側へ広がる／後退すること、透明な穴が移動すること、付け根2pxが静止することを32コマ検査する。左右が陸地の1セル水路では外へ広がらず、上端3pxも覆わない。同じ接地点の内部Sprite境界に加え、接地点が1セル違う隣画像でも、受け手の揺れ深度を共用して穴・二重合成を作らないことを検証する。Atlasの隣画像混入、コマ保持、負原点変更の既存回帰も維持する。Shaderの初期値は一時Materialで検査し、ユーザーが調整する保存Materialには有効範囲だけを要求する。
+
+2026-10-28の輪郭修正後は、液体関連80件（1.49秒）、水中描画純粋計算4件（0.02秒）、材質解決7件（0.03秒）、Scene接続4件（0.03秒）、Scene構築10件（0.03秒）、製品分離2件（0.91秒）のEditMode計107件と、SampleScene移動・再生成のPlayMode各1件（チャンク別46.60秒、共有46.83秒）が全件成功、Skipなしだった。添付動画の外周固定を確認したうえで、報告地点(-12.5,-30)の実シーンでも反射以外を静止させ、反射時計0秒／2秒の比較で外周が横へ変わることを確認した。8反射MeshがMaterial1件を共有し、当該表示での最大頂点数は332だった。これはProfilerの性能計測や最悪条件の実測値ではない。Editor内のユーザー調整（振幅2px・最大濃度1）と水面模様の調整値を保持し、水際Materialの保存内容は変更していない。再コンパイル・Shader・現在のConsoleにエラー／警告なし。確認用Playと一時停止を解除し、背景実行設定を復元して、比較画像は製品Assetから削除した。その後2026-10-28にユーザーが見た目を確認し、採用とcommitを承認した。水面模様Materialの既存調整は反射のcommitへ含めず、作業ツリーへ保持する。全体テスト、Development Build・Profiler計測は未実施とする。
+
+反射投影の回帰では、接地点と高さに応じた到達／非到達、地面1セルを挟むWall、負座標、水面の上端3pxクリップ、24pxの連続減衰、実Wallの下段からの画像順を検証する。GPUは実際の`TerrainWaterReflectionMesh`を使い、Atlasの隣画像混入防止、外周と透明な穴の移動、内部タイル端の連続性、2fpsコマ保持、非同期変位、付け根の固定、原点変更の一致を読戻す。旧反射Tile・段数Alpha・行別4コマの期待値は廃止する。Scene回帰は製品Atlas参照、設定見本にTileがないこと、反射時計、Mesh間のMaterial共有、1サブチャンク最大6144頂点（256水セル×左右を含む3列×2画像×4頂点）を保証する。将来の木・設備・生物の描画元と、Development Build・性能計測は今回未実装／未検証である。
+
+2026-10-28の反射改善では、液体関連73件（1.10秒）、水中描画純粋計算4件（0.02秒）、材質解決7件（0.02秒）、Scene接続4件（0.03秒）、Scene構築10件（0.03秒）、製品分離2件（0.89秒）のEditMode計100件が全件成功、Skipなしだった。SampleSceneの移動・再生成PlayModeはチャンク別46.72秒・共有46.69秒で各1件成功した。再コンパイルとConsoleのエラー・警告は0件。フレーム進行を確認したGameビューでは、報告地点(-12.5,-30)の断面と、Wallが水へ接する(-5,-53)付近を確認し、7反射Meshが実行時Material1件・Atlas Texture1件を共有していた。DontSaveの反射は全Object検索から除外されるため、Scene回帰では所有Gridの子からMeshを検査する。確認用Playは停止済みで、背景実行設定を元へ戻し、確認用画像を製品Assetから削除済みである。水際Materialは変更せず、水面模様のユーザー調整（密度0.3、出現5秒・休止4秒）は保持した。全ドキュメントの影響確認では、現行の描画契約・アート・Scene接続・テスト・ロードマップ・索引を更新し、生成・保存・生態・制作Prompt・過去の性能計測とArchiveは今回の描画変更で契約が変わらない。この時点では見た目の採用は人間確認待ちだったが、上記の輪郭修正後にユーザーが採用を承認した。全体テスト・Development Build・ProfilerによるCPU/GPU/GC計測は未実施とする。
+
+水面模様の直線化では、形状分岐を削除し、厚さ1pxの連続水平線へ統一した。長さ3〜8pxの既存の位置・長さ抽選から作った期待画像とGPUの全画素を比較し、折れ・中央の欠けがなく、複数の長さが混在することを保証する。液体関連EditMode64件が2.74秒で全件成功し、Skipなし、Shaderのエラー・警告なしだった。コマ保持・非同期アニメーション・3pxクリップ・原点補正の既存回帰も成功した。両Materialの保存ファイルは変更していない。直線化後のGameビューの見た目は2026-10-27にユーザー確認済みで、commitも承認された。PlayMode・Build・性能計測は直線化後には再実行していない。
+
+短い水面模様追加時のAI確認（2026-10-27）は、関連EditMode90件（液体63、純粋投影4、材質解決7、Scene接続4、Scene構築10、製品分離2）がすべて成功した。SampleSceneの移動・決定論的再生成はチャンク別方式48.64秒、共有方式49.29秒で各1件成功した。再コンパイルと新Shaderにエラー・警告はなく、Gameビューのフレーム進行、同地点(-12.5,-30)での短い線の変化、5 Rendererで1件の模様Material共有を確認した。水際Materialは変更せず、確認用画像は製品Assetから除いた。見た目はその後の直線化を経てユーザー確認済みとなった。全体テスト・Development Build・ProfilerによるCPU/GPU/GC計測は未実施とする。
+
+短い水面模様は専用ShaderのGPU描画5件で、長さが不規則な厚さ1pxの連続水平線（折れ・中央の欠けなし）の全画素一致、疎な静止形状、16px境界を跨ぐ線、水域Tile消去後の非表示、4倍表示の素材1px内の均一性、大きな負原点への変更、実奥岸セルの上端3pxだけのクリップ、2fpsコマ保持、同一コマ内の成長と減衰の混在を検査する。Scene接続テストでは断面→水面模様→反射→水際の順を確認し、SampleSceneのチャンク別／共有方式PlayModeでは専用Tilemap、共通時計、全チャンクでのMaterial共有、セル情報の受渡しを確認する。ゲームルール・生成・セーブ形式は変更しない。
+
+GPUを使えるEditorのEditModeで、未保存のPreview Sceneの製品TilemapをLinear浮動小数RenderTextureへ描いて読み戻す。水色単独の全7段・水種・床有無・奥岸クリップ、断面合成後の45px／93px減衰、同じTileの段数色だけの更新、岸Y差1・5・9と負座標での余計な断面の不在、上端3pxの地面の縁、4倍描画時の素材1px内4×4画素の濃度均一性を検査する。水際全127形状と明暗・原点変更の回帰は維持する。製品と同じApplyTilesでDirtyセルをRefreshしてから一括反映し、書込順の差をテストだけで隠さない。テスト用Scene・Texture・Tileは終了時に破棄し、GPUなしの環境では明示的にSkipして別のGPU付きEditorで実行する。
+
+2026-10-27に修正前の実Tilemapで、穴上端から16 pxの期待Alpha約0.145に対し約0.021となる不具合を再現した。TilemapRendererが深度データを格納した頂点RGBへLinear色変換を掛けていたため、Shaderで元データ値へ復元した。また、水中Faceに乾燥崖の段内減衰が掛かっていたため、頂点Alpha 0を不透明な水中下地の識別値として復号するよう修正した。描画先にはURP Render Graphの要求に従って24bit深度バッファを確保し、深度なしRenderTextureによる警告を出さない。
+
+#### 水際の静止形状・Shader回帰
+
+`TerrainLiquidPresentationUtilityTests`は奥・左・右に左右内角と裏側終端を加えた7bit接触形状、異種液体をまたがない内角接続、連続する縦岸16px・奥岸および裏側終端の側線13px・内角の接点込み4px、左右独立の終端判定、淡水・海水・マグマ共通の終端、負側と正側の斜めHaloでの終端・継続判定、静止Tileの色×形状共有、旧カタログ形式の拒否、負座標とint両端での原点画素変換を検証する。
+
+`TerrainLiquidRenderingTests`は専用水際Shaderと実Tilemapを使い、全127非空マスクの画素をCPUの形状契約と比較する。最低・最大濃度を1へ固定し、時間変化と色空間の影響を除いて形状の欠けを検出する。通常原点と負側の表示原点へ変更した描画を比較し、同じ絶対地点の明暗模様が維持されることも確認する。共有表示時間をMaterialへ明示入力し、完全透明を含む濃度4階調だけの出力（静止形状上のAlpha 0も計数）、毎秒4コマの保持と更新、同じコマで強まる・弱まる波の混在、旧全岸共通6秒周期への退行防止、4096px周期端での濃度連続性、4倍表示の素材1px内4×4画素の均一性をGPU描画で検査する。水中断面の回帰は、水色の均一性・実投影範囲・光学減衰を個別に検査し、結果の滑らかさだけを成功条件にしない。
+
+`WorldGenerationScenePlayModeTests`のSampleSceneストリーミング回帰では、実際のPresenterが水際の共通表示時間を進め、チャンク別Rendererも同じ実行時Materialを共有することを確認する。Shaderだけが動き、製品Sceneでは時計未接続で静止する不具合を防ぐ。
+
+2026-10-27の水際微調整では、濃度4階調・毎秒4コマ・その場での寄せ引きへ変更した。関連EditMode 37件が全件成功し、全EditModeでは744件中743件成功・1件失敗（325.02秒、Skipなし）だった。失敗は`SystemGroupBoundaryTests.CommonAssemblies_KeepOneWayLayerDependencies`で、変更前から`Farmware.Authoring.asmdef`が`Farmware.WorldGeneration.Runtime`も参照する一方、テストが`Farmware.Simulation`だけを期待している不一致である。該当asmdefとテストがHEADと同一であることを確認し、今回の水際変更とは分離した既存課題として扱う。水際のGPU検証では往復時の浮動小数丸めが階調を変える不具合を検出し、往路・復路の時間を同一範囲へ折り畳んで解消した。
+
+同変更の全PlayModeは56件中48件成功・8件失敗（138.14秒、Skipなし）だった。水際時計・共有Materialを追加検証したSampleScene通常方式（45.27秒）、共有方式（35.01秒）、繰り返し原点変更（57.70秒）の3件は成功した。失敗8件は`ChunkLocalTilemapPresentationTests`で、1引数の旧`ChunkApplyProgress`コンストラクター呼出し3件と、地形カタログBlobを用意せず有効近傍を予約しようとするテスト5件である。該当テスト全体、`CollectPresentationWork`、`ChunkApplyProgress`が変更前のHEADと一致し、前者のコンストラクターは変更前から2引数、後者の有効近傍構築も変更前から地形カタログ必須であることを確認した。水際の修正とは分けた既存テスト整備課題として残す。
+
+手動の実Scene確認では階段状岸と細い水路を撮影し、6 Rendererが実行時Material 1件を共有して表示時間を進め、元Materialの時刻と原点は0のままであることを確認した。検証後はPlayMode停止、背景実行false、Camera基準480×270、Scene未変更へ戻した。最終Console実状態はコンパイル失敗なし・エラー0・警告0だった。見た目の最終採否とDevelopment BuildでのCPU/GPU性能は人間確認・未計測として残す。
+
+続く同日の濃淡調整では、水際の最低濃度を0.22から0、最大濃度を0.72から0.9へ変更し、Alpha 0／0.3／0.6／0.9の4階調とした。GPUテストは背景画素を濃度から推定せず、静止接続形状で選別して透明な水際も0階調として数える。関連EditMode 37件が1.32秒で全件成功（Skipなし）した。全EditModeの再実行は進行を確認できず、Editor設定参照のメインスレッド待機が5秒でタイムアウトしたため、今回開始した全体実行を`cancel_tests`で中断してから関連37件を実行した。全体結果と全PlayModeの再確認は未完了であり、上記の前回全体結果を今回の成功結果として扱わない。強制終了・再起動や接続パッケージの更新は行っていない。
+
+濃淡調整後のSampleSceneはフレーム進行と初期位置の適用完了を確認し、階段状岸を表示時間0秒・1.5秒で比較した。強い接触線と透明な区間が入れ替わり、岸の接続形状・水深の描画が保たれることを確認した。撮影時刻は実行時Materialだけへ指定し、元Assetの時刻は0を維持する。見た目の採否は人間確認を残す。
+
+同日のタイミング調整では、全岸共通の主・副2周期と、その全岸一斉往復だけを保証する旧描画テストを削除した。絶対画素座標の固定中心ごとに整数ハッシュで位相・周期を選び、基準3秒±25%の独立した強弱を周囲4中心の固定形状へ掛ける。関連EditMode 39件が1.51秒で全件成功（Skipなし）した。同じコマで強まる・弱まる画素が混在すること、旧6秒周期で全岸が同じ状態へ戻らないこと、4095／4096px境界で濃度が飛ばないことを追加検証し、4階調・コマ保持・原点変更・全31形状と深度の回帰も維持した。SampleSceneのストリーミング・再生成・共有時計・Material共有を通すPlayMode 1件は47.47秒で成功した。全体回帰は直前の停滞による未完了状態を引き継ぎ、今回も全件成功とは扱わない。Development BuildのCPU/GPU性能と見た目の採否は未確認として残す。
+
+タイミング調整後も実Sceneのフレーム進行を確認し、階段状岸を表示時間0秒・0.75秒で比較した。部分ごとに明暗が異なって変化することを確認し、検証後はPlayMode・一時停止を解除、背景実行false、基準480×270、Scene未変更へ戻した。元Materialの時刻と原点は0で、最終Consoleの実状態はコンパイル失敗なし・エラー0・警告0だった。
+
+同日の裏側終端修正では、接触形状を7bitへ拡張し、奥へ同種液体が続く一方で斜め奥に岸がない側だけ上端3pxを隠す。関連EditMode 48件が1.71秒で全件成功した。液体3種の左右独立判定、左右の斜めHaloをまたぐ終端と継続、終端側13pxと反対側16px、上位bitを保持する共有Tileを検証し、GPU形状回帰も全127非空マスクへ拡張した。既存の内角、深度、明暗、Floating Originの回帰を維持する。
+
+この修正の全EditModeは755件中753件成功・2件失敗（432.99秒、Skipなし）だった。1件は上記の既知のAssembly参照不一致である。もう1件は、水文テスト中にAIが送ったEditor状態取得が30秒でタイムアウトし、そのPipelineエラーログを`GeneratedFlow_UsesOnlyOceanOrStrictlyDescendingD8Edges`が検出したものである。状態取得を挟まず同テストだけを再実行すると1件成功（11.35秒）した。全体実行そのものを全件成功とは扱わない。全PlayModeは56件中48件成功・8件失敗（141.21秒、Skipなし）で、失敗は上記と同じ`ChunkLocalTilemapPresentationTests`の既存不整合だった。該当するテストとAssembly定義がHEADと同一であることも確認した。
+
+検証後はSampleScene停止中・Scene未変更、水際Shaderエラーなし、Console実状態のエラー0・警告0・コンパイル失敗なしを確認した。今回の実装では水際Materialの調整値を書き換える操作は行っていない。検証終了時の保存済みAssetには、毎秒2コマ・最低濃度0.03・最大濃度0.5・模様長さ12px・基準周期12秒・周期ばらつき25%の調整値が入っており、Shader初期値へ戻していない。形状・明暗の自動テストは独立した一時Materialを使用する。地面の裏側へ回り込む角で線の上端だけ3px隠れることと、連続する縦岸・内角が途切れないことの最終Gameビュー確認、およびDevelopment Buildでの確認は人間確認として残す。
+
+大きな岸段差の追加修正では、深度TileのRGBを段開始Alphaではなく0〜6深度段（0〜255へ広げて符号化）へ置換した。Shaderは各列の現在画素の深度から勾配・飽和を評価した後に横補間し、同種液体かつ同じ床有無だけを混ぜる。小さい段数をbyteへそのまま入れる初期実装はLinear色変換で0へ丸められることをGPUで検出し、全範囲へ広げる符号化で解消した。旧開始Alpha計算APIとその契約だけを保証する期待値は残さない。
+
+水中Faceの頂点Alphaは1〜6/255で0〜5段を表す。乾燥崖の48px減衰とは分離し、岸上端から80pxまでは不透明、80〜96pxだけを連続的に消す。隣の浅い列でOverlayが薄くなっても断面の描画終了線が出ないようにする。関連EditMode 60件は0.69秒で全件成功（Skipなし）した。CPUでは1・5・9タイルの段差と床有無、GPUでは5・9タイルの段差と床有無を走査し、濃度の縦方向の逆戻りがないことを検査した。実際に断面とOverlayを重ねた終端の読戻しも成功した。元の水際Materialの調整値は変更していない。
+
+同修正の全EditModeは767件中765件成功・2件失敗（310.91秒、Skipなし）だった。1件は既知のAssembly参照不一致、もう1件は`ProductResolver_SharesTopAndSelectsPurposeSpecificBoundary`が旧Alpha 0を期待していたものである。後者の期待値を段数付きAlphaへ更新し、0〜5段のTintと6段以降の拒否を確認するようにした後、`TerrainMaterialProductPresentationTests`7件が0.04秒で全件成功した。全体実行と対象再確認の結果は分けて記録し、全体を全件成功とは扱わない。これらはEditor上のAI確認であり、報告画像と同じ地形での最終Gameビュー確認、Development Buildと性能計測は残す。
+
+同修正の全PlayModeは56件中48件成功・8件失敗（148.99秒、Skipなし）だった。SampleSceneのストリーミング、決定論的再生成、共有Material、原点変更の連携は成功し、失敗は上記と同じ`ChunkLocalTilemapPresentationTests`の旧コンストラクター呼出し3件とカタログ未準備5件である。対象テストと既知のAssembly参照不一致の定義・テストはHEADと同一であり、今回の修正へ混入させない。検証後はSampleScene停止中・Scene未変更、深度OverlayとFaceのShaderエラーなし、Console実状態のエラー0・警告0・コンパイル失敗なしを確認した。水際Materialの保存済みファイルは修正開始時と同じである。
+
+2026-10-27の再報告地点(-12.5,-30)では、左右が全行とも水である旧合成テストでは実際の陸地→水の切替を再現できていなかった。深度RGBは中央0〜6段・左右0〜6段または陸地7を値×255/7へ符号化し、陸地は行によらない濃度0へ固定した。水中Faceは頂点R/Bへ左右の断面状態（0=なし、0.5=終端、1=不透明）を渡し、断面なし・終端との境界を半セル8px幅で接続する。反射は3px低い実水面へ位置を合わせ、2段を圧縮した24px全体で連続減衰させる。反射の頂点Alphaは1/255・2/255の段数で、見た目の濃度ではない。実地形分類を通す5・9タイル岸段差、負座標、断面＋Overlayの両列合成、反射の開始位置・段間連続・終端をGPU読戻しで追加検証した。関連EditMode73件は4.32秒で全件成功、Skipなしだった。同地点のGameビューでも中央の縦境界の1画素差が緩和することを確認した。水際Materialのユーザー調整値は保存ファイルを変更していない。最終見た目の人間確認とDevelopment Buildでの確認は残す。
+
+全体EditModeの再実行は、開始後18分以上経過しても完了結果を取得できず、未完了とする。UnityプロセスのCPU処理と管理コード実行は観測したが、進行中テスト名は取得できなかった。Test Runner正式APIによる通常キャンセル要求もメインスレッド待ちで未応答であり、Editorの強制終了・再起動は行っていない。全体の成功件数や既知失敗以外の回帰有無は判定しない。上記73件の対象実行と同地点の実Play確認は、この全体実行前に完了した独立した結果である。全PlayModeの再実行も今回は未実施である。
+
+#### `TerrainWaterRenderDataTests`
+
+今回のAI確認は、Unity 6000.3.8f1で液体分類・GPU描画90件（1.97秒）と本テスト7件（3.88秒）のEditMode計97件、SampleSceneのチャンク別・共有方式の移動／決定論的再生成PlayMode各1件（47.03秒・46.76秒）が全件成功し、Skipなしだった。フレーム進行を確認した同じ報告地点のGameビューでは、1列だけ断面が抜ける濃い溝がなくなったことをAI確認した。最終コンパイル失敗なし、現在のConsoleはエラー0・警告0。ユーザー調整のMaterial値は保持し、水際Material、Scene、生成設定に保存差分を残していない。確認用Playは停止し、背景実行設定はfalseへ復元した。確認用画像は製品Assetから削除し、比較用コピーだけをプロジェクト外の一時領域へ残した。差分レビューはブロッカーなし。全ドキュメントへの影響を確認し、現行のアート・ゲーム／マップ・多層水域・技術・Editor確認手順・テスト・ロードマップを更新した。索引は文書構成が変わらず既存要約とも矛盾しないため更新不要とし、素材制作Prompt・生態・生成／保存・過去の実装記録・Archiveは契約不変のため更新していない。全体テスト、Development Build・Profiler計測は未実施。2026-10-28にユーザーが溝の解消を確認し、採用とcommitを承認した。水面模様・反射Materialのユーザー調整差分は今回の修正commitへ含めず、作業ツリーへ保持する。
+
+2026-10-28の海岸の溝報告に対し、Seed `0x3EE49B3100677454`・GeneratorVersion 2のChunk `(-5,3)`を製品Generatorで再生成する回帰を追加した。Surface `(-290,204)`から同じ列のGround Y=207まで、海水・海水・淡水が続き、断面が段2・1・0で投影されることを保証する。混在水域が完成済み北隣チャンクへ続く場合と、隣チャンクが未取得の場合も検証する。生成地形や水種を変える修正ではないため、GeneratorVersionは変更しない。
+
+現在は、岸Y差1・5・9でも断面が各列自身の奥岸の真下だけへ投影され、元のSource X/Yと段数を保つこと、横・手前の陸地だけでは水中断面が生成されないことを純粋計算で検証する。岸からの画面上の投影距離は物理的な水深ではなく、別の岸と平均しない。「共有頂点の一致」「隣列の断面を描画範囲へ延長する」を成功条件とした旧テストは廃止した。
+
+2026-10-27の赤枠再報告を受け、(-12.5,-30)で水中断面・水色を個別に表示したところ、どちらにも同じ縦帯があることを確認した。前回の「解消した」というAI判断は取り消す。一定の水色を先に描き、実際の岸からの距離で断面の可視Alphaを1−水の被覆率へ減衰させる方式へ置換した。GPU回帰は、水色だけなら全7段・床有無で完全に均一であること、実際の3pxクリップだけが残ること、断面合成後の45px／50%・93px／100%減衰、地面上端3px、岸Y差1・5・9と負座標で余計な断面が出ないことを別々に検証する。水色と断面の最終色を無条件に左右一致させるテストは使わない。実際の断面の端は正しい形状として残し、2026-10-27にユーザーが同地点の表示を確認して採用した。
+
+この方式の最終対象EditModeは、水色・断面・水際・反射59件（2.44秒）、純粋投影4件（0.70秒）、材質解決7件（0.62秒）、Scene接続4件（0.63秒）、Scene構築10件（0.71秒）、製品分離2件（1.49秒）の計86件が成功し、Skipはなかった。4倍描画でも素材1pxの内部で濃度が変わらない回帰を含む。最終PlayModeはSampleSceneのストリーミング・決定論的再生成をチャンク別方式で47.27秒、共有方式で47.85秒、それぞれ1件成功した。同地点の修正後Gameビューでは水色単独の縦帯と左側への断面延長がなくなった一方、右側の実際の断面の端は直線として残ることを確認した。この直線を含む最終の見た目はユーザー確認済みで、2026-10-27にcommitを承認された。水際Materialの調整値は保持し、確認画像は製品Assetへ残さない。全体テストの再完走、下層自然生成接続後の実床プレビュー、Development Build・Profilerでの性能確認は未実施である。
+
+以下の共通四隅深度場・追加断面・計測値は、廃止した方式の試行履歴である。成功件数は当時のテストの結果であり、赤枠の問題解消や現在方式の合格を示すものではない。
+
+2026-10-27の責務分離後、共通深度・水際・反射56件、純粋な水中描画分類5件、材質解決7件、Scene接続4件のEditMode計72件が成功した。報告地点(-12.5,-30)のGameビューでは、手前の縦岸に出ていた明るい帯と中央の縦境界を同時に確認した。その後、距離0でも頂点Alphaを0にしない128のデータ印、水面の上端3pxへ地面断面が残る回帰、同じTileの色だけの更新を通常フレーム後に確認する回帰を追加した。後者はSetTilesだけでは保存値と描画結果が食い違うことを検出したため、製品とテストが同じApplyTilesを使い、Dirty範囲の非空セルだけRefreshTileしてから色付き一括書込する方式へ修正した。逆順では共有断面TileのLockColorがデータ色を白へ戻すため、GPUの断面上端3pxテストで書込順も保証する。最終対象EditModeは水際・共通深度・反射57件（2.41秒）、純粋分類5件（0.70秒）、材質解決7件（0.62秒）、Scene接続4件（0.64秒）、Scene構築10件（0.70秒）、製品分離2件（1.47秒）の計85件が全件成功、Skipなしだった。途中の再実行1回はPlay中のPreview Scene作成が拒否されて開始処理に失敗したため結果へ含めず、ユーザーの停止後に再実行した。
+
+色付き書込の追加再描画は、同Editor／Monoの隔離Preview Scene、RendererなしTilemap、256セルの再利用配列2個を交互に100回反映（25,600セル、32回ウォームアップ）して比較した。SetTilesだけは7.637ms、DirtyセルRefresh＋SetTilesは39.536msで、256セル1レイヤー当たり約0.076→0.395ms、managed allocationはいずれも0 byteだった。全TilemapのRefreshAllTilesや毎フレーム更新は使わず、地形がDirtyの時だけ適用する。これはAPI呼出し時間の比較であり、Sprite・Renderer・GPUを含む実製品負荷、ProfilerやDevelopment Buildの性能合格を示すものではない。
+
+最終のSampleScene PlayModeは、チャンク別Tilemap方式のストリーミング・決定論的再生成1件が47.72秒、共有方式の同回帰1件が47.40秒で成功した。同地点を最新の符号化・反映処理で再撮影し、手前縦岸の深水を薄くする帯がなく、中央の水色が連続することをAI確認した。実Playのフレーム進行も確認し、検証用Playを停止、背景実行設定を元のfalseへ戻した。水際Materialの調整値は変更せず、C#コンパイル失敗・関連Shaderエラーはない。見た目の最終採否、全体テストの再完走、Development Build・実製品負荷の計測は未確認として残す。
+
+共通深度算出の単独計測はUnity 6000.3.8f1 Editor／Mono、Burstなし、中央64×64の完成地形、直線岸の0〜5段、各条件256回ウォームアップ後に行った。1,000セルは1.603ms、10,000セルは16.091ms、100,000セルは160.932msで、計測ループのmanaged allocationはいずれも0 byteだった。16×16セル換算で約0.412msだが、Tilemapへの反映、断面Source選択、描画、GPU時間を含まない。旧方式との同条件比較やDevelopment Buildでの性能合格を示す値ではない。四隅データの組合せごとにTileを生成せず、白い深度Tile1件とPresenter寿命の固定長再利用配列を使う。水中断面用Tilemapは表示チャンクごとに1レイヤー追加し、セルごとのGameObjectは作らない。
+
+作業開始時点ではEditorは停止中・Scene未変更・Test Runner非実行で、以前のCLI実行中記録だけが残っていた。正式なcancelコマンドで古い記録を消し、Editorを再起動せず対象検証へ進んだ。以前の全体EditMode未完了を成功へ読み替えず、今回は対象回帰を優先する。
+
+#### `TerrainLiquidProductPublisherTests`
+
+製品カタログがVersion 2の3液体のSurface・水際色・深度色を初期化できること、再帰依存に旧制作SourceやFallbackが含まれないことを確認する。共有水際Materialが専用Shaderを使い、Shaderエラーがなく、液体製品フォルダーに旧AnimatedTileが残らないことを保証する。製品Surfaceの淡水・海水Alpha 0とマグマAlpha 255は維持する。旧方向別入力生成テストは生成実装・入力・Atlasとともに削除した。
+
+#### 比較・検品専用テストの削除
+
+2026-10-27の水面表現第1段階では、関連EditMode（水際・深度34件、製品接続・分離6件、Scene構築10件）計50件と、SampleSceneのストリーミング・決定論的再生成PlayMode 1件（47.41秒）が成功した。GPUの全31接触形状と原点変更に加え、実画面の細い水路と階段状岸を別時刻で比較し、輪郭を固定した明暗変化と、5 Rendererでの実行時Material 1件共有を確認した。元のMaterial Assetの原点値は変更されていない。CLIの`unity status`が古い接続パッケージへ`editor status`を送って発生する互換性エラーと、ゲームの例外・コンパイル失敗は分けて確認する。見た目の採否とDevelopment Buildでの性能計測は未実施であり、人間確認を残す。
+
+地形タイル、Wall暗色化、Wall影、折れ目影、旧共通境界、水面反射の比較・検品専用テストは、採用方式を製品Sceneへ接続したC6-D6で対応するScene、Builder、Development Shader、生成Materialとともに削除した。現行回帰は`TerrainMaterialProductPublisherTests`、`TerrainLiquidProductPublisherTests`、`TerrainProductSceneConnectionTests`、`TerrainMaterialProductPresentationTests`、`TerrainWallShadowUtilityTests`、`TerrainLiquidPresentationUtilityTests`、`TerrainProductIsolationTests`で保証する。
+
+2026-10-27のC6-D6材質接続AI確認では、Unity 6000.3.8f1 Editorの再コンパイルがエラー0件で完了し、製品公開、境界合成、Import、材質表示、Wall影、Atlas、Scene接続、Bootstrap、製品分離の関連EditMode 61件がすべて成功した。SampleSceneの製品材質Tile、資源の前後関係、ストリーミング、決定論的再生成を通すPlayMode 1件も46.67秒で成功し、最終Consoleはエラー0件・警告0件だった。PlayMode確認中に検出した`TerrainWall`のGlobal Light対象漏れ、通常資源がWall背後へ回るSorting Layer不整合、非アクティブHierarchy内での`ShadowCaster2D`初期化NullReference、旧一体型岩壁Tileを期待する回帰条件は同じ変更内で修正した。
+
+続く液体接続では初期入力3枚、透明水Surface、不透明マグマSurface、全21水際Tile、液体製品カタログ、SampleSceneの専用5レイヤーを追加した。接続確認で階段状の岸に16 px単位の矩形帯が見つかったため、左右セルの段開始Alphaをセル中央間で補間する回帰を追加した。さらに深部で横帯が反復する再報告を受け、6段超を最終勾配の段5へ丸めていたことを原因と特定し、段6の飽和値へ固定する回帰を追加した。3pxクリップは奥側がGroundまたはWallの先頭水セルだけに限定し、斜め岸では列ごとの先頭セルが階段状に並ぶ一方、連続水域内部はクリップしないことを既存回帰で維持する。再コンパイルはエラー0件で、液体公開・分類・水際20件、Scene接続4件、製品分離2件、Scene再構築10件の関連EditMode計36件がすべて成功した。SampleSceneのストリーミング・決定論的再生成を通すPlayMode 1件は横補間修正後に50.84秒で成功し、段6飽和修正後の再実行でも成功した。初回PlayModeでは旧「Surface＋全面アニメーション」待機条件が新仕様と不一致で失敗したため、「Surface＋床有無いずれかの深度Overlay」と旧全面アニメーション不在を確認する条件へ置換し、再実行で成功した。段6飽和修正後のGameビューでは、岸から96 pxを超える広い水面が均一な最大濃度を維持し、16 px周期の横帯を繰り返さないことをAI確認した。続く報告画像から、0〜96 pxが深いほど明るいシアンへ近づく問題へは、まず製品カタログの収束色を調整した。断面差分の固定・奇数段上下反転による修正は効果がなく表示規則も変えるため撤回し、通常の段別差分選択へ戻した。淡水を`#184860`、海水を`#102A48`へ収束させる回帰を追加し、深いほど暗く見える方向へ修正した。液体公開4件、液体表示14件、材質表示7件、Scene接続4件の関連EditMode計29件と、SampleSceneのストリーミング・決定論的再生成を通すPlayMode 1件が成功し、Consoleは警告0件・エラー0件だった。その後に残った横帯は、深度データを詰めた頂点RGBのLinear色変換と、水中断面へ混入した乾燥崖の段内減衰をGPU描画で特定した。頂点RGBを元データ値へ復元し、水中断面へは乾燥減衰を掛けず、Wall下のGroundも投影するよう修正した。GPU描画4件を含む関連EditMode 35件と、SampleScene PlayMode 1件（55.115秒）が成功し、C#再コンパイルは警告0件・エラー0件だった。実地形の階段状の岸でも、Wall下Groundの水中断面が欠けず、0〜96pxの濃度がタイル境界で戻らないことをGame用Camera画像で確認した。最終Consoleは警告0件・エラー0件だった。報告画像と同じ位置での最終見た目は人間確認へ残す。
 
 #### `WorldGenerationSceneBootstrapTests`
 
@@ -356,15 +492,20 @@ C6-Dで採用方式の本番接続と製品回帰テストが成功した後は�
 
 #### `ChunkLocalTilemapPresentationTests`
 
-`PresentationPreload_`の5ケースは、通常・負座標・遠方について可視優先の予約、外側1チャンクまでの先行準備、Inactive完成データの再利用、画面へ入った表示の維持、範囲外の消去予約、生成中の非公開、同期原点再構築の可視限定と予算4を確認する。共有・ローカル両方式を含む。`NewPresenter_DefaultsToChunkLocalTilemaps`は新規Componentの既定ONを保証する。SampleScene縦切りテストは、設定SubSceneからBakeされた鶏の共通実行時ID、草原・通常陸地条件、群れ、密度、固定Tick移動、外見差分も実際のDefault Worldで確認する。以下の既定OFFという記載は比較時点の履歴であり、現在は既定ONを採用している。
+`PresentationPreload_`は通常・負座標・遠方の可視優先予約、外側1チャンクの準備、Inactive完成データの再利用、画面へ入った表示の維持、範囲外消去、生成中の非公開、明示移動での可視限定と予算4を確認する。旧共有方式と切替設定は削除し、製品チャンク別方式だけを検証する。SampleScene縦切りは設定SubScene・鶏・地形・液体・資源・診断表示も確認する。
 
-外周地形配列の寿命テストは、Awakeで260要素を確保し、停止・再開では保持し、PresenterのOnDestroyで解放することを実際のComponentで確認する。
+有効地形近傍の回帰テストは、Presenterが旧260要素Haloフィールドを持たず、周囲8チャンクの完成自然地形と疎な差分を直接参照することを確認する。停止・再開、Presenter破棄、World切替では表示Fingerprintと借用参照だけを破棄し、表示専用の永続外周配列を所有しない。
 
-`SparseWrite_`の追加6ケースは、実際のPresenter書込経路で空→空だけを省くこと、末尾1セルを含む非空配列を書き込むこと、非空→空の実消去、レイヤーとサブチャンクごとの履歴分離、部分消去とプール再貸出、正負原点変更後の履歴維持、共有方式の無条件書込と方式切替を保証する。空判定時間も性能比較へ含め、見た目・GPUの合否はこれらのテストだけで決定しない。
+`SparseWrite_`は、実際のPresenter書込経路で空→空だけを省くこと、末尾1セルを含む非空配列を書き込むこと、非空→空の実消去、レイヤーとサブチャンクごとの履歴分離、部分消去とプール再貸出、正負原点変更後の履歴維持を保証する。空判定時間も性能比較へ含め、見た目・GPUの合否はこれらのテストだけで決定しない。
 
-既定OFFの比較方式について、正方向・負方向と斜め・遠方の自動原点変更で同じTilemap・セル内容・完成済み集合・部分反映番号を保持することを検証する。消去途中ではプールへ返さず、全16サブチャンク消去後だけ空の表示単位を別チャンクへ再利用すること、プール上限0、方式切替、World切替で表示とプールを残さないことも保証する。上下チャンクの相対Z順は現行Orthographic描画の継ぎ目対策であり、XY位置とSorting Orderを変えないことを確認する。実際の描画ピクセル、GPU、メモリ帰属は別途Gameビューと性能計測で確認する。
+製品チャンク別表示について、正方向・負方向と斜め・遠方の自動原点変更で同じTilemap・セル内容・完成済み集合・部分反映番号を保持することを検証する。消去途中ではプールへ返さず、全16サブチャンク消去後だけ空の表示単位を別チャンクへ再利用すること、プール上限0、設定変更、World切替で表示とプールを残さないことも保証する。上下チャンクの相対Z順は現行Orthographic描画の継ぎ目対策であり、XY位置とSorting Orderを変えないことを確認する。実際の描画ピクセル、GPU、メモリ帰属は別途Gameビューと性能計測で確認する。
 
 2026-10-17に比較方式の7ケースを含むPlayMode全38件と、関連ワールド生成EditMode 163件がUnity 6000.3.8f1で成功した。原点変更前後と拡大・負座標・遠方の44画像確認、前面EditorのCPU比較、未検証事項は[性能計測レポート](./Map02DPerformanceReport.md)を参照する。
+
+
+`WorldGenerationSceneBootstrapTests.ValidateProductSceneReferences_AcceptsPublishedProductScene`は、必要な場合だけ製品Sceneを追加読込し、構築ツール自身の読み取り専用検査を実行する。ユーザーやTest Runnerの未保存Sceneを閉じず、追加読込したSceneだけを終了時に閉じる。水中断面と直下床の採用済み`WaterSurface`を旧`Default`条件で拒否する回帰も防ぐ。
+
+2026-10-28の製品切替整理では、製品カタログ未設定時に1回だけエラーを通知して描画を拒否すること、旧素材・Atlas・API・保存済み参照が残らないことを`TerrainProductIsolationTests`へ追加した。`WorldGenerationScenePlayModeTests.CalculateChunkBounds_ProductProjectionIncludesFullOverhang`は、正負のチャンク境界でWall 2段とGround崖面3段の張り出し全体が可視要求へ含まれることを検証する。旧表示の寸法・Biome代用・共有方式だけを保証したケースは削除した。
 
 #### `WorldGenerationScenePlayModeTests`
 
@@ -379,7 +520,7 @@ C6-Dで採用方式の本番接続と製品回帰テストが成功した後は�
 | 初期スポーン失敗 | Scene保存位置を維持し、失敗状態の確定後にチャンクストリーミングを開始できることを保証する。 |
 | Presentation寿命 | Camera GameObjectを維持したDefault World再作成時に新しい初期スポーンを再適用する。Camera Bridgeは新Worldの初期スポーン探索中でも旧WorldのObserverを直ちに破棄し、初期位置の確定前は新Observerを作らず、確定後に1件だけ作り直す。同一Worldでカメラ制御を再有効化した場合はプレイヤーの移動後位置を保つ。正負座標のGrid 64タイル境界へViewport右上端が一致しても、上限側の面積を持たない隣接チャンクを要求しない。Tilemap PresenterがWorld切替または無効化時に表示済み・反映途中・消去途中の旧表示を残さないことも保証する。 |
 | 開発者用可視化 | バイオーム、Soil、水域、岩壁、マグマ、資源、TERRAIN-01C1の8連続環境表示、共通配置APIの判定結果を使う地形配置マトリクスの色写像がSimulationを変更しないことを保証する。正負の遠方表示原点でも、相対Viewportから得た絶対範囲と中央タイルを検索し、絶対タイルを正しい相対セルへ投影することを確認する。旧`Weirdness`と`Biome Transition`の色判定は削除済みであり、新しい回帰へ含めない。 |
-| 岩壁表示 | チャンク境界をまたぐ内部影が連続したグラデーションになり、一体型岩壁の上面・内部影・露出資源が同じ12px高へ揃うことを保証する。 |
+| 旧一体型岩壁フォールバック | 製品カタログ未接続の開発Sceneでだけ、チャンク境界をまたぐ内部影が連続し、一体型岩壁の上面・内部影・露出資源が同じ12px高へ揃うことを保証する。 |
 | SampleScene縦切り | SubSceneロード、Authoringと共通既定閾値、初期カメラ、通常12タイル/秒・Shift併用36タイル/秒のカメラ操作設定、512タイルの自動Floating Origin設定、チャンク生成、World Grid直下へScene保存した境界2層を含む9枚のテンプレートTilemap（実行時チャンク配下の複製は枚数から除外）、Ground・Rock WallのIndividual ModeおよびTop Left順、土地境界Order 1・岩壁境界Order 4と表示高、14 Sprite参照、境界の既定不透明度20%と実行時Tileへの反映、同じBiomeなら標準・肥沃・砂質のいずれも同じプレイヤー向けTileを選ぶこと、SampleSceneの7バイオーム参照が本番用`terrain_biomes_base.png`の同名Spriteへ対応すること、岩壁参照と全表示セルが本番用`terrain_rock_wall_01.png`の専用Tileへ対応すること、Editor専用Soil可視化が3種類を別色にすること、通常資源の岩壁背面用Order 2・前面用Order 10への振り分け、静止液面・アニメーションの-8pxオフセット、液体セルのGround Tilemapとの排他表示、岩壁セルの下層土地、岩壁上資源の12pxオフセット、土地・岩壁Spriteの上下はみ出しを含む可視チャンク範囲、液面4fps設定、アンロード、同一地形の再生成を保証する。EditModeでは、境界選択と資源背面分類の純粋計算を保証する。 |
 
 `AutomaticRebase_PreviousPixelPerfectCameraMatrixDoesNotShiftObserver`は、URP Pixel Perfect Cameraが前回描画時の`worldToCameraMatrix`を保持する条件を明示代入で再現する。Camera Transformと表示原点を更新した後、Bridgeが現在のTransformに基づく行列へ戻してからViewportを変換することを検証する。実際にちらついた絶対X=448・960（チャンク7・15への進入）と負方向の3条件で、可視要求が8チャンク先へ飛ばず正しい範囲を示すことを保証する。描画イベントの発火時刻やGameビューの解像度へ依存せず、前フレームの行列が残っていることも前提条件として検査する。
@@ -389,6 +530,22 @@ C6-Dで採用方式の本番接続と製品回帰テストが成功した後は�
 `SampleScene_RepeatedAutomaticRebasesPreserveStreamingAcrossRoundTripAndNegativeCrossing`は、採用済みのチャンク別Tilemap方式で絶対X=32.5、544.5、1056.5、479.5、-96.5、416.5、1056.5、-96.5、32.5の9地点を順に確認する。移動は明示テレポートではなく通常移動と同じ相対座標APIを使い、表示原点6種類、自動変更、東西往復、0境界横断、3チャンク再訪を一つのScene寿命で起こす。各地点のCamera、Observer、Activeチャンク、Tilemap表示、座標重複を検証し、再訪時には旧Entityのアンロードと地形・資源の代表3セルの決定論的一致を確認する。全4096セルの生成一致は既存EditModeテストへ任せ、通常回帰の実行時間を抑える。
 
 SampleScene縦切りは、初期中心チャンクの表示完了時に左隣チャンクも`GeneratedTerrainCell`を含む6 Buffer公開済みのReadyToApply、Active、Inactiveのいずれかであることを確認する。C4-D2の生成中に左下・左上角を先読みし、通常の左境界越えで未生成空白が見える回帰をこの実Scene条件で防ぐ。
+
+#### `TerrainMagmaShoreLightingTests`
+
+製品の岸照明を通常EditModeで検証する13件。マグマ内部と未完成近傍で架空の岸を作らないこと、固定区画ごとの1灯配置とAdditive Blend Style、強度0.12、再利用、チャンク削除・Dirty更新による消灯、Floating Origin即時再配置、負座標と正負10億タイル付近、完成済み隣チャンクの岸判定、Wall前面・上面で隠れるマグマの除外と表示上の岸の抽出、チャンク境界を越えるWall投影、カメラ移動前後で共通に見える範囲の光源集合と強度の不変、岸の収集順を変えても固定区画の同じ光源を選ぶことを保証する。テスト所有の完成地形配列から収集し、Tilemapや製品Sceneへ書き込まない。実際のPlay中のComponent破棄、見た目、GPU負荷は別途確認する。
+
+`TerrainProductSceneConnectionTests`へHDR・Post Processing・Volume Layer Mask、製品Bloom ProfileのIntensity 0.4・Threshold 1.15・Scatter 0.25・最大3反復、岸照明参照と再接続時の重複防止を追加する。`TerrainLiquidRenderingTests`は製品Materialの網目が1より大きいHDR輝度をGPU出力へ保持し、内部に暗部が残ることも検証する。Test AssemblyはURP Core・Universal・2D Runtimeを参照する。採用前の一時比較UI・復元専用テストは製品経路へ置き換えて削除する。
+
+2026-10-28、Unity 6000.3.8f1／URP 17.3.0で岸照明7件（0.04秒）、製品Scene接続6件（0.04秒）、GPU描画41件（1.56秒）がすべて成功した。製品SampleSceneの`SampleScene_StreamsAndDeterministicallyRegeneratesTerrainTiles`も47.01秒で成功した。初回の照明テストで見つかった、PlayのAwakeを経ないEditModeでOnDestroy通知を期待する検査は、候補消去とプール再利用の検査へ整理した。URP Blend Style API名を修正した後にコンパイル要求が進まなくなり、Editorの再起動でUnityがLibrary破損を検出したため、UnityのRebuild Libraryを実行して復旧した。最新版Assemblyへの追加7件の読み込みを確認して上記テストを再実行し、最終テスト後のConsoleはエラー0・警告0だった。Library復旧は生成キャッシュの再構築であり、パッケージの追加・更新は行っていない。Development PlayerのCPU／GPU負荷・製品最大Viewport・動的遮蔽は未検証である。
+
+同日の製品Play確認では、初期配置完了後に絶対タイル`(144, -476)`へCameraだけを移動し、合成済みGameビューで黄色い網目・Bloom・岸の橙色の光をAI確認した。全体照明は強度1のまま、岸の有効光源は12灯だった。`(16, 36)`へ離れると0灯、元へ戻ったロード完了後は同じInstance IDの12灯を再利用した。フレーム進行を複数時点で確認し、Play停止後は所有Light GameObjectが0、Scene未変更、検証用の背景実行も元のfalseへ戻った。これは静止画像と限られた往復の確認であり、ユーザーによる製品接続後の見た目確認・全岸の均等性・影・負荷測定の代替ではない。
+
+続くユーザー報告では、絶対Camera位置`(177.813, -488.25)`でWall中央に点状の光が出る問題を再現した。光源の論理座標はマグマ上だったが、手前のWallが+2タイルの上面・前面として重なり、光源の液面を隠していた。隠れたマグマを候補から除き、可視の液面と投影Wallとの接触も岸に含める修正を行った。追加4ケースを含む照明EditMode 11件が0.04秒で成功し、同じ地点のGameビューで離れた光だまりが岸へ揃うことを確認した。有効16灯の中心を実際のWall Top／Wall Face Tilemapと照合し、壁に覆われる中心は0件だった。Play停止後は光源・一時マーカー残留0、Scene未変更、一時的な背景実行を復元した。今回の修正は照明の候補分類だけであり、前回のGPU41件とPlayMode1件は再実行していない。製品でのユーザー再確認と実機負荷の計測を残す。
+
+さらに照り返しの強さとカメラ移動での位置変化の報告を受け、強度を0.35から0.12へ下げ、Camera距離で16灯へ絞る方式と最小間隔の再選択を廃止した。絶対座標の固定3×3タイル区画から1灯を決め、画面へ光が届く固定光源をすべて表示する。カメラ移動・ズームは更新間隔を待たず同じフレームに反映し、URP Light2DのLateUpdateより前に位置を更新する。追加2件を含む照明EditMode 13件が0.05秒で成功した。実際のPlayでもCameraを`(177.813, -488.25)`から右へ3タイル動かし、両方から見える共通矩形へ光が届く24灯の絶対座標・強度がすべて一致した。全有効灯数は25灯から30灯となったが、これは表示端に新たな固定光源が入ったためである。Bloom 0.4と全体照明強度1を維持し、合成済みGameビューで弱めた照り返しを確認した。停止後は光源残留0、Scene未変更、背景実行を元のfalseへ復元した。旧16灯上限がないため、固定区画密度とViewportに応じて表示灯数・プールの最大保持数が変わる。Development PlayerでのCPU／GPU時間・製品最大Viewportの負荷は未計測であり、この確認を性能合格とはしない。
+
+2026-10-28、最終の岸照明修正後にユーザーが見た目を確認し、「いい感じです」と採用を承認した。今回のマグマ表現の人間確認は完了し、commitの許可も得た。上記の途中段階で残していた製品接続後の見た目再確認は、この確認で完了した。Development PlayerでのCPU／GPU時間・製品最大Viewport・動的遮蔽の未検証範囲は引き続き残す。
 
 ## 4. 変更内容ごとの実行範囲
 
@@ -400,7 +557,7 @@ TERRAIN-01C1のAuthoring回帰では、既存の高地閾値を43,000以外へ�
 | --- | --- | --- |
 | 既存の共通基盤 | SystemGroupBoundaryTests、FixedTickSimulationTests、PersistentIdTests、DefinitionCatalogTests、WorldSessionBoundaryTests、SimulationCommandQueueTests、SimulationStateHashTestsから関連範囲。失敗時無変更、安定順、上限、停止・再開を維持 | Console、Assembly依存、必要時Player |
 | WORLD-01 | Layer付きセル・チャンク・索引、同X/Yの分離、負座標・int端点、PlayerIdと操作主体。多層試作の遷移元・先・水密条件 | 人工海中、上下遮断、乾燥室への出入りの試作 |
-| TERRAIN-01 | 同Seed・版・設定の`ushort`・`0〜65535`の基礎気温・地形気温・基礎湿度・標高とBiome分類、海面以下の補正0、既定海面・高地境界での補正16,551、最高標高での補正32,768、基礎気温未満への飽和、海面閾値19,999・65,535の拒否、64bit中間計算と一回適用、0・65,535の端点、気温境界11,999／12,000・22,999／23,000・32,767／32,768・39,999／40,000、湿度境界15,999／16,000・28,499／28,500・39,499／39,500・49,999／50,000の分類、標高境界19,999／20,000・36,000／36,001・42,999／43,000・53,999／54,000、新4軸の境界13,106／13,107・26,213／26,214・39,320／39,321・52,427／52,428、木本植生ポテンシャルの192・96・48タイルと4：2：1の整数加重平均・専用Salt・ワープ座標・負座標・チャンク境界、湿度を二重合成しないこと、湿地分岐39,320／39,321、地形起伏の中心・上下左右16・斜め11の9点、局所差0・16,383・16,384・65,535、海洋影響の8方向×16・32・64・128タイル、斜め11・23・45・91、最短距離値、海方向数0〜8、直線海岸3方向の`DirectionalExposure = 24,575`・`CoastalInfluence = 34,815`、半島・小島6方向の`49,151`・`53,247`、合成式、海面下表示65,535、淡水除外、亜熱帯海洋性林境界52,427／52,428、火山活動度の256・128・64タイルと4：2：1・専用Salt・活動段階、適合地質との中核・周縁・地熱分岐、露出マグマの中核包含、既存`Weirdness`とのGeneratorVersion分離、64bit座標加算・範囲外明示失敗・設定配列検証・キャッシュ前後一致、18バイオームの地形気温・基礎湿度・標高範囲内外、5段階の気温・湿度と4陸地区分の組合せ候補被覆、高山岩地が全気温・全湿度を受理すること、気候・標高・地質→陸海→水文→最終Biomeの順序、用途別Saltの分離、台形型適性の代表範囲・両傾斜・許容範囲端0・範囲外候補除外・片側傾斜なし、通常Biomeの重み合計256、分類値適合度、64bit整数加重和、全候補0点でも候補を維持すること、候補別Saltの低周波同点変動、安定ID最終同点解決、通常比較の先頭候補選択、候補なし・不正Definitionの監査失敗、生成順・Job順・候補列挙順・ロード範囲の不変、可変状態・配置結果を固定Biome入力へ戻さないこと、河川・池・岩壁でも元の標高区分を保持すること、基礎湿度と土壌水分・水域の分離、分類後の環境値保持、表示用変換値が生成へ戻らないこと、固定Biomeと可変Blockの分離、複数パレット、母岩適合、資源Definition別Salt、256×256タイルの監査窓で全地上バイオームの木材・石材・鉄鉱石候補最低クラスタ、差分適用、元生成不変、変更済みHalo・影境界 | 基礎気温・地形気温・基礎湿度・湿度5段階・連続標高・標高5区分・木本植生ポテンシャル・地形起伏・火山活動度・水文・海洋影響・Biome・Blockの個別可視化、各段階の実面積比、木本植生ポテンシャルの連結領域直径、地形起伏と標高区分のクロス集計・海岸内陸別分布・飽和比率、海洋影響と海岸実距離・海方向数・陸塊幅のクロス集計、火山活動度と適合地質の重複率・中核周縁の連結領域・孤立セル・露出マグマ包含、湿地条件内の草本・樹木湿地比、18バイオームの代表範囲と遷移側範囲を分けた分布監査、上位候補・軸値・軸別適性・重み・軸別積・総合スコア・同点解決段階・特殊判定・境界両側の環境差と接続理由、乾燥地域の局所水場と湿原Biomeの区別、水域・岩壁と標高区分の同時表示、資源密度・最大空白を含む分布監査、Map Viewer、Debug Visualization、ブロック・母岩識別 |
+| TERRAIN-01 | 同Seed・版・設定の`ushort`・`0〜65535`の基礎気温・地形気温・基礎湿度・標高とBiome分類、海面以下の補正0、既定海面・高地境界での補正16,551、最高標高での補正32,768、基礎気温未満への飽和、海面閾値19,999・65,535の拒否、64bit中間計算と一回適用、0・65,535の端点、気温境界11,999／12,000・22,999／23,000・32,767／32,768・39,999／40,000、湿度境界15,999／16,000・28,499／28,500・39,499／39,500・49,999／50,000の分類、標高境界19,999／20,000・36,000／36,001・42,999／43,000・53,999／54,000、新4軸の境界13,106／13,107・26,213／26,214・39,320／39,321・52,427／52,428、木本植生ポテンシャルの192・96・48タイルと4：2：1の整数加重平均・専用Salt・ワープ座標・負座標・チャンク境界、湿度を二重合成しないこと、湿地分岐39,320／39,321、地形起伏の中心・上下左右16・斜め11の9点、局所差0・16,383・16,384・65,535、海洋影響の8方向×16・32・64・128タイル、斜め11・23・45・91、最短距離値、海方向数0〜8、直線海岸3方向の`DirectionalExposure = 24,575`・`CoastalInfluence = 34,815`、半島・小島6方向の`49,151`・`53,247`、合成式、海面下表示65,535、淡水除外、亜熱帯海洋性林境界52,427／52,428、火山活動度の256・128・64タイルと4：2：1・専用Salt・活動段階、適合地質との中核・周縁・地熱分岐、露出マグマの中核包含、既存`Weirdness`とのGeneratorVersion分離、64bit座標加算・範囲外明示失敗・設定配列検証・キャッシュ前後一致、18バイオームの地形気温・基礎湿度・標高範囲内外、5段階の気温・湿度と4陸地区分の組合せ候補被覆、高山岩地が全気温・全湿度を受理すること、気候・標高・地質→陸海→水文→最終Biomeの順序、用途別Saltの分離、台形型適性の代表範囲・両傾斜・許容範囲端0・範囲外候補除外・片側傾斜なし、通常Biomeの重み合計256、分類値適合度、64bit整数加重和、全候補0点でも候補を維持すること、候補別Saltの低周波同点変動、安定ID最終同点解決、通常比較の先頭候補選択、候補なし・不正Definitionの監査失敗、生成順・Job順・候補列挙順・ロード範囲の不変、可変状態・配置結果を固定Biome入力へ戻さないこと、河川・池・岩壁でも元の標高区分を保持すること、基礎湿度と土壌水分・水域の分離、分類後の環境値保持、表示用変換値が生成へ戻らないこと、固定Biomeと可変Blockの分離、複数パレット、母岩適合、資源Definition別Salt、256×256タイルの監査窓で全地上バイオームの木材・石材・鉄鉱石候補最低クラスタ、差分適用、元生成不変、差分込み有効地形近傍・影境界 | 基礎気温・地形気温・基礎湿度・湿度5段階・連続標高・標高5区分・木本植生ポテンシャル・地形起伏・火山活動度・水文・海洋影響・Biome・Blockの個別可視化、各段階の実面積比、木本植生ポテンシャルの連結領域直径、地形起伏と標高区分のクロス集計・海岸内陸別分布・飽和比率、海洋影響と海岸実距離・海方向数・陸塊幅のクロス集計、火山活動度と適合地質の重複率・中核周縁の連結領域・孤立セル・露出マグマ包含、湿地条件内の草本・樹木湿地比、18バイオームの代表範囲と遷移側範囲を分けた分布監査、上位候補・軸値・軸別適性・重み・軸別積・総合スコア・同点解決段階・特殊判定・境界両側の環境差と接続理由、乾燥地域の局所水場と湿原Biomeの区別、水域・岩壁と標高区分の同時表示、資源密度・最大空白を含む分布監査、Map Viewer、Debug Visualization、ブロック・母岩識別 |
 | TERRAIN-01C5／Biome ID置換 | `None = 0`、18種の安定ID 1〜18と仕様表の完全一致、ID重複・欠落・範囲外の拒否、Definition登録順・表示順・表示名・翻訳による不変、C5前の保存スキーマ・GeneratorVersion・生成済みチャンク・キャッシュの拒否、旧値を同じ数値の新Biomeへ暗黙変換しないこと、`AnimalBiomeMask : ulong`の独立bit 0〜17と全18種の明示変換、`None`・未定義IDの変換拒否、鶏Definitionの`TemperateGrassland`更新、状態ハッシュへの新ID・新Mask反映、旧7種のenum名・分類器・遷移処理・配色・`Weirdness`生成・状態・Mask・変換switch・互換フォールバック・旧実装専用テストが残っていないこと | Map Viewer、Gameビュー、凡例、中央情報がID 1〜18と環境名だけを表示し、旧7種モードやLegacy表示を持たないこと。新規ワールドの再生成手順と旧版拒否メッセージを確認する |
 | TERRAIN-01C5-A／Biome Definition | `BiomeStableIds`の0と1〜18、独立した`BiomeClassificationSettings`共有既定値、18件の欠落なし検索、全18行の軸重み、全144件の地質適合度、通常16種の重み合計256、水文特殊2種の重み合計0、海洋性林・湿原分岐・高山・火山の境界値、初期スポーン可否、Definition固有Saltの非0・一意性・既存用途Saltとの分離、湿原Host 7件／4件、ID・Salt・範囲・重み・地質・Host破損の拒否、登録逆順での検証不変 | 製品生成・Scene・Prefab・表示は変更しない。Consoleの新規エラー・警告がなく、旧7Biome表示が意図せず変化していないことだけを人間確認する |
 | TERRAIN-01C5-B1／通常候補の個別評価 | 海面直下の候補除外、海面閾値上の受理、通常・水文特殊Definition役割、7連続軸の許容範囲、台形型`AxisFit`の両端・傾斜・代表範囲・片側傾斜なし、地質適合、海洋影響段階5、活動的火山地質と火山活動段階4、火山中核段階5の通常候補除外、重み合計256の64bit最大16,776,960、全使用軸0点候補、256・128タイルを2：1で合成する候補別Variation、Warp後負座標、Definition固有Salt、Variation設定破損の拒否 | 製品生成・Scene・Prefab・表示は変更しない。Consoleの新規エラー・警告がなく、旧7Biome表示へ意図しない変化がないことを人間確認する。通常全候補の順位と候補なしはC5-B2、特殊優先はC5-B3で確認する |
@@ -408,11 +565,13 @@ TERRAIN-01C1のAuthoring回帰では、既存の高地閾値を43,000以外へ�
 | TERRAIN-01C5-B3／特殊優先と最終選択 | 火山Definitionの地質適合・`SupportsActiveVolcanism`・活動度段階5の3条件と水文特殊より高い優先度、淡水接続・湿原タイル資格・広域湿原規模の全成立、木本植生39,320／39,321境界、対象Definitionの地形気温・基礎湿度・標高・木本植生許容範囲、通常首位の専用Host許可・不許可、局所水場の通常Biome維持、特殊不成立時の通常首位、特殊選択後の通常順位保持、通常候補なしの明示失敗と既定結果、Definition登録逆順での最終ID・理由・通常順位不変 | 製品生成・Scene・Prefab・表示は変更しない。Consoleの新規エラー・警告がなく、旧7Biome表示へ意図しない変化がないことを人間確認する。ECS生成への接続と旧7Biome経路削除はC5-Cで確認する |
 | TERRAIN-01C5-C／ECS生成切替 | 基礎環境・地質・陸海の後にC3／C4水文を完成し、最終Jobで新18Biomeと地面を4096件へ一括公開すること。海だけが`BiomeId.None`となり、地上は1〜18の有効IDであること。火山中核・水文特殊・通常候補の優先、露出マグマが活動度段階5・追加活動度下限・形状密度をすべて要求すること、マグマ＞固定表流水＞岩壁＞陸地の暫定Ground優先、候補なしのチャンク全体失敗とBuffer部分非公開、状態ハッシュ、チャンク順・Job完了順の不変、GeneratorVersion 2の受理とC5前の明示拒否、旧7Biome分類・橋遷移・`Weirdness`・旧淡水・旧岩地マグマ・12×8開始平地探索が実行可能でないこと。初期スポーンが完成ECSチャンクの許可Biome・乾燥・通行可・資源なしセルだけを有限探索し、原点チャンクの遠い候補より負側隣接チャンクの近い候補を選ぶこと。同距離の未探索候補があり得る間も座標順確定のため探索を継続すること。SampleScene統合は初期スポーン付近の資源や`TemperateGrassland`を保証せず、存在する資源・動物だけを検証すること | SampleSceneで18色が欠落・代替Tileなしで表示され、淡水・海水・マグマ・岩壁の優先が保たれること。`Magma`診断の候補色、中央HUD、凡例が製品と同じ段階5・追加下限・形状密度条件で一致すること。初期カメラが有効スポーンへ移動し、通常移動・チャンク境界往復で空白や旧色が残らないこと。Map Viewerの`Terrain`／`Biome`がGameビューと一致すること。C5-E前の旧分布監査が無効で、基礎`None`を成功値として集計しないこと |
 | TERRAIN-01C5-E／分布・境界監査 | `BiomeDistributionAuditSettings`の空Seed・半径範囲、完成1チャンクの全4,096タイル保存則、陸地面積合計、通常首位が候補資格件数を超えないこと、自身隣接18件を含む陸地隣接辺保存則、全153異種ペア台帳、同条件2回の署名・レポート一致、候補なし・完成Buffer不一致・火山中核条件・水文Host不整合の明示失敗。旧単一タイル監査型、旧enum名、旧7bit Mask、旧分類・表示・橋遷移・実行可能な`Weirdness`・旧挙動専用テストの不存在 | `Farmware > World Generation > Analysis > Analyze Distribution`が既定3 Seed×3×3完成チャンクをバックグラウンドで完走し、全153ペアをゼロ件も含めて表示すること。火山中核／周縁、水文Host昇格、候補なし0件、実行時間、比較署名を記録する。景観合否の数値閾値はC6後のC7で合意する |
-| TERRAIN-01C6／旧地形表示の置換 | 最終Block・Liquid・固定水文を正とする表示と状態ハッシュ、旧水域分類・旧River／Pond生成・旧Biome直結配色・互換変換・旧専用Wall上面生成に加え、補助表現比較で不採用となった折れ目影または旧14形状境界ハイライトの素材・Material／Shader・Atlas・Scene参照・選択処理・専用テストが残っていないこと、差分適用後も元生成を変更しないこと | GameビューとMap Viewerが新しい有効地形で一致し、材質ごとの16×16 `GroundTop`をGround／Wallで共有し、Wall表示だけが係数0.85で暗くなること。任意の16×16 `FaceBoundaryOverlay`、16×16 `Face`、淡水・海水で通常断面へ重なる半透明の`Liquid深度Overlay`、背後の断面を最初の段から隠す不透明なマグマを確認できること。Ground崖面とWall前面は同じ境界入力・断面素材を使うこと。すべての材質で断面1段目から`Face`を使い、境界ありではEditorがGround用の元色Overlay版とWall用の暗色化Overlay版を事前合成し、用途に対応する完成Spriteを1枚描画すること。`Face`自体は暗色化しないこと。表示高が論理的な水深、Liquid量、通行、採掘結果を変えず、液体専用断面を持たないこと。Wall接続では材質IDを比較せず、異材質Wall間にFace・固定接地影・動的影の切れ目を出さないこと。固定接地影を左右各1px・手前3px・各レイヤーAlpha 22%でサブチャンク単位に結合し、Wall領域をWall前面段数だけ手前へ投影した設置面の結合輪郭からDirtyサブチャンク単位で`Shadow Caster 2D`を更新すること。動的影が最下段Faceの根元から伸びること。補助表現は専用比較で採用した1種類だけを使うこと。F4のチャンク境界診断を維持すること |
+| TERRAIN-01C6／旧地形表示の置換 | 最終Block・Liquid・固定水文を正とする表示と状態ハッシュ、旧水域分類・旧River／Pond生成・旧Biome直結配色・互換変換・旧専用Wall上面生成に加え、補助表現比較で不採用となった折れ目影または旧14形状境界ハイライトの素材・Material／Shader・Atlas・Scene参照・選択処理・専用テストが残っていないこと、差分適用後も元生成を変更しないこと。Map ViewerのTerrain色変換は41材質のRuntime ID検索表を必須とし、検索表なし・未知Ground・未知Wallを旧Biome色や旧固定Wall色へ代替しないこと | GameビューとMap Viewerが新しい有効地形で一致し、材質ごとの16×16 `GroundTop`をGround／Wallで共有し、Wall表示だけが係数0.85で暗くなること。任意の16×16 `FaceBoundaryOverlay`、16×16 `Face`、淡水・海水で通常断面へ重なる半透明の`Liquid深度Overlay`、背後の断面を最初の段から隠す不透明なマグマを確認できること。Ground崖面とWall前面は同じ境界入力・断面素材を使うこと。すべての材質で断面1段目から`Face`を使い、境界ありではEditorがGround用の元色Overlay版とWall用の暗色化Overlay版を事前合成し、用途に対応する完成Spriteを1枚描画すること。`Face`自体は暗色化しないこと。表示高が論理的な水深、Liquid量、通行、採掘結果を変えず、液体専用断面を持たないこと。Wall接続では材質IDを比較せず、異材質Wall間にFace・固定接地影・動的影の切れ目を出さないこと。固定接地影を左右各1px・手前3px・各レイヤーAlpha 22%でサブチャンク単位に結合し、完成済みの差分込み有効地形近傍から求めた露出Wall前縁だけを前面段数分手前へ投影してDirtyサブチャンク単位で`Shadow Caster 2D`を更新すること。奥側WallのCasterでWall上面を自己遮蔽せず、動的影が最下段Faceの根元から伸びること。補助表現は専用比較で採用した1種類だけを使うこと。F4のチャンク境界診断を維持すること |
 | TERRAIN-01C6-C2／ECS生成・公開 | `GeneratedTerrainCell`を全チャンクEntityと生成枠が所有し、完成Biome・地質・固定水文と同じ最終Jobで4096件を全上書きすること。Block確定失敗時は旧地形を含む6 Bufferを部分公開せず、成功時は全Bufferを同じ固定Tick境界で公開すること。絶対座標から生成Bufferと任意差分を合成できること。生成署名が全自然Blockセルを含み、永続状態ハッシュが18Biome・8地質パレットの行、Range、重み、Block分類を検証・反映すること | C6-C2は表示入力をまだ切り替えない。Unity Editorで対象EditMode／PlayMode回帰を実行し、ストリーミング完了後に6 Bufferが所定件数で揃うこと、通常移動・境界往復で生成失敗やConsoleの新規エラー／警告がないことを確認する。GameビューとMap Viewerの新Block表示確認はC6-C3・C6-Dで行う |
+| TERRAIN-01C6-D1／製品表示カタログと決定論的差分選択 | 製品表示カタログが安定材質ID 1〜41を登録順に依存せず各1件公開し、欠落・重複・範囲外を拒否すること。`GroundTop`・`Face`の空、null、16×16 px以外、16 PPU以外、同一配列内の重複、0以下または1超の暗色化係数を拒否すること。境界なしでは用途別完成配列0件、境界ありではGround用`F×B`と暗色化時のWall用`F×B`を要求し、暗色化なしではGround用をWallへ再利用すること。41材質BlobのGround／Wall Runtime IDを別々の昇順検索表へ変換し、役割をまたぐフォールバック、未解決ID、安定ID・Runtime ID重複を拒否すること。表示選択Version 1が負座標を含むWorldLayer・絶対X/Y・断面段・安定材質ID・用途別Saltから可変長配列の範囲内を再現可能に選び、境界合成添字を`faceIndex×B + boundaryIndex`で求めること | C6-D1では製品Scene、暫定Presenter、Map Viewer、Atlas、既存の検品・生成ツールをまだ切り替えない。追加した対象EditModeテストとPresentation／Test Assemblyのコンパイル、Consoleの新規エラー・警告0件を確認する。残り36材質のSprite完成は不要で、実画面の新立体表示、全41材質アセット接続、旧表示削除はC6-D2〜D6で確認する |
+| TERRAIN-01C6-D4／固定接地影・折れ目影・動的影 | 現在Wallかつ差分込み有効地形近傍の南隣セルが非Wallの露出根元だけから、16×16サブチャンクの横連続区間を作り、異材質Wallを分断しないこと。奥側Wallを除外してWall上面の自己遮蔽を作らないこと。固定接地影の左右1 px・手前3 px・各Alpha 22%、32 px折れ目影の上端Alpha 35%と0／16 px開始行、論理Wall根元に対するCasterの追加補正0タイルを固定すること。Dirty再反映でCasterを再利用し、表示外プール、アンロード、Floating OriginでSimulation状態を変更しないこと。製品Materialが専用Shaderを参照し、Shaderエラーがないこと。Groundを`Default`、Wallを`TerrainWall`へ分離すること | SampleSceneでWall上面・前面・折れ目影が+2Y、固定影が+2Yから手前3 px、Wall上資源が+2Y、動的Casterが論理根元に接続済みであることを自動確認する。Gameビューでは固定接地影と動的影、Wall上面の自己遮蔽、32 px連続減衰を確認する。正式な環境光・局所光はTIME-01Bで接続する |
 | TERRAIN-01C6／地形の固定明暗と照明境界 | `GroundTop`・`Face`・透明な`FaceBoundaryOverlay`と、そのEditor合成結果だけで材質を識別できること。固定光が左右へ偏らない弱い上方光を基本とし、部位・差分間で方向と強さが揃うこと。Ground／Wallで共有する`GroundTop`は、Wall表示の0.85暗色化後も固定光の向きと模様を保つこと。左右へ偏った強いハイライト、硬い方向影、特定光源の色、隣接セルへ伸びる投影影、時間帯の明暗をBase Spriteへ含めないこと。Normal Mapが41材質の必須参照・必須Import要件になっていないこと | 動的照明なしでも立体構造を読め、`Light 2D`と`Shadow Caster 2D`による明るさ・色・投影影の変更が焼き込みと不自然に競合しないこと。採用した固定接地影は、2段Wall向けの手前3px・左右対称の接地感を保ちながら光源移動へ追従しない影として動的影と区別でき、明るい環境でも濃すぎないこと。Normal MapはTIME-01Bで代表材質を比較し、Pixel Perfect、Atlas、メモリ、GPU時間、Light 2D数を記録してから採否を決める |
-| 地形タイル試作工程／代表5材質試作 | `GrassLoam`、`DesertSand`、`Sandstone`、`Granite`、`Basalt`について、16×16 `GroundTop`、材質ごとに任意の透明な16×16 `FaceBoundaryOverlay`、Ground崖面とWall前面で共用する16×16 `Face`をAsepriteまたはPixeloramaで手制作すること。専用`WallTop`は作らず、Wall上面でも同じ`GroundTop`を使う。断面は1段目から`Face`を使い、境界ありではEditorがGround用の元色Overlay版とWall用の暗色化Overlay版を事前合成し、Runtimeでは用途に対応する完成Spriteを1枚だけ描画すること。PixelLabは材質タイルの制作、ラフ生成、Prompt、配色決定に使用しないこと。各部位が少数色・低コントラスト・単純なブロック状模様で材質を読め、写真調の細密描写、強い明暗ノイズ、セル単位の枠を含まないこと。`GrassLoam`の`GroundTop`は草だけとし、Wall表示では同じSpriteを0.85で暗色化する。`FaceBoundaryOverlay`は暗めの緑の草層から暗めの茶色い土層へ切り替え、`Face`は上面より全体的に暗く、内部コントラストを抑えた茶色5色の土層と小石で構成する。根は使わないこと。`GrassLoam`・`Sandstone`は境界あり、`DesertSand`・`Granite`・`Basalt`は境界なしの仕様とすること | 同一材質Ground上のWall上面・Face 2段・固定接地影の重なり、採用差分の全左右・上下組合せ、境界あり／なしの1段目、3段以上の縦反復、淡水・海水越しの断面、マグマ背後の断面が透けないことを固定検品マップで比較すること。`GrassLoam`では`GroundTop`、境界、断面の順に全体が暗くなり、`Face`の5色内の明暗差が小さいことを確認すること。上面、境界、断面で色相を統一せず、材質構造を読めることを確認する。良好なら、同じ明度関係を材質固有の色相と模様を保ったまま残り40材質へ適用すること。Wall暗色化係数0.85、採用した固定接地影と動的影、均等選択する可変長配列の内容、Ground崖面段数、Wall前面段数、41材質表の確定済み境界あり17材質・なし24材質、Ground崖面・Wall前面でのOverlay入力共有、Ground用元色合成結果・Wall用暗色化合成結果の使い分けが一致することを確認すること。`GroundTop`・`FaceBoundaryOverlay`・`Face`は地形タイル表現仕様第7章の採用パレット・使用比率・模様方針に一致させること。各部位の使用比率合計が100%であること、実Spriteが通常±5ポイント、透明な境界Overlayが±10ポイントの許容範囲内であることを確認すること |
-| 地形タイル試作工程／Wall上面・固定接地影・動的影 | GroundとWallが材質ごとに同じ`GroundTop`候補を参照し、Wall表示だけがsRGB各成分へ`WallDarkenFactor`を乗算すること。既定値0.85、Alpha維持、0超1以下、決定論的な最近接整数丸めを保証すること。Wallの8近傍接続は材質IDを比較せず、隣接セルがWallなら接続扱いにすること。固定接地影を左右各1px・手前3px・各レイヤーAlpha 22%で結合し、`Shadow Caster 2D`形状をWall領域からWall前面段数だけ手前へ投影した設置面を基準にDirtyサブチャンク単位で更新すること。タイルごとのGameObjectを本番へ作らず、8px／16px／32px折れ目影と1px境界ハイライトの専用比較では補助表現以外の条件を揃えること | 通常Ground、孤立Wall、広いWall、異材質Wall同士、暗色`Basalt`、青Overlayが45 pxで50%へ達する直下床、93 pxで100%へ達する床なし穴を同じ画面へ配置する。Wall上面0.85暗色化、Face、固定接地影、動的影を重ね、専用比較で折れ目影3深度と境界ハイライトの識別性を判断する。32px影がFace 2段の境界で濃く戻らず連続して減衰すること、動的影が最下段Faceの根元から伸びてWall上面から始まらないことを確認する。異材質Wall間にFace・固定接地影・動的影の切れ目がないこと。移動する`Light 2D`へ動的影だけが追従し、チャンク境界、Floating Origin、アンロード・再利用で欠け・重複・旧影が残らないこと |
+| 地形タイル試作工程／代表5材質試作 | `GrassLoam`、`DesertSand`、`Sandstone`、`Granite`、`Basalt`について、16×16 `GroundTop`、材質ごとに任意の透明な16×16 `FaceBoundaryOverlay`、Ground崖面とWall前面で共用する16×16 `Face`をAsepriteまたはPixeloramaで手制作すること。専用`WallTop`は作らず、Wall上面でも同じ`GroundTop`を使う。断面は1段目から`Face`を使い、境界ありではEditorがGround用の元色Overlay版とWall用の暗色化Overlay版を事前合成し、Runtimeでは用途に対応する完成Spriteを1枚だけ描画すること。PixelLabは材質タイルの制作、ラフ生成、Prompt、配色決定に使用しないこと。各部位が少数色・低コントラスト・単純なブロック状模様で材質を読め、写真調の細密描写、強い明暗ノイズ、セル単位の枠を含まないこと。`GrassLoam`の`GroundTop`は草だけとし、Wall表示では同じSpriteを0.85で暗色化する。`FaceBoundaryOverlay`は暗めの緑の草層から暗めの茶色い土層へ切り替え、`Face`は上面より全体的に暗く、内部コントラストを抑えた茶色5色の土層と小石で構成する。根は使わないこと。完成した今回の画像では`GrassLoam`を境界あり、`DesertSand`・`Sandstone`・`Granite`・`Basalt`を境界なしの仕様とすること | 同一材質Ground上のWall上面・Face 2段・固定接地影の重なり、採用差分の全左右・上下組合せ、境界あり／なしの1段目、3段以上の縦反復、淡水・海水越しの断面、マグマ背後の断面が透けないことを固定検品マップで比較すること。`GrassLoam`では`GroundTop`、境界、断面の順に全体が暗くなり、`Face`の5色内の明暗差が小さいことを確認すること。上面、境界、断面で色相を統一せず、材質構造を読めることを確認する。良好なら、同じ明度関係を材質固有の色相と模様を保ったまま残り40材質へ適用すること。Wall暗色化係数0.85、採用した固定接地影と動的影、均等選択する可変長配列の内容、Ground崖面段数、Wall前面段数、41材質表の確定済み境界あり11材質・なし30材質、Ground崖面・Wall前面でのOverlay入力共有、Ground用元色合成結果・Wall用暗色化合成結果の使い分けが一致することを確認すること。`GroundTop`・`FaceBoundaryOverlay`・`Face`は地形タイル表現仕様第7章の採用パレット・使用比率・模様方針に一致させること。各部位の使用比率合計が100%であること、実Spriteが通常±5ポイント、透明な境界Overlayが±10ポイントの許容範囲内であることを確認すること |
+| 地形タイル試作工程／Wall上面・固定接地影・動的影 | GroundとWallが材質ごとに同じ`GroundTop`候補を参照し、Wall表示だけがsRGB各成分へ`WallDarkenFactor`を乗算すること。既定値0.85、Alpha維持、0超1以下、決定論的な最近接整数丸めを保証すること。Wallの8近傍接続は材質IDを比較せず、隣接セルがWallなら接続扱いにすること。論理Wallセルを最下段Faceの根元とし、Wall上面・前面・折れ目影・Wall上資源を+2Yの同じ表示基準へ揃えること。固定接地影を左右各1px・手前3px・各レイヤーAlpha 22%で結合すること。動的影は差分込み有効地形近傍の南隣セルからFaceが露出するWall前縁だけを抽出し、論理Wall根元を基準にDirtyサブチャンク単位で更新すること。タイルごとのGameObjectを本番へ作らず、8px／16px／32px折れ目影と1px境界ハイライトの専用比較では補助表現以外の条件を揃えること | 通常Ground、孤立Wall、広いWall、異材質Wall同士、暗色`Basalt`、青Overlayが45 pxで50%へ達する直下床、93 pxで100%へ達する床なし穴を同じ画面へ配置する。Wall上面0.85暗色化、Face、固定接地影、動的影を重ね、専用比較で折れ目影3深度と境界ハイライトの識別性を判断する。32px影がFace 2段の境界で濃く戻らず連続して減衰すること、動的影が論理Wallセルと同じ最下段Faceの根元から伸びてWall上面から始まらないこと、奥側WallのCasterによる上面の明暗帯がないことを確認する。異材質Wall間にFace・固定接地影・動的影の切れ目がないこと。移動する`Light 2D`へ動的影だけが追従し、チャンク境界、Floating Origin、アンロード・再利用で欠け・重複・旧影が残らないこと |
 | 地形タイル試作工程／材質差分配列と決定論 | `GroundTop`・`Face`が1件以上、`FaceBoundaryOverlay`が0件以上であること。各配列内の候補は個別Weightを持たず均等確率で選ぶこと。必須配列の空、16×16 px以外、半透明なOverlay、`WallDarkenFactor`の0以下または1超を拒否すること。`G`・`F`・`B`と暗色化有無`D`に対して、手描き入力数が`G + F + B`、生成数が`B > 0ならF×B×(1 + D)、B = 0なら0`になること。WorldLayer・絶対X/Y・断面段・安定材質ID・用途別Saltが同じなら、ロード、再描画、チャンク生成順、Job完了順にかかわらず同じ均等差分を選ぶこと。`UnityEngine.Random`へ依存しないこと | Inspectorで配列の追加・削除・並べ替え、Spriteプレビュー、暗色化設定と生成数内訳を確認する。Weight／Override項目が表示されないことを確認する。登録したすべての`GroundTop`と`Face`差分を必要な全組合せで並べ、破綻しないことを確認する。Ground／Wallが同じ`GroundTop`候補を参照し、Wall表示だけが暗色化されることを確認する |
 | TERRAIN-01C7／バイオーム・地形生成の総合調整 | 調整した気候・Biome・水文・Block設定の端点と不正値拒否、同Seed・GeneratorVersion・設定での決定論、負座標・チャンク境界・生成順不変、状態ハッシュ、河川の流出量別段階幅と地下水涵養Halo・泉候補除外の一致、候補なし・水文特殊Host・火山必須ゲートの維持、C7-Aで固定したSeed・範囲の変更前後集計 | C6の最終Tileを使ったGameビューとMap Viewerで、18Biomeの面積率・領域径・孤立片・境界、水系幅、湖・湿原規模、Block構成、初期スポーン候補、生成時間を比較する。合格範囲は実測後に合意し、仮色や描画だけで生成上の問題を隠していないことを確認する |
 | TERRAIN-01／BiomeVariation | 256・128タイル、2：1、既存Biome Warp後の座標、候補別64bit `VariationSalt`、Salt重複拒否、同じ`BiomeScore`内だけの変動値降順、変動値同点時の安定Definition ID昇順、スコア差1で順位不変、首位1候補＋同点次点2候補、最高スコア3候補以上の同点、最終選択前の一意化、先頭候補の最終選択・診断用上位2候補、表示名・登録順・候補列挙順・Job順・チャンク生成順による不変、GeneratorVersionと保存設定の分離 | 完全同点セル率、候補別勝率、連結領域サイズ、1セル孤立領域、同点候補・変動値・安定ID・上位2候補と最終選択理由の診断表示 |
@@ -518,7 +677,7 @@ C5-Eの`Analyze_CompletedChunk_IsCompleteAndDeterministic`は1 Seed×1チャン�
 
 2026-10-17、ユーザーが影改善後の比較ONで通常移動と`(7,-1)`／`(15,-1)`付近の影の継ぎ目・濃さ・停止感を確認し、問題なさそうと回答した。今回の局所改善の動作確認済みとして扱い、製品の性能合格や比較方式の既定ON採用とは区別する。詳細は[性能計測の受け入れ記録](./Map02DPerformanceReport.md#岩壁影マスク構築の同期burst化)を参照する。
 
-分類用外周の一括生成後はUnity 6000.3.8f1で関連EditMode 196件、PlayMode 39件が成功した。外周の追加16ケースと寿命の追加1ケースを含む。Development Playerでも新旧同一入力の前処理込み比較と前面移動2試行を実施し、開始地点の新旧PNG一致を確認した。これは移動中の全ピクセルや停止感を自動保証するものではない。2026-10-17にユーザーが比較ONの通常移動と`(7,-1)`／`(15,-1)`付近の影の継ぎ目・濃さ・停止感を確認し、問題なさそうと回答してcommitを許可した。今回の確認範囲は動作確認済みとし、最終Viewport・負方向・資源レイヤー等の網羅確認や既定ON採用とは区別する。条件と残る負荷は[外周生成の性能計測](./Map02DPerformanceReport.md#分類用外周地形のバッチ生成)を参照する。この段落はGeneratorVersion 1の外周生成方式に対する履歴であり、C5-C以降の完成3×3 Buffer方式の現行回帰は上記`TerrainNeighborHaloUtilityTests`と岩壁影マスク節を正とする。
+分類用外周の一括生成後はUnity 6000.3.8f1で関連EditMode 196件、PlayMode 39件が成功した。外周の追加16ケースと寿命の追加1ケースを含む。Development Playerでも新旧同一入力の前処理込み比較と前面移動2試行を実施し、開始地点の新旧PNG一致を確認した。これは移動中の全ピクセルや停止感を自動保証するものではない。2026-10-17にユーザーが比較ONの通常移動と`(7,-1)`／`(15,-1)`付近の影の継ぎ目・濃さ・停止感を確認し、問題なさそうと回答してcommitを許可した。今回の確認範囲は動作確認済みとし、最終Viewport・負方向・資源レイヤー等の網羅確認や既定ON採用とは区別する。条件と残る負荷は[外周生成の性能計測](./Map02DPerformanceReport.md#分類用外周地形のバッチ生成)を参照する。この段落はGeneratorVersion 1の外周生成方式に対する履歴であり、C6-D5以降の差分込み3×3有効地形近傍の現行回帰は上記`CompletedChunkTerrainNeighborhoodTests`と岩壁影マスク節を正とする。
 
 `58d10b16`後の残余停止調査では、同じ検証Playerを再ビルドせず詳細Profiler引数付きで再実行し、移動1907フレームすべて前面だった。読み込めた最後の2000フレームから、影なしの表示スパイクを分類・Tilemap書込へ帰属し、長いフレーム内のFPS待機とは分けて記録した。Editorの固定入力による8近傍取得の補助計測は反射・boxingを含むため、製品時間やGC量の比較には使わない。製品コード・テストは変更しておらず、180件＋依存境界4件／PlayMode 38件を今回再実行したわけではない。起動／出力／終了処理を移動値へ混ぜないこと、記録の退避・復元、未検証事項は[影なしのスパイク切り分け](./Map02DPerformanceReport.md#影構築なしの表示スパイクとフレーム待機の切り分け)を参照する。
 

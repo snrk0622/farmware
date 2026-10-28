@@ -8,6 +8,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farmware.Simulation;
 using Farmware.WorldGeneration.Presentation;
+using Unity.Collections;
+using Unity.Entities;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -114,6 +116,9 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>Baker入力またはPlayMode ECSから取得した、独自値を含まない基準設定です。</summary>
         private WorldGenerationSettings sourceSettings;
 
+        /// <summary>このWindowで直前まで表示した完成自然地形の上限付き値コピーです。Domainをまたいで保存しません。</summary>
+        private WorldGenerationMapChunkCache completedChunkReuseCache = new WorldGenerationMapChunkCache();
+
         /// <summary>基準設定を取得でき、地図を生成してよい場合はtrueです。</summary>
         private bool hasSourceSettings;
 
@@ -185,6 +190,8 @@ namespace Farmware.WorldGeneration.Editor
             resizeRenderSchedule?.Pause();
             resizeRenderSchedule = null;
             CancelPendingRender();
+            // 実行中要求は取得済みの旧キャッシュを使い切れます。Native資源を借用しないため終了待ちは不要です。
+            completedChunkReuseCache = new WorldGenerationMapChunkCache();
             DestroyDisplayedTexture();
         }
 
@@ -197,6 +204,8 @@ namespace Farmware.WorldGeneration.Editor
             // 破棄済みTextureに対応する「初期生成済み」状態を必ず解除します。
             initialRenderRequested = false;
             CancelPendingRender();
+            // 実行中要求は取得済みの旧キャッシュを使い切れます。Native資源を借用しないため終了待ちは不要です。
+            completedChunkReuseCache = new WorldGenerationMapChunkCache();
             DestroyDisplayedTexture();
             displayedSample = null;
             resizeRenderSchedule?.Pause();
@@ -236,6 +245,10 @@ namespace Farmware.WorldGeneration.Editor
             hoverLabel = RequireElement<Label>("hoverLabel");
             sourceLabel = RequireElement<Label>("sourceLabel");
             zoomLabel = RequireElement<Label>("zoomLabel");
+            ScrollView sidePanel = RequireElement<ScrollView>("sidePanel");
+            // 材質名が長くても横方向へスクロールさせず、残り幅で折り返して色見本の幅を守ります。
+            sidePanel.mode = ScrollViewMode.Vertical;
+            sidePanel.horizontalScrollerVisibility = ScrollerVisibility.Hidden;
             legendContainer = RequireElement<VisualElement>("legendContainer");
             statusLabel = RequireElement<Label>("statusLabel");
             generationLabel = RequireElement<Label>("generationLabel");
@@ -478,6 +491,8 @@ namespace Farmware.WorldGeneration.Editor
             CancellationToken cancellationToken = renderCancellation.Token;
             int requestId = ++renderRequestId;
 
+            // await中にWindowが閉じても、開始時に捕捉したManagedキャッシュだけを要求が保持します。
+            WorldGenerationMapChunkCache requestChunkCache = completedChunkReuseCache;
             WorldGenerationMapViewMode viewMode = serializedViewMode;
             int tilesPerPixel = serializedTilesPerPixel;
             WorldGenerationMapSampler.CalculateSampleResolution(
@@ -522,6 +537,7 @@ namespace Farmware.WorldGeneration.Editor
             });
 
             HydrologyDiagnosticTerrainCatalogs terrainCatalogs = null;
+            WorldGenerationMapTerrainDeltaSnapshot terrainDeltaSnapshot = null;
             try
             {
                 WorldGenerationMapSamplingPath samplingPath =
@@ -537,8 +553,24 @@ namespace Farmware.WorldGeneration.Editor
                         "Map Viewer用の地形Definitionカタログを構築できませんでした。");
                 }
 
+                if (requiresCompletedTerrain && layer == WorldLayer.Surface)
+                {
+                    // ECSのDynamic BufferはThreadPoolから読めないため、同じ生成設定のWorldだけをメインスレッドで値コピーします。
+                    terrainDeltaSnapshot = CaptureTerrainDeltaSnapshot(renderSettings, layer, terrainCatalogs);
+                }
+
+                if (requiresCompletedTerrain && layer == WorldLayer.Surface)
+                {
+                    // 未訪問チャンクも製品と同じBurst Jobで生成します。独立Worldなので動物の初期化やゲーム状態へ影響しません。
+                    var requiredChunks = WorldGenerationMapSampler.CollectRequiredDiagnosticChunkCoordinates(
+                        renderSettings, layer, centerTileX, centerTileY, width, height, tilesPerPixel,
+                        samplingPath == WorldGenerationMapSamplingPath.CompletedHydrologyChunk);
+                    await WorldGenerationMapChunkGenerator.PrepareAsync(renderSettings, terrainCatalogs,
+                        requiredChunks, requestChunkCache, cancellationToken, progress);
+                }
+
                 // BlobBuilderの完成処理はMain Thread限定なので上で先に完了させ、
-                // ThreadPool側には読み取り専用Blobだけを渡して重いチャンク生成を続けます。
+                // ThreadPool側では完成キャッシュを独立コピーし、画像とHover情報を作ります。
                 WorldGenerationMapSampleResult result = await Task.Run(
                     () => WorldGenerationMapSampler.Sample(
                         renderSettings,
@@ -551,7 +583,10 @@ namespace Farmware.WorldGeneration.Editor
                         tilesPerPixel,
                         viewMode,
                         cancellationToken,
-                        progress),
+                        progress,
+                        terrainDeltaSnapshot,
+                        requestChunkCache,
+                        requirePreparedCompletedChunks: requiresCompletedTerrain && layer == WorldLayer.Surface),
                     cancellationToken);
 
                 if (cancellationToken.IsCancellationRequested
@@ -573,6 +608,11 @@ namespace Farmware.WorldGeneration.Editor
                 {
                     completionMessage =
                         $"完了: {result.Width * result.Height:N0} samples / 完成診断{result.DiagnosticChunkCount:N0} chunks / {stopwatch.Elapsed.TotalSeconds:F2}秒";
+                    if (result.UsesTerrainDeltaSnapshot)
+                    {
+                        completionMessage +=
+                            $" / 有効地形差分 {result.AppliedTerrainDeltaSampleCount:N0} samples";
+                    }
                 }
                 else
                 {
@@ -602,6 +642,139 @@ namespace Farmware.WorldGeneration.Editor
                 // 完了後にキューから届く進捗通知が、完了表示やエラー表示を上書きしないようにします。
                 stopwatch.Stop();
             }
+        }
+
+        /// <summary>
+        /// 実行中Worldの永続TerrainCellDeltaをManaged配列へコピーし、Map Viewer用の不変Snapshotを作ります。
+        /// </summary>
+        /// <param name="renderSettings">Map Viewerが今回使うSeedと全生成設定です。</param>
+        /// <param name="layer">コピー対象の固定ワールドレイヤーです。</param>
+        /// <param name="destinationCatalogs">診断側Runtime IDの解決元です。呼び出し元がSnapshot作成中も所有します。</param>
+        /// <returns>
+        /// 同じ設定を持つDefault Worldが存在する場合は空を含むSnapshot、それ以外は自然生成だけを示すnullです。
+        /// </returns>
+        private static WorldGenerationMapTerrainDeltaSnapshot CaptureTerrainDeltaSnapshot(
+            in WorldGenerationSettings renderSettings,
+            WorldLayer layer,
+            HydrologyDiagnosticTerrainCatalogs destinationCatalogs)
+        {
+            World world = World.DefaultGameObjectInjectionWorld;
+            if (world == null || !world.IsCreated)
+            {
+                return null;
+            }
+
+            EntityManager entityManager = world.EntityManager;
+            EntityQuery settingsQuery = entityManager.CreateEntityQuery(
+                ComponentType.ReadOnly<WorldGenerationSettings>());
+            try
+            {
+                // 別Seedや別調整値の差分を適用すると、同じ保存差分を異なる自然地形へ重ねることになります。
+                // 全設定が一致する実行中Worldだけを現在有効地形の取得元として採用します。
+                if (settingsQuery.CalculateEntityCount() != 1
+                    || !settingsQuery.GetSingleton<WorldGenerationSettings>().Equals(renderSettings))
+                {
+                    return null;
+                }
+            }
+            finally
+            {
+                settingsQuery.Dispose();
+            }
+
+            // Runtime IDは定義をGUID順へ並べた、そのWorld内だけの添字です。
+            // 動物・設備の定義が加わると地形の数値も動くため、同じ整数を別カタログへ直接渡してはいけません。
+            using EntityQuery definitionQuery = entityManager.CreateEntityQuery(ComponentType.ReadOnly<DefinitionCatalog>());
+            if (definitionQuery.CalculateEntityCount() != 1 || destinationCatalogs == null || !destinationCatalogs.IsCreated)
+            {
+                throw new InvalidOperationException("有効地形差分の取得には、実WorldとMap Viewer両方の定義カタログが必要です。");
+            }
+            BlobAssetReference<DefinitionCatalogBlob> sourceCatalog = definitionQuery.GetSingleton<DefinitionCatalog>().Value;
+            var runtimeIdMap = new Dictionary<int, DefinitionRuntimeId>();
+
+            var copiedDeltas =
+                new Dictionary<ChunkCoordinate, TerrainCellDelta[]>();
+            EntityQuery deltaQuery = entityManager.CreateEntityQuery(
+                ComponentType.ReadOnly<TerrainChunkDeltaOwner>(),
+                ComponentType.ReadOnly<TerrainCellDelta>());
+            try
+            {
+                using NativeArray<Entity> entities = deltaQuery.ToEntityArray(Allocator.Temp);
+                using NativeArray<TerrainChunkDeltaOwner> owners =
+                    deltaQuery.ToComponentDataArray<TerrainChunkDeltaOwner>(Allocator.Temp);
+                for (int index = 0; index < entities.Length; index++)
+                {
+                    TerrainChunkDeltaOwner owner = owners[index];
+                    if (owner.Layer != layer)
+                    {
+                        continue;
+                    }
+
+                    var coordinate = new ChunkCoordinate(owner.Layer, owner.ChunkX, owner.ChunkY);
+                    if (copiedDeltas.ContainsKey(coordinate))
+                    {
+                        throw new InvalidOperationException(
+                            $"Map Viewer用の地形差分所有者が重複しています: {coordinate}");
+                    }
+
+                    DynamicBuffer<TerrainCellDelta> source =
+                        entityManager.GetBuffer<TerrainCellDelta>(entities[index], true);
+                    var copy = new TerrainCellDelta[source.Length];
+                    for (int deltaIndex = 0; deltaIndex < source.Length; deltaIndex++)
+                    {
+                        TerrainCellDelta delta = source[deltaIndex];
+                        // 未変更区画は参照せず、Invalidによる明示除去はInvalidのまま保持します。
+                        delta.GroundBlockRuntimeId = (delta.ChangeMask & TerrainCellChangeMask.GroundBlock) == 0 ? default
+                            : ResolveMapRuntimeId(sourceCatalog, destinationCatalogs.DefinitionCatalog, delta.GroundBlockRuntimeId, DefinitionKind.GroundBlock, runtimeIdMap);
+                        delta.WallBlockRuntimeId = (delta.ChangeMask & TerrainCellChangeMask.WallBlock) == 0 ? default
+                            : ResolveMapRuntimeId(sourceCatalog, destinationCatalogs.DefinitionCatalog, delta.WallBlockRuntimeId, DefinitionKind.WallBlock, runtimeIdMap);
+                        delta.LiquidRuntimeId = (delta.ChangeMask & TerrainCellChangeMask.Liquid) == 0 ? default
+                            : ResolveMapRuntimeId(sourceCatalog, destinationCatalogs.DefinitionCatalog, delta.LiquidRuntimeId, DefinitionKind.Liquid, runtimeIdMap);
+                        delta.TerrainSurfaceRuntimeId = (delta.ChangeMask & TerrainCellChangeMask.TerrainSurface) == 0 ? default
+                            : ResolveMapRuntimeId(sourceCatalog, destinationCatalogs.DefinitionCatalog, delta.TerrainSurfaceRuntimeId, DefinitionKind.TerrainSurface, runtimeIdMap);
+                        copy[deltaIndex] = delta;
+                    }
+
+                    copiedDeltas.Add(coordinate, copy);
+                }
+            }
+            finally
+            {
+                deltaQuery.Dispose();
+            }
+
+            return new WorldGenerationMapTerrainDeltaSnapshot(copiedDeltas);
+        }
+
+        /// <summary>Snapshot作成時だけ、実WorldのIDを定義GUIDで診断側へ対応付けます。未知定義や区画違いを代用品で隠しません。</summary>
+        /// <param name="source">実行中Worldが所有する共通定義です。</param>
+        /// <param name="destination">呼び出し元が所有する診断用の共通定義です。</param>
+        /// <param name="sourceId">実Worldの区画に保存されているIDです。0は明示除去です。</param>
+        /// <param name="expectedKind">変更区画が要求する定義分類です。</param>
+        /// <param name="resolvedIds">同じ定義をセルごとにGUID検索しないため、今回要求中だけ再利用する対応表です。</param>
+        /// <returns>診断カタログ内の同じ定義を指すIDです。元Blobやゲーム状態は変更しません。</returns>
+        private static DefinitionRuntimeId ResolveMapRuntimeId(
+            BlobAssetReference<DefinitionCatalogBlob> source,
+            BlobAssetReference<DefinitionCatalogBlob> destination,
+            DefinitionRuntimeId sourceId,
+            DefinitionKind expectedKind,
+            Dictionary<int, DefinitionRuntimeId> resolvedIds)
+        {
+            if (sourceId.Value == DefinitionRuntimeId.InvalidValue) return default;
+            if (!DefinitionCatalogLookup.TryGetDefinition(source, sourceId, out DefinitionBlobRecord sourceRecord)
+                || sourceRecord.Kind != expectedKind)
+            {
+                throw new InvalidOperationException($"実Worldの地形差分IDが区画に一致しません: ID={sourceId.Value}, Kind={expectedKind}");
+            }
+            if (resolvedIds.TryGetValue(sourceId.Value, out DefinitionRuntimeId cached)) return cached;
+            if (!DefinitionCatalogLookup.TryResolve(destination, sourceRecord.Guid, out DefinitionRuntimeId destinationId)
+                || !DefinitionCatalogLookup.TryGetDefinition(destination, destinationId, out DefinitionBlobRecord destinationRecord)
+                || destinationRecord.Kind != expectedKind)
+            {
+                throw new InvalidOperationException($"Map Viewerに地形差分の定義がありません: GUID={sourceRecord.Guid}, Kind={expectedKind}");
+            }
+            resolvedIds.Add(sourceId.Value, destinationId);
+            return destinationId;
         }
 
         /// <summary>
@@ -964,6 +1137,12 @@ namespace Farmware.WorldGeneration.Editor
             GeneratedTerrainCell terrainCell = hasFinalizedTerrain
                 ? finalizedTerrainSample.TerrainCell
                 : default;
+            TerrainBlockMaterialId groundMaterialId = hasFinalizedTerrain
+                ? finalizedTerrainSample.GroundMaterialId
+                : TerrainBlockMaterialId.None;
+            TerrainBlockMaterialId wallMaterialId = hasFinalizedTerrain
+                ? finalizedTerrainSample.WallMaterialId
+                : TerrainBlockMaterialId.None;
             bool hasTile = hasFinalizedTerrain;
             if (!hasTile)
             {
@@ -1085,7 +1264,8 @@ namespace Farmware.WorldGeneration.Editor
             hoverLabel.text =
                 $"{displayedSample.Layer} / Tile ({worldTileX}, {worldTileY}) / Chunk ({chunk.X}, {chunk.Y}) / "
                 + $"Biome {tile.Biome} / GroundBlock {terrainCell.GroundBlockRuntimeId.Value} / "
-                + $"WallBlock {terrainCell.WallBlockRuntimeId.Value} / Liquid {terrainCell.LiquidRuntimeId.Value} / "
+                + $"GroundMaterial {groundMaterialId} / WallBlock {terrainCell.WallBlockRuntimeId.Value} / "
+                + $"WallMaterial {wallMaterialId} / Liquid {terrainCell.LiquidRuntimeId.Value} / "
                 + $"Surface {terrainCell.TerrainSurfaceRuntimeId.Value}\n"
                 + $"Elevation {tile.Elevation} ({tile.ElevationClass}) / BaseTemp {tile.Temperature} / "
                 + $"TerrainTemp {tile.TerrainTemperature} / BaseMoisture {tile.Moisture}\n"
@@ -1155,7 +1335,12 @@ namespace Farmware.WorldGeneration.Editor
                 $"設定: {settingsSourceDescription}\n"
                 + $"Layer: {(displayedSample == null ? serializedLayer : displayedSample.Layer)}\n"
                 + $"GeneratorVersion: {settings.GeneratorVersion}\n"
-                + $"WorldSeed: 0x{settings.WorldSeed:X16}";
+                + $"WorldSeed: 0x{settings.WorldSeed:X16}"
+                + (displayedSample == null
+                    ? string.Empty
+                    : displayedSample.UsesTerrainDeltaSnapshot
+                        ? $"\n地形: 実行中Worldの有効地形（差分適用 {displayedSample.AppliedTerrainDeltaSampleCount:N0} samples）"
+                        : "\n地形: 自然生成（同じ設定の実行中Worldなし）");
         }
 
         /// <summary>
@@ -1501,25 +1686,33 @@ namespace Farmware.WorldGeneration.Editor
                 return;
             }
 
+            if (selectedMode == WorldGenerationMapViewMode.Terrain)
+            {
+                // TerrainはBiome色ではなく41材質色を使います。同じ色相の暗色がWallであることを行名で明示します。
+                AddLegendRow("Fresh Water", "legend-fresh-water");
+                AddLegendRow("Salt Water", "legend-salt-water");
+                AddLegendRow("Magma", "legend-magma");
+                for (TerrainBlockMaterialId materialId = TerrainBlockMaterialDefinitions.First;
+                    materialId <= TerrainBlockMaterialDefinitions.Last;
+                    materialId++)
+                {
+                    AddLegendRow(
+                        $"{materialId} Ground (Wall = darker)",
+                        WorldGenerationMapSampler.GetTerrainMaterialDisplayColor(materialId, false));
+                }
+
+                return;
+            }
+
             for (byte stableId = BiomeStableIds.First;
                 stableId <= BiomeStableIds.Last;
                 stableId++)
             {
-                // 凡例もMap本体の色関数を通し、18種追加時にUSSの旧7色だけが残らないようにします。
+                // Biome凡例もMap本体の色関数を通し、18種追加時にUSSの旧7色だけが残らないようにします。
                 BiomeId biome = (BiomeId)stableId;
                 AddLegendRow(
                     biome.ToString(),
                     WorldGenerationMapSampler.GetBiomeColor(biome));
-            }
-
-            if (selectedMode == WorldGenerationMapViewMode.Terrain)
-            {
-                // TerrainではBiome以外に優先表示する水域・マグマ・岩壁だけを凡例へ追加します。
-                // 地表Blockは現行の暫定通常地形色へ反映しないため、完成Block IDとして案内します。
-                AddLegendRow("Fresh Water", "legend-fresh-water");
-                AddLegendRow("Salt Water", "legend-salt-water");
-                AddLegendRow("Magma", "legend-magma");
-                AddLegendRow("Rock Wall", "legend-rock-wall");
             }
         }
 

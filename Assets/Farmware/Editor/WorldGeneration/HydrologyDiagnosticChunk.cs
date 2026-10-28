@@ -64,8 +64,17 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>18Biomeと8地質の自然生成候補を保持し、この所有者だけが破棄するPalette Blobです。</summary>
         private BlobAssetReference<TerrainBlockPaletteCatalogBlob> paletteCatalog;
 
+        /// <summary>World固有Runtime IDをGUIDから診断用IDへ対応付けるための共通定義です。Snapshot作成中だけ借用します。</summary>
+        internal BlobAssetReference<DefinitionCatalogBlob> DefinitionCatalog => definitionCatalog;
+
         /// <summary>完成セル確定へ読み取り専用で渡す、構築済みPalette Blobです。</summary>
         internal BlobAssetReference<TerrainBlockPaletteCatalogBlob> PaletteCatalog => paletteCatalog;
+
+        /// <summary>Map Viewerが自然生成へ変更差分を適用するときに参照する地形分類Blobです。</summary>
+        internal BlobAssetReference<TerrainBlockCatalogBlob> TerrainCatalog => terrainCatalog;
+
+        /// <summary>Map ViewerがGround／Wall Runtime IDを安定材質IDへ解決するときに参照する材質Blobです。</summary>
+        internal BlobAssetReference<TerrainBlockMaterialCatalogBlob> MaterialCatalog => materialCatalog;
 
         /// <summary>淡水、海水、マグマ等の組み込みBlockを解決したRuntime ID一式です。</summary>
         public BuiltInTerrainBlockRuntimeIds RuntimeIds { get; private set; }
@@ -233,6 +242,39 @@ namespace Farmware.WorldGeneration.Editor
             catch
             {
                 Dispose();
+                throw;
+            }
+        }
+
+        /// <summary>Map Viewerの不変キャッシュから、呼び出し側が独立して所有・破棄できる完成配列を復元します。</summary>
+        /// <param name="coordinate">コピー元のレイヤー付き座標です。</param>
+        /// <param name="runtimeIds">コピー元と同じ固定DefinitionのIDです。</param>
+        /// <param name="tiles">自然生成済み環境タイルです。</param>
+        /// <param name="cells">差分を適用する前の自然生成Blockセルです。</param>
+        /// <param name="hydrology">完成固定水文セルです。</param>
+        /// <param name="surfaceWater">完成表流水です。</param>
+        /// <param name="hydrologyTiles">完成自然水文タイルです。</param>
+        /// <returns>キャッシュを借用せず、5つのNative配列を新しく所有する診断チャンクです。</returns>
+        internal static HydrologyDiagnosticChunk CopyFromCache(
+            ChunkCoordinate coordinate, BuiltInTerrainBlockRuntimeIds runtimeIds,
+            GeneratedTile[] tiles, GeneratedTerrainCell[] cells, GeneratedHydrologyCell[] hydrology,
+            GeneratedSurfaceWaterTile[] surfaceWater, GeneratedHydrologyTile[] hydrologyTiles)
+        {
+            var copy = new HydrologyDiagnosticChunk(coordinate);
+            try
+            {
+                // Managed配列をNative配列へコピーし、取消済み要求の破棄が後続要求のデータを壊さないようにします。
+                copy.TerrainRuntimeIds = runtimeIds;
+                copy.TerrainTiles.CopyFrom(tiles);
+                copy.TerrainCells.CopyFrom(cells);
+                copy.HydrologyCells.CopyFrom(hydrology);
+                copy.SurfaceWaterTiles.CopyFrom(surfaceWater);
+                copy.HydrologyTiles.CopyFrom(hydrologyTiles);
+                return copy;
+            }
+            catch
+            {
+                copy.Dispose();
                 throw;
             }
         }
