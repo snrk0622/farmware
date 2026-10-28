@@ -17,6 +17,8 @@ namespace Farmware.WorldGeneration.Presentation
     [DefaultExecutionOrder(-50)]
     public sealed class TerrainMagmaShoreLighting : MonoBehaviour
     {
+        /// <summary>岸光源の固定区画の一辺上限です。地形依存範囲の検証にも使います。単位はタイルです。</summary>
+        public const int MaximumPlacementCellSize = 8;
         /// <summary>候補選択と光源位置反映を分離計測するProfiler Markerです。Simulation時間は含みません。</summary>
         private static readonly ProfilerMarker UpdateMarker = new ProfilerMarker("Farmware.WorldGeneration.MagmaShoreLighting");
         /// <summary>共通表示原点を持つCameraです。Editor接続時に設定し、原点変更を毎フレーム読みます。</summary>
@@ -36,7 +38,7 @@ namespace Farmware.WorldGeneration.Presentation
         [Min(0.1f)] [SerializeField] private float outerRadius = 3f;
         /// <summary>光源を1個選ぶ固定区画の一辺です。単位はタイルで、Play開始から再構築まで固定します。</summary>
         [Tooltip("絶対座標に固定する照明区画の一辺です。単位はタイルです。各区画から岸を1セルだけ選びます。変更後はPlayを再開してください。")]
-        [Range(2, 8)] [SerializeField] private int placementCellSize = 3;
+        [Range(2, MaximumPlacementCellSize)] [SerializeField] private int placementCellSize = 3;
         /// <summary>静止地形で光源候補を選び直す間隔です。単位は実時間秒です。</summary>
         [Tooltip("静止時に可視光源を再確認する間隔です。単位は実時間秒です。カメラ移動・ズーム・Dirty地形は同じフレームに反映します。")]
         [Min(0.05f)] [SerializeField] private float refreshInterval = 0.5f;
@@ -141,7 +143,7 @@ namespace Farmware.WorldGeneration.Presentation
         private bool IsFixedWorldAnchor(in CompletedChunkTerrainNeighborhood neighborhood,
             int x, int y, int2 absolute, DefinitionRuntimeId magmaId)
         {
-            int size = Mathf.Clamp(placementCellSize, 2, 8);
+            int size = Mathf.Clamp(placementCellSize, 2, MaximumPlacementCellSize);
             // C#の負数剰余を0以上へ補正し、負側でも同じ絶対格子を使います。大きい絶対値はfloatへ変換しません。
             int startX = x - ((absolute.x % size + size) % size);
             int startY = y - ((absolute.y % size + size) % size);

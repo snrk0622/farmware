@@ -116,6 +116,9 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>Baker入力またはPlayMode ECSから取得した、独自値を含まない基準設定です。</summary>
         private WorldGenerationSettings sourceSettings;
 
+        /// <summary>このWindowで直前まで表示した完成自然地形の上限付き値コピーです。Domainをまたいで保存しません。</summary>
+        private WorldGenerationMapChunkCache completedChunkReuseCache = new WorldGenerationMapChunkCache();
+
         /// <summary>基準設定を取得でき、地図を生成してよい場合はtrueです。</summary>
         private bool hasSourceSettings;
 
@@ -187,6 +190,8 @@ namespace Farmware.WorldGeneration.Editor
             resizeRenderSchedule?.Pause();
             resizeRenderSchedule = null;
             CancelPendingRender();
+            // 実行中要求は取得済みの旧キャッシュを使い切れます。Native資源を借用しないため終了待ちは不要です。
+            completedChunkReuseCache = new WorldGenerationMapChunkCache();
             DestroyDisplayedTexture();
         }
 
@@ -199,6 +204,8 @@ namespace Farmware.WorldGeneration.Editor
             // 破棄済みTextureに対応する「初期生成済み」状態を必ず解除します。
             initialRenderRequested = false;
             CancelPendingRender();
+            // 実行中要求は取得済みの旧キャッシュを使い切れます。Native資源を借用しないため終了待ちは不要です。
+            completedChunkReuseCache = new WorldGenerationMapChunkCache();
             DestroyDisplayedTexture();
             displayedSample = null;
             resizeRenderSchedule?.Pause();
@@ -484,6 +491,8 @@ namespace Farmware.WorldGeneration.Editor
             CancellationToken cancellationToken = renderCancellation.Token;
             int requestId = ++renderRequestId;
 
+            // await中にWindowが閉じても、開始時に捕捉したManagedキャッシュだけを要求が保持します。
+            WorldGenerationMapChunkCache requestChunkCache = completedChunkReuseCache;
             WorldGenerationMapViewMode viewMode = serializedViewMode;
             int tilesPerPixel = serializedTilesPerPixel;
             WorldGenerationMapSampler.CalculateSampleResolution(
@@ -550,8 +559,18 @@ namespace Farmware.WorldGeneration.Editor
                     terrainDeltaSnapshot = CaptureTerrainDeltaSnapshot(renderSettings, layer);
                 }
 
+                if (requiresCompletedTerrain && layer == WorldLayer.Surface)
+                {
+                    // 未訪問チャンクも製品と同じBurst Jobで生成します。独立Worldなので動物の初期化やゲーム状態へ影響しません。
+                    var requiredChunks = WorldGenerationMapSampler.CollectRequiredDiagnosticChunkCoordinates(
+                        renderSettings, layer, centerTileX, centerTileY, width, height, tilesPerPixel,
+                        samplingPath == WorldGenerationMapSamplingPath.CompletedHydrologyChunk);
+                    await WorldGenerationMapChunkGenerator.PrepareAsync(renderSettings, terrainCatalogs,
+                        requiredChunks, requestChunkCache, cancellationToken, progress);
+                }
+
                 // BlobBuilderの完成処理はMain Thread限定なので上で先に完了させ、
-                // ThreadPool側には読み取り専用Blobだけを渡して重いチャンク生成を続けます。
+                // ThreadPool側では完成キャッシュを独立コピーし、画像とHover情報を作ります。
                 WorldGenerationMapSampleResult result = await Task.Run(
                     () => WorldGenerationMapSampler.Sample(
                         renderSettings,
@@ -565,7 +584,9 @@ namespace Farmware.WorldGeneration.Editor
                         viewMode,
                         cancellationToken,
                         progress,
-                        terrainDeltaSnapshot),
+                        terrainDeltaSnapshot,
+                        requestChunkCache,
+                        requirePreparedCompletedChunks: requiresCompletedTerrain && layer == WorldLayer.Surface),
                     cancellationToken);
 
                 if (cancellationToken.IsCancellationRequested

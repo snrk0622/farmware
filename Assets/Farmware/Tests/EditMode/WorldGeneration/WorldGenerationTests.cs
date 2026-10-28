@@ -909,6 +909,51 @@ namespace Farmware.WorldGeneration.Tests
                 Is.EqualTo(InitialSpawnSearchPhase.Succeeded));
         }
 
+        /// <summary>投入直後にScene相当の入力Blobを解放しても生成でき、同じ内容の再読込では所有コピーを再利用することを保証します。</summary>
+        [Test]
+        public void ChunkGenerationSystem_KeepsPaletteAliveAfterSourceDisposal()
+        {
+            using World world = new World("Generation palette lifetime test");
+            var settings = WorldGenerationSettings.CreateDefault(123UL, WorldGenerationSettings.CurrentGeneratorVersion);
+            SystemHandle handle = world.GetOrCreateSystem<ChunkGenerationSystem>();
+            ref ChunkGenerationSystem generator = ref world.Unmanaged.GetUnsafeSystemRef<ChunkGenerationSystem>(handle);
+            BlobAssetReference<TerrainBlockPaletteCatalogBlob> firstSnapshot = default;
+            for (int iteration = 0; iteration < 3; iteration++)
+            {
+                Entity chunk = CreateChunkEntity(world.EntityManager, iteration, 0, ChunkGenerationPhase.Queued, true);
+                using (TerrainGenerationTestCatalogSet source = TerrainGenerationTestCatalogSet.Create())
+                {
+                    // 3回目だけ有効な重みの組を変え、別内容を古いコピーへ読み替えないことも確認します。
+                    if (iteration == 2)
+                    {
+                        source.PaletteCatalog.Value.Entries[0].Weight++;
+                        source.PaletteCatalog.Value.Entries[1].Weight--;
+                    }
+                    Assert.That(generator.ScheduleBatch(world.EntityManager, settings, BiomeDefinitionCatalog.CreateDefault(),
+                        ResourceGenerationSettings.CreateDefault(), source.PaletteCatalog, source.RuntimeIds, 1), Is.True);
+                    // 公開APIへ所有権確認専用の口を作らず、SystemのBlobだけをテストから観測します。
+                    var owned = (BlobAssetReference<TerrainBlockPaletteCatalogBlob>)typeof(ChunkGenerationSystem)
+                        .GetField("ownedPaletteCatalog", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(generator);
+                    Assert.That(owned, Is.Not.EqualTo(source.PaletteCatalog));
+                    if (iteration == 0) firstSnapshot = owned;
+                    else if (iteration == 1) Assert.That(owned, Is.EqualTo(firstSnapshot), "同じ固定値ならチャンクごとにBlobを確保し直しません。");
+                    Assert.That(owned.Value.Entries[0].Weight, Is.EqualTo(source.PaletteCatalog.Value.Entries[0].Weight));
+                    Assert.That(owned.Value.Entries[1].Weight, Is.EqualTo(source.PaletteCatalog.Value.Entries[1].Weight));
+                }
+                // usingを抜けた時点で生成元は解放済みです。Jobを待つ前に解放する順序がこの回帰の条件です。
+                var timer = System.Diagnostics.Stopwatch.StartNew();
+                while (!generator.TryCompleteAndPublishBatch(world.EntityManager))
+                {
+                    Assert.That(timer.Elapsed.TotalSeconds, Is.LessThan(30));
+                    System.Threading.Thread.Sleep(1);
+                }
+                Assert.That(world.EntityManager.GetComponentData<ChunkGenerationStatus>(chunk).Phase,
+                    Is.EqualTo(ChunkGenerationPhase.ReadyToApply));
+                Assert.That(world.EntityManager.GetBuffer<GeneratedTerrainCell>(chunk).Length,
+                    Is.EqualTo(WorldGridConstants.TilesPerChunk));
+            }
+        }
+
         /// <summary>
         /// テスト用Worldへ設定Entityと要求チャンクを作り、System更新後に4096タイルと完了状態が得られることを保証します。
         /// </summary>
@@ -1688,6 +1733,49 @@ namespace Farmware.WorldGeneration.Tests
                 // 実製品では描画フレームがWorkerへ時間を渡します。同期テストではCPU占有を避けて明示的に譲ります。
                 System.Threading.Thread.Yield();
             }
+        }
+
+        /// <summary>2チャンク幅の画面で外側1列だけ不足させ、角より先に可視辺へ接する2チャンクを要求することを保証します。</summary>
+        /// <param name="directionX">不足する列が右なら1、左なら-1、上下なら0です。</param>
+        /// <param name="directionY">不足する行が上なら1、下なら-1、左右なら0です。</param>
+        [TestCase(1, 0)]
+        [TestCase(-1, 0)]
+        [TestCase(0, 1)]
+        [TestCase(0, -1)]
+        public void ChunkStreamingSystem_PreloadPrioritizesVisibleEdgesBeforeOuterCorners(int directionX, int directionY)
+        {
+            using World world = new World("Visible edge generation priority test");
+            EntityManager manager = world.EntityManager;
+            CreateStreamingSingletons(manager, new ChunkStreamingObserver
+            {
+                Layer = WorldLayer.Surface, MinimumVisibleChunkX = 0, MaximumVisibleChunkX = 1,
+                MinimumVisibleChunkY = -1, MaximumVisibleChunkY = 0
+            }, new ChunkStreamingSettings
+            {
+                PreloadMarginInChunks = 1, RetentionMarginInChunks = 0, MaximumConcurrentGenerations = 2
+            });
+            // 先読み4×4のうち移動先の1列・1行だけを未生成にし、既存の生成数と同じ上限で比較します。
+            for (int y = -2; y <= 1; y++)
+                for (int x = -1; x <= 2; x++)
+                {
+                    bool missing = directionX != 0 ? x == (directionX > 0 ? 2 : -1) : y == (directionY > 0 ? 1 : -2);
+                    if (!missing) CreateChunkEntity(manager, x, y, ChunkGenerationPhase.Inactive, false);
+                }
+            world.GetOrCreateSystem<ChunkStreamingSystem>().Update(world.Unmanaged);
+            using EntityQuery query = manager.CreateEntityQuery(typeof(ChunkCoordinateComponent), typeof(ChunkGenerationStatus));
+            using var coordinates = query.ToComponentDataArray<ChunkCoordinateComponent>(Unity.Collections.Allocator.Temp);
+            using var statuses = query.ToComponentDataArray<ChunkGenerationStatus>(Unity.Collections.Allocator.Temp);
+            int queued = 0;
+            for (int index = 0; index < statuses.Length; index++)
+            {
+                if (statuses[index].Phase != ChunkGenerationPhase.Queued) continue;
+                queued++;
+                // 接する辺の直前入力だけを選び、同距離の角に生成枠を先取りされないことを検証します。
+                if (directionX != 0) Assert.That(coordinates[index].Y, Is.InRange(-1, 0));
+                else Assert.That(coordinates[index].X, Is.InRange(0, 1));
+            }
+            Assert.That(queued, Is.EqualTo(2));
+            Assert.That(coordinates.Length, Is.EqualTo(14), "先読み範囲や同時生成数を増やしてはいけません。");
         }
 
         /// <summary>

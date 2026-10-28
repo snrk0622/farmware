@@ -551,7 +551,7 @@ namespace Farmware.WorldGeneration.Editor
         /// 大容量Persistent作業領域を使う完成水文生成を、Editorプロセス内で同時に1要求へ制限します。
         /// パンやズームを連続したとき、取消済み要求と最新要求が並列にNative配列を確保してメモリとCPUを増幅しないためです。
         /// </summary>
-        private static readonly SemaphoreSlim CompletedChunkGenerationGate =
+        internal static readonly SemaphoreSlim CompletedChunkGenerationGate =
             new SemaphoreSlim(1, 1);
 
         /// <summary>
@@ -822,6 +822,8 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="cancellationToken">新しい操作で不要になった走査を中止するためのTokenです。</param>
         /// <param name="progress">完了割合0〜1の任意通知先です。呼出元でメインスレッドへ戻すProgressを渡し、省略時は通知しません。</param>
         /// <param name="terrainDeltaSnapshot">Editorメインスレッドでコピーした現在Worldの疎な地形差分です。省略時は自然生成だけを表示します。</param>
+        /// <param name="completedChunkReuseCache">Window専用の完成自然地形キャッシュです。省略時は要求終了時にすべて破棄します。</param>
+        /// <param name="requirePreparedCompletedChunks">Windowが製品Jobで事前完成させた結果だけを使う場合はtrueです。欠落を低速再生成で隠しません。</param>
         /// <returns>Texture2Dへ適用できる色配列、レイヤー、座標情報です。</returns>
         /// <exception cref="InvalidOperationException">
         /// 座標端で固定サンプル範囲を安全に確保できない場合や、完成診断チャンクを生成できない場合に発生します。
@@ -838,7 +840,9 @@ namespace Farmware.WorldGeneration.Editor
             WorldGenerationMapViewMode viewMode,
             CancellationToken cancellationToken,
             IProgress<float> progress = null,
-            WorldGenerationMapTerrainDeltaSnapshot terrainDeltaSnapshot = null)
+            WorldGenerationMapTerrainDeltaSnapshot terrainDeltaSnapshot = null,
+            WorldGenerationMapChunkCache completedChunkReuseCache = null,
+            bool requirePreparedCompletedChunks = false)
         {
             if (!WorldLayerUtility.IsPlayable(layer))
             {
@@ -981,7 +985,7 @@ namespace Farmware.WorldGeneration.Editor
                             isDerivedHydrologyViewMode);
 
                     // 直前要求の1チャンク完了待ちでも0%に見え続けないよう、Gate待機へ入る直前に準備開始を通知します。
-                    progress?.Report(CompletedChunkPreparationProgress);
+                    if (!requirePreparedCompletedChunks) progress?.Report(CompletedChunkPreparationProgress);
                     // 取消待ちの要求はGate取得中にもTokenで終了し、古い要求を順番に実生成しません。
                     CompletedChunkGenerationGate.Wait(cancellationToken);
                     enteredCompletedChunkGenerationGate = true;
@@ -992,16 +996,27 @@ namespace Farmware.WorldGeneration.Editor
                         chunkIndex < requiredDiagnosticChunks.Count;
                         chunkIndex++)
                     {
-                        GetOrCreateDiagnosticChunk(
-                            settings,
-                            terrainCatalogs,
-                            requiredDiagnosticChunks[chunkIndex],
-                            diagnosticChunkCache,
-                            cancellationToken);
+                        cancellationToken.ThrowIfCancellationRequested();
+                        ChunkCoordinate coordinate = requiredDiagnosticChunks[chunkIndex];
+                        // 前の表示要求と同じ自然地形だけを再利用します。変更差分は後段で今回のSnapshotから適用します。
+                        if (completedChunkReuseCache != null
+                            && completedChunkReuseCache.TryRestore(settings, coordinate, out HydrologyDiagnosticChunk restored))
+                        {
+                            diagnosticChunkCache.Add(CreateCoordinateKey(coordinate.X, coordinate.Y), restored);
+                        }
+                        else
+                        {
+                            if (requirePreparedCompletedChunks)
+                                throw new InvalidOperationException("Map Viewerの完成地形が事前生成キャッシュにありません。");
+                            HydrologyDiagnosticChunk generated = GetOrCreateDiagnosticChunk(
+                                settings, terrainCatalogs, coordinate, diagnosticChunkCache, cancellationToken);
+                            completedChunkReuseCache?.Remember(settings, generated);
+                        }
                         float completedChunkFraction =
                             (chunkIndex + 1f) / requiredDiagnosticChunks.Count;
-                        progress?.Report(
-                            completedChunkFraction * CompletedChunkProgressLimit);
+                        // 非同期の製品Job経路はすでに95%まで進んでいるため、キャッシュ読込で進捗を逆行させません。
+                        if (!requirePreparedCompletedChunks)
+                            progress?.Report(completedChunkFraction * CompletedChunkProgressLimit);
                     }
                 }
 
@@ -1307,7 +1322,7 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="tilesPerPixel">代表サンプル間のワールドタイル数です。</param>
         /// <param name="includeHydrologyCellOwner">担当水文セルを隣接チャンクから読む派生水文モードならtrueです。</param>
         /// <returns>タイル所有者と水文セル所有者を含む一意な完成診断チャンク座標です。</returns>
-        private static List<ChunkCoordinate> CollectRequiredDiagnosticChunkCoordinates(
+        internal static List<ChunkCoordinate> CollectRequiredDiagnosticChunkCoordinates(
             in WorldGenerationSettings settings,
             WorldLayer layer,
             int centerTileX,

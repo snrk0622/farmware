@@ -187,6 +187,7 @@ namespace Farmware.WorldGeneration
                     QueueMissingChunksNearFirst(
                         observer.Layer,
                         preloadBounds,
+                        visibleBounds,
                         visibleBounds.CenterX,
                         visibleBounds.CenterY,
                         requestBudget,
@@ -208,10 +209,11 @@ namespace Farmware.WorldGeneration
         }
 
         /// <summary>
-        /// 指定矩形内の不足チャンクを中心から外側へ向かう四角いリング順で要求します。
+        /// 不足チャンクを可視矩形からの距離順、同距離では中心からの四角いリング順で要求します。
         /// </summary>
         /// <param name="layer">今回作成・再利用するチャンクが属する固定ワールドレイヤーです。</param>
         /// <param name="bounds">生成対象となるプリロード込み矩形です。</param>
+        /// <param name="visibleBounds">先読みの角より画面に接する入力を優先するための可視矩形です。</param>
         /// <param name="centerX">優先順位の中心となる水平チャンク座標です。</param>
         /// <param name="centerY">優先順位の中心となる垂直チャンク座標です。</param>
         /// <param name="requestBudget">今回新規作成してよいチャンクEntity数です。</param>
@@ -221,6 +223,7 @@ namespace Farmware.WorldGeneration
         private static void QueueMissingChunksNearFirst(
             WorldLayer layer,
             ChunkBounds bounds,
+            ChunkBounds visibleBounds,
             int centerX,
             int centerY,
             int requestBudget,
@@ -234,107 +237,45 @@ namespace Farmware.WorldGeneration
             }
 
             int maximumRing = bounds.MaximumDistanceFrom(centerX, centerY);
-            for (int ring = 0; ring <= maximumRing && requestBudget > 0; ring++)
+            // 中心リングだけで並べると、幅2チャンクの画面では外側の角が必要な辺より先になります。
+            // 可視矩形へのマンハッタン距離を先に比較し、同じ生成上限で画面に必要な入力を先に準備します。
+            int horizontalMargin = math.max(visibleBounds.MinimumX - bounds.MinimumX, bounds.MaximumX - visibleBounds.MaximumX);
+            int verticalMargin = math.max(visibleBounds.MinimumY - bounds.MinimumY, bounds.MaximumY - visibleBounds.MaximumY);
+            int maximumPriorityDistance = horizontalMargin + verticalMargin;
+            for (int priorityDistance = 0; priorityDistance <= maximumPriorityDistance && requestBudget > 0; priorityDistance++)
             {
-                if (ring == 0)
+                for (int ring = 0; ring <= maximumRing && requestBudget > 0; ring++)
                 {
-                    TryQueueChunk(
-                        layer,
-                        centerX,
-                        centerY,
-                        bounds,
-                        ref requestBudget,
-                        ref knownCoordinates,
-                        ref reactivatableRequests,
-                        ref commandBuffer);
-                    continue;
-                }
-
-                int left = centerX - ring;
-                int right = centerX + ring;
-                int bottom = centerY - ring;
-                int top = centerY + ring;
-
-                // 通常移動では斜め角より先に上下左右の隣接チャンクが画面へ入ります。
-                // 生成上限が小さいときも移動先の描画を間に合わせるため、各辺の中央を角より先に予約します。
-                TryQueueChunk(
-                    layer,
-                    left,
-                    centerY,
-                    bounds,
-                    ref requestBudget,
-                    ref knownCoordinates,
-                    ref reactivatableRequests,
-                    ref commandBuffer);
-                TryQueueChunk(
-                    layer,
-                    right,
-                    centerY,
-                    bounds,
-                    ref requestBudget,
-                    ref knownCoordinates,
-                    ref reactivatableRequests,
-                    ref commandBuffer);
-                TryQueueChunk(
-                    layer,
-                    centerX,
-                    bottom,
-                    bounds,
-                    ref requestBudget,
-                    ref knownCoordinates,
-                    ref reactivatableRequests,
-                    ref commandBuffer);
-                TryQueueChunk(
-                    layer,
-                    centerX,
-                    top,
-                    bounds,
-                    ref requestBudget,
-                    ref knownCoordinates,
-                    ref reactivatableRequests,
-                    ref commandBuffer);
-
-                // 残る上下の辺を左から右へ、続いて左右の辺を下から上へ処理します。
-                // 中央は上で予約済みなので飛ばし、同じ座標のHash検索も増やしません。
-                for (int x = left; x <= right && requestBudget > 0; x++)
-                {
-                    if (x == centerX)
+                    if (ring == 0)
                     {
+                        TryQueueChunk(
+                            layer,
+                            centerX,
+                            centerY,
+                            bounds,
+                            visibleBounds,
+                            priorityDistance,
+                            ref requestBudget,
+                            ref knownCoordinates,
+                            ref reactivatableRequests,
+                            ref commandBuffer);
                         continue;
                     }
 
-                    TryQueueChunk(
-                        layer,
-                        x,
-                        bottom,
-                        bounds,
-                        ref requestBudget,
-                        ref knownCoordinates,
-                        ref reactivatableRequests,
-                        ref commandBuffer);
-                    TryQueueChunk(
-                        layer,
-                        x,
-                        top,
-                        bounds,
-                        ref requestBudget,
-                        ref knownCoordinates,
-                        ref reactivatableRequests,
-                        ref commandBuffer);
-                }
+                    int left = centerX - ring;
+                    int right = centerX + ring;
+                    int bottom = centerY - ring;
+                    int top = centerY + ring;
 
-                for (int y = bottom + 1; y < top && requestBudget > 0; y++)
-                {
-                    if (y == centerY)
-                    {
-                        continue;
-                    }
-
+                    // 通常移動では斜め角より先に上下左右の隣接チャンクが画面へ入ります。
+                    // 生成上限が小さいときも移動先の描画を間に合わせるため、各辺の中央を角より先に予約します。
                     TryQueueChunk(
                         layer,
                         left,
-                        y,
+                        centerY,
                         bounds,
+                        visibleBounds,
+                        priorityDistance,
                         ref requestBudget,
                         ref knownCoordinates,
                         ref reactivatableRequests,
@@ -342,12 +283,100 @@ namespace Farmware.WorldGeneration
                     TryQueueChunk(
                         layer,
                         right,
-                        y,
+                        centerY,
                         bounds,
+                        visibleBounds,
+                        priorityDistance,
                         ref requestBudget,
                         ref knownCoordinates,
                         ref reactivatableRequests,
                         ref commandBuffer);
+                    TryQueueChunk(
+                        layer,
+                        centerX,
+                        bottom,
+                        bounds,
+                        visibleBounds,
+                        priorityDistance,
+                        ref requestBudget,
+                        ref knownCoordinates,
+                        ref reactivatableRequests,
+                        ref commandBuffer);
+                    TryQueueChunk(
+                        layer,
+                        centerX,
+                        top,
+                        bounds,
+                        visibleBounds,
+                        priorityDistance,
+                        ref requestBudget,
+                        ref knownCoordinates,
+                        ref reactivatableRequests,
+                        ref commandBuffer);
+
+                    // 残る上下の辺を左から右へ、続いて左右の辺を下から上へ処理します。
+                    // 中央は上で予約済みなので飛ばし、同じ座標のHash検索も増やしません。
+                    for (int x = left; x <= right && requestBudget > 0; x++)
+                    {
+                        if (x == centerX)
+                        {
+                            continue;
+                        }
+
+                        TryQueueChunk(
+                            layer,
+                            x,
+                            bottom,
+                            bounds,
+                            visibleBounds,
+                            priorityDistance,
+                            ref requestBudget,
+                            ref knownCoordinates,
+                            ref reactivatableRequests,
+                            ref commandBuffer);
+                        TryQueueChunk(
+                            layer,
+                            x,
+                            top,
+                            bounds,
+                            visibleBounds,
+                            priorityDistance,
+                            ref requestBudget,
+                            ref knownCoordinates,
+                            ref reactivatableRequests,
+                            ref commandBuffer);
+                    }
+
+                    for (int y = bottom + 1; y < top && requestBudget > 0; y++)
+                    {
+                        if (y == centerY)
+                        {
+                            continue;
+                        }
+
+                        TryQueueChunk(
+                            layer,
+                            left,
+                            y,
+                            bounds,
+                            visibleBounds,
+                            priorityDistance,
+                            ref requestBudget,
+                            ref knownCoordinates,
+                            ref reactivatableRequests,
+                            ref commandBuffer);
+                        TryQueueChunk(
+                            layer,
+                            right,
+                            y,
+                            bounds,
+                            visibleBounds,
+                            priorityDistance,
+                            ref requestBudget,
+                            ref knownCoordinates,
+                            ref reactivatableRequests,
+                            ref commandBuffer);
+                    }
                 }
             }
         }
@@ -359,6 +388,8 @@ namespace Farmware.WorldGeneration
         /// <param name="x">要求候補の水平論理チャンク座標です。</param>
         /// <param name="y">要求候補の垂直論理チャンク座標です。</param>
         /// <param name="bounds">候補を含めてよいプリロード矩形です。</param>
+        /// <param name="visibleBounds">画面に必要な入力への距離を求める矩形です。</param>
+        /// <param name="priorityDistance">今回受け付ける可視矩形からのマンハッタン距離です。単位はチャンクです。</param>
         /// <param name="requestBudget">成功時に1減らす今回の残り要求数です。</param>
         /// <param name="knownCoordinates">重複生成を防ぐ座標集合です。</param>
         /// <param name="reactivatableRequests">空Entityを再利用できる座標とEntityの対応表です。</param>
@@ -368,6 +399,8 @@ namespace Farmware.WorldGeneration
             int x,
             int y,
             ChunkBounds bounds,
+            ChunkBounds visibleBounds,
+            int priorityDistance,
             ref int requestBudget,
             ref NativeParallelHashSet<ChunkCoordinate> knownCoordinates,
             ref NativeParallelHashMap<ChunkCoordinate, Entity> reactivatableRequests,
@@ -379,7 +412,10 @@ namespace Farmware.WorldGeneration
             }
 
             ChunkCoordinate coordinate = new ChunkCoordinate(layer, x, y);
-            if (!bounds.Contains(coordinate))
+            // 矩形内は距離0、上下左右の先読みは1、対角の先読みは2となります。
+            int distanceX = math.max(0, math.max(visibleBounds.MinimumX - x, x - visibleBounds.MaximumX));
+            int distanceY = math.max(0, math.max(visibleBounds.MinimumY - y, y - visibleBounds.MaximumY));
+            if (distanceX + distanceY != priorityDistance || !bounds.Contains(coordinate))
             {
                 return;
             }

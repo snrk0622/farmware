@@ -39,6 +39,11 @@ namespace Farmware.WorldGeneration.PlayModeTests
         // セルの消失や混入を識別するテスト専用Tileです。Fixtureが所有し、終了時に破棄します。
         private Tile tile;
 
+        /// <summary>反映予算のテストだけが構築し、Presenterより後に破棄する地形分類Blobです。</summary>
+        private BlobAssetReference<TerrainBlockCatalogBlob> terrainCatalog;
+        /// <summary>地形分類Blobの参照先となる、同じテスト寿命の共通定義Blobです。</summary>
+        private BlobAssetReference<DefinitionCatalogBlob> definitionCatalog;
+
         /// <summary>
         /// 各テスト前に空の表示とCameraを作り、比較方式を有効にします。ECS WorldやSceneアセットは変更しません。
         /// </summary>
@@ -71,6 +76,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Object.DestroyImmediate(gridObject);
             Object.DestroyImmediate(cameraObject);
             Object.DestroyImmediate(tile);
+            if (terrainCatalog.IsCreated) terrainCatalog.Dispose();
+            if (definitionCatalog.IsCreated) definitionCatalog.Dispose();
         }
 
         /// <summary>新規Componentの保存前の既定値がONで、生成ツールからの新規追加も採用方式になることを保証します。</summary>
@@ -116,8 +123,9 @@ namespace Farmware.WorldGeneration.PlayModeTests
             // 別チャンクを3サブチャンク反映済みとして用意し、原点変更で先頭へ戻されないことを確認します。
             IDictionary progress = (IDictionary)Field("applyProgressByCoordinate").GetValue(presenter);
             Type progressType = typeof(ChunkTilemapPresenter).GetNestedType("ChunkApplyProgress", BindingFlags.NonPublic);
-            object partial = Activator.CreateInstance(progressType, new object[] { Entity.Null });
+            object partial = Activator.CreateInstance(progressType, new object[] { Entity.Null, 0UL });
             progressType.GetField("NextSubChunkIndex").SetValue(partial, 3);
+            progressType.GetField("AppliedSubChunkMask").SetValue(partial, (ushort)0x0007);
             ChunkCoordinate partialCoordinate = new ChunkCoordinate(chunkX + 1, chunkY);
             progress.Add(partialCoordinate, partial);
             Tilemap partialTilemap = GetTilemap(partialCoordinate, true);
@@ -131,6 +139,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(displayed.Contains(coordinate), Is.True);
             Assert.That(progress[partialCoordinate], Is.SameAs(partial));
             Assert.That(progressType.GetField("NextSubChunkIndex").GetValue(partial), Is.EqualTo(3));
+            Assert.That(progressType.GetField("AppliedSubChunkMask").GetValue(partial), Is.EqualTo((ushort)0x0007));
             Assert.That(GetTilemap(partialCoordinate, false), Is.SameAs(partialTilemap));
             Assert.That(((ICollection)Field("staleOriginClearQueue").GetValue(presenter)).Count, Is.Zero);
             Assert.That(gridObject.transform.position, Is.EqualTo(Vector3.zero));
@@ -387,7 +396,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
         }
 
         /// <summary>
-        /// 完成した画面外データを先に作り、可視優先・完成近傍が揃う範囲だけの予約・Inactive再利用・範囲外消去を保証します。
+        /// 完成した画面外データを先に作り、可視優先・中心が完成した範囲だけの予約・Inactive再利用・範囲外消去を保証します。
         /// 共有方式とローカル方式で同じ有限範囲を使い、Observer自身は変更しません。
         /// </summary>
         /// <param name="local">チャンク別Tilemapを使う場合はtrueです。</param>
@@ -442,8 +451,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Assert.That(pendingClear.Contains(new ChunkCoordinate(center - 1, center)), Is.True);
                 Assert.That(
                     progress.Contains(new ChunkCoordinate(center + 2, center)),
-                    Is.False,
-                    "右外周のさらに右隣が未ロードなら、確定前地形で補完せず先行表示を待つ必要があります。");
+                    Is.True,
+                    "右外周は中心の完成時点で予約し、各部分の必要近傍が揃うまでその部分だけを待機します。");
                 Assert.That(progress.Contains(new ChunkCoordinate(center + 3, center)), Is.False);
             }
             finally
@@ -466,7 +475,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
             {
                 World.DefaultGameObjectInjectionWorld = world;
                 EntityManager manager = world.EntityManager;
-                // 可視中心と外側1チャンクの各表示が完成3×3近傍を借用できるよう、保持範囲相当の5×5を用意します。
+                // 可視中心と外側1チャンクの各表示が完成近傍を借用できるよう、保持範囲相当の5×5を用意します。
                 for (int y = -2; y <= 2; y++)
                 {
                     for (int x = -2; x <= 2; x++)
@@ -481,6 +490,7 @@ namespace Farmware.WorldGeneration.PlayModeTests
                     }
                 }
                 Assert.That(Invoke("TryEnsureQueries"), Is.True);
+                ConfigureTerrainCatalog();
                 Invoke("SynchronizeDisplayOrigin");
                 ChunkStreamingObserver observer = new ChunkStreamingObserver
                 {
@@ -502,6 +512,16 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 presenter.enabled = false;
                 World.DefaultGameObjectInjectionWorld = previous;
             }
+        }
+
+        /// <summary>実反映が変更差分を解決できるよう、製品と同じBuilderで最小分類カタログを用意します。</summary>
+        private void ConfigureTerrainCatalog()
+        {
+            DefinitionBuildEntry[] entries = BuiltInTerrainBlockDefinitions.CreateCommonDefinitions(0, out DefinitionBuildReference[] references);
+            Assert.That(DefinitionCatalogBuilder.TryBuild(entries, references, out definitionCatalog, out _), Is.True);
+            Assert.That(BuiltInTerrainBlockDefinitions.TryCreateTerrainDefinitions(definitionCatalog, out TerrainBlockDefinitionBuildEntry[] terrain), Is.True);
+            Assert.That(TerrainBlockCatalogBuilder.TryBuild(definitionCatalog, terrain, out terrainCatalog), Is.True);
+            Field("terrainCatalogBlob").SetValue(presenter, terrainCatalog);
         }
 
         /// <summary>表示予約に必要なComponentと確定BufferをテストWorldへ作り、指定状態を設定します。</summary>
@@ -542,7 +562,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
         private bool WriteLayer(ChunkCoordinate coordinate, Tilemap layer, int index, TileBase[] tiles)
         {
             BoundsInt bounds = new BoundsInt(index % 4 * 16, index / 4 * 16, 0, 16, 16, 1);
-            return (bool)Invoke("WriteSubChunkLayer", coordinate, layer, bounds, tiles);
+            // 反射呼出しでは省略可能引数も明示し、現在の色データなし経路を選びます。
+            return (bool)Invoke("WriteSubChunkLayer", coordinate, layer, bounds, tiles, null);
         }
 
         /// <summary>

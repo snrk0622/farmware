@@ -283,6 +283,18 @@ C3-C1の水文生成は、8水文行と地形・資源を9つの`IJobParallelFor
 
 Runtimeと同じ資源予約を生成して候補から除外するEditorのAnalyzerを、負座標を含む2組のSeed・18地域で2回実行し、適格タイル・目標数・生成候補が存在すること、群れ契約違反と位置重複が0件であること、署名と集計値が一致することを保証する。約100万タイルの既定監査は通常テストへ含めず、`Farmware > World Generation > Analysis > Analyze Animal Population`から明示実行する。
 
+#### `WorldGenerationMapChunkCacheTests`
+
+Editor専用の上限付き完成自然地形キャッシュを7件で検証する。5種類の出力配列を元Native配列から値コピーし、元の破棄・復元先の編集・復元先の破棄が次の要求へ影響しないこと、Seed・GeneratorVersion・海面閾値それぞれの変更で失効すること、同じX/Yの別Layerを混ぜないこと、最大32チャンクを超えた古い値を除去し、今回必要な最古の値は不足分追加の前に保護することを保証する。生成器の速度やメモリの合格値をテストへ持ち込まず、規定長のテスト所有配列だけを使う。
+
+`WorldGenerationMapViewerTests.Sample_TerrainDeltaSnapshotChangesFinalizedTerrainAndColor`は同じ自然地形キャッシュを3要求で共有し、自然地形、編集差分あり、差分なしへ戻した場合の色・Hover・差分件数を検証する。キャッシュへ編集結果を混ぜないことを統合経路で保証する。通常表示とMap Viewerの遅延計測・残件は[地形表示の遅延調査](./Terrain01C6D5PerformanceReport.md)を参照する。
+
+2026-10-28、Unity 6000.3.8f1で新規キャッシュ6件が0.68秒、更新したMap Viewer関連65件が128.14秒ですべて成功した。再コンパイル成功、最終Console実状態のエラー0・警告0、Play停止・Scene未変更・背景実行falseを確認した。この時点はキャッシュだけの変更の確認である。続く部分表示と初回Job生成の検証は下記および遅延調査記録を参照する。実画面の人間確認とDevelopment Buildの性能評価は残す。
+
+#### `WorldGenerationMapChunkGeneratorTests`
+
+未訪問地形の専用Editor World生成を4件で検証する。製品Burst Jobの5出力配列が従来の同期診断と全要素一致し、Default Worldを置換せず終了後のWorld数も不変であることを確認する。投入直後の取消では実行中Jobの終了を待って破棄し、後続チャンクとキャッシュ公開を行わないこと、事前生成必須のSamplerが不足データを同期生成しないこと、32件超の要求をWorld確保前に拒否することを保証する。Unity 6000.3.8f1で4件が14.22秒で成功した。容量境界の回帰追加後、生成4件とキャッシュ7件の合計11件も14.36秒ですべて成功した。専用WorldのJob明示送出を追加した後にも生成4件が19.71秒で再成功した。
+
 #### `WorldGenerationMapViewerTests`
 
 WORLD-01Cでは、UnderwaterがLayer付きの未生成結果となり、Surface Generatorを複製せず固定の未接続色を返すことと、UXMLにLayer選択欄が存在することを検証する。
@@ -350,13 +362,25 @@ C6-D4の製品Wall影を、41材質と製品Sceneを接続する前に純粋形�
 
 Runtime表示テストは、同じDirtyサブチャンクを再反映してもCaster GameObjectを増やさず、既存Casterの位置と長さを更新し、論理Wallセルと最下段Face根元が同じ座標になることを確認する。PlayModeでは、プールから戻ったRootを先に有効化し、`ShadowCaster2D`を有効なHierarchy内で初期化してから非表示へ戻すことで、初回区間生成時に内部輪郭未初期化のNullReferenceを出さないこともSampleScene縦切りで確認する。Assetテストは製品用固定接地影と折れ目影Materialが製品Shaderを参照し、Shaderエラーがなく、開始行0／16 pxと採用Alphaを保持することを確認する。C6-D6では製品SceneへWall上面・前面・折れ目影の+2Y、固定影の+2Yから手前3 px、動的Casterの根元座標、Sorting Order、全41材質、Atlasを接続し、比較Sceneの仮`Light 2D`と検品用生成Assetを削除した。正式な環境光・局所光はTIME-01Bで接続する。
 
+#### `TerrainSubChunkDependencyTests`
+
+必要近傍Maskと実Presenterの部分反映を10件で検証する。中心だけなら内部4部分を表示できること、必要な辺だけを待つこと、正負ワールド端で域外を要求しないこと、不正な部分Indexを拒否することを確認する。実Tilemapへ内部だけが描かれ、近傍到着時に進捗を捨てず残りを反映すること、待機先頭が後続を止めないこと、使用済みEntity置換で進捗を失効させることを保証する。部分影は完成入力のある三角形だけを公開し、その頂点Alphaが全体完成時と一致すること、途中Meshを完成済みの原点変更再利用候補に残さないことも検証する。10件が0.32秒で成功し、関連Terrain全288件も48.09秒で成功した（包含関係のある実行であり件数は合算しない）。
+
+生成Systemのパレット寿命回帰`WorldGenerationTests.ChunkGenerationSystem_KeepsPaletteAliveAfterSourceDisposal`は、Job投入直後に元カタログを解放してから完成を待つ。同じ値の再読込では所有Blobを再利用し、重みを変更した入力では新しい値を保持することを3回の投入で保証する。生成System関連10件が12.54秒で成功した。これは部分表示で完了が早まった後のScene連続読込から検出した寿命問題への回帰である。修正後のPlayMode Assembly全56件も128.98秒で成功し、連続Scene読込、正負の原点変更、アンロード再訪、共有／チャンク別表示を含む回帰を確認した。さらに可視辺を角より先に生成する回帰を東西南北4条件で追加し、`ChunkStreamingSystem`関連15件が5.62秒で成功した。優先順位変更後もPlayMode Assembly全56件が132.46秒で再成功した。`WorldGenerationTests`全61件もEditorログでは全成功したが、同期CLI応答は30秒で期限を超えて結果本文を受け取れなかったため、実行時間は記録しない。
+
 #### C6-D5 有効地形・診断・境界回帰
 
-Gameビューの通常表示、開発者可視化、岩壁影、Map Viewerが、完成自然地形と`TerrainCellDelta`を合成した同じ有効地形を読むことを保証する。中心と周囲8チャンクの自然地形Bufferに、同じ所有チャンクの疎な差分Bufferを重ね、負座標とチャンク境界でも同じ絶対セルへ解決する。表示Fingerprintは中心・周囲8チャンクと直下層の自然地形・差分を含み、差分変更、アンロード、Entity再利用、World切替後に古いサブチャンクを残さない。製品Presenterは旧260要素Haloと`TerrainNeighborHaloBuild` Markerを保持せず、必要な近傍が未完成なら自然生成へフォールバックせず反映を待つ。
+Gameビューの通常表示、開発者可視化、岩壁影、Map Viewerが、完成自然地形と`TerrainCellDelta`を合成した同じ有効地形を読むことを保証する。中心と周囲8チャンクの自然地形Bufferに、同じ所有チャンクの疎な差分Bufferを重ね、負座標とチャンク境界でも同じ絶対セルへ解決する。表示Fingerprintは中心・周囲8チャンクと直下層の自然地形・差分を含み、差分変更、アンロード、Entity再利用、World切替後に古いサブチャンクを残さない。製品Presenterは旧260要素Haloと`TerrainNeighborHaloBuild` Markerを保持せず、必要な近傍が未完成なら自然生成へフォールバックせず、その入力を読む部分だけ反映を待つ。
 
 Map Viewerの`Terrain`は同じ生成設定の実行中Worldがある場合だけ、メインスレッドで取得した不変の差分Snapshotをバックグラウンド生成へ渡す。表示色はLiquidを優先し、Ground／WallはRuntime IDから41材質の安定IDへ解決して、Wallだけ同色相を暗くする。Hover、凡例、取得元、実際に適用した差分サンプル数を同じ結果へ固定する。設定不一致またはEditModeでは自然生成であることを明示し、実行中の現在地形と誤表示しない。41材質凡例では長い名前を行内で折り返し、14pxの色見本を横方向にも縮小しないことを最小Window幅で確認する。
 
 2026-10-27のC6-D5 AI確認では、Unity 6000.3.8f1 Editorの再コンパイルが警告0件・エラー0件、旧Halo削除前の有効地形近傍13件と、Map Viewerの負座標差分Snapshot、安定材質色、完成地形全画素一致、有効地形・色の統合回帰がすべて成功した。その後、製品から到達不能になった旧260要素Halo APIと旧挙動だけのテストを削除し、現行`CompletedChunkTerrainNeighborhoodTests` 3件と正負ワールド端2件もすべて再成功した。PlayModeでは、旧Presenter Haloを持たないこと、同一論理チャンクの自動原点変更で岩壁影を再利用すること、チャンク境界の連続影、自動原点変更の往復・負座標横断の4回帰が成功した。最後の回帰は、任意の差分配列を既定値のままUnity Jobへ渡せない安全性エラーを初回に検出したため、岩壁影マスクを完了済みBufferだけ読む同期ループへ修正して再成功した。自然地形Entity世代のFingerprint追加と近傍コンストラクタ整理後にも、`CompletedChunkTerrainNeighborhoodTests` 3件を0.020秒、往復・負座標横断PlayMode回帰1件を56.675秒で再実行し、どちらも成功した。Gameビュー、Map Viewer、F4、負座標、Floating Origin、アンロード・再利用の実表示一致と、ProfilerでのCPU時間・GC Alloc確認は人間確認へ残す。
+
+#### 地形表示のDevelopment Player局所計測
+
+2026-10-28、元プロジェクトを変更しない一時コピーで、現在実装と`b05e817f`の通常12／高速36タイル毎秒を比較した。各ケースは初期周辺16チャンク完成後に5秒静止・30秒移動・20秒静止し、macOS Universal／Mono Development、M3／24GiB、Metal、1920×1080、基準30×16.875タイル、先読み1・同時生成2・表示予算4を共通とした。専用引数だけで有効になる一時Componentを使い、ECS・Presenterの未反映Mask、ProfilerRecorderのCPU／GC／メモリ、重複timestampを除くFrameTimingManagerのGPU、OS RSSを記録した。行配列を事前確保し、観測ループ自身のmanaged allocationは全ケース0 byteだった。元Sceneや製品設定を変更せず、終了後は専用コピー内のC#・metaも削除した。
+
+通常は比較元594/1,792フレームで未反映、現在版0/1,792、追加実行も0/1,794だった。高速の現在版は937/1,788フレームで未反映を検出し、停止後1.607秒で収束した（比較元7.235秒）。表示CPUとGC・表示メモリの増加、単発フレーム間隔66.269msと追加確認の35.573ms、既知の終了時ComputeBuffer警告も隠さず記録する。両ビルド成功、計5 Playerの区間中エラー・警告0、終了コード0を確認した。正式なFPS・全機器・最大Viewportの合格判定とは分離し、条件・全数値・制約・成果物は[遅延調査記録](./Terrain01C6D5PerformanceReport.md)を参照する。今回追加したのは計測と文書であり、製品C#・Scene・Assetは前回の確認時点から変更していないため、自動回帰全体の再実行は行っていない。
 
 #### `TerrainLiquidPresentationUtilityTests`
 

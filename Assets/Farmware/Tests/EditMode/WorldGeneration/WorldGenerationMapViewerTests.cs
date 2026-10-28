@@ -211,7 +211,7 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 1代表タイルを自然生成した後、そのセルの最前面区画を明示除去するSnapshotで再生成します。
+        /// 1代表タイルの自然生成をキャッシュし、そのセルの最前面区画を明示除去する最新Snapshotで再表示します。
         /// Snapshot検索だけでなく、Map Viewer本体が差分適用済みHover値・色・適用件数を返すことを保証します。
         /// </summary>
         [Test]
@@ -227,18 +227,22 @@ namespace Farmware.WorldGeneration.Tests
             using HydrologyDiagnosticTerrainCatalogs diagnosticCatalogs =
                 createdDiagnosticCatalogs;
 
+            // 同じ自然地形を再利用した場合も、今回の編集差分だけが色とHoverへ反映されることを検証します。
+            var reuseCache = new WorldGenerationMapChunkCache();
             const int worldTileX = -65;
             const int worldTileY = 130;
             WorldGenerationMapSampleResult natural = WorldGenerationMapSampler.Sample(
                 settings,
                 diagnosticCatalogs,
+                WorldLayer.Surface,
                 worldTileX,
                 worldTileY,
                 1,
                 1,
                 1,
                 WorldGenerationMapViewMode.Terrain,
-                CancellationToken.None);
+                CancellationToken.None,
+                completedChunkReuseCache: reuseCache);
             Assert.That(
                 natural.TryGetFinalizedTerrainSample(
                     worldTileX,
@@ -295,7 +299,8 @@ namespace Farmware.WorldGeneration.Tests
                 1,
                 WorldGenerationMapViewMode.Terrain,
                 CancellationToken.None,
-                terrainDeltaSnapshot: snapshot);
+                terrainDeltaSnapshot: snapshot,
+                completedChunkReuseCache: reuseCache);
             Assert.That(
                 effective.TryGetFinalizedTerrainSample(
                     worldTileX,
@@ -319,6 +324,14 @@ namespace Farmware.WorldGeneration.Tests
                 Assert.That(effectiveSample.TerrainCell.GroundBlockRuntimeId.IsValid, Is.False);
                 Assert.That(effectiveSample.GroundMaterialId, Is.EqualTo(TerrainBlockMaterialId.None));
             }
+            // 編集差分を外した要求では、キャッシュ由来でも自然地形の色へ戻ることを確認します。
+            Assert.That(reuseCache.Count, Is.EqualTo(1));
+            WorldGenerationMapSampleResult restoredNatural = WorldGenerationMapSampler.Sample(
+                settings, diagnosticCatalogs, WorldLayer.Surface, worldTileX, worldTileY,
+                1, 1, 1, WorldGenerationMapViewMode.Terrain, CancellationToken.None,
+                completedChunkReuseCache: reuseCache);
+            Assert.That(restoredNatural.PixelColors[0], Is.EqualTo(natural.PixelColors[0]));
+            Assert.That(restoredNatural.AppliedTerrainDeltaSampleCount, Is.Zero);
         }
 
         /// <summary>材質疑似色が安定IDを区別し、同じ材質のWallだけを暗く表示することを保証します。</summary>

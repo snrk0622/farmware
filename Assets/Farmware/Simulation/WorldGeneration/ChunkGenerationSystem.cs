@@ -77,6 +77,9 @@ namespace Farmware.WorldGeneration
         // List自体はJobへ渡さず、選んだ枠の配列だけを依存関係で結んだ生成Job群へ貸します。
         private NativeList<GenerationSlot> slots;
 
+        /// <summary>SceneのBlob解放から生成Jobを独立させる固定パレットの所有コピーです。同じ内容ならSystem寿命中に再利用します。</summary>
+        private BlobAssetReference<TerrainBlockPaletteCatalogBlob> ownedPaletteCatalog;
+
         /// <summary>
         /// System作成時に要求Queryと再利用枠の一覧を確保し、生成設定がそろうまで更新を待つ条件を登録します。
         /// </summary>
@@ -365,6 +368,8 @@ namespace Farmware.WorldGeneration
             // Systemだけが先に破棄されるテストWorldでも、存在しない生成Jobを理由に固定Tickを止め続けません。
             RefreshFixedTickReadiness(state.EntityManager, false, false);
             slots.Dispose();
+            // 全枠のHandleを完了した後だけ、Jobが参照していた自分のBlobを解放します。
+            if (ownedPaletteCatalog.IsCreated) ownedPaletteCatalog.Dispose();
         }
 
         /// <summary>完成した作業枠だけを読み、存続する要求Entityへ6種類の固定生成Bufferをまとめて公開します。</summary>
@@ -445,6 +450,75 @@ namespace Farmware.WorldGeneration
             }
         }
 
+        /// <summary>Scene側が先にアンロードされてもJob入力が生存するよう、同じ内容をSystem所有Blobへコピーします。</summary>
+        /// <param name="source">呼出し中は有効な固定パレットです。未設定値は既存の生成失敗判定へそのまま渡します。</param>
+        /// <param name="snapshot">Job完了までSystemが所有する読み取り専用コピーです。</param>
+        /// <returns>コピーを取得できればtrueです。別内容への切替中で旧Jobが残る場合だけ投入を延期します。</returns>
+        private bool TryGetOwnedPalette(BlobAssetReference<TerrainBlockPaletteCatalogBlob> source,
+            out BlobAssetReference<TerrainBlockPaletteCatalogBlob> snapshot)
+        {
+            snapshot = source;
+            if (!source.IsCreated) return true;
+            if (ownedPaletteCatalog.IsCreated && PaletteContentsMatch(source, ownedPaletteCatalog))
+            {
+                snapshot = ownedPaletteCatalog;
+                return true;
+            }
+            // 異なる入力へ切り替える場合も未完成JobをCompleteで待たず、旧コピーを使い終えるまで次回へ延期します。
+            for (int index = 0; index < slots.Length; index++)
+                if (slots[index].Running) return false;
+            if (ownedPaletteCatalog.IsCreated) ownedPaletteCatalog.Dispose();
+            ownedPaletteCatalog = default;
+            using var builder = new BlobBuilder(Allocator.Temp);
+            ref TerrainBlockPaletteCatalogBlob input = ref source.Value;
+            ref TerrainBlockPaletteCatalogBlob root = ref builder.ConstructRoot<TerrainBlockPaletteCatalogBlob>();
+            // BlobArrayは相対ポインタを持つため構造体だけを複写せず、3配列の要素まで新しいBlob内へコピーします。
+            var biomes = builder.Allocate(ref root.BiomeSurfacePalettes, input.BiomeSurfacePalettes.Length);
+            for (int index = 0; index < biomes.Length; index++) biomes[index] = input.BiomeSurfacePalettes[index];
+            var geologies = builder.Allocate(ref root.GeologyPalettes, input.GeologyPalettes.Length);
+            for (int index = 0; index < geologies.Length; index++) geologies[index] = input.GeologyPalettes[index];
+            var entries = builder.Allocate(ref root.Entries, input.Entries.Length);
+            for (int index = 0; index < entries.Length; index++) entries[index] = input.Entries[index];
+            ownedPaletteCatalog = builder.CreateBlobAssetReference<TerrainBlockPaletteCatalogBlob>(Allocator.Persistent);
+            snapshot = ownedPaletteCatalog;
+            return true;
+        }
+
+        /// <summary>登録元のアドレス再利用やハッシュ衝突へ依存せず、全固定値を比較して所有コピーを再利用します。</summary>
+        /// <param name="first">今回のScene入力です。</param>
+        /// <param name="second">Systemが所有する現在値です。</param>
+        /// <returns>全3配列の長さ・範囲・ID・重みが一致する場合だけtrueです。</returns>
+        private static bool PaletteContentsMatch(BlobAssetReference<TerrainBlockPaletteCatalogBlob> first,
+            BlobAssetReference<TerrainBlockPaletteCatalogBlob> second)
+        {
+            ref TerrainBlockPaletteCatalogBlob a = ref first.Value;
+            ref TerrainBlockPaletteCatalogBlob b = ref second.Value;
+            if (a.BiomeSurfacePalettes.Length != b.BiomeSurfacePalettes.Length
+                || a.GeologyPalettes.Length != b.GeologyPalettes.Length || a.Entries.Length != b.Entries.Length) return false;
+            for (int index = 0; index < a.BiomeSurfacePalettes.Length; index++)
+            {
+                var x = a.BiomeSurfacePalettes[index];
+                var y = b.BiomeSurfacePalettes[index];
+                if (x.BiomeId != y.BiomeId || x.SurfaceGround.StartIndex != y.SurfaceGround.StartIndex
+                    || x.SurfaceGround.Count != y.SurfaceGround.Count) return false;
+            }
+            for (int index = 0; index < a.GeologyPalettes.Length; index++)
+            {
+                var x = a.GeologyPalettes[index];
+                var y = b.GeologyPalettes[index];
+                if (x.GeologyClass != y.GeologyClass || x.ExposedGround.StartIndex != y.ExposedGround.StartIndex
+                    || x.ExposedGround.Count != y.ExposedGround.Count || x.NaturalWall.StartIndex != y.NaturalWall.StartIndex
+                    || x.NaturalWall.Count != y.NaturalWall.Count) return false;
+            }
+            for (int index = 0; index < a.Entries.Length; index++)
+            {
+                var x = a.Entries[index];
+                var y = b.Entries[index];
+                if (x.MaterialId != y.MaterialId || x.BlockRuntimeId.Value != y.BlockRuntimeId.Value || x.Weight != y.Weight) return false;
+            }
+            return true;
+        }
+
         /// <summary>実行中枠数を上限内に保ち、Queued要求だけを専用配列のJobへ渡します。</summary>
         /// <param name="manager">要求と生成状態を所有する同じWorldです。</param>
         /// <param name="settings">値コピーしてJobへ渡す地形設定です。</param>
@@ -491,6 +565,7 @@ namespace Farmware.WorldGeneration
                 }
             }
             ordered.AsArray().Sort();
+            if (ordered.Length == 0 || !TryGetOwnedPalette(paletteCatalog, out paletteCatalog)) return false;
             bool scheduled = false;
             for (int index = 0; index < ordered.Length && running < limit; index++)
             {

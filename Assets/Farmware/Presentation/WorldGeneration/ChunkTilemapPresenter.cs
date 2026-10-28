@@ -470,6 +470,9 @@ namespace Farmware.WorldGeneration.Presentation
         // 露出したWall上の資源だけを、製品では論理根元から2タイル上の上面へ描画する256要素の再利用配列です。
         private TileBase[] rockWallResourceSubChunkTileBuffer;
 
+        /// <summary>部分公開する岩壁影の三角形Indexを再利用する配列です。容量は1チャンク分です。</summary>
+        private readonly List<int> rockWallShadowVisibleTriangles = new List<int>(WorldGridConstants.TilesPerChunk * 6);
+
         // 表示済みチャンクへ重ねた影GameObjectとMeshを座標別に保持し、アンロード時に同じ単位で破棄します。
         private readonly Dictionary<ChunkCoordinate, RockWallShadowChunkPresentation>
             rockWallShadowByCoordinate =
@@ -1717,7 +1720,7 @@ namespace Farmware.WorldGeneration.Presentation
             CacheTerrainDeltaOwners(entityManager);
 
             // 可視チャンクを予約する前に、近傍参照へ使える完成Bufferを全ロード範囲から座標索引化します。
-            // 周囲8チャンクがまだ生成中なら中心の表示を待ち、確定前の単一タイル生成へ戻りません。
+            // 各部分が読む近傍を完成済み在庫Maskで判定し、確定前の単一タイル生成へ戻りません。
             for (int index = 0; index < entities.Length; index++)
             {
                 ChunkGenerationStatus status = statuses[index];
@@ -1771,16 +1774,11 @@ namespace Farmware.WorldGeneration.Presentation
                         || status.Phase == ChunkGenerationPhase.Active
                         || status.Phase == ChunkGenerationPhase.Inactive;
 
-                    bool hasCompleteNeighborhood = isInsidePreparation
-                        && hasCompleteData
-                        && CompletedChunkTerrainNeighborhoodFactory.TryCreateEffective(
-                            entityManager,
-                            completedChunkEntities,
-                            terrainDeltaOwnerEntities,
-                            coordinate,
-                            terrainCatalogBlob,
-                            out _);
-                    if (hasCompleteNeighborhood)
+                    // 中心が完成した時点で予約し、各サブチャンクの必要近傍は反映時に検証します。
+                    // 反対側の未完成チャンクのために、入力が揃った範囲まで待たせません。
+                    bool hasCompleteCenter = isInsidePreparation && hasCompleteData
+                        && completedChunkEntities.ContainsKey(coordinate);
+                    if (hasCompleteCenter)
                     {
                         ulong terrainFingerprint = CalculatePresentationTerrainFingerprint(coordinate);
                         if (displayedTerrainFingerprints.TryGetValue(
@@ -1792,7 +1790,7 @@ namespace Farmware.WorldGeneration.Presentation
                             CancelApplyAndScheduleClearIfNeeded(coordinate);
                         }
 
-                        ScheduleApply(coordinate, entities[index], terrainFingerprint);
+                        ScheduleApply(coordinate, entities[index], CalculatePendingTerrainFingerprint(coordinate));
                     }
                     else
                     {
@@ -1896,6 +1894,55 @@ namespace Farmware.WorldGeneration.Presentation
             }
 
             return hash;
+        }
+
+        /// <summary>部分表示の更新境界を、中心Entity・全疎差分・直下層から計算します。隣接の新規到着だけでは進捗を捨てません。</summary>
+        /// <param name="center">表示中の論理チャンクです。</param>
+        /// <returns>中心寿命・地形編集・直下層変更を検知する指紋です。</returns>
+        private ulong CalculatePendingTerrainFingerprint(ChunkCoordinate center)
+        {
+            const ulong prime = 1099511628211UL;
+            Entity entity = completedChunkEntities[center];
+            ulong hash = ((ulong)(uint)entity.Index << 32) | (uint)entity.Version;
+            hash = AppendNeighborhoodDeltaFingerprints(hash, center, prime);
+            if (TryGetLowerLayer(center.Layer, out WorldLayer lowerLayer))
+            {
+                var lower = new ChunkCoordinate(lowerLayer, center.X, center.Y);
+                hash = AppendNeighborhoodTerrainEntityFingerprints(hash, lower, prime);
+                hash = AppendNeighborhoodDeltaFingerprints(hash, lower, prime);
+            }
+            return hash;
+        }
+
+        /// <summary>部分表示が実際に使った近傍Entityだけを照合し、削除・再利用されたデータを混ぜないようにします。</summary>
+        /// <param name="coordinate">部分反映中の中心です。</param>
+        /// <param name="progress">過去に参照した近傍の寿命を保持する進捗です。</param>
+        /// <returns>使用済み入力のEntity寿命が同じ場合はtrueです。未使用近傍の新規到着は無視します。</returns>
+        private bool UsedNeighborhoodIsCurrent(ChunkCoordinate coordinate, ChunkApplyProgress progress)
+        {
+            for (int index = 0; index < 9; index++)
+            {
+                if ((progress.UsedChunkMask & (1 << index)) == 0) continue;
+                var neighbor = new ChunkCoordinate(coordinate.Layer, coordinate.X + index % 3 - 1, coordinate.Y + index / 3 - 1);
+                if (!completedChunkEntities.TryGetValue(neighbor, out Entity entity) || entity != progress.UsedEntities[index]) return false;
+            }
+            return true;
+        }
+
+        /// <summary>反映した部分が参照した完成近傍のEntity寿命を保存します。Entityは所有しません。</summary>
+        /// <param name="coordinate">中心チャンクです。</param>
+        /// <param name="progress">部分反映進捗です。</param>
+        /// <param name="subChunkIndex">今回反映した番号です。</param>
+        private void RememberUsedNeighborhood(ChunkCoordinate coordinate, ChunkApplyProgress progress, int subChunkIndex)
+        {
+            ushort required = TerrainSubChunkDependencyUtility.GetRequiredChunkMask(coordinate, subChunkIndex);
+            for (int index = 0; index < 9; index++)
+            {
+                if ((required & (1 << index)) == 0) continue;
+                var neighbor = new ChunkCoordinate(coordinate.Layer, coordinate.X + index % 3 - 1, coordinate.Y + index / 3 - 1);
+                progress.UsedEntities[index] = completedChunkEntities[neighbor];
+            }
+            progress.UsedChunkMask |= required;
         }
 
         /// <summary>
@@ -2006,7 +2053,7 @@ namespace Farmware.WorldGeneration.Presentation
 
             if (applyProgressByCoordinate.TryGetValue(coordinate, out ChunkApplyProgress progress))
             {
-                if (progress.TerrainFingerprint != terrainFingerprint)
+                if (progress.TerrainFingerprint != terrainFingerprint || !UsedNeighborhoodIsCurrent(coordinate, progress))
                 {
                     // 部分反映中に差分が変わった場合は、新旧サブチャンクを混在させず先頭からやり直します。
                     CancelApplyAndScheduleClearIfNeeded(coordinate);
@@ -2078,99 +2125,56 @@ namespace Farmware.WorldGeneration.Presentation
         private int ProcessApplyQueue(int remainingBudget)
         {
             EntityManager entityManager = presentationWorld.EntityManager;
-            // 同一呼び出し内の連続サブチャンクだけで有効地形近傍を共有し、次フレームは完成Bufferを借り直します。
-            ChunkApplyProgress preparedProgress = null;
-            CompletedChunkTerrainNeighborhood preparedNeighborhood = default;
-            CompletedChunkTerrainNeighborhood preparedLowerNeighborhood = default;
-            bool preparedHasLowerNeighborhood = false;
-            while (remainingBudget > 0 && applyQueue.Count > 0)
+            // 各座標を1回ずつ調べ、未完成近傍を待つ先頭のために後続の可視部分まで止めないようにします。
+            int coordinatesToVisit = applyQueue.Count;
+            while (remainingBudget > 0 && coordinatesToVisit-- > 0 && applyQueue.Count > 0)
             {
-                ChunkCoordinate coordinate = applyQueue.Peek();
-                if (!applyProgressByCoordinate.TryGetValue(coordinate, out ChunkApplyProgress progress))
-                {
-                    // Queueには残っていても画面外移動でDictionaryから除かれた項目は、安全に読み飛ばします。
-                    applyQueue.Dequeue();
-                    continue;
-                }
-
+                ChunkCoordinate coordinate = applyQueue.Dequeue();
+                if (!applyProgressByCoordinate.TryGetValue(coordinate, out ChunkApplyProgress progress)) continue;
                 if (!entityManager.Exists(progress.Entity)
                     || !entityManager.HasBuffer<GeneratedTerrainCell>(progress.Entity)
                     || !entityManager.HasBuffer<GeneratedResourceTile>(progress.Entity))
                 {
                     CancelApplyAndScheduleClearIfNeeded(coordinate);
-                    applyQueue.Dequeue();
                     continue;
                 }
-
-                DynamicBuffer<GeneratedTerrainCell> terrainCells =
-                    entityManager.GetBuffer<GeneratedTerrainCell>(progress.Entity, true);
-                DynamicBuffer<GeneratedResourceTile> resources =
-                    entityManager.GetBuffer<GeneratedResourceTile>(progress.Entity, true);
-                if (terrainCells.Length != WorldGridConstants.TilesPerChunk
-                    || resources.Length != WorldGridConstants.TilesPerChunk)
+                DynamicBuffer<GeneratedResourceTile> resources = entityManager.GetBuffer<GeneratedResourceTile>(progress.Entity, true);
+                if (resources.Length != WorldGridConstants.TilesPerChunk
+                    || !CompletedChunkTerrainNeighborhoodFactory.TryCreateEffectiveAvailable(entityManager,
+                        completedChunkEntities, terrainDeltaOwnerEntities, coordinate, terrainCatalogBlob, out CompletedChunkTerrainNeighborhood neighborhood))
                 {
-                    // Job完了前または不正バッファは描画せず、次フレームに再確認します。
-                    return remainingBudget;
+                    applyQueue.Enqueue(coordinate);
+                    continue;
                 }
-
-                if (preparedProgress != progress)
+                ushort readyMask = TerrainSubChunkDependencyUtility.GetReadySubChunkMask(coordinate, neighborhood.AvailableChunkMask);
+                CompletedChunkTerrainNeighborhood lowerNeighborhood = default;
+                bool hasLower = TryGetLowerLayer(coordinate.Layer, out WorldLayer lowerLayer)
+                    && CompletedChunkTerrainNeighborhoodFactory.TryCreateEffective(entityManager, completedChunkEntities,
+                        terrainDeltaOwnerEntities, new ChunkCoordinate(lowerLayer, coordinate.X, coordinate.Y), terrainCatalogBlob, out lowerNeighborhood);
+                bool appliedAny = false;
+                for (int index = 0; index < WorldGridConstants.SubChunksPerChunk && remainingBudget > 0; index++)
                 {
-                    if (!CompletedChunkTerrainNeighborhoodFactory.TryCreateEffective(
-                            entityManager,
-                            completedChunkEntities,
-                            terrainDeltaOwnerEntities,
-                            coordinate,
-                            terrainCatalogBlob,
-                            out preparedNeighborhood))
-                    {
-                        // Streaming更新との間で隣接Entityが消えた場合は、古い近傍を使わず次回の収集まで待ちます。
-                        return remainingBudget;
-                    }
-
-                    preparedHasLowerNeighborhood = false;
-                    if (TryGetLowerLayer(coordinate.Layer, out WorldLayer lowerLayer))
-                    {
-                        var lowerCoordinate = new ChunkCoordinate(
-                            lowerLayer,
-                            coordinate.X,
-                            coordinate.Y);
-                        preparedHasLowerNeighborhood =
-                            CompletedChunkTerrainNeighborhoodFactory.TryCreateEffective(
-                                entityManager,
-                                completedChunkEntities,
-                                terrainDeltaOwnerEntities,
-                                lowerCoordinate,
-                                terrainCatalogBlob,
-                                out preparedLowerNeighborhood);
-                    }
-
-                    preparedProgress = progress;
+                    int bit = 1 << index;
+                    if ((readyMask & bit) == 0 || (progress.AppliedSubChunkMask & bit) != 0) continue;
+                    // 必要な入力が全て揃った範囲だけを、既存の分類・Tilemap・反射・影更新へ渡します。
+                    ApplySubChunk(coordinate, index, resources, neighborhood, hasLower, lowerNeighborhood);
+                    RememberUsedNeighborhood(coordinate, progress, index);
+                    progress.AppliedSubChunkMask |= (ushort)bit;
+                    progress.NextSubChunkIndex++;
+                    remainingBudget--;
+                    appliedAny = true;
                 }
-
-                ApplySubChunk(
-                    coordinate,
-                    progress.NextSubChunkIndex,
-                    resources,
-                    preparedNeighborhood,
-                    preparedHasLowerNeighborhood,
-                    preparedLowerNeighborhood);
-                progress.NextSubChunkIndex++;
-                remainingBudget--;
-
-                if (progress.NextSubChunkIndex >= WorldGridConstants.SubChunksPerChunk)
+                bool complete = progress.AppliedSubChunkMask == ushort.MaxValue;
+                if (appliedAny && (!complete || !TryReuseRockWallShadowAfterAutomaticRebase(coordinate)))
                 {
-                    // 自動原点変更では同じ論理チャンクの既存Meshを使い、地形が新規または変化した通常反映だけ再構築します。
-                    // 全4096タイルがそろった時点で1チャンク1Meshを作り、サブチャンクごとのGameObject生成を避けます。
-                    if (!TryReuseRockWallShadowAfterAutomaticRebase(coordinate))
-                    {
-                        BuildRockWallShadowMesh(coordinate, preparedNeighborhood);
-                    }
-
+                    // 影も同じ完成部分の三角形だけを公開し、未完成範囲の仮地形を画面へ混ぜません。
+                    BuildRockWallShadowMeshForSubChunks(coordinate, neighborhood, progress.AppliedSubChunkMask);
+                }
+                if (complete)
+                {
                     applyProgressByCoordinate.Remove(coordinate);
-                    applyQueue.Dequeue();
                     displayedCoordinates.Add(coordinate);
-                    displayedTerrainFingerprints[coordinate] = progress.TerrainFingerprint;
-
+                    displayedTerrainFingerprints[coordinate] = CalculatePresentationTerrainFingerprint(coordinate);
                     ChunkGenerationStatus status = entityManager.GetComponentData<ChunkGenerationStatus>(progress.Entity);
                     if (status.Phase == ChunkGenerationPhase.ReadyToApply)
                     {
@@ -2178,8 +2182,8 @@ namespace Farmware.WorldGeneration.Presentation
                         entityManager.SetComponentData(progress.Entity, status);
                     }
                 }
+                else applyQueue.Enqueue(coordinate);
             }
-
             return remainingBudget;
         }
 
@@ -3584,6 +3588,18 @@ namespace Farmware.WorldGeneration.Presentation
             ChunkCoordinate coordinate,
             in CompletedChunkTerrainNeighborhood neighborhood)
         {
+            BuildRockWallShadowMeshForSubChunks(coordinate, neighborhood, ushort.MaxValue);
+        }
+
+        /// <summary>完成済み部分の影だけを同じ距離場計算で公開します。参照半径を含め入力が揃ったMaskだけを受け取ります。</summary>
+        /// <param name="coordinate">中心座標です。</param>
+        /// <param name="neighborhood">存在する完成入力だけを含む借用近傍です。</param>
+        /// <param name="visibleSubChunks">地形と同時に公開する16bitです。</param>
+        private void BuildRockWallShadowMeshForSubChunks(ChunkCoordinate coordinate,
+            in CompletedChunkTerrainNeighborhood neighborhood, ushort visibleSubChunks)
+        {
+            // 部分Meshで上書きした後に、原点変更前の完成Meshとして再利用してはいけません。
+            reusableRockWallShadowCoordinates.Remove(coordinate);
             // using宣言は早期returnを含むメソッド終了時に自動で閉じ、影構築全体を漏れなく計測します。
             using ProfilerMarker.AutoScope buildScope =
                 RockWallShadowBuildProfilerMarker.Auto();
@@ -3661,7 +3677,21 @@ namespace Farmware.WorldGeneration.Presentation
                 presentation.Mesh.Clear();
                 presentation.Mesh.vertices = rockWallShadowVertexBuffer;
                 presentation.Mesh.colors32 = rockWallShadowColorBuffer;
-                presentation.Mesh.triangles = rockWallShadowTriangleBuffer;
+                if (visibleSubChunks == ushort.MaxValue) presentation.Mesh.triangles = rockWallShadowTriangleBuffer;
+                else
+                {
+                    // 未完成領域にも作業用頂点はありますが、必要入力が揃った部分の三角形だけを描画へ渡します。
+                    rockWallShadowVisibleTriangles.Clear();
+                    for (int y = 0; y < WorldGridConstants.LogicalChunkSize; y++)
+                        for (int x = 0; x < WorldGridConstants.LogicalChunkSize; x++)
+                        {
+                            int subIndex = y / WorldGridConstants.SubChunkSize * WorldGridConstants.SubChunksPerAxis + x / WorldGridConstants.SubChunkSize;
+                            if ((visibleSubChunks & (1 << subIndex)) == 0) continue;
+                            int first = (y * WorldGridConstants.LogicalChunkSize + x) * 6;
+                            for (int triangle = 0; triangle < 6; triangle++) rockWallShadowVisibleTriangles.Add(rockWallShadowTriangleBuffer[first + triangle]);
+                        }
+                    presentation.Mesh.SetTriangles(rockWallShadowVisibleTriangles, 0);
+                }
                 presentation.Mesh.RecalculateBounds();
             }
         }
@@ -4181,13 +4211,20 @@ namespace Farmware.WorldGeneration.Presentation
             public Entity Entity;
 
             /// <summary>
-            /// 中心・周囲・直下の完成自然地形Entity寿命とTerrainCellDeltaから作った表示入力の指紋です。
+            /// 中心Entity寿命・全近傍のTerrainCellDelta・直下層から作った部分表示入力の指紋です。
             /// 反映途中に入力が変わった場合、異なる時点のサブチャンクを混在させず先頭から作り直すために保持します。
             /// </summary>
             public readonly ulong TerrainFingerprint;
 
-            /// <summary>次に反映する行優先のサブチャンク番号です。範囲は0〜16です。</summary>
+            /// <summary>反映済みサブチャンク数です。範囲は0〜16です。具体的な反映位置はAppliedSubChunkMaskで保持します。</summary>
             public int NextSubChunkIndex;
+
+            /// <summary>反映済みの16サブチャンクを表すMaskです。到着順によらず同じ完成入力だけを表示します。</summary>
+            public ushort AppliedSubChunkMask;
+            /// <summary>反映済み部分が実際に読んだ近傍の9bitです。新規到着と寿命変更を区別します。</summary>
+            public ushort UsedChunkMask;
+            /// <summary>使用済み近傍EntityのIndex・Versionです。チャンク進捗の寿命中だけ保持します。</summary>
+            public readonly Entity[] UsedEntities = new Entity[9];
 
             /// <summary>
             /// 新しい反映作業を先頭サブチャンクから開始します。

@@ -37,6 +37,8 @@ v0.54では地上18種を維持し、アフリカサバンナを熱帯サバン�
 
 ## 開発・検証
 
+通常カメラ移動とMap Viewerの遅延は[地形表示の遅延調査](./Development/Terrain01C6D5PerformanceReport.md)に計測条件・変更・未解決範囲を記録する。通常表示は必要入力が揃ったサブチャンクから反映し、Map Viewerは製品Burst Jobによる初回生成と最大32チャンクの自然地形再利用へ変更した。通常表示の改善は人間確認済みで、Development Buildの通常・高速の局所比較も実施した。通常移動の表示待ちは0となり、高速で残る待ちとCPU・GC・表示メモリ増加を記録した。全条件の表示確認と正式な対象機器・最大Viewportの性能評価は分離し、C6-D5は継続中である。
+
 TERRAIN-01C7への申し送りとして、火山バイオームなどでの水の温泉化、マグマと水の接触による黒曜石などへの自動変換を未確定の追加仕様として検討する。[実装ロードマップ](./Development/ImplementationRoadmap.md)と[マップ仕様](./GameSpecification/RandomMapGenerationSpecification.md)に検討範囲を記録している。
 
 マグマはHDR表面色とBloom Intensity 0.4を採用し、Wallに隠れない表示上の岸に、絶対座標の固定3×3タイル区画ごとの橙色照明（強度0.12）を再利用する。カメラ移動で同じ岸の光源位置・強度を変えない。全体照明の明るさは維持する。調整先と動作確認は[Editorツール](./Development/EditorTools.md#マグマhdr発光bloom岸照明)、採用色と描画契約は[地形タイル表現仕様](./Art/TerrainTileArtSpecification.md#マグマ網状模様)を参照する。

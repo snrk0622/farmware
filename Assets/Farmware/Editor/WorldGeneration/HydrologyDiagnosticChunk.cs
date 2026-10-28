@@ -243,6 +243,39 @@ namespace Farmware.WorldGeneration.Editor
             }
         }
 
+        /// <summary>Map Viewerの不変キャッシュから、呼び出し側が独立して所有・破棄できる完成配列を復元します。</summary>
+        /// <param name="coordinate">コピー元のレイヤー付き座標です。</param>
+        /// <param name="runtimeIds">コピー元と同じ固定DefinitionのIDです。</param>
+        /// <param name="tiles">自然生成済み環境タイルです。</param>
+        /// <param name="cells">差分を適用する前の自然生成Blockセルです。</param>
+        /// <param name="hydrology">完成固定水文セルです。</param>
+        /// <param name="surfaceWater">完成表流水です。</param>
+        /// <param name="hydrologyTiles">完成自然水文タイルです。</param>
+        /// <returns>キャッシュを借用せず、5つのNative配列を新しく所有する診断チャンクです。</returns>
+        internal static HydrologyDiagnosticChunk CopyFromCache(
+            ChunkCoordinate coordinate, BuiltInTerrainBlockRuntimeIds runtimeIds,
+            GeneratedTile[] tiles, GeneratedTerrainCell[] cells, GeneratedHydrologyCell[] hydrology,
+            GeneratedSurfaceWaterTile[] surfaceWater, GeneratedHydrologyTile[] hydrologyTiles)
+        {
+            var copy = new HydrologyDiagnosticChunk(coordinate);
+            try
+            {
+                // Managed配列をNative配列へコピーし、取消済み要求の破棄が後続要求のデータを壊さないようにします。
+                copy.TerrainRuntimeIds = runtimeIds;
+                copy.TerrainTiles.CopyFrom(tiles);
+                copy.TerrainCells.CopyFrom(cells);
+                copy.HydrologyCells.CopyFrom(hydrology);
+                copy.SurfaceWaterTiles.CopyFrom(surfaceWater);
+                copy.HydrologyTiles.CopyFrom(hydrologyTiles);
+                return copy;
+            }
+            catch
+            {
+                copy.Dispose();
+                throw;
+            }
+        }
+
         /// <summary>
         /// C3、C4-A〜D、C5-Cの既存Generatorを製品と同じ順序で実行し、完成診断チャンクを生成します。
         /// 呼出し元は成功時のchunkをusingで破棄し、失敗時はstageを監査エラーへ記録します。

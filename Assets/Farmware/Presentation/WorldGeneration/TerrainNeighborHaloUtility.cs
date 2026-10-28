@@ -67,20 +67,23 @@ namespace Farmware.WorldGeneration.Presentation
             && center.IsCreated
             && center.Length == WorldGridConstants.TilesPerChunk;
 
+        /// <summary>完成Bufferがある位置を南西から北東の9bitで返します。部分表示は必要範囲がこのMaskに含まれる場合だけ行います。</summary>
+        public ushort AvailableChunkMask => availabilityMask;
+
         /// <summary>
         /// 3×3チャンクの完成地形Bufferを借用して近傍を作ります。
-        /// ワールド端の外側に当たる配列だけはdefaultを渡せます。availabilityMaskにより実在する隣接チャンクと区別し、
-        /// 中心と実在チャンクは必ず4096要素を渡します。
+        /// 未完成またはワールド端の外側の配列にはdefaultを渡せます。部分表示は必要範囲のMaskを事前検証し、
+        /// 中心と完成済みチャンクは必ず4096要素を渡します。
         /// </summary>
-        /// <param name="southWest">左下チャンクの完成地形、またはワールド外ならdefaultです。</param>
-        /// <param name="south">下チャンクの完成地形、またはワールド外ならdefaultです。</param>
-        /// <param name="southEast">右下チャンクの完成地形、またはワールド外ならdefaultです。</param>
-        /// <param name="west">左チャンクの完成地形、またはワールド外ならdefaultです。</param>
+        /// <param name="southWest">左下チャンクの完成地形、または未完成・ワールド外ならdefaultです。</param>
+        /// <param name="south">下チャンクの完成地形、または未完成・ワールド外ならdefaultです。</param>
+        /// <param name="southEast">右下チャンクの完成地形、または未完成・ワールド外ならdefaultです。</param>
+        /// <param name="west">左チャンクの完成地形、または未完成・ワールド外ならdefaultです。</param>
         /// <param name="center">中心チャンクの完成地形です。</param>
-        /// <param name="east">右チャンクの完成地形、またはワールド外ならdefaultです。</param>
-        /// <param name="northWest">左上チャンクの完成地形、またはワールド外ならdefaultです。</param>
-        /// <param name="north">上チャンクの完成地形、またはワールド外ならdefaultです。</param>
-        /// <param name="northEast">右上チャンクの完成地形、またはワールド外ならdefaultです。</param>
+        /// <param name="east">右チャンクの完成地形、または未完成・ワールド外ならdefaultです。</param>
+        /// <param name="northWest">左上チャンクの完成地形、または未完成・ワールド外ならdefaultです。</param>
+        /// <param name="north">上チャンクの完成地形、または未完成・ワールド外ならdefaultです。</param>
+        /// <param name="northEast">右上チャンクの完成地形、または未完成・ワールド外ならdefaultです。</param>
         public CompletedChunkTerrainNeighborhood(
             NativeArray<GeneratedTerrainCell> southWest,
             NativeArray<GeneratedTerrainCell> south,
@@ -408,17 +411,59 @@ namespace Farmware.WorldGeneration.Presentation
             BlobAssetReference<TerrainBlockCatalogBlob> terrainCatalog,
             out CompletedChunkTerrainNeighborhood neighborhood)
         {
+            return TryCreateEffectiveCore(entityManager, completedEntities, deltaOwnerEntities,
+                centerCoordinate, terrainCatalog, false, out neighborhood);
+        }
+
+        /// <summary>中心と完成済み隣接だけを借用します。未完成位置は補完せず、利用側が必要Maskを検証してから表示します。</summary>
+        /// <param name="entityManager">現在WorldのBuffer管理境界です。</param>
+        /// <param name="completedEntities">完成自然地形だけの座標索引です。</param>
+        /// <param name="deltaOwnerEntities">疎な変更差分の所有者索引です。</param>
+        /// <param name="centerCoordinate">中心チャンクです。</param>
+        /// <param name="terrainCatalog">差分を検証する分類カタログです。</param>
+        /// <param name="neighborhood">中心必須・隣接任意の借用値です。呼び出し中だけ使います。</param>
+        /// <returns>中心と差分を借用できればtrueです。隣接の不足はAvailableChunkMaskで判別します。</returns>
+        public static bool TryCreateEffectiveAvailable(
+            EntityManager entityManager,
+            IReadOnlyDictionary<ChunkCoordinate, Entity> completedEntities,
+            IReadOnlyDictionary<ChunkCoordinate, Entity> deltaOwnerEntities,
+            ChunkCoordinate centerCoordinate,
+            BlobAssetReference<TerrainBlockCatalogBlob> terrainCatalog,
+            out CompletedChunkTerrainNeighborhood neighborhood)
+        {
+            return TryCreateEffectiveCore(entityManager, completedEntities, deltaOwnerEntities,
+                centerCoordinate, terrainCatalog, true, out neighborhood);
+        }
+
+        /// <summary>全近傍と部分借用で同じ自然地形・差分検証を使い、未完成セルの代替生成を作りません。</summary>
+        /// <param name="entityManager">Bufferを同期借用する管理境界です。</param>
+        /// <param name="completedEntities">完成自然地形の索引です。</param>
+        /// <param name="deltaOwnerEntities">差分所有者の索引です。</param>
+        /// <param name="centerCoordinate">中心座標です。</param>
+        /// <param name="terrainCatalog">差分分類カタログです。</param>
+        /// <param name="allowIncompleteNeighbors">隣接不足を未利用Maskとして返してよい場合はtrueです。</param>
+        /// <param name="neighborhood">成功時の同期借用値です。</param>
+        /// <returns>中心・必要近傍・差分を検証できればtrueです。</returns>
+        private static bool TryCreateEffectiveCore(
+            EntityManager entityManager,
+            IReadOnlyDictionary<ChunkCoordinate, Entity> completedEntities,
+            IReadOnlyDictionary<ChunkCoordinate, Entity> deltaOwnerEntities,
+            ChunkCoordinate centerCoordinate,
+            BlobAssetReference<TerrainBlockCatalogBlob> terrainCatalog,
+            bool allowIncompleteNeighbors,
+            out CompletedChunkTerrainNeighborhood neighborhood)
+        {
             neighborhood = default;
             if (!terrainCatalog.IsCreated
-                || !TryGetChunk(entityManager, completedEntities, centerCoordinate, -1, -1, out NativeArray<GeneratedTerrainCell> southWest)
-                || !TryGetChunk(entityManager, completedEntities, centerCoordinate, 0, -1, out NativeArray<GeneratedTerrainCell> south)
-                || !TryGetChunk(entityManager, completedEntities, centerCoordinate, 1, -1, out NativeArray<GeneratedTerrainCell> southEast)
-                || !TryGetChunk(entityManager, completedEntities, centerCoordinate, -1, 0, out NativeArray<GeneratedTerrainCell> west)
+                || !TryGetChunk(entityManager, completedEntities, centerCoordinate, -1, -1, out NativeArray<GeneratedTerrainCell> southWest, allowIncompleteNeighbors)
+                || !TryGetChunk(entityManager, completedEntities, centerCoordinate, 0, -1, out NativeArray<GeneratedTerrainCell> south, allowIncompleteNeighbors)
+                || !TryGetChunk(entityManager, completedEntities, centerCoordinate, 1, -1, out NativeArray<GeneratedTerrainCell> southEast, allowIncompleteNeighbors)
+                || !TryGetChunk(entityManager, completedEntities, centerCoordinate, -1, 0, out NativeArray<GeneratedTerrainCell> west, allowIncompleteNeighbors)
                 || !TryGetChunk(entityManager, completedEntities, centerCoordinate, 0, 0, out NativeArray<GeneratedTerrainCell> center)
-                || !TryGetChunk(entityManager, completedEntities, centerCoordinate, 1, 0, out NativeArray<GeneratedTerrainCell> east)
-                || !TryGetChunk(entityManager, completedEntities, centerCoordinate, -1, 1, out NativeArray<GeneratedTerrainCell> northWest)
-                || !TryGetChunk(entityManager, completedEntities, centerCoordinate, 0, 1, out NativeArray<GeneratedTerrainCell> north)
-                || !TryGetChunk(entityManager, completedEntities, centerCoordinate, 1, 1, out NativeArray<GeneratedTerrainCell> northEast)
+                || !TryGetChunk(entityManager, completedEntities, centerCoordinate, 1, 0, out NativeArray<GeneratedTerrainCell> east, allowIncompleteNeighbors)
+                || !TryGetChunk(entityManager, completedEntities, centerCoordinate, -1, 1, out NativeArray<GeneratedTerrainCell> northWest, allowIncompleteNeighbors)
+                || !TryGetChunk(entityManager, completedEntities, centerCoordinate, 0, 1, out NativeArray<GeneratedTerrainCell> north, allowIncompleteNeighbors)
+                || !TryGetChunk(entityManager, completedEntities, centerCoordinate, 1, 1, out NativeArray<GeneratedTerrainCell> northEast, allowIncompleteNeighbors)
                 || !TryGetDeltaChunk(entityManager, deltaOwnerEntities, centerCoordinate, -1, -1, out NativeArray<TerrainCellDelta> southWestDeltas, out bool hasSouthWestDeltas)
                 || !TryGetDeltaChunk(entityManager, deltaOwnerEntities, centerCoordinate, 0, -1, out NativeArray<TerrainCellDelta> southDeltas, out bool hasSouthDeltas)
                 || !TryGetDeltaChunk(entityManager, deltaOwnerEntities, centerCoordinate, 1, -1, out NativeArray<TerrainCellDelta> southEastDeltas, out bool hasSouthEastDeltas)
@@ -496,7 +541,8 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="center">中心チャンクです。</param>
         /// <param name="offsetX">中心からの水平差です。</param>
         /// <param name="offsetY">中心からの垂直差です。</param>
-        /// <param name="tiles">成功時に借用Buffer、ワールド外ならdefaultを返します。</param>
+        /// <param name="tiles">成功時に借用Buffer、未利用位置またはワールド外ならdefaultを返します。</param>
+        /// <param name="allowUnavailable">部分借用で隣接不足を未利用として返せる場合はtrueです。中心には指定しません。</param>
         /// <returns>ワールド内の必要Bufferを借用できたか、座標自体がワールド外ならtrueです。</returns>
         private static bool TryGetChunk(
             EntityManager entityManager,
@@ -504,7 +550,8 @@ namespace Farmware.WorldGeneration.Presentation
             ChunkCoordinate center,
             int offsetX,
             int offsetY,
-            out NativeArray<GeneratedTerrainCell> tiles)
+            out NativeArray<GeneratedTerrainCell> tiles,
+            bool allowUnavailable = false)
         {
             tiles = default;
             long chunkX = (long)center.X + offsetX;
@@ -523,13 +570,13 @@ namespace Farmware.WorldGeneration.Presentation
                 || !entityManager.Exists(entity)
                 || !entityManager.HasBuffer<GeneratedTerrainCell>(entity))
             {
-                return false;
+                return allowUnavailable;
             }
 
             DynamicBuffer<GeneratedTerrainCell> buffer = entityManager.GetBuffer<GeneratedTerrainCell>(entity, true);
             if (buffer.Length != WorldGridConstants.TilesPerChunk)
             {
-                return false;
+                return allowUnavailable;
             }
 
             // AsNativeArrayはコピーせず、同期処理の終了までだけECS Bufferを読み取り専用で貸し出します。
