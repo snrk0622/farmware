@@ -1,4 +1,4 @@
-// このファイルは、水の基底色と水中断面へ渡すセル固有の表示データを作ります。
+// このファイルは、水の基底色・水中断面と、マグマ奥岸の露出断面へ渡すセル固有の表示データを作ります。
 // 岸からの垂直投影距離はその列だけの値です。隣列と平均したり断面を横へ延長したりしません。
 // 地形の正はSimulationにあり、本処理はDirtyサブチャンクの描画反映時だけ使用します。
 using UnityEngine;
@@ -9,6 +9,14 @@ namespace Farmware.WorldGeneration.Presentation
     /// <summary>水種・床有無・投影段数を符号化し、Presenter所有のTilemapへ反映する表示専用処理です。</summary>
     public static class TerrainWaterRenderUtility
     {
+        /// <summary>マグマ奥岸のGround断面を、上端3pxだけ不透明に残す専用のセルデータを返します。</summary>
+        /// <returns>Alpha 0は断面Shader用のマグマ印です。水の奥岸印128/255・通常印1と区別します。</returns>
+        public static Color EncodeMagmaBankFace()
+        {
+            // 透明度ではなく分類印です。Shaderは元SpriteのAlphaを維持し、液面より下だけを破棄します。
+            return Color.clear;
+        }
+
         /// <summary>同じTileの色だけの変更でも描画が更新されるよう、Dirty範囲を反映します。</summary>
         /// <param name="map">Presenterが所有する書込先です。</param>
         /// <param name="changes">Dirty領域の全セルを含む再利用配列です。呼出し後は保持しません。</param>

@@ -284,6 +284,72 @@ namespace Farmware.WorldGeneration.Tests
             }
         }
 
+        /// <summary>実Presenterの分類処理で、マグマ奥岸のGroundの縁とWall前面が消去されないことを保証します。</summary>
+        /// <param name="hasWall">Ground岸にWallを重ねる場合はtrueです。</param>
+        [TestCase(false)]
+        [TestCase(true)]
+        public void MagmaClassification_PreservesShoreGroundAndWallFaces(bool hasWall)
+        {
+            CompletedChunkTerrainNeighborhood neighborhood = CreateEmptyNeighborhood(
+                out NativeArray<GeneratedTerrainCell> center, out _);
+            var ids = new BuiltInTerrainBlockRuntimeIds { Magma = new DefinitionRuntimeId(103) };
+            var magma = new GeneratedTerrainCell { LiquidRuntimeId = ids.Magma };
+            var shore = new GeneratedTerrainCell { GroundBlockRuntimeId = new DefinitionRuntimeId(1001) };
+            if (hasWall) shore.WallBlockRuntimeId = new DefinitionRuntimeId(2001);
+            SetCell(center, 10, 10, magma);
+            SetCell(center, 10, 11, shore);
+            Sprite source = CreateSprite("Bank Face", new Color32(80, 65, 50, 255));
+            TerrainMaterialPresentationCatalog catalog = CreateCompleteCatalog(source, source, source, source);
+            var gameObject = new GameObject("Magma Bank Classification Test");
+            var presenter = gameObject.AddComponent<ChunkTilemapPresenter>();
+            Type type = typeof(ChunkTilemapPresenter);
+            var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            // 製品APIへテスト用の状態を公開せず、分類に必要な最小の入力だけを非公開フィールドへ準備します。
+            Action<string, object> setField = (name, value) => type.GetField(name, flags).SetValue(presenter, value);
+            Func<string, object> getField = name => type.GetField(name, flags).GetValue(presenter);
+            var materialCache = (IDisposable)Activator.CreateInstance(type.GetField("materialTileCache", flags).FieldType, true);
+            var liquidCache = new TerrainLiquidRuntimeTileCache();
+            try
+            {
+                // EditModeではAwakeが呼ばれない場合があるため、未確保のときだけ製品の初期化を呼びます。
+                if (getField("wallFaceSubChunkTileBuffer") == null) type.GetMethod("Awake", flags).Invoke(presenter, null);
+                setField("materialPresentationCatalog", catalog);
+                setField("materialRuntimeLookup", CreateRuntimeLookup());
+                setField("materialTileCache", materialCache);
+                setField("liquidTileCache", liquidCache);
+                setField("terrainRuntimeIds", ids);
+                setField("liquidPresentationCatalog", AssetDatabase.LoadAssetAtPath<TerrainLiquidPresentationCatalog>(
+                    "Assets/Farmware/Art/WorldGeneration/Liquids/Published/TerrainLiquidPresentationCatalog.asset"));
+                Assert.That(getField("liquidPresentationCatalog"), Is.Not.Null);
+
+                // 断面を分類した後にLiquid分類がWallを消す、という報告不具合と同じ呼出し順を再現します。
+                type.GetMethod("ClassifyProductMaterialTiles", flags).Invoke(presenter,
+                    new object[] { new ChunkCoordinate(0, 0), 10, 10, 0, magma, neighborhood });
+                var wallFaces = (TileBase[])getField("wallFaceSubChunkTileBuffer");
+                TileBase wallBefore = wallFaces[0];
+                Assert.That(wallBefore != null, Is.EqualTo(hasWall));
+                type.GetMethod("ClassifyProductLiquidTiles", flags).Invoke(presenter,
+                    new object[] { new ChunkCoordinate(0, 0), 0, 10, 10, 0, magma, neighborhood,
+                        false, default(CompletedChunkTerrainNeighborhood) });
+                Assert.That(wallFaces[0], Is.SameAs(wallBefore), "Liquid分類が水面より上のWall前面を消しています。");
+                Assert.That(((TileBase[])getField("submergedGroundFaceSubChunkTileBuffer"))[0], Is.Not.Null,
+                    "マグマ岸のGroundの縁が分類されていません。");
+                Assert.That(((Color[])getField("waterDepthSubChunkColorBuffer"))[0],
+                    Is.EqualTo(TerrainWaterRenderUtility.EncodeMagmaBankFace()));
+                Assert.That(((TileBase[])getField("liquidDepthWithoutFloorSubChunkTileBuffer"))[0], Is.Null,
+                    "マグマへ水の深度Overlayを追加してはいけません。");
+            }
+            finally
+            {
+                // このテストが用意したキャッシュはECS Queryを作らないため、テスト自身が破棄責任を持ちます。
+                setField("materialTileCache", null);
+                setField("liquidTileCache", null);
+                materialCache.Dispose();
+                liquidCache.Dispose();
+                UnityEngine.Object.DestroyImmediate(gameObject);
+            }
+        }
+
         /// <summary>製品用Materialが検品専用Shaderではなく、48px連続減衰用の製品Shaderを参照することを保証します。</summary>
         [Test]
         public void DryCliffMaterial_UsesProductShader()

@@ -157,7 +157,7 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// 淡水・海水越しへ続ける通常Ground Faceを選び、水中専用レイヤーへ白Tintで渡します。
+        /// 水中へ続ける通常Ground Face、またはマグマ岸の縁の元Faceを選び、共通断面レイヤーへ白Tintで渡します。
         /// </summary>
         /// <param name="catalog">41材質を完全登録した製品表示カタログです。</param>
         /// <param name="runtimeLookup">Ground Runtime IDから安定材質IDを引く検索表です。</param>

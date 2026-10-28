@@ -110,9 +110,9 @@ namespace Farmware.WorldGeneration.Presentation
         [Tooltip("直前方のセルが岩壁である通常資源を描画する専用Tilemapです。岩壁より後ろのSorting Orderへ設定してください。")]
         [SerializeField] private Tilemap resourceBehindRockWallTilemap;
 
-        // 製品カタログ未接続の開発Sceneだけで、旧全面アニメーションを静止した基礎色へ重ねます。
-        [Tooltip("製品液体カタログ未接続時だけ使う旧全面アニメーションTilemapです。製品SceneではRendererを無効にし、静止形状とShader明暗を分けた水際Tilemapへ置き換えます。")]
-        [SerializeField] private Tilemap liquidAnimationTilemap;
+        // 製品マグマセルだけへ、基礎液面と同じ岸側クリップ印で連続する網状模様を描きます。
+        [Tooltip("マグマの手続き型網状模様を描くTilemapです。液面と同じ論理座標に置き、専用Materialで網目寸法と発光を調整します。")]
+        [SerializeField] private Tilemap magmaSurfacePatternTilemap;
 
         // 直下床がある水域の基底色です。45pxの光学減衰は前面の断面側で評価します。
         [Tooltip("直下床がある淡水・海水の基底色Tilemapです。TerrainLiquidDepthWithFloor Materialを設定し、断面・床より後ろに置きます。")]
@@ -126,8 +126,8 @@ namespace Farmware.WorldGeneration.Presentation
         [Tooltip("水域の4段目以降へ直下1層のGround上面を簡易投影するTilemapです。選択やSimulation処理には使用しません。")]
         [SerializeField] private Tilemap underwaterFloorPreviewTilemap;
 
-        // 乾燥崖とは別に、その列の実際の岸からの投影距離で減衰するGround断面を描きます。
-        [Tooltip("水中Ground断面専用Tilemapです。実際の岸からの投影距離で減衰するTerrainSubmergedGroundFace Materialを設定し、水の基底色より前に置きます。")]
+        // 水では水深による断面、マグマでは液面より上のGroundの縁3pxを描く共通レイヤーです。
+        [Tooltip("水中Ground断面とマグマ奥岸の縁3pxを表示するTilemapです。TerrainSubmergedGroundFace Materialがセルの分類印で描き分け、水の基底色より前に置きます。")]
         [SerializeField] private Tilemap submergedGroundFaceTilemap;
 
         // 淡水・海水の短い画素模様を、断面より前・反射より後ろに独立して重ねます。
@@ -254,18 +254,6 @@ namespace Farmware.WorldGeneration.Presentation
         // 製品経路では論理Wall根元から2タイル上へ描画する上面、未接続の旧開発Sceneでは16×28一体型Wallを保持します。
         [Tooltip("製品では論理Wall根元から2タイル上の上面を表示するTileです。製品カタログ未設定の開発Sceneだけ、16×28の共通Tileを使います。")]
         [SerializeField] private TileBase rockWallTile;
-
-        // 淡水セルへ重ねる透明なAnimatedTileです。基礎のFreshWater Tileは下層に残します。
-        [Tooltip("淡水セルへ重ねる透明なAnimatedTileです。未設定なら淡水は静止表示のままです。")]
-        [SerializeField] private TileBase freshWaterAnimationTile;
-
-        // 海水セルへ重ねる透明なAnimatedTileです。基礎のSaltWater Tileは下層に残します。
-        [Tooltip("海水セルへ重ねる透明なAnimatedTileです。未設定なら海水は静止表示のままです。")]
-        [SerializeField] private TileBase saltWaterAnimationTile;
-
-        // マグマセルへ重ねる透明なAnimatedTileです。基礎のMagma Tileは下層に残します。
-        [Tooltip("マグマセルへ重ねる透明なAnimatedTileです。未設定ならマグマは静止表示のままです。")]
-        [SerializeField] private TileBase magmaAnimationTile;
 
         // GeneratedResourceType.Treeへ使用する透明背景の表示専用Tileです。
         [Tooltip("樹木資源に表示する仮Tileです。資源の種類と存在はECSバッファを正とします。")]
@@ -397,8 +385,8 @@ namespace Farmware.WorldGeneration.Presentation
         // 8px下げた静止液面Tilemapへ渡す256要素の再利用配列です。土地セルにはnullを設定します。
         private TileBase[] liquidBaseSubChunkTileBuffer;
 
-        // 液面アニメーションTilemapへ渡す256要素の再利用配列です。通常地形セルにはnullを設定します。
-        private TileBase[] liquidAnimationSubChunkTileBuffer;
+        // マグマ模様Tilemapへ渡す256要素の再利用配列です。マグマ以外のセルにはnullを設定します。
+        private TileBase[] magmaSurfacePatternSubChunkTileBuffer;
 
         // 直下床ありの水だけへ45px深度Overlay Tileを置く256要素の再利用配列です。
         private TileBase[] liquidDepthWithFloorSubChunkTileBuffer;
@@ -412,7 +400,7 @@ namespace Farmware.WorldGeneration.Presentation
         // 色付きTileの一括反映に使う256件です。更新ごとに配列を確保しません。
         private TileChangeData[] waterTileChangeBuffer;
 
-        // 水中断面のSpriteだけを保持します。距離は上の共通色配列へ分離します。
+        // 水中断面またはマグマ岸の縁のSpriteを保持します。距離と分類印は上の共通色配列へ分離します。
         private TileBase[] submergedGroundFaceSubChunkTileBuffer;
 
         // 水域4段目以降へ直下1層のGround上面を置く256要素の再利用配列です。
@@ -543,6 +531,21 @@ namespace Farmware.WorldGeneration.Presentation
         /// <summary>水面模様の原点を初回送信したかを保持します。破棄時にfalseへ戻します。</summary>
         private bool hasSurfacePatternMaterialOrigin;
 
+        /// <summary>マグマ模様用の借用Rendererです。実行時Materialの設定先としてPresenterの寿命中保持します。</summary>
+        private TilemapRenderer magmaSurfacePatternMaterialRenderer;
+
+        /// <summary>変更せず借用するProject内のマグマ模様Materialです。</summary>
+        private Material magmaSurfacePatternSourceMaterial;
+
+        /// <summary>全チャンクで共有し、Presenterが生成・破棄するマグマ模様Materialの実行時コピーです。</summary>
+        private Material magmaSurfacePatternRuntimeMaterial;
+
+        /// <summary>最後にマグマ模様へ送ったタイル原点です。Floating Origin変更時だけ更新します。</summary>
+        private int2 magmaSurfacePatternMaterialOrigin;
+
+        /// <summary>マグマ模様へ絶対原点を一度でも送ったかを、原点(0,0)と区別して保持します。</summary>
+        private bool hasMagmaSurfacePatternMaterialOrigin;
+
         // presentedDisplayOriginを初期化済みか示し、絶対原点(0, 0)自体も有効値として区別します。
         private bool hasPresentedDisplayOrigin;
 
@@ -611,32 +614,23 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// Editor構築ツールまたはテストから、低い液面、一体型岩壁、液面アニメーション用の表示レイヤー・Tileを設定します。
+        /// Editor構築ツールまたはテストから、液面、マグマ模様、岩壁と岩壁上資源の表示先を設定します。
         /// ECSのGeneratedTerrainCellは変更せず、表示の高さだけを組み立てるPresentation設定を保存します。
         /// </summary>
         /// <param name="baseLiquidTilemap">淡水・海水・マグマの静止した基礎Tile専用Tilemapです。</param>
-        /// <param name="animatedLiquidTilemap">淡水・海水・マグマの透明アニメーション専用Tilemapです。</param>
+        /// <param name="magmaPatternTilemap">マグマだけへ手続き型の網状模様を描くTilemapです。</param>
         /// <param name="combinedRockWallTilemap">16×28の岩壁ブロックを基準セルへ描画する専用Tilemapです。</param>
         /// <param name="raisedRockWallResourceTilemap">露出したWall上の資源を、製品では論理根元から2タイル上へ持ち上げる専用Tilemapです。</param>
-        /// <param name="freshWaterAnimation">淡水へ重ねる透明AnimatedTileです。</param>
-        /// <param name="saltWaterAnimation">海水へ重ねる透明AnimatedTileです。</param>
-        /// <param name="magmaAnimation">マグマへ重ねる透明AnimatedTileです。</param>
         public void ConfigureTerrainEffects(
             Tilemap baseLiquidTilemap,
-            Tilemap animatedLiquidTilemap,
+            Tilemap magmaPatternTilemap,
             Tilemap combinedRockWallTilemap,
-            Tilemap raisedRockWallResourceTilemap,
-            TileBase freshWaterAnimation,
-            TileBase saltWaterAnimation,
-            TileBase magmaAnimation)
+            Tilemap raisedRockWallResourceTilemap)
         {
             liquidBaseTilemap = baseLiquidTilemap;
-            liquidAnimationTilemap = animatedLiquidTilemap;
+            magmaSurfacePatternTilemap = magmaPatternTilemap;
             rockWallTilemap = combinedRockWallTilemap;
             rockWallResourceTilemap = raisedRockWallResourceTilemap;
-            freshWaterAnimationTile = freshWaterAnimation;
-            saltWaterAnimationTile = saltWaterAnimation;
-            magmaAnimationTile = magmaAnimation;
         }
 
         /// <summary>
@@ -712,7 +706,7 @@ namespace Farmware.WorldGeneration.Presentation
 
         /// <summary>
         /// Editor構築ツールまたはテストから、製品Liquid表示カタログ、専用レイヤー、反射の描画設定を設定します。
-        /// 全参照が揃うまで既存の基礎液面・全面アニメーションを維持し、新旧Liquid表現を同時に描きません。
+        /// 全参照が揃った製品カタログだけを使用し、マグマ模様と水面模様の描画先を分離します。
         /// </summary>
         /// <param name="catalog">淡水・海水・マグマを完全登録した製品Liquid表示カタログです。</param>
         /// <param name="depthWithFloor">直下床あり45px深度OverlayのTilemapです。</param>
@@ -720,6 +714,7 @@ namespace Farmware.WorldGeneration.Presentation
         /// <param name="floorPreview">直下1層のGround上面を簡易投影するTilemapです。</param>
         /// <param name="submergedFaces">乾燥崖から分離した水中Ground断面のTilemapです。</param>
         /// <param name="surfacePattern">淡水・海水の短い水面模様専用Tilemapです。</param>
+        /// <param name="magmaPattern">マグマの網状模様専用Tilemapです。</param>
         /// <param name="reflection">反射MeshへMaterialとSortingを渡す設定見本Tilemapです。</param>
         /// <param name="reflectionAtlas">反射元Spriteをまとめる製品Atlasです。</param>
         /// <param name="edgeWave">静止接触形状とShader明暗を描く水際Tilemapです。</param>
@@ -730,6 +725,7 @@ namespace Farmware.WorldGeneration.Presentation
             Tilemap floorPreview,
             Tilemap submergedFaces,
             Tilemap surfacePattern,
+            Tilemap magmaPattern,
             Tilemap reflection,
             UnityEngine.U2D.SpriteAtlas reflectionAtlas,
             Tilemap edgeWave)
@@ -740,6 +736,7 @@ namespace Farmware.WorldGeneration.Presentation
                 || underwaterFloorPreviewTilemap != floorPreview
                 || submergedGroundFaceTilemap != submergedFaces
                 || waterSurfacePatternTilemap != surfacePattern
+                || magmaSurfacePatternTilemap != magmaPattern
                 || waterReflectionTilemap != reflection
                 || waterReflectionAtlas != reflectionAtlas
                 || liquidEdgeWaveTilemap != edgeWave;
@@ -760,6 +757,7 @@ namespace Farmware.WorldGeneration.Presentation
             underwaterFloorPreviewTilemap = floorPreview;
             submergedGroundFaceTilemap = submergedFaces;
             waterSurfacePatternTilemap = surfacePattern;
+            magmaSurfacePatternTilemap = magmaPattern;
             waterReflectionTilemap = reflection;
             if (waterReflectionAtlas != reflectionAtlas)
             {
@@ -792,7 +790,7 @@ namespace Farmware.WorldGeneration.Presentation
             resourceSubChunkTileBuffer = new TileBase[tileCount];
             resourceBehindRockWallSubChunkTileBuffer = new TileBase[tileCount];
             liquidBaseSubChunkTileBuffer = new TileBase[tileCount];
-            liquidAnimationSubChunkTileBuffer = new TileBase[tileCount];
+            magmaSurfacePatternSubChunkTileBuffer = new TileBase[tileCount];
             liquidDepthWithFloorSubChunkTileBuffer = new TileBase[tileCount];
             liquidDepthWithoutFloorSubChunkTileBuffer = new TileBase[tileCount];
             waterDepthSubChunkColorBuffer = new Color[tileCount];
@@ -919,6 +917,7 @@ namespace Farmware.WorldGeneration.Presentation
             {
                 // チャンク用Rendererが見本Materialを複製参照する前に、全チャンク共有の実行時Materialを用意します。
                 if (!TrySynchronizeShorelineMaterial() || !TrySynchronizeSurfacePatternMaterial()
+                    || !TrySynchronizeMagmaSurfacePatternMaterial()
                     || !TrySynchronizeReflectionMaterial())
                 {
                     return;
@@ -939,7 +938,8 @@ namespace Farmware.WorldGeneration.Presentation
                         || wallFaceTilemap == null
                         || dryCliffDeepBlackTilemap == null);
                 bool missingRequiredLiquidLayer = usesProductLiquidPresentation
-                    && (liquidDepthWithFloorTilemap == null
+                    && (magmaSurfacePatternTilemap == null
+                        || liquidDepthWithFloorTilemap == null
                         || liquidDepthWithoutFloorTilemap == null
                         || underwaterFloorPreviewTilemap == null
                         || submergedGroundFaceTilemap == null
@@ -964,7 +964,7 @@ namespace Farmware.WorldGeneration.Presentation
                     if (missingRequiredLiquidLayer)
                     {
                         LogMaterialPresentationFailureOnce(
-                            "製品Liquid表示には基底色、直下床、水中断面、水面模様、水際、反射設定見本と製品Atlasの参照が必要です。");
+                            "製品Liquid表示には基底色、直下床、水中断面、水面模様、マグマ模様、水際、反射設定見本と製品Atlasの参照が必要です。");
                     }
 
                     if (missingMaterialForProductLiquid)
@@ -1190,6 +1190,79 @@ namespace Farmware.WorldGeneration.Presentation
             surfacePatternSourceMaterial = null;
             surfacePatternMaterialRenderer = null;
             hasSurfacePatternMaterialOrigin = false;
+        }
+
+        /// <summary>各Updateでマグマ網状模様の共通時計・絶対原点を同期します。セルやMaterial Assetは毎フレーム変更しません。</summary>
+        /// <returns>製品液体が未設定、または専用Materialを正常に同期できた場合はtrueです。</returns>
+        private bool TrySynchronizeMagmaSurfacePatternMaterial()
+        {
+            if (liquidPresentationCatalog == null || magmaSurfacePatternTilemap == null)
+            {
+                return true;
+            }
+
+            TilemapRenderer renderer = magmaSurfacePatternTilemap.GetComponent<TilemapRenderer>();
+            if (magmaSurfacePatternRuntimeMaterial == null
+                || magmaSurfacePatternMaterialRenderer != renderer)
+            {
+                DisposeMagmaSurfacePatternMaterial();
+                if (renderer == null || renderer.sharedMaterial == null
+                    || renderer.sharedMaterial.shader.name != "Farmware/Terrain/Magma Surface Pattern")
+                {
+                    LogMaterialPresentationFailureOnce(
+                        "マグマ模様TilemapにはMagma Surface Pattern Materialが必要です。");
+                    return false;
+                }
+
+                // Inspectorで比較調整するAssetを保護し、実行時に変わる時計と原点は共有コピー1件だけへ渡します。
+                magmaSurfacePatternMaterialRenderer = renderer;
+                magmaSurfacePatternSourceMaterial = renderer.sharedMaterial;
+                magmaSurfacePatternRuntimeMaterial = new Material(magmaSurfacePatternSourceMaterial)
+                {
+                    name = "Runtime Magma Surface Pattern",
+                    hideFlags = HideFlags.DontSave
+                };
+                renderer.sharedMaterial = magmaSurfacePatternRuntimeMaterial;
+            }
+
+            // 表示専用時間は論理固定Tickやマグマ生成結果へ書き戻さず、Shader側で指定FPSへ段階化します。
+            magmaSurfacePatternRuntimeMaterial.SetFloat(ShorelineAnimationTimeId, Time.time);
+            int2 origin = cameraPanController == null
+                ? int2.zero
+                : cameraPanController.CurrentDisplayOrigin.AbsoluteTileCoordinate;
+            if (!hasMagmaSurfacePatternMaterialOrigin
+                || origin.x != magmaSurfacePatternMaterialOrigin.x
+                || origin.y != magmaSurfacePatternMaterialOrigin.y)
+            {
+                // 水際・水面模様と同じ4096px周期へ整数のまま戻し、遠方座標のfloat精度低下を避けます。
+                magmaSurfacePatternRuntimeMaterial.SetVector(ShorelineWorldPixelOffsetId, new Vector4(
+                    TerrainLiquidPresentationUtility.GetShorelineOriginPixelOffset(origin.x),
+                    TerrainLiquidPresentationUtility.GetShorelineOriginPixelOffset(origin.y), 0f, 0f));
+                magmaSurfacePatternMaterialOrigin = origin;
+                hasMagmaSurfacePatternMaterialOrigin = true;
+            }
+
+            return true;
+        }
+
+        /// <summary>設定先変更・OnDestroyで借用参照を戻し、自分が所有するマグマ模様Materialだけを破棄します。</summary>
+        private void DisposeMagmaSurfacePatternMaterial()
+        {
+            if (magmaSurfacePatternMaterialRenderer != null
+                && magmaSurfacePatternMaterialRenderer.sharedMaterial == magmaSurfacePatternRuntimeMaterial)
+            {
+                magmaSurfacePatternMaterialRenderer.sharedMaterial = magmaSurfacePatternSourceMaterial;
+            }
+
+            if (magmaSurfacePatternRuntimeMaterial != null)
+            {
+                DestroyUnityObject(magmaSurfacePatternRuntimeMaterial);
+            }
+
+            magmaSurfacePatternRuntimeMaterial = null;
+            magmaSurfacePatternSourceMaterial = null;
+            magmaSurfacePatternMaterialRenderer = null;
+            hasMagmaSurfacePatternMaterialOrigin = false;
         }
 
         /// <summary>描画前に共有反射Materialを作り、共通時計・絶対画素原点だけを同期します。</summary>
@@ -1428,6 +1501,7 @@ namespace Farmware.WorldGeneration.Presentation
             DestroyChunkLocalPresentations();
             DisposeShorelineMaterial();
             DisposeSurfacePatternMaterial();
+            DisposeMagmaSurfacePatternMaterial();
             if (waterReflectionTilemap != null && reflectionRuntimeMaterial != null)
                 waterReflectionTilemap.GetComponent<Renderer>().sharedMaterial = reflectionSourceMaterial;
             DestroyUnityObject(reflectionRuntimeMaterial);
@@ -2252,7 +2326,11 @@ namespace Farmware.WorldGeneration.Presentation
                                     terrainNeighborhood,
                                     tileLocalX,
                                     tileLocalY);
-                            liquidAnimationSubChunkTileBuffer[destinationIndex] = null;
+                            // 手続き模様Shaderは基礎液面と同じSprite・岸側クリップ印を使い、マグマ以外には描きません。
+                            magmaSurfacePatternSubChunkTileBuffer[destinationIndex] =
+                                liquidKind == TerrainLiquidVisualKind.Magma
+                                    ? liquidBaseSubChunkTileBuffer[destinationIndex]
+                                    : null;
                             ClassifyProductLiquidTiles(
                                 coordinate,
                                 subChunkIndex,
@@ -2269,8 +2347,8 @@ namespace Farmware.WorldGeneration.Presentation
                             liquidBaseSubChunkTileBuffer[destinationIndex] = isLiquid
                                 ? SelectLiquidBaseTile(terrainCell)
                                 : null;
-                            liquidAnimationSubChunkTileBuffer[destinationIndex] =
-                                SelectLiquidAnimationTile(terrainCell);
+                            // 製品液体が未接続の開発表示では基礎色だけを描き、製品Shaderへ旧素材を流用しません。
+                            magmaSurfacePatternSubChunkTileBuffer[destinationIndex] = null;
                         }
 
                         // 内部影に覆われる資源アイコンだけを隠します。ECSの資源データと露出面の表示は維持します。
@@ -2327,9 +2405,9 @@ namespace Farmware.WorldGeneration.Presentation
                 WriteSubChunkLayer(coordinate, resourceBehindRockWallTilemap,
                     bounds,
                     resourceBehindRockWallSubChunkTileBuffer);
-                if (liquidAnimationTilemap != null)
+                if (magmaSurfacePatternTilemap != null)
                 {
-                    WriteSubChunkLayer(coordinate, liquidAnimationTilemap, bounds, liquidAnimationSubChunkTileBuffer);
+                    WriteSubChunkLayer(coordinate, magmaSurfacePatternTilemap, bounds, magmaSurfacePatternSubChunkTileBuffer);
                 }
 
                 WriteSubChunkLayer(
@@ -2611,11 +2689,19 @@ namespace Farmware.WorldGeneration.Presentation
             liquidEdgeWaveSubChunkTileBuffer[destinationIndex] =
                 liquidTileCache.GetOrCreateShoreline(definition.ShorelineColor, edgeMask);
 
-            // マグマはSurface Tileを3pxクリップして不透明描画し、背後のFace、青深度、反射を追加しません。
+            // マグマでも水面より上のGroundの縁とWall前面は必要です。液面より下の断面・青深度・反射だけを省きます。
             if (kind == TerrainLiquidVisualKind.Magma)
             {
                 groundFaceSubChunkTileBuffer[destinationIndex] = null;
-                wallFaceSubChunkTileBuffer[destinationIndex] = null;
+                // Wall前面は+2Y補正後に根元より上へ描かれます。書込先セルがマグマでも消してはいけません。
+                if (TerrainLiquidPresentationUtility.TryProjectGroundFaceAtLiquidBank(
+                        terrainNeighborhood, localX, localY, terrainRuntimeIds,
+                        out TerrainLiquidFaceProjection bankProjection))
+                {
+                    submergedGroundFaceSubChunkTileBuffer[destinationIndex] =
+                        SelectProductLiquidGroundFace(chunkCoordinate, bankProjection);
+                    waterDepthSubChunkColorBuffer[destinationIndex] = TerrainWaterRenderUtility.EncodeMagmaBankFace();
+                }
                 return;
             }
 
@@ -2681,22 +2767,11 @@ namespace Farmware.WorldGeneration.Presentation
                     localX,
                     localY,
                     terrainRuntimeIds,
-                    out TerrainLiquidFaceProjection faceProjection)
-                && TryCreateLiquidFaceSourceCoordinate(
-                    chunkCoordinate,
-                    faceProjection,
-                    out WorldTileCoordinate sourceCoordinate)
-                && TerrainMaterialProductTileResolver.TryResolveSubmergedGroundFace(
-                    materialPresentationCatalog,
-                    materialRuntimeLookup,
-                    presentationWorldSeed,
-                    sourceCoordinate,
-                    faceProjection.SourceCell.GroundBlockRuntimeId,
-                    faceProjection.FaceDepth,
-                    out TerrainMaterialProductTileSelection submergedFace))
+                    out TerrainLiquidFaceProjection faceProjection))
             {
                 // 実際の岸の真下だけへ断面を置き、Shaderで1から水の被覆率を引いた値を可視Alphaにします。
-                submergedGroundFaceSubChunkTileBuffer[destinationIndex] = materialTileCache.GetOrCreate(submergedFace);
+                submergedGroundFaceSubChunkTileBuffer[destinationIndex] =
+                    SelectProductLiquidGroundFace(chunkCoordinate, faceProjection);
             }
 
             // 反射元の幅から左右2pxへ輪郭を動かせるよう、受け手から左右1列のWallも読みます。
@@ -2749,6 +2824,26 @@ namespace Farmware.WorldGeneration.Presentation
                     mesh.Append(subChunkIndex, packed, slice, waterReflectionTilemap.GetComponent<Renderer>(), waterSurfaceY);
                 }
             }
+        }
+
+        /// <summary>水中断面とマグマ岸で同じGround材質・境界完成Spriteを選び、白Tintの共有Tileへ変換します。</summary>
+        /// <param name="coordinate">表示先の論理チャンクです。投影元の絶対座標を解決します。</param>
+        /// <param name="projection">完成近傍から求めた投影元Groundと段数です。</param>
+        /// <returns>成功時はキャッシュが所有するTile、不正な参照や未登録材質ならnullです。</returns>
+        private TileBase SelectProductLiquidGroundFace(
+            ChunkCoordinate coordinate, TerrainLiquidFaceProjection projection)
+        {
+            if (!TryCreateLiquidFaceSourceCoordinate(coordinate, projection, out WorldTileCoordinate sourceCoordinate)
+                || !TerrainMaterialProductTileResolver.TryResolveSubmergedGroundFace(
+                    materialPresentationCatalog, materialRuntimeLookup, presentationWorldSeed, sourceCoordinate,
+                    projection.SourceCell.GroundBlockRuntimeId, projection.FaceDepth,
+                    out TerrainMaterialProductTileSelection selection))
+            {
+                return null;
+            }
+
+            // 表示先セルへ距離やマグマ印を別送するため、素材とTileの共有キーへ混ぜません。
+            return materialTileCache.GetOrCreate(selection);
         }
 
         /// <summary>製品Liquidカタログから、通常セルまたは岸側3pxクリップ用の共有Surface Tileを取得します。</summary>
@@ -2973,9 +3068,9 @@ namespace Farmware.WorldGeneration.Presentation
                     liquidBaseTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
                 }
 
-                if (liquidAnimationTilemap != null)
+                if (magmaSurfacePatternTilemap != null)
                 {
-                    liquidAnimationTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
+                    magmaSurfacePatternTilemap.SetTilesBlock(bounds, emptySubChunkTileBuffer);
                 }
 
                 if (liquidDepthWithFloorTilemap != null)
@@ -3176,7 +3271,7 @@ namespace Farmware.WorldGeneration.Presentation
         private Tilemap[] GetTilemapTemplates()
         {
             return new[] { targetTilemap, liquidBaseTilemap, resourceTilemap, resourceBehindRockWallTilemap,
-                liquidAnimationTilemap, rockWallTilemap, groundFaceTilemap, wallFaceTilemap,
+                magmaSurfacePatternTilemap, rockWallTilemap, groundFaceTilemap, wallFaceTilemap,
                 wallContactShadowLeftTilemap, wallContactShadowRightTilemap,
                 wallFoldShadowTopTilemap, wallFoldShadowBottomTilemap,
                 dryCliffDeepBlackTilemap, liquidDepthWithFloorTilemap,
@@ -3370,28 +3465,6 @@ namespace Farmware.WorldGeneration.Presentation
                 WorldGridConstants.SubChunkSize,
                 WorldGridConstants.SubChunkSize,
                 1);
-        }
-
-        /// <summary>
-        /// ECS地形から、液面アニメーション専用Tilemapへ重ねるTileを選択します。
-        /// </summary>
-        /// <param name="terrainCell">ECSを正とする1セル分の自然生成Blockセルです。</param>
-        /// <returns>淡水・海水・マグマのAnimatedTileです。通常地形ならnullです。</returns>
-        private TileBase SelectLiquidAnimationTile(GeneratedTerrainCell terrainCell)
-        {
-            switch (TerrainLayerPresentationUtility.ClassifyLiquidAnimation(
-                terrainCell,
-                terrainRuntimeIds))
-            {
-                case LiquidAnimationKind.FreshWater:
-                    return freshWaterAnimationTile;
-                case LiquidAnimationKind.SaltWater:
-                    return saltWaterAnimationTile;
-                case LiquidAnimationKind.Magma:
-                    return magmaAnimationTile;
-                default:
-                    return null;
-            }
         }
 
         /// <summary>

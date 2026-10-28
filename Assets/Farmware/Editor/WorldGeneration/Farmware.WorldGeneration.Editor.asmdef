@@ -12,7 +12,6 @@
     "Unity.Entities.Hybrid",
     "Unity.Scenes",
     "Unity.2D.Sprite.Editor",
-    "Unity.2D.Tilemap.Extras",
     "Unity.RenderPipelines.Universal.Runtime",
     "Unity.RenderPipelines.Universal.2D.Runtime"
   ],

@@ -26,13 +26,13 @@
 #### 用途
 
 - 上面16pxと断面8pxを結合した16×24の仮色土地Tile、16×16の仮色液体・資源Tileを生成または更新する。土地上面は安定`BiomeId` 1〜18に対応する18種類の仮色だけで塗り、未制作Biomeを別BiomeのTileへフォールバックさせない。草、葉、砂紋などの固有模様や旧土壌分類別の派生Tileは生成しない。旧7種の土地フォールバックと旧14枚の肥沃・砂質派生アセットが存在する場合は削除する。
-- 上面16pxと側面12pxを結合した16×28フォールバック岩壁Tile、淡水・海水・マグマ各4枚の透明フレームとAnimatedTileを生成または更新する。フォールバックは構築確認用として維持し、本番用`terrain_rock_wall_01.png`を上書きしない。
+- 上面16pxと側面12pxを結合した16×28フォールバック岩壁Tile、液体の静止基礎Tileを生成または更新する。液面アニメーション用の旧4フレーム素材は生成しない。フォールバックは構築確認用として維持し、本番用`terrain_rock_wall_01.png`を上書きしない。
 - 本番用`terrain_rock_wall_01.png`へPoint、PPU 16、Mip Maps Off、Compression None、Full Rect、Pivot Y `8/28`を設定し、専用Tileを作成または更新する。Sprite PivotはSprite Editor Data Provider経由で設定する。
 - 新18Biomeの仮色土地Spriteを同じTextureページへ収める`GroundTerrainAtlas.spriteatlasv2`、本番用岩壁を収める`RockWallAtlas.spriteatlasv2`、共通境界14 Spriteを収める`BoundaryHighlightAtlas.spriteatlasv2`を生成または更新し、現在のBuild Target向けにパックする。C6のBlock用本番素材が未制作の間だけ、18枚の仮色土地を表示契約とAtlas検証に使う。境界PNGの画素と14分割は専用の境界生成ツールが担当し、このツールはImport済みTextureの検証・Atlas登録・同一ページ検証を担当する。
 - `WorldGenerationSettingsSubScene`へ生成設定のAuthoringと、最初の動物種である鶏の共通定義・生成条件を配置する。鶏は草原の通常陸地、群れ3〜6羽、有効地形4096タイル当たり8羽、待機20〜80固定Tick、1タイル移動5固定Tick、最大徘徊8タイル、外見差分3種類を開発用初期値とする。
 - `DefinitionCatalogAuthoring`の専用Inspectorでは、`animalSpeciesDefinitions`の各要素を共通定義GUIDで照合し、`0: Chicken`のように`definitions`側の表示名を見出しへ表示する。表示名を動物種固有設定へ重複保存しないため、名称変更は`definitions`側だけで行う。GUID未設定または参照切れの場合は、見出しへ未解決理由と短縮GUIDを表示する。固定3液体とC6-Bの41材質に属するItem・Ground・Wall Definitionに加え、18Biome表層と8地質の露出Ground・自然WallパレットはBakerが固定表から自動登録するため、Inspectorの`definitions`へ重複追加しない。置換済みの共通Ground・Wall互換Definitionは登録しない。パレットは同じBaker内で材質・地形カタログへ解決し、行欠落、重複、重み合計、分類、自然Wall属性に不整合があればBakeを失敗させる。
-- `SampleScene`へCamera、原点固定のGrid、Ground・静止液面・液面アニメーション・土地境界・岩壁・岩壁境界・岩壁背面資源・通常前面資源・岩壁上資源の9枚のTilemap、表示用Component、SubScene参照を接続する。Cameraの`CameraPanController`を全Tilemap Presenterの共通表示原点として接続し、絶対初期位置をTransformへ直接保存しない。通常移動では512タイル未満の間はCameraの相対座標だけを更新し、閾値へ達するとGridを動かさず表示原点を所属チャンク境界へ自動更新する。静止液面と液面アニメーションは土地より8px下、岩壁境界と岩壁上資源は土地基準面より12px上へ設定する。GroundとRock WallはIndividual ModeかつTop Left順で描画する。土地境界はOrder 1、岩壁境界はOrder 4とし、生成済みの共通境界14 Spriteを両方へ接続する。通常資源は直前方の岩壁有無からOrder 2の背面用TilemapとOrder 10の前面用Tilemapへ振り分ける。
-- 上記の9枚・12px・14形状境界は構築途中のフォールバックに限定する。その後、41材質を製品カタログへ公開して製品地形表示を接続する。最終Sceneでは論理Wallセルを最下段Faceの根元とし、Wall上面・前面・折れ目影・Wall上資源を+2Yへ、固定接地影をその基準から手前3 pxへ配置する。通常資源は手前側2セル以内のWall根元で遮蔽される場合だけ背面用Tilemapへ振り分ける。
+- `SampleScene`へCamera、原点固定のGrid、Ground・静止液面・マグマ模様・岩壁・岩壁背面資源・通常前面資源・岩壁上資源のTilemap、表示用Component、SubScene参照を接続する。Cameraの`CameraPanController`を全Tilemap Presenterの共通表示原点として接続し、絶対初期位置をTransformへ直接保存しない。通常移動では512タイル未満の間はCameraの相対座標だけを更新し、閾値へ達するとGridを動かさず表示原点を所属チャンク境界へ自動更新する。構築途中の静止液面は仮配置し、製品接続後は静止液面とマグマ模様を論理セル原点へ固定する。岩壁上資源は製品接続後にWall根元から2タイル上へ揃える。GroundとRock WallはIndividual ModeかつTop Left順で描画する。土地境界はOrder 1、岩壁境界はOrder 4とし、生成済みの共通境界14 Spriteを両方へ接続する。通常資源は直前方の岩壁有無からOrder 2の背面用TilemapとOrder 10の前面用Tilemapへ振り分ける。
+- 上記の一体型地形・12px・14形状境界の説明は構築途中のフォールバックに限定する。その後、41材質を製品カタログへ公開して製品地形表示を接続する。最終Sceneでは論理Wallセルを最下段Faceの根元とし、Wall上面・前面・折れ目影・Wall上資源を+2Yへ、固定接地影をその基準から手前3 pxへ配置する。通常資源は手前側2セル以内のWall根元で遮蔽される場合だけ背面用Tilemapへ振り分ける。
 - Pixel Perfect Cameraの基準解像度480×270を含む、再現可能な確認環境を構築する。
 - `Use Chunk Local Tilemaps`を既定ON、空き表示プール上限を8とする。自動原点変更では既存Tilemap・影と画面外の先行表示を再配置する。Presenterは可視範囲の外側1チャンクまで準備し、反映・消去合計4サブチャンク/フレームを維持する。OFFは旧共有方式との診断・比較用であり、原点変更直後の表示遅れが残る。
 
@@ -49,7 +49,7 @@
 - `WorldGenerationAuthoring`の設定項目、既定値、Baker変換を変更した。
 - `DefinitionCatalogAuthoring`または鶏の定義GUID、生成条件、移動パラメータ、外見差分を変更した。
 - バイオーム、地面、水域、マグマ、岩壁、資源の種類またはフォールバック色を変更した。
-- Ground、Liquid Base、Liquid Surface Animation、Land Boundary Highlight、Rock Wall、Rock Wall Boundary Highlight、Resource、Rock Wall ResourceのTilemapレイヤー構成、Transform、描画Mode、Sorting Order、参照関係を変更した。
+- Ground、Liquid Base、Magma Surface Pattern、Land Boundary Highlight、Rock Wall、Rock Wall Boundary Highlight、Resource、Rock Wall ResourceのTilemapレイヤー構成、Transform、描画Mode、Sorting Order、参照関係を変更した。
 - Camera、Pixel Perfect Camera、共通表示原点、480×270の基準解像度、黒帯処理を変更した。
 - `SampleScene`または`WorldGenerationSettingsSubScene`の生成構成を変更した。
 - 土地・岩壁の元Texture、Sprite Slice、Atlas容量、Pixel Art向けAtlas設定を変更した。境界ハイライトの再制作時は、Sprite、Slice、Atlas、Scene参照を同じ変更で確認する。
@@ -58,9 +58,9 @@
 
 1. Consoleに例外または新規警告が出ていない。
 2. メニュー実行をキャンセルした場合はアセットやSceneが変更されず、実行した場合は成功・失敗のどちらでも元の複数Scene構成、読込状態、Active Sceneへ戻る。
-3. 必要なPNG、Tile、AnimatedTile、Sprite Atlas、`.meta`が揃っている。18枚の土地フォールバックは安定`BiomeId` 1〜18と一対一で、上面はBiome別の仮色一色とし、草・葉・砂紋やSoil模様を含まない。旧7種の土地フォールバックは存在せず、18枚が`GroundTerrainAtlas`の同じパック後Textureを参照する。本番用`terrain_rock_wall_01.png`と専用Tileが16×28、Pivot Y `8/28`で同じSpriteを参照し、`RockWallAtlas`へ収録される。共通境界PNGは16×16の14区画を持ち、`BoundaryHighlightAtlas`の同じパック後Textureへ収録され、Sceneの境界Sprite配列へ14件すべて接続される。
+3. 必要なPNG、Tile、Material、Sprite Atlas、`.meta`が揃っている。18枚の土地フォールバックは安定`BiomeId` 1〜18と一対一で、上面はBiome別の仮色一色とし、草・葉・砂紋やSoil模様を含まない。旧7種の土地フォールバックは存在せず、18枚が`GroundTerrainAtlas`の同じパック後Textureを参照する。本番用`terrain_rock_wall_01.png`と専用Tileが16×28、Pivot Y `8/28`で同じSpriteを参照し、`RockWallAtlas`へ収録される。共通境界PNGは16×16の14区画を持ち、`BoundaryHighlightAtlas`の同じパック後Textureへ収録され、Sceneの境界Sprite配列へ14件すべて接続される。
 4. SampleSceneとSubSceneの参照がMissingになっていない。`WorldGenerationSettingsSubScene`の`DefinitionCatalogAuthoring`が鶏の定義GUIDと開発用初期値を保持し、共通定義の分類が`AnimalSpecies`になっている。Inspectorの`animalSpeciesDefinitions`を展開すると要素見出しが`0: Chicken`になり、GUIDが未設定または不一致なら未解決表示になる。World GridのTransformが原点・無回転・等倍で、Cameraの`CameraPanController`が`ChunkTilemapPresenter`と`InitialCameraPositionController`へ接続され、自動Floating Origin距離が512タイルになっている。
-5. PlayModeで土地が16×24、岩壁が16×28の一体型ブロックとして表示される。土地は論理Biomeだけを反映し、同じBiome内では標準・肥沃・砂質のいずれも同じTileに見える。静止液面と透明アニメーションは同じ8px下、岩壁内部影・露出資源は12px上へ表示される。Ground／Wallの境界ハイライトは14基本形と回転から選ばれ、20%のAlphaで表示される。液体はGround Tilemapへ重複せず、液面下辺と奥側ブロックの断面・側面は手前ブロックに隠れる。直前方が岩壁の通常資源は背面用Tilemapへ入り、それ以外は前面用へ入る。カメラをサブチャンク・チャンク境界へ寄せても立体Spriteが途中で消えない。
+5. PlayModeで土地が16×24、岩壁が16×28の一体型ブロックとして表示される。土地は論理Biomeだけを反映し、同じBiome内では標準・肥沃・砂質のいずれも同じTileに見える。製品の静止液面・マグマ模様は同じ論理セル原点、岩壁内部影・露出資源は12px上へ表示される。Ground／Wallの境界ハイライトは14基本形と回転から選ばれ、20%のAlphaで表示される。液体はGround Tilemapへ重複せず、液面下辺と奥側ブロックの断面・側面は手前ブロックに隠れる。直前方が岩壁の通常資源は背面用Tilemapへ入り、それ以外は前面用へ入る。カメラをサブチャンク・チャンク境界へ寄せても立体Spriteが途中で消えない。
    ただし上記の一体型Wall・12px・14形状境界は中間フォールバックの検査である。最終製品Sceneでは41材質のWall上面と前面2段を使い、論理Wall根元が最下段Face、Y+1が1段目Face、Y+2がWall上面とWall上資源になること、動的Casterが論理根元と一致することを確認する。
 6. Gameビューの地形描画領域が480×270基準の黒帯内へ収まり、HUDとF4表示も同じ領域を使用する。F3には現在タイルのサブチャンク座標、Biome、GeneratorVersion、16桁16進数のワールドシードが表示される。
 7. 最大ズームアウトで通常移動とShift移動を行い、512タイル境界の前後でCamera、Tilemap、F3、F4、開発者用可視化が同じ絶対セルを示し、空白や旧セルの残留が見えない。Profilerでは`Farmware.WorldGeneration.FloatingOriginRebase`、`Farmware.WorldGeneration.TilemapPresentation`、`Farmware.WorldGeneration.ChunkStreaming`を記録し、原点変更フレームのCPU時間、GC Alloc、生成待ち数を変更前後で比較する。
@@ -444,7 +444,7 @@ Projectビューの`Create > Farmware > Terrain Tile Art Generation Settings`か
 
 反射設定見本のMaterialは`TerrainWaterReflection.mat`とし、元画像の色補正・反射色・最大濃度、整数pxの最大振幅、横と縦のまとまり、基準周期、周期ばらつき、更新FPS、付け根を固定する長さを調整できる。初期設定は最大±1px、横32px・縦4px、4秒±35%、2fps、付け根2px。振幅0で揺れを止め、切り抜き位置と減衰を確認する。横変位は模様だけでなく外周・透明な穴にも適用する。付け根と受け手の水域境界は固定する。永続調整は停止中にAssetへ行う。Play中は全反射Meshが共有する実行時Materialを使い、Assetへ時刻や原点を書き戻さない。
 
-接続処理は公開済み41材質カタログと液体3種カタログをSampleSceneの`ChunkTilemapPresenter`へ設定する。地形側はGround断面、Wall前面、乾燥崖深部黒、固定接地影2枚、32px折れ目影2枚を作成または再利用する。液体側は既存`Liquid Base Tilemap`を論理セル原点へ戻して製品Surface Materialを割り当て、床あり基底色、床なし基底色、直下床、水中断面、短い水面模様、反射設定見本、水際の描画設定を追加する。反射は製品Atlasも明示設定し、実描画は水域で切り抜いたMeshを使う。`WaterSurface` Layer内はSurfaceと基底色0、直下床と水中断面1、水面模様2、反射3、水際4の順とする。旧`Liquid Surface Animation Tilemap`は残存Tileを消してRendererを無効にし、新旧表現を重ねない。
+接続処理は公開済み41材質カタログと液体3種カタログをSampleSceneの`ChunkTilemapPresenter`へ設定する。地形側はGround断面、Wall前面、乾燥崖深部黒、固定接地影2枚、32px折れ目影2枚を作成または再利用する。液体側は既存`Liquid Base Tilemap`を論理セル原点へ戻して製品Surface Materialを割り当て、床あり基底色、床なし基底色、直下床、水中断面、短い水面模様、反射設定見本、水際の描画設定を追加する。反射は製品Atlasも明示設定し、実描画は水域で切り抜いたMeshを使う。`WaterSurface` Layer内はSurfaceと基底色0、直下床と水中断面1、水面模様またはマグマ網状模様2、反射3、水際4の順とする。`Magma Surface Pattern Tilemap`を製品名から作成または再利用し、Presenterの`magmaSurfacePatternTilemap`へ接続する。Rendererへ`TerrainMagmaSurfacePattern.mat`を割り当て、マグマセルだけを描く。マグマ岸の地面の縁3pxは水中断面レイヤーへ専用の分類印で描き、Wall前面は通常のWallレイヤーへ残す。新しいSceneレイヤーや専用Spriteは追加しない。網目6px、芯の半幅0.25px、橙色帯の半幅0.75px、4fpsを採用初期値とし、再接続時も既存のMaterial調整値を保持する。旧AnimatedTile・4フレーム生成と選択経路、一時的なマグマ候補移動メニューは削除済みである。
 
 論理Wallセルを最下段Faceの根元とし、Wall上面・前面・折れ目影・Wall上資源は+2Y、固定接地影は+2Yを基準に手前3 pxへ揃える。動的Casterは論理Wall根元へ追加オフセットなしで置く。Wall上面・前面・折れ目影は`TerrainWall` Sorting Layerへ置き、既存Global Light 2Dの対象へ同Layerを追加する。画面手前側2セル以内にWall根元がある資源だけは`Default` LayerのWall背後へ残し、通常資源とWall上資源は`TerrainWall` Layer内でWall本体より大きいSorting Orderへ揃える。これにより、Lit MaterialのWallが無照明で黒くなることと、Sorting Layerの違いによって通常資源までWallの背後へ回ることを防ぐ。
 

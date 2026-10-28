@@ -1,4 +1,4 @@
-// このファイルは、公開済み41材質・液体カタログと採用済み断面・Wall影レイヤーを製品SampleSceneへ接続します。
+// このファイルは、公開済み41材質・液体カタログと採用済み断面・液面模様・Wall影レイヤーを製品SampleSceneへ接続します。
 // Sprite生成やSimulation状態は変更せず、ChunkTilemapPresenterが製品表示へ書き込むTilemap、Material、描画順だけを構成します。
 
 using System;
@@ -40,9 +40,12 @@ namespace Farmware.WorldGeneration.Editor
         /// <summary>製品Surface Tileを書き込む既存液体基礎レイヤー名です。</summary>
         public const string LiquidBaseTilemapName = "Liquid Base Tilemap";
 
-        /// <summary>製品経路では無効化する旧全面液体アニメーションレイヤー名です。</summary>
-        public const string LegacyLiquidAnimationTilemapName =
-            "Liquid Surface Animation Tilemap";
+        /// <summary>製品経路でマグマだけへ手続き型の網状模様を重ねるレイヤー名です。</summary>
+        public const string MagmaSurfacePatternTilemapName = "Magma Surface Pattern Tilemap";
+
+        /// <summary>網目を絶対座標から生成するマグマ模様Materialの保存先です。</summary>
+        public const string MagmaSurfacePatternMaterialPath =
+            "Assets/Farmware/Art/WorldGeneration/Materials/TerrainMagmaSurfacePattern.mat";
 
         /// <summary>直下床あり水域の基底色レイヤー名です。45pxの光学減衰は断面側で評価します。</summary>
         public const string LiquidDepthWithFloorTilemapName =
@@ -151,7 +154,7 @@ namespace Farmware.WorldGeneration.Editor
                 ConnectAndSave();
                 EditorUtility.DisplayDialog(
                     "製品地形表示を接続しました",
-                    "SampleSceneへ41材質、液体深度・反射・水際、採用済みWall影を接続しました。",
+                    "SampleSceneへ41材質、液体深度・反射・水際・マグマ模様、採用済みWall影を接続しました。",
                     "閉じる");
             }
             catch (Exception exception)
@@ -212,6 +215,7 @@ namespace Farmware.WorldGeneration.Editor
             Material liquidDepthWithoutFloor = LoadRequiredMaterial(
                 LiquidDepthWithoutFloorMaterialPath);
             Material waterReflection = LoadRequiredMaterial(WaterReflectionMaterialPath);
+            Material magmaSurfacePattern = LoadRequiredMaterial(MagmaSurfacePatternMaterialPath);
             Material surfacePattern = AssetDatabase.LoadAssetAtPath<Material>(WaterSurfacePatternMaterialPath);
             if (surfacePattern == null)
             {
@@ -356,27 +360,16 @@ namespace Farmware.WorldGeneration.Editor
                     sortingOrder: 4,
                     shoreline);
 
-                // 旧全面アニメーションは製品カタログ経路では書き込まないため、残存Tileを消してRendererも無効化します。
-                // GameObjectとPresenter参照は、製品未接続の開発Scene向け旧経路を別作業で削除するまで保持します。
-                Transform legacyAnimationTransform = gridObject.transform.Find(
-                    LegacyLiquidAnimationTilemapName);
-                Tilemap legacyAnimation = legacyAnimationTransform == null
-                    ? null
-                    : legacyAnimationTransform.GetComponent<Tilemap>();
-                TilemapRenderer legacyAnimationRenderer = legacyAnimationTransform == null
-                    ? null
-                    : legacyAnimationTransform.GetComponent<TilemapRenderer>();
-                if (legacyAnimation == null || legacyAnimationRenderer == null)
-                {
-                    throw new InvalidOperationException(
-                        $"製品Sceneに移行元Tilemapがありません: {LegacyLiquidAnimationTilemapName}");
-                }
-
-                legacyAnimation.ClearAllTiles();
-                legacyAnimationTransform.localPosition = Vector3.zero;
-                legacyAnimationRenderer.enabled = false;
-                EditorUtility.SetDirty(legacyAnimationTransform);
-                EditorUtility.SetDirty(legacyAnimationRenderer);
+                // マグマ専用層は再接続時も同じGameObjectを再利用し、製品名から直接構成します。
+                Tilemap magmaPattern = EnsureTilemap(
+                    gridObject.transform,
+                    MagmaSurfacePatternTilemapName,
+                    Vector3.zero,
+                    sortingLayerName: WaterSortingLayerName,
+                    sortingOrder: 2,
+                    magmaSurfacePattern);
+                magmaPattern.animationFrameRate = 0f;
+                EditorUtility.SetDirty(magmaPattern);
 
                 float pixelsPerUnit = TerrainTileArtGenerationSettings.TileSizeInPixels;
                 Vector3 contactBaseOffset = new Vector3(
@@ -483,6 +476,7 @@ namespace Farmware.WorldGeneration.Editor
                     floorPreview,
                     submergedFaces,
                     pattern,
+                    magmaPattern,
                     reflection,
                     AssetDatabase.LoadAssetAtPath<UnityEngine.U2D.SpriteAtlas>(TerrainMaterialProductPublisher.AtlasPath),
                     edgeWave);

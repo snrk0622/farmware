@@ -1,4 +1,4 @@
-// このファイルは、旧一体型地形の寸法、液面アニメーション、製品2段Wallによる資源遮蔽の共通表示規則を定義します。
+// このファイルは、旧一体型地形の寸法、製品2段Wallによる資源遮蔽の共通表示規則を定義します。
 // Tilemapへ実際に描画するChunkTilemapPresenterと数値を分離し、Sceneを開かないEditModeテストでも高さ規則を検証できるようにします。
 
 using Farmware.Simulation;
@@ -6,25 +6,6 @@ using UnityEngine;
 
 namespace Farmware.WorldGeneration.Presentation
 {
-    /// <summary>
-    /// 液体セルへ重ねるアニメーション素材の種類です。
-    /// 液体の種類や採水可否は変更せず、透明な波・気泡の選択だけに使用します。
-    /// </summary>
-    public enum LiquidAnimationKind : byte
-    {
-        /// <summary>アニメーションを描画しない通常地形です。</summary>
-        None = 0,
-
-        /// <summary>川と池へ重ねる淡水の波です。</summary>
-        FreshWater = 1,
-
-        /// <summary>海へ重ねる海水の波です。</summary>
-        SaltWater = 2,
-
-        /// <summary>マグマへ重ねる発光気泡です。</summary>
-        Magma = 3
-    }
-
     /// <summary>
     /// 一体型ブロックSpriteの寸法、液面オーバーレイ、岩壁際の通常資源を固定描画レイヤーへ振り分ける規則を定義します。
     /// すべて純粋計算であり、ECSデータ、Tilemap、アセットを変更しません。
@@ -64,7 +45,7 @@ namespace Farmware.WorldGeneration.Presentation
 
         /// <summary>
         /// 16pxを1セルとするTilemap上での液面表示オフセットです。
-        /// 画面下方向へ移動するため負値とし、静止液面とアニメーションの両Tilemapへ同じ値を適用します。
+        /// 画面下方向へ移動するため負値とし、製品カタログ未接続の静止液面Tilemapへ適用します。
         /// </summary>
         public const float LiquidSurfaceOffsetInCells =
             -LiquidSurfaceDepthInPixels / (float)TerrainSurfaceHeightInPixels;
@@ -94,34 +75,6 @@ namespace Farmware.WorldGeneration.Presentation
         /// </summary>
         public const float RockWallElevationInCells =
             RockWallElevationInPixels / (float)TerrainSurfaceHeightInPixels;
-
-        /// <summary>
-        /// 1セルのLiquid Runtime IDから、重ねる液面アニメーション種類を返します。
-        /// </summary>
-        /// <param name="terrainCell">ECSを正とする1セル分の自然生成Blockセルです。</param>
-        /// <param name="runtimeIds">淡水、海水、マグマを識別する組み込みIDです。</param>
-        /// <returns>淡水・海水・マグマの表示種類です。通常地形ならNoneです。</returns>
-        public static LiquidAnimationKind ClassifyLiquidAnimation(
-            in GeneratedTerrainCell terrainCell,
-            in BuiltInTerrainBlockRuntimeIds runtimeIds)
-        {
-            if (terrainCell.LiquidRuntimeId.IsValid
-                && terrainCell.LiquidRuntimeId.Value == runtimeIds.Magma.Value)
-            {
-                return LiquidAnimationKind.Magma;
-            }
-
-            if (terrainCell.LiquidRuntimeId.IsValid
-                && terrainCell.LiquidRuntimeId.Value == runtimeIds.FreshWater.Value)
-            {
-                return LiquidAnimationKind.FreshWater;
-            }
-
-            return terrainCell.LiquidRuntimeId.IsValid
-                && terrainCell.LiquidRuntimeId.Value == runtimeIds.SaltWater.Value
-                ? LiquidAnimationKind.SaltWater
-                : LiquidAnimationKind.None;
-        }
 
         /// <summary>
         /// 通常地面の資源を、画面手前にある2段Wallより後ろへ描画する必要があるか判定します。

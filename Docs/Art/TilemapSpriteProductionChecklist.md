@@ -28,9 +28,9 @@
 
 旧方式でPixelLab中心に制作した製品用スプライトの画風、生成、Unityへのインポート、表示設定、実機確認を履歴として記録する。現行の材質タイル制作手順には使用しない。
 
-Editorの構築メニューが `Assets/Farmware/Art/WorldGeneration/Fallback/` へ生成する、上面をBiome別の仮色一色で塗った18種類の16×24土地Tile、3種類の16×16液体Tile、1種類の16×28岩壁Tile、3種類の資源Tile、淡水・海水・マグマの各4フレームAnimatedTileは表示を成立させるための仮素材である。新18Biome土地の本番素材はまだなく、SampleSceneと`GroundTerrainAtlas`は18枚の仮色Tileを一対一で参照する。未制作Biomeを旧草原・森林等の近似Tileへフォールバックしない。本書のチェックは、本番候補へ置き換えた素材から付け、仮素材が存在するだけではチェックしない。
+Editorの構築メニューが `Assets/Farmware/Art/WorldGeneration/Fallback/` へ生成する、上面をBiome別の仮色一色で塗った18種類の16×24土地Tile、3種類の16×16液体Tile、1種類の16×28岩壁Tile、3種類の資源Tileは表示を成立させるための仮素材である。液面模様は製品Shaderへ置き換え、旧4フレームAnimatedTileは廃止した。新18Biome土地の本番素材はまだなく、SampleSceneと`GroundTerrainAtlas`は18枚の仮色Tileを一対一で参照する。未制作Biomeを旧草原・森林等の近似Tileへフォールバックしない。本書のチェックは、本番候補へ置き換えた素材から付け、仮素材が存在するだけではチェックしない。
 
-2026-10-26時点で、`ChunkTilemapPresenter`には上面16 pxと断面8 pxを結合した土地、上面16 pxと側面12 pxを結合した岩壁、土地より8 px下へ投影する静止液面・液面アニメーション、岩壁上資源を16×16サブチャンク単位で表示・消去する旧Scene経路が残っている。C6-C3で表示入力は`GeneratedTerrainCell`のGround、Wall、Liquidへ統一した。C6-D2では、完全な41材質製品カタログと専用3 Tilemapを割り当てた場合だけ、同じDirtyサブチャンク、カリング、Floating Originへ16×16の`GroundTop`、Ground崖面3段、Wall前面2段、乾燥穴の48 px減衰と深部黒を接続する製品経路を追加した。SpriteとTintの組を共有Tileへキャッシュし、セルごとのSpriteやGameObjectは作らない。41材質SpriteとAtlasを製品Sceneへ割り当てるC6-D6まではSampleSceneを旧表示のまま維持し、不完全な製品カタログを暫定Biome Tileへフォールバックさせない。旧経路の断面は隣接判定で出し分けず、画面手前の一体型ブロックが奥側の断面を隠す。`Build Fallback Map Prototype`を実行すると旧経路に必要なレイヤーと仮素材を再生成し、仮色土地と岩壁をSampleSceneへ再接続できる。
+2026-10-26時点で、`ChunkTilemapPresenter`には上面16 pxと断面8 pxを結合した土地、上面16 pxと側面12 pxを結合した岩壁、土地より8 px下へ投影する静止液面、岩壁上資源を16×16サブチャンク単位で表示・消去する旧Scene経路が残っている。C6-C3で表示入力は`GeneratedTerrainCell`のGround、Wall、Liquidへ統一した。C6-D2では、完全な41材質製品カタログと専用3 Tilemapを割り当てた場合だけ、同じDirtyサブチャンク、カリング、Floating Originへ16×16の`GroundTop`、Ground崖面3段、Wall前面2段、乾燥穴の48 px減衰と深部黒を接続する製品経路を追加した。SpriteとTintの組を共有Tileへキャッシュし、セルごとのSpriteやGameObjectは作らない。41材質SpriteとAtlasを製品Sceneへ割り当てるC6-D6まではSampleSceneを旧表示のまま維持し、不完全な製品カタログを暫定Biome Tileへフォールバックさせない。旧経路の断面は隣接判定で出し分けず、画面手前の一体型ブロックが奥側の断面を隠す。`Build Fallback Map Prototype`を実行すると旧経路に必要なレイヤーと仮素材を再生成し、仮色土地と岩壁をSampleSceneへ再接続できる。
 
 ### 1.1 チェック欄の意味
 
@@ -73,7 +73,7 @@ Editorの構築メニューが `Assets/Farmware/Art/WorldGeneration/Fallback/` �
 #### 段階A: 全体配色とシルエットの確認
 
 ランダムマップ全体を本番候補の色と形で埋め、バイオームの識別、画面の情報量、資源の可読性を先に判断する。
-この段階では現在の`ChunkTilemapPresenter`が扱える各分類1枚のTileを使用する。断面と液面アニメーションはフォールバック素材で先に表示できるが、本番候補の完成条件には含めない。
+この段階では現在の`ChunkTilemapPresenter`が扱える各分類1枚のTileを使用する。断面はフォールバック素材で先に表示できるが、本番候補の完成条件には含めない。
 
 - [x] 草原、森林、砂漠、岩地、湿地、雪原、火山の代表地面を各1枚選定
 - [ ] 淡水、海水、マグマ、岩壁上面の代表地形を各1枚選定
@@ -98,7 +98,7 @@ Editorの構築メニューが `Assets/Farmware/Art/WorldGeneration/Fallback/` �
 
 #### 段階B: 製品表示としての接続と反復の確認
 
-段階Aで採用した色と形を基準に、16×24土地と16×28岩壁の一体型ブロック、液面アニメーション、装飾レイヤーを追加する。
+段階Aで採用した色と形を基準に、16×24土地と16×28岩壁の一体型ブロック、Shaderによる液面模様、装飾レイヤーを追加する。
 ロードマップ上の`ART-00B`と`ART-00C`は完了している。`ART-00B`は2026-10-15に、関連EditMode 23件とSampleScene PlayMode 25件の成功、Consoleエラー0件をAIが確認し、14形状と各回転、斜め内角、土地と岩壁の表示高さ、チャンク往復後の残留がないことを含むGameビュー確認を開発者が承認した。`ART-00C`はPR #4（merge commit `8a69fe9d`）で本番PNG、専用Tile、Atlas、SampleScene、再構築処理、関連テストを導入し、2026-10-16に岩壁の側面遮蔽、表示高、下層土地断面、にじみ、チャンク境界を開発者がGameビューで確認して問題なしと承認した。
 
 - [ ] 全11種類のBase地形を各1枚用意し、同じ分類では常に同じTileを表示
@@ -146,7 +146,7 @@ Base地形は合計11種類×1枚の11 Spriteとなる。段階Aの世界観確�
 
 - Foragerのように、正方形グリッド上で島や地形の輪郭を直角かつ単純に読める斜め見下ろし表現を使用する。アイソメトリックの菱形グリッドにはしない。
 - 地面は上面16×16 pxと前面断面16×8 pxを縦に結合した16×24 pxで描く。論理グリッドは正方形のまま、断面だけをセル直下へはみ出させる。
-- 淡水、海水、マグマは16×16 pxの正方形を維持し、静止Base Tileと透明アニメーションを専用Tilemapで画面下へ8 px移動して低い液面として投影する。土地断面の下端と液面上辺を接続し、液面の下辺が手前の土地へ重なる場合は手前ブロックで隠す。
+- 淡水、海水、マグマは16×16pxの正方形を維持する。製品液面と模様は専用Tilemapを論理セル原点に固定し、奥岸上端3pxだけShaderで切り抜いて低く投影する。模様は水面・マグマごとの専用Shaderで動かす。
 - 岩壁は上面16×16 pxと側面16×12 pxを縦に結合した16×28 pxとする。上面16 px：側面12 pxを1：0.75の基準比率とし、Sprite Pivotで基準面から上へ積まれた一段を表す。
 - 通常地面のBase Spriteには側面、外周線、タイル境界線、投影影を描かない。土地・岩壁境界ハイライトはBase Spriteへ焼き込まず、専用オーバーレイへ分離する。
 - 土地と岩壁の前面は全Spriteへ含める。奥側の前面は画面手前側のブロックがYソートで隠し、隣接判定や専用断面Tilemapでは出し分けない。岩壁内部は同じ岩壁Tileの上へPresentationが連続アルファの黒い影Meshを重ねる。
@@ -268,17 +268,14 @@ Match the approved grassland reference in canvas size, top-and-face layout, outl
 
 ### 3.8 水面・マグマの地形アニメーション共通設定
 
-水面やマグマは波紋、流れ、明暗の帯を上下へ1 px程度動かし、液面の高さが変わって見える表現を使用してよい。ただし、論理セルと岸の境界は全フレームで固定する。各液体の1枚のBase Tileは静止画のまま`Liquid Base Tilemap`へ置き、土地より画面下へ8 px移動する。その上の`Liquid Surface Animation Tilemap`も同じ8 px下へ移動し、透明背景の波紋・明暗だけを重ねる。
+液面は製品カタログとShaderで構成する。Tilemapは論理セル原点に固定し、奥岸セルの上端3pxだけを切る。淡水・海水の短い水面模様、反射、水際、マグマの網状模様は、それぞれ専用Shaderで動かす。静止Surfaceは公開ツールで生成し、4フレームOverlay画像やAnimatedTileは制作しない。
 
-- 個々のTileや論理セルは移動させず、静止液面とアニメーションのTilemap Transformを一律`-8/16セル`へ設定する。
-- 各アニメーションフレームの外周1 pxは完全透明とし、隣接Tileとの継ぎ目や岸の輪郭を動かさない。
-- 岸、前面断面、岩壁側面へ波や発光ピクセルをはみ出させない。
-- 動かすのはTile内部の短い波紋、反射、低コントラストの明暗帯に限定する。
-- 4フレームの低速Loopを初期値とし、最近傍表示で1 px単位に切り替える。フレーム補間、Spriteの拡大縮小、サブピクセル移動は使用しない。
-- アニメーションはPresentation専用とし、`GeneratedTile`、当たり判定、建築可否、採取、経路、セーブデータを変更しない。
-- 大量のタイルごとにGameObjectやSpriteRendererを生成せず、導入済みのTilemap Extrasに含まれる`AnimatedTile`または同等のTilemap一括表示で実装する。透明オーバーレイも液体分類ごとに1種類を共有し、Base Tileの差分選択は追加しない。採用方式はProfilerで確認する。
+- マグマの網目は約6pxを基準とし、16pxの1タイル幅に約2〜3個を収める。明るい芯の半幅0.25px、橙色帯の半幅0.75px、4fpsを初期値とする。
+- 模様は絶対画素座標から生成し、タイル・チャンク境界で再開しない。岸、液面位置、前面断面はアニメーションで動かさない。
+- Presentation専用とし、ECSの有効地形、当たり判定、建築可否、液体量、経路、保存データを変更しない。
+- 材料調整は停止中に専用Materialへ行う。実行時はPresenterが所有するコピーを全表示チャンクで共有する。
 
-実際に岸線を1 px上下させるアニメーションは、前面断面との重なり、隣接セルとの継ぎ目、マスク処理が別途必要になるため、初期方針には含めない。
+詳細は[地形タイル表現仕様](./TerrainTileArtSpecification.md#マグマ網状模様)を正とする。
 
 ### 3.9 固定資源スプライト共通フォーマット
 
@@ -384,57 +381,11 @@ Top-down oblique 2D pixel art desert ground block for a cozy agricultural and in
 
 ### 4.4 淡水面 `terrain_fresh_water`
 
-- 必要数: 静かな静止画1枚。アニメーションを採用する場合は、透明オーバーレイ1種類×4フレームを初期値とする
-- PixelLabツール: 静止画は`Create tiles (Pro)`、アニメーションは採用静止画を`Animate with text`へ渡す
-- 静止画設定: 3.4の共通設定。採用した草原をStyle referenceへ指定し、Tile thicknessは0、Outlineなし
-- Static Prompt（全文をそのまま入力）:
-
-```text
-Top-down 2D pixel art water surface for a cozy agricultural and industrial automation game, using an orthogonal square grid rather than an isometric diamond grid. Create one repeatable seamless calm freshwater surface viewed directly from above, exactly 16 by 16 pixels. The tile must form a flat seamless surface with no visible tile boundary, shore, side face, thickness, outline, or cast shadow. Match the approved grassland reference only in visual scale and cheerful natural-daylight color clarity. Unlike solid normal land, liquid may use two or three restrained value steps and sparse internal ripple clusters. Do not add darker outlines or high-frequency noise.
-
-Use clear medium blue-green with a small amount of fresh cyan-blue and pale sunlit reflection. Keep the surface bright and clean without becoming neon, mirror-like, or self-illuminated. Give the tile two to four subtle low-contrast blue or blue-green clusters totaling approximately four to eight changed pixels. The tile may not be completely flat or solid-colored. Do not put a unique reflection or landmark in the Base Tile. Ripples must be short broken pixel clusters rather than symbols or repeated lines. Avoid isometric diamond grid, visible sides, tile border, grid line, black seam, gray or muddy water, outlined ripples, parallel wave stripes, ocean swell, foam, shoreline, fish, boats, floating objects, large reflections, strong directional highlights, fluorescent cyan, glowing water, gradient, blur, anti-aliasing, and dense speckles.
-```
-
-- Animation Prompt（全文をそのまま入力）:
-
-```text
-Create a transparent four-frame pixel-art overlay that animates only tiny water ripples and one-pixel light-dark clusters, creating a gentle illusion that the surface rises and falls without moving the shoreline. Keep the outermost one-pixel border completely transparent in every frame. Preserve the reference water palette, pixel density, scale, and camera. Do not include the filled water base, translate the whole tile, or change the tile silhouette. No camera movement, new object, foam, or large wave.
-```
-
-- Animation settings: `4 frames`、Loop、動きの強さ`Low`
-- [ ] 静止Base Tileを生成
-- [ ] アニメーション採用可否を決定
-- [ ] 全フレームで外周1 pxが完全透明で、岸の位置が変化しない
-- [ ] 取込
-- [ ] 設定
-- [ ] 確認
+製品Surfaceは公開ツールが16×16px・Alpha 0で生成する。水色は深度Material、短い水面模様は`TerrainWaterSurfacePattern.mat`、岸の明暗は`TerrainLiquidShoreline.mat`で調整する。静止画像へ模様を焼き込まず、アニメーション画像は制作しない。
 
 ### 4.5 海水面 `terrain_salt_water`
 
-- 必要数: 静かな静止画1枚。アニメーションを採用する場合は、透明オーバーレイ1種類×4フレームを初期値とする
-- PixelLabツール: 静止画は`Create tiles (Pro)`、アニメーションは採用静止画を`Animate with text`へ渡す
-- 静止画設定: 3.4の共通設定。採用した草原と淡水面をStyle referenceへ指定し、Tile thicknessは0、Outlineなし
-- Static Prompt（全文をそのまま入力）:
-
-```text
-Top-down 2D pixel art water surface for a cozy agricultural and industrial automation game, using an orthogonal square grid rather than an isometric diamond grid. Create one repeatable seamless calm saltwater surface viewed directly from above, exactly 16 by 16 pixels. The tile must form a flat seamless surface with no visible tile boundary, shore, side face, thickness, outline, or cast shadow. Match the approved grassland reference only in visual scale and color clarity, and match freshwater in ripple density and contrast. Unlike solid normal land, liquid may use two or three restrained value steps and sparse internal ripple clusters. Do not add darker outlines or high-frequency noise.
-
-Use a clear medium ocean blue that is slightly deeper than the freshwater reference while remaining bright and colorful in daylight. Give the tile two to four subtle low-contrast blue clusters totaling approximately four to eight changed pixels. The tile may not be completely flat or solid-colored. Do not put a unique reflection or landmark in the Base Tile. Keep the surface readable as ocean water without drawing foam or a shoreline. Avoid isometric diamond grid, visible sides, tile border, grid line, black seam, gray navy, murky water, tropical neon cyan, outlined waves, large ocean swell, parallel stripes, foam, shoreline, fish, boats, floating objects, large reflections, strong directional highlights, glowing water, gradient, blur, anti-aliasing, and dense speckles.
-```
-
-- Animation Prompt（全文をそのまま入力）:
-
-```text
-Create a transparent four-frame pixel-art overlay that animates only small saltwater wave clusters and one-pixel light-dark bands, creating a gentle illusion that the surface rises and falls without moving the shoreline. Keep the outermost one-pixel border completely transparent in every frame. Preserve the reference ocean palette, pixel density, scale, and camera. Do not include the filled water base, translate the whole tile, or change the tile silhouette. No camera movement, shore foam, large wave, or new object.
-```
-
-- Animation settings: `4 frames`、Loop、動きの強さ`Low`
-- [ ] 静止Base Tileを生成
-- [ ] アニメーション採用可否を決定
-- [ ] 全フレームで外周1 pxが完全透明で、岸の位置が変化しない
-- [ ] 取込
-- [ ] 設定
-- [ ] 確認
+淡水と同じ製品経路を使い、カタログとMaterialの海水色で区別する。Surfaceは16×16px・Alpha 0とし、海水専用の4フレーム素材は制作しない。
 
 ### 4.6 岩地・湿地・雪原・火山・マグマ
 
@@ -484,26 +435,16 @@ Top-down oblique 2D pixel art volcanic ground block for a cozy agricultural and 
 
 #### 4.6.5 マグマ `terrain_magma`
 
-- Static Prompt（全文をそのまま入力）:
+製品Surfaceは公開ツールが16×16px・Alpha 255で生成する。全面の模様は`TerrainMagmaSurfacePattern.mat`と`Magma Surface Pattern Tilemap`で描く。Voronoi境界を明るい網、内部を暗い面にし、特徴点を動かして網目そのものを変形させる。ドット絵の静止模様・4フレームOverlayは追加しない。
 
-```text
-Top-down 2D pixel art molten magma surface for a cozy agricultural and industrial automation game, using an orthogonal square grid rather than an isometric diamond grid. Create one repeatable seamless magma surface viewed directly from above, exactly 16 by 16 pixels. The tile must form a flat lowland liquid surface with no visible tile boundary, shore, side face, thickness, outline, or cast shadow. Match normal land only in visual scale and readable color separation. Unlike solid normal land, magma may use three controlled value steps and sparse internal flow clusters. Do not add heavy outlines or high-frequency noise.
+見本画像全体が1タイル分であるため、網目6pxを基準とする。色、網目寸法、芯と橙色帯の幅、移動量、周期、FPS、内部階調、明滅量は専用Materialで調整する。基礎の不透明面と奥岸3pxクリップを維持し、発光によって岸や液面の高さを変えない。詳細は[地形タイル表現仕様](./TerrainTileArtSpecification.md#マグマ網状模様)を参照する。
 
-Use a strong orange base, warm red-orange darker clusters, and a very limited amount of pale yellow highlights. Keep broad calm color fields so a large magma area does not flicker or overpower machines and UI. Give the tile two to four subtle internal 1-to-3-pixel flow-color clusters totaling approximately four to eight changed pixels. The tile may not be completely flat or solid-colored. Do not put a bright molten knot or other unique landmark in the Base Tile. Avoid isometric diamond grid, visible sides, tile border, grid line, black seam, shoreline, crust edge, white-hot broad area, neon yellow, flashing highlight, long continuous lava stripe, large eruption, splash, smoke, flying ember, rock island, outlined crack network, strong bloom, gradient, blur, anti-aliasing, and dense speckles.
-```
-
-- Animation Prompt（全文をそのまま入力）:
-
-```text
-Create a transparent four-frame pixel-art overlay that animates only small internal magma flow clusters and one-pixel orange-yellow light bands, creating a gentle illusion that the molten surface rises and falls without moving the shoreline. Keep the outermost one-pixel border completely transparent in every frame. Preserve the reference magma palette balance, pixel density, scale, and camera. Do not include the filled magma base, translate the whole tile, or change the tile silhouette. No eruption, splash, smoke, flying ember, large white flash, shore glow, or new object.
-```
-
+- [x] マグマ面のShader生成・縮尺・網目変形・見た目を確認
+- [x] マグマ奥岸のGroundの縁3pxとWall前面が見え、液面より下の断面は透けていない（ユーザー確認済み）
 - [ ] 岩地を生成・取込・設定・確認
 - [ ] 湿地を生成・取込・設定・確認
 - [ ] 雪原を生成・取込・設定・確認
 - [ ] 火山を生成・取込・設定・確認
-- [ ] マグマを生成・取込・設定・確認
-- [ ] マグマをアニメーションさせる場合、全フレームで外周1 pxが完全透明で、岸の位置が変化しない
 
 ### 4.7 一体型岩壁 `terrain_rock_wall`
 
@@ -649,13 +590,13 @@ Gameビューで高さが読めない場合だけ、チャンク単位のMeshま
 
 ### 5.9 Presentation実装と検品
 
-静止した水・マグマは`Ground Tilemap`から分けた`Liquid Base Tilemap`へ、透明アニメーションは`Liquid Surface Animation Tilemap`へ反映し、両方を画面下へ8 px移動する。16×24土地は`Ground Tilemap`、16×28岩壁は`Rock Wall Tilemap`へ同じ論理座標で反映する。
+製品の水・マグマSurfaceは`Ground Tilemap`から分けた`Liquid Base Tilemap`へ反映し、マグマ模様は`Magma Surface Pattern Tilemap`へ重ねる。両方を論理セル原点へ固定し、奥岸3pxだけShaderで切る。16×24土地は`Ground Tilemap`、16×28岩壁は`Rock Wall Tilemap`へ同じ論理座標で反映する。
 
 `Ground Tilemap`と`Rock Wall Tilemap`は、セルごとの重なりをY座標で解決するため`TilemapRenderer.Mode.Individual`を使用する。Sort Orderは`Top Left`とし、画面奥に当たる大きいワールドYから先に描いて、画面手前の小さいワールドYを後から重ねる。通常資源は、直前方に当たるワールドYが1小さいセルが岩壁なら`Resource Behind Rock Wall Tilemap`へ置き、岩壁より小さいSorting Orderで先に描く。それ以外は`Resource Tilemap`へ置き、岩壁より大きいSorting Orderで後から描く。これにより遠方の大きな絶対座標を透明ソート値へ使わず、奥の木・石・砂を手前岩壁で隠せる。別断面Tilemapは不要である。液体セルではGroundを空にし、土地・岩壁セルでは一体型Spriteの前面が手前側へはみ出す。
 
-- [ ] Ground、Liquid Base、Liquid Surface Animation、Rock Wall、Resource Behind Rock Wall、Resource、Rock Wall Resourceの各Tilemapが分離されている
-- [ ] 静止液面とアニメーションが同じ`-8/16セル`へ移動し、Ground Tilemapの同一論理セルへ液体Tileが重複していない
-- [ ] 移動後の液面上辺と8 px断面下辺に隙間や重なりがない
+- [ ] Ground、Liquid Base、Magma Surface Pattern、Rock Wall、Resource Behind Rock Wall、Resource、Rock Wall Resourceの各Tilemapが分離されている
+- [ ] 製品液面と模様が同じ論理セル原点にあり、Ground Tilemapの同一論理セルへ液体Tileが重複していない
+- [ ] 奥岸上端3pxの切抜きと地面の縁に、不自然な隙間や模様のはみ出しがない
 - [ ] 液面下辺が手前の土地セルへ重なる場所では、土地上面が前に描かれて液面を隠している
 - [ ] GroundとRock WallがIndividual ModeかつTop Left順で、連続するブロックの奥側前面を手前ブロックが隠している
 - [ ] 直前方が岩壁の通常資源だけがResource Behind Rock Wallへ入り、岩壁より先に描かれて重なる下部が隠れる
@@ -891,12 +832,12 @@ player_drone_idle_south.png
 equipment_starting_core_active.png
 ```
 
-製品カタログ未設定時の`ChunkTilemapPresenter`は、18Biomeの16×24仮色土地を`Ground Tilemap`、淡水・海水・マグマを`Liquid Base Tilemap`へ排他的に表示する。Biome配列は安定ID 1〜18順の18要素を必須とし、欠落時に他BiomeのTileを表示しない。静止液面と透明アニメーションは論理セルを変えず画面下へ8 px移動する。岩壁セルにもBiome由来の土地ブロックを残し、16×28岩壁を`Rock Wall Tilemap`へ同じ論理座標で重ねる。GroundとRock WallはIndividual ModeかつTop Left順でセルごとにYソートし、画面奥を先、手前を後に描いて奥側の断面・側面を手前ブロックで隠す。通常Resourceは直前方の岩壁有無から背面用と前面用の固定Tilemapへ振り分け、遠方座標でも手前岩壁との前後関係を維持する。岩壁の内部影と露出資源は岩壁上面に合わせて12 px上へ表示する。境界用Tilemapには再制作した14 Spriteを接続し、8近傍47状態の選択結果を20%のAlphaで描画する。この旧表示はC6-D6の製品Scene切替と回帰確認後に、旧境界素材・選択処理と同じ変更単位で削除する。
+製品カタログ未設定時の`ChunkTilemapPresenter`は、18Biomeの16×24仮色土地を`Ground Tilemap`、淡水・海水・マグマを`Liquid Base Tilemap`へ排他的に表示する。Biome配列は安定ID 1〜18順の18要素を必須とし、欠落時に他BiomeのTileを表示しない。製品カタログ未設定の静止液面だけは論理セルを変えず画面下へ8px移動する。製品の液面と模様は原点に固定し、奥岸3pxだけをShaderで切る。岩壁セルにもBiome由来の土地ブロックを残し、16×28岩壁を`Rock Wall Tilemap`へ同じ論理座標で重ねる。GroundとRock WallはIndividual ModeかつTop Left順でセルごとにYソートし、画面奥を先、手前を後に描いて奥側の断面・側面を手前ブロックで隠す。通常Resourceは直前方の岩壁有無から背面用と前面用の固定Tilemapへ振り分け、遠方座標でも手前岩壁との前後関係を維持する。岩壁の内部影と露出資源は岩壁上面に合わせて12 px上へ表示する。境界用Tilemapには再制作した14 Spriteを接続し、8近傍47状態の選択結果を20%のAlphaで描画する。この旧表示はC6-D6の製品Scene切替と回帰確認後に、旧境界素材・選択処理と同じ変更単位で削除する。
 
 Editor構築ツールとPlayerビルド前処理は、18Biomeの仮色土地PNGを`GroundTerrainAtlas`の1ページ、岩壁を`RockWallAtlas`、再制作した14境界Spriteを`BoundaryHighlightAtlas`へ自動登録・再パックする。境界生成ツールはPNGの実画素、14分割、安定Sprite IDを更新し、SampleScene構築は同じ14参照をPresenterへ保存する。各Atlasが複数ページへ分割された場合は、テストまたはビルドを失敗させる。C6でBlock用本番素材を導入する際は、仮色Packableを同じ変更単位で置換する。
 
 - [x] 通常地形と低地の高さ分類をPresentationで判定できる
-- [x] 静止液面と透明アニメーションをGround Tilemapから分離し、同じ8 pxだけ画面下へ移動できる
+- [x] 製品液面とShader模様をGround Tilemapから分離し、奥岸上端3pxだけを切り抜ける
 - [x] 液体セルをGround Tilemapへ重複配置せず、移動した液面下辺を手前土地で隠せる
 - [x] 16×24土地TileをGround Tilemapへ同じ論理セル座標で表示・消去できる
 - [x] 16×28岩壁TileをRock Wall Tilemapへ同じ論理セル座標で表示・消去できる
@@ -907,7 +848,7 @@ Editor構築ツールとPlayerビルド前処理は、18Biomeの仮色土地PNG�
 - [x] Terrain Front Edge、Rock Wall Front Face、Rock Wall Topの旧TilemapをSceneから削除済みである
 - [x] Rock Wall Resource Tilemapを基準面より12 px上へ表示・消去できる
 - [x] 持ち上げた岩壁上面へ後付けした連続影で、内部と露出面を表現できる
-- [x] Liquid Surface Animation Tilemapで、水面・マグマのBase Tileを維持したまま透明アニメーションを重ねられる
+- [x] 水面模様・マグマ模様の専用Shaderで、Base Tileを維持したまま絶対座標に連続する模様を動かせる
 - [x] 液面アニメーションを無効化しても地形分類と岸の位置が変わらない
 - [ ] 平面的な地表装飾を`Ground Overlay Tilemap`へ表示し、土地より前、全立体物より後ろへ描画できる
 - [ ] 地表装飾をECSまたはセーブ差分から再構築でき、Tilemapを配置状態の正にしていない
@@ -936,7 +877,7 @@ Editor構築ツールとPlayerビルド前処理は、18Biomeの仮色土地PNG�
 - [x] 岩壁上面、内部影、岩壁上資源が基準面より12 px上に揃うことを確認
 - [x] 岩壁が淡水・海水・マグマへ面する場所で、下層の土地断面が欠けないことを確認
 - [x] 同じ岩壁Tileの上で、内部だけが滑らかな黒い影になり、露出面の模様が読めることを確認
-- [ ] 淡水、海水、マグマの4フレームを確認し、外周1 px、土地断面、岩壁側面の位置が動かないことを確認
+- [ ] 淡水・海水の水面Shaderとマグマの網状Shaderを確認し、模様が動いても岸・土地断面・岩壁側面の位置が変わらないことを確認
 - [ ] 液面の波紋が上下に動いて見えても、隣接Tileとの継ぎ目や白いフラッシュが出ないことを確認
 - [ ] 木、石、砂資源を全地形背景に重ね、輪郭を識別できることを確認
 - [ ] 1×1占有物と複数タイル設備を上下に隣接配置し、上方向へのはみ出しとYソートが自然に見えることを確認

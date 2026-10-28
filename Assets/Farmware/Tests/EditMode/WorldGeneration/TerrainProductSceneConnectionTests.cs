@@ -48,7 +48,7 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// Presenterが材質・液体カタログ、断面、深部黒、固定影、折れ目影、液体5レイヤーをすべて参照することを確認します。
+        /// Presenterが材質・液体カタログ、断面、深部黒、固定影、折れ目影、水面・マグマ模様をすべて参照することを確認します。
         /// </summary>
         [Test]
         public void SampleScene_PresenterReferencesCompleteProductTerrainLayers()
@@ -80,6 +80,10 @@ namespace Farmware.WorldGeneration.Tests
                 serialized,
                 "dryCliffDeepBlackTilemap",
                 TerrainProductSceneConnector.DryCliffDeepBlackTilemapName);
+            AssertTilemapReference(
+                serialized,
+                "magmaSurfacePatternTilemap",
+                TerrainProductSceneConnector.MagmaSurfacePatternTilemapName);
             AssertTilemapReference(
                 serialized,
                 "wallContactShadowLeftTilemap",
@@ -125,7 +129,7 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 製品液体が論理セル位置を維持し、基底色、水中断面、水面模様、反射、水際の順で重なることを確認します。
+        /// 製品液体が論理セル位置を維持し、水面・マグマ模様、反射、水際を採用順で重ねることを確認します。
         /// </summary>
         [Test]
         public void SampleScene_LiquidLayersUseProductMaterialsAndAdoptedOrder()
@@ -161,6 +165,9 @@ namespace Farmware.WorldGeneration.Tests
             AssertLayer(grid, TerrainProductSceneConnector.WaterSurfacePatternTilemapName,
                 Vector3.zero, TerrainProductSceneConnector.WaterSortingLayerName,
                 TerrainProductSceneConnector.WaterSurfacePatternMaterialPath);
+            AssertLayer(grid, TerrainProductSceneConnector.MagmaSurfacePatternTilemapName,
+                Vector3.zero, TerrainProductSceneConnector.WaterSortingLayerName,
+                TerrainProductSceneConnector.MagmaSurfacePatternMaterialPath);
             AssertLayer(
                 grid,
                 TerrainProductSceneConnector.WaterReflectionTilemapName,
@@ -198,13 +205,14 @@ namespace Farmware.WorldGeneration.Tests
             Assert.That(depth.sortingOrder, Is.LessThan(reflection.sortingOrder));
             Assert.That(reflection.sortingOrder, Is.LessThan(edgeWave.sortingOrder));
 
-            TilemapRenderer legacyAnimation = GetRenderer(
+            TilemapRenderer magmaPattern = GetRenderer(
                 grid,
-                TerrainProductSceneConnector.LegacyLiquidAnimationTilemapName);
+                TerrainProductSceneConnector.MagmaSurfacePatternTilemapName);
             Assert.That(
-                legacyAnimation.enabled,
-                Is.False,
-                "製品経路では旧全面液体アニメーションを描画してはいけません。");
+                magmaPattern.enabled,
+                Is.True,
+                "製品経路ではマグマ模様専用Rendererを有効にします。");
+            Assert.That(magmaPattern.sortingOrder, Is.LessThan(reflection.sortingOrder));
         }
 
         /// <summary>

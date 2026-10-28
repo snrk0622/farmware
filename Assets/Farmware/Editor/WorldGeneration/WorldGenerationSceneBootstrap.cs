@@ -1,4 +1,4 @@
-// このファイルは、本番用バイオーム土地・岩壁、資源・液面アニメーションの仮素材、初期動物種の静的定義を組み合わせ、マップ生成を確認できるSampleScene構成を再現可能に作ります。
+// このファイルは、本番用バイオーム土地・岩壁、資源の仮素材、初期動物種の静的定義を組み合わせ、マップ生成を確認できるSampleScene構成を再現可能に作ります。
 // Runtimeの生成規則には関与せず、製品・フォールバック表示素材、Sprite Atlas、SubScene、Camera、Grid、Tilemap、静的定義のAuthoring接続だけを担当します。
 
 using System;
@@ -89,12 +89,6 @@ namespace Farmware.WorldGeneration.Editor
 
         /// <summary>フォールバック画像の1辺のピクセル数で、全Tileを偶数寸法へ統一します。</summary>
         private const int FallbackTilePixelSize = 16;
-
-        /// <summary>淡水・海水・マグマの仮アニメーションに使用するフレーム数です。</summary>
-        private const int LiquidAnimationFrameCount = 4;
-
-        /// <summary>液面を速く点滅させず穏やかに見せる、1秒あたりのアニメーションフレーム数です。</summary>
-        private const float LiquidAnimationFramesPerSecond = 4f;
 
         /// <summary>SpriteのPixels Per Unitです。16px画像を1×1ワールドセルとして表示します。</summary>
         private const int AssetsPixelsPerUnit = 16;
@@ -341,19 +335,6 @@ namespace Farmware.WorldGeneration.Editor
             CreateOrUpdateFallbackResourceTile("TreeResource", GeneratedResourceType.Tree);
             CreateOrUpdateFallbackResourceTile("StoneResource", GeneratedResourceType.Stone);
             CreateOrUpdateFallbackResourceTile("SandResource", GeneratedResourceType.Sand);
-            CreateOrUpdateFallbackLiquidAnimationTile(
-                "FreshWaterAnimation",
-                new Color32(186, 231, 255, 190),
-                isMagma: false);
-            CreateOrUpdateFallbackLiquidAnimationTile(
-                "SaltWaterAnimation",
-                new Color32(116, 193, 255, 190),
-                isMagma: false);
-            CreateOrUpdateFallbackLiquidAnimationTile(
-                "MagmaAnimation",
-                new Color32(255, 214, 67, 220),
-                isMagma: true);
-
             // 水は地形そのものを採水源に変更したため、旧水域Tileと水資源アイコンを再生成対象から除外します。
             DeleteObsoleteFallbackTile("Water");
             DeleteObsoleteFallbackTile("WaterResource");
@@ -399,12 +380,6 @@ namespace Farmware.WorldGeneration.Editor
             Tile treeResourceTile = LoadRequiredFallbackTile("TreeResource");
             Tile stoneResourceTile = LoadRequiredFallbackTile("StoneResource");
             Tile sandResourceTile = LoadRequiredFallbackTile("SandResource");
-            AnimatedTile freshWaterAnimationTile =
-                LoadRequiredFallbackAnimatedTile("FreshWaterAnimation");
-            AnimatedTile saltWaterAnimationTile =
-                LoadRequiredFallbackAnimatedTile("SaltWaterAnimation");
-            AnimatedTile magmaAnimationTile =
-                LoadRequiredFallbackAnimatedTile("MagmaAnimation");
             SceneAsset settingsSubSceneAsset = CreateOrUpdateSettingsSubScene();
             ConfigureMainScene(
                 settingsSubSceneAsset,
@@ -415,10 +390,7 @@ namespace Farmware.WorldGeneration.Editor
                 rockWallTile,
                 treeResourceTile,
                 stoneResourceTile,
-                sandResourceTile,
-                freshWaterAnimationTile,
-                saltWaterAnimationTile,
-                magmaAnimationTile);
+                sandResourceTile);
             // 旧フォールバックSceneを構築した直後に、今回の41材質と液体3種を製品カタログへ公開して接続します。
             // これにより再構築メニューを実行しても製品Sceneが旧一体型地形・全面液体アニメーションへ戻りません。
             TerrainMaterialProductPublisher.PublishAll();
@@ -631,159 +603,6 @@ namespace Farmware.WorldGeneration.Editor
                 pixelHeight,
                 new Vector2(0.5f, TerrainLayerPresentationUtility.CombinedRockWallPivotY),
                 hasTransparency: false);
-        }
-
-        /// <summary>
-        /// 4枚の透明PNGとAnimatedTileを作成または更新し、液体本体を隠さない波・気泡を用意します。
-        /// </summary>
-        /// <param name="assetName">AnimatedTileとフレームPNGの共通英語名です。</param>
-        /// <param name="effectColor">波または気泡へ使用する半透明色です。</param>
-        /// <param name="isMagma">波ではなくマグマ気泡を描く場合はtrueです。</param>
-        /// <returns>作成または更新された液面表示専用AnimatedTileです。</returns>
-        private static AnimatedTile CreateOrUpdateFallbackLiquidAnimationTile(
-            string assetName,
-            Color32 effectColor,
-            bool isMagma)
-        {
-            Sprite[] frames = new Sprite[LiquidAnimationFrameCount];
-            for (int frameIndex = 0; frameIndex < LiquidAnimationFrameCount; frameIndex++)
-            {
-                Color32[] pixels = new Color32[FallbackTilePixelSize * FallbackTilePixelSize];
-                if (isMagma)
-                {
-                    DrawFallbackMagmaBubbles(pixels, effectColor, frameIndex);
-                }
-                else
-                {
-                    DrawFallbackWaterWave(pixels, effectColor, frameIndex);
-                }
-
-                string frameAssetName = $"{assetName}Frame{frameIndex:00}";
-                frames[frameIndex] = CreateOrUpdateFallbackSpriteAsset(
-                    frameAssetName,
-                    pixels,
-                    FallbackTilePixelSize,
-                    FallbackTilePixelSize,
-                    new Vector2(0.5f, 0.5f),
-                    hasTransparency: true);
-            }
-
-            string animatedTileAssetPath = $"{FallbackAssetFolder}/{assetName}.asset";
-            AnimatedTile animatedTile =
-                AssetDatabase.LoadAssetAtPath<AnimatedTile>(animatedTileAssetPath);
-            if (animatedTile == null)
-            {
-                animatedTile = ScriptableObject.CreateInstance<AnimatedTile>();
-                AssetDatabase.CreateAsset(animatedTile, animatedTileAssetPath);
-            }
-
-            animatedTile.m_AnimatedSprites = frames;
-            animatedTile.m_MinSpeed = 1f;
-            animatedTile.m_MaxSpeed = 1f;
-            animatedTile.m_AnimationStartTime = 0f;
-            animatedTile.m_AnimationStartFrame = 0;
-            animatedTile.m_TileColliderType = Tile.ColliderType.None;
-            EditorUtility.SetDirty(animatedTile);
-            return animatedTile;
-        }
-
-        /// <summary>
-        /// 水面の左右へ流れる短い水平線を、フレームごとに1px上下・左右へ移動して描きます。
-        /// </summary>
-        /// <param name="pixels">書き込む16×16の透明ピクセル配列です。</param>
-        /// <param name="waveColor">波へ使用する半透明色です。</param>
-        /// <param name="frameIndex">0〜3のアニメーションフレーム番号です。</param>
-        private static void DrawFallbackWaterWave(
-            Color32[] pixels,
-            Color32 waveColor,
-            int frameIndex)
-        {
-            int firstWaveY = 10 + (frameIndex == 1 || frameIndex == 2 ? 1 : 0);
-            int secondWaveY = 4 + (frameIndex >= 2 ? 1 : 0);
-            int horizontalShift = frameIndex % 2;
-            DrawFallbackHorizontalLine(pixels, 2 + horizontalShift, firstWaveY, 5, waveColor);
-            DrawFallbackHorizontalLine(pixels, 9 - horizontalShift, firstWaveY - 3, 4, waveColor);
-            DrawFallbackHorizontalLine(pixels, 4 - horizontalShift, secondWaveY, 5, waveColor);
-        }
-
-        /// <summary>
-        /// マグマ面の気泡が膨らんで消える様子を、フレーム番号に応じた小さな円で描きます。
-        /// </summary>
-        /// <param name="pixels">書き込む16×16の透明ピクセル配列です。</param>
-        /// <param name="bubbleColor">気泡へ使用する半透明色です。</param>
-        /// <param name="frameIndex">0〜3のアニメーションフレーム番号です。</param>
-        private static void DrawFallbackMagmaBubbles(
-            Color32[] pixels,
-            Color32 bubbleColor,
-            int frameIndex)
-        {
-            int radius = frameIndex == 1 || frameIndex == 2 ? 2 : 1;
-            DrawFallbackCircleOutline(pixels, 5, 6 + (frameIndex / 2), radius, bubbleColor);
-            if (frameIndex >= 2)
-            {
-                DrawFallbackCircleOutline(pixels, 11, 10, 1, bubbleColor);
-            }
-        }
-
-        /// <summary>
-        /// 16×16配列へ範囲内の水平線を描き、仮アニメーション形状を組み立てます。
-        /// </summary>
-        /// <param name="pixels">書き込む16×16ピクセル配列です。</param>
-        /// <param name="startX">線の左端X座標です。</param>
-        /// <param name="y">線のY座標です。</param>
-        /// <param name="length">線の長さです。単位はピクセルです。</param>
-        /// <param name="color">書き込む色です。</param>
-        private static void DrawFallbackHorizontalLine(
-            Color32[] pixels,
-            int startX,
-            int y,
-            int length,
-            Color32 color)
-        {
-            for (int offset = 0; offset < length; offset++)
-            {
-                int x = startX + offset;
-                if (x >= 0 && x < FallbackTilePixelSize && y >= 0 && y < FallbackTilePixelSize)
-                {
-                    pixels[(y * FallbackTilePixelSize) + x] = color;
-                }
-            }
-        }
-
-        /// <summary>
-        /// 16×16配列へ小さな円周を描き、マグマ気泡の膨張を表します。
-        /// </summary>
-        /// <param name="pixels">書き込む16×16ピクセル配列です。</param>
-        /// <param name="centerX">気泡中心のX座標です。</param>
-        /// <param name="centerY">気泡中心のY座標です。</param>
-        /// <param name="radius">気泡半径です。単位はピクセルです。</param>
-        /// <param name="color">書き込む色です。</param>
-        private static void DrawFallbackCircleOutline(
-            Color32[] pixels,
-            int centerX,
-            int centerY,
-            int radius,
-            Color32 color)
-        {
-            for (int offsetY = -radius; offsetY <= radius; offsetY++)
-            {
-                for (int offsetX = -radius; offsetX <= radius; offsetX++)
-                {
-                    int distanceSquared = (offsetX * offsetX) + (offsetY * offsetY);
-                    if (distanceSquared < radius * radius - radius
-                        || distanceSquared > radius * radius + radius)
-                    {
-                        continue;
-                    }
-
-                    int x = centerX + offsetX;
-                    int y = centerY + offsetY;
-                    if (x >= 0 && x < FallbackTilePixelSize && y >= 0 && y < FallbackTilePixelSize)
-                    {
-                        pixels[(y * FallbackTilePixelSize) + x] = color;
-                    }
-                }
-            }
         }
 
         /// <summary>
@@ -1162,35 +981,6 @@ namespace Farmware.WorldGeneration.Editor
         }
 
         /// <summary>
-        /// 全Textureの再インポート後に、指定名のフォールバックAnimatedTileをAssetDatabaseから読み直します。
-        /// </summary>
-        /// <param name="assetName">読み込むAnimatedTileアセットの拡張子を除いた名前です。</param>
-        /// <returns>4枚の有効なSprite参照を持つAnimatedTileアセットです。</returns>
-        private static AnimatedTile LoadRequiredFallbackAnimatedTile(string assetName)
-        {
-            string tileAssetPath = $"{FallbackAssetFolder}/{assetName}.asset";
-            AnimatedTile tile = AssetDatabase.LoadAssetAtPath<AnimatedTile>(tileAssetPath);
-            if (tile == null
-                || tile.m_AnimatedSprites == null
-                || tile.m_AnimatedSprites.Length != LiquidAnimationFrameCount)
-            {
-                throw new InvalidOperationException(
-                    $"フォールバックAnimatedTileを再読込できませんでした: {tileAssetPath}");
-            }
-
-            for (int frameIndex = 0; frameIndex < tile.m_AnimatedSprites.Length; frameIndex++)
-            {
-                if (tile.m_AnimatedSprites[frameIndex] == null)
-                {
-                    throw new InvalidOperationException(
-                        $"AnimatedTileのフレーム参照がありません: {tileAssetPath} frame={frameIndex}");
-                }
-            }
-
-            return tile;
-        }
-
-        /// <summary>
         /// WorldGenerationAuthoringと静的定義Authoringを含むSubSceneを作成または更新し、Bakerが設定Singletonを生成できるようにします。
         /// </summary>
         /// <returns>SampleSceneのSubScene Componentへ割り当てるSceneAssetです。</returns>
@@ -1382,9 +1172,6 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="treeResourceTile">樹木資源用の透明背景Tileです。</param>
         /// <param name="stoneResourceTile">石資源用の透明背景Tileです。</param>
         /// <param name="sandResourceTile">砂資源用の透明背景Tileです。</param>
-        /// <param name="freshWaterAnimationTile">淡水へ重ねる透明AnimatedTileです。</param>
-        /// <param name="saltWaterAnimationTile">海水へ重ねる透明AnimatedTileです。</param>
-        /// <param name="magmaAnimationTile">マグマへ重ねる透明AnimatedTileです。</param>
         private static void ConfigureMainScene(
             SceneAsset settingsSubSceneAsset,
             TileBase[] biomeTiles,
@@ -1394,10 +1181,7 @@ namespace Farmware.WorldGeneration.Editor
             TileBase rockWallTile,
             TileBase treeResourceTile,
             TileBase stoneResourceTile,
-            TileBase sandResourceTile,
-            TileBase freshWaterAnimationTile,
-            TileBase saltWaterAnimationTile,
-            TileBase magmaAnimationTile)
+            TileBase sandResourceTile)
         {
             Scene mainScene = EditorSceneManager.OpenScene(MainScenePath, OpenSceneMode.Single);
 
@@ -1436,15 +1220,13 @@ namespace Farmware.WorldGeneration.Editor
                 0f);
             ConfigureTilemapRenderer(liquidBaseTilemapObject, sortingOrder: -2);
 
-            GameObject liquidAnimationTilemapObject =
-                FindOrCreateDirectChild(gridObject.transform, "Liquid Surface Animation Tilemap");
-            Tilemap liquidAnimationTilemap = GetOrAddComponent<Tilemap>(liquidAnimationTilemapObject);
-            liquidAnimationTilemap.animationFrameRate = LiquidAnimationFramesPerSecond;
-            liquidAnimationTilemapObject.transform.localPosition = new Vector3(
-                0f,
-                TerrainLayerPresentationUtility.LiquidSurfaceOffsetInCells,
-                0f);
-            ConfigureTilemapRenderer(liquidAnimationTilemapObject, sortingOrder: -1);
+            GameObject magmaSurfacePatternTilemapObject =
+                FindOrCreateDirectChild(gridObject.transform, TerrainProductSceneConnector.MagmaSurfacePatternTilemapName);
+            Tilemap magmaSurfacePatternTilemap = GetOrAddComponent<Tilemap>(magmaSurfacePatternTilemapObject);
+            magmaSurfacePatternTilemap.animationFrameRate = 0f;
+            // マグマ模様は論理セル原点へ置き、後段の製品接続で専用Shaderと描画順を割り当てます。
+            magmaSurfacePatternTilemapObject.transform.localPosition = Vector3.zero;
+            ConfigureTilemapRenderer(magmaSurfacePatternTilemapObject, sortingOrder: 2);
 
             // 旧分離レイヤーは参照が切れた状態で残さず、Sceneから明示的に取り除きます。
             DeleteDirectChildIfPresent(gridObject.transform, "Terrain Front Edge Tilemap");
@@ -1498,12 +1280,9 @@ namespace Farmware.WorldGeneration.Editor
                 stoneResourceTile,
                 sandResourceTile,
                 liquidBaseTilemap,
-                liquidAnimationTilemap,
+                magmaSurfacePatternTilemap,
                 rockWallTilemap,
-                rockWallResourceTilemap,
-                freshWaterAnimationTile,
-                saltWaterAnimationTile,
-                magmaAnimationTile);
+                rockWallResourceTilemap);
 
             Camera camera = FindMainCamera(mainScene);
             CameraPanController panController = ConfigureCamera(camera, grid);
@@ -1535,12 +1314,9 @@ namespace Farmware.WorldGeneration.Editor
         /// <param name="stoneResourceTile">石資源用の透明背景Tileです。</param>
         /// <param name="sandResourceTile">砂資源用の透明背景Tileです。</param>
         /// <param name="liquidBaseTilemap">静止した液面を土地より8px下へ描画するTilemapです。</param>
-        /// <param name="liquidAnimationTilemap">液面アニメーションを静止液面と同じ8px下へ描画するTilemapです。</param>
+        /// <param name="magmaSurfacePatternTilemap">論理セル原点にマグマの網状模様を描画するTilemapです。</param>
         /// <param name="rockWallTilemap">16×28の岩壁ブロックを基準セルへ描画するTilemapです。</param>
         /// <param name="rockWallResourceTilemap">フォールバックでは12px、後段の製品接続では論理Wall根元から2タイル上へ資源を描画するTilemapです。</param>
-        /// <param name="freshWaterAnimationTile">淡水へ重ねる透明AnimatedTileです。</param>
-        /// <param name="saltWaterAnimationTile">海水へ重ねる透明AnimatedTileです。</param>
-        /// <param name="magmaAnimationTile">マグマへ重ねる透明AnimatedTileです。</param>
         private static void ConfigurePresenter(
             ChunkTilemapPresenter presenter,
             Tilemap tilemap,
@@ -1555,12 +1331,9 @@ namespace Farmware.WorldGeneration.Editor
             TileBase stoneResourceTile,
             TileBase sandResourceTile,
             Tilemap liquidBaseTilemap,
-            Tilemap liquidAnimationTilemap,
+            Tilemap magmaSurfacePatternTilemap,
             Tilemap rockWallTilemap,
-            Tilemap rockWallResourceTilemap,
-            TileBase freshWaterAnimationTile,
-            TileBase saltWaterAnimationTile,
-            TileBase magmaAnimationTile)
+            Tilemap rockWallResourceTilemap)
         {
             presenter.Configure(
                 tilemap,
@@ -1576,12 +1349,9 @@ namespace Farmware.WorldGeneration.Editor
             presenter.ConfigureResourceOcclusion(resourceBehindRockWallTilemap);
             presenter.ConfigureTerrainEffects(
                 liquidBaseTilemap,
-                liquidAnimationTilemap,
+                magmaSurfacePatternTilemap,
                 rockWallTilemap,
-                rockWallResourceTilemap,
-                freshWaterAnimationTile,
-                saltWaterAnimationTile,
-                magmaAnimationTile);
+                rockWallResourceTilemap);
             EditorUtility.SetDirty(presenter);
         }
 
@@ -1887,18 +1657,6 @@ namespace Farmware.WorldGeneration.Editor
                 TerrainLayerPresentationUtility.CombinedRockWallSpriteHeightInPixels,
                 new Vector2(0.5f, TerrainLayerPresentationUtility.CombinedRockWallPivotY));
 
-            string[] animatedTileNames =
-            {
-                "FreshWaterAnimation",
-                "SaltWaterAnimation",
-                "MagmaAnimation"
-            };
-            for (int index = 0; index < animatedTileNames.Length; index++)
-            {
-                // LoadRequired側で4フレームすべてのSprite参照まで検証し、空のAnimatedTileをSceneへ保存しません。
-                LoadRequiredFallbackAnimatedTile(animatedTileNames[index]);
-            }
-
             Scene mainScene = EditorSceneManager.OpenScene(MainScenePath, OpenSceneMode.Single);
             Camera camera = FindMainCamera(mainScene);
             GameObject gridObject = FindOrCreateRoot(mainScene, "World Grid");
@@ -1908,8 +1666,8 @@ namespace Farmware.WorldGeneration.Editor
                 gridObject.transform.Find("Resource Behind Rock Wall Tilemap");
             Transform liquidBaseTilemapTransform =
                 gridObject.transform.Find("Liquid Base Tilemap");
-            Transform liquidAnimationTilemapTransform =
-                gridObject.transform.Find("Liquid Surface Animation Tilemap");
+            Transform magmaSurfacePatternTilemapTransform =
+                gridObject.transform.Find(TerrainProductSceneConnector.MagmaSurfacePatternTilemapName);
             Transform liquidDepthWithFloorTransform = gridObject.transform.Find(
                 TerrainProductSceneConnector.LiquidDepthWithFloorTilemapName);
             Transform liquidDepthWithoutFloorTransform = gridObject.transform.Find(
@@ -1982,10 +1740,14 @@ namespace Farmware.WorldGeneration.Editor
                 || AssetDatabase.GetAssetPath(
                     liquidBaseTilemapTransform.GetComponent<TilemapRenderer>().sharedMaterial)
                     != TerrainProductSceneConnector.LiquidSurfaceMaterialPath
-                || liquidAnimationTilemapTransform == null
-                || liquidAnimationTilemapTransform.GetComponent<Tilemap>() == null
-                || liquidAnimationTilemapTransform.GetComponent<TilemapRenderer>() == null
-                || liquidAnimationTilemapTransform.GetComponent<TilemapRenderer>().enabled
+                || magmaSurfacePatternTilemapTransform == null
+                || magmaSurfacePatternTilemapTransform.GetComponent<Tilemap>() == null
+                || magmaSurfacePatternTilemapTransform.GetComponent<TilemapRenderer>() == null
+                || !magmaSurfacePatternTilemapTransform.GetComponent<TilemapRenderer>().enabled
+                || !ValidateProductLiquidTilemap(
+                    magmaSurfacePatternTilemapTransform,
+                    TerrainProductSceneConnector.WaterSortingLayerName,
+                    TerrainProductSceneConnector.MagmaSurfacePatternMaterialPath)
                 || !ValidateProductLiquidTilemap(
                     liquidDepthWithFloorTransform,
                     TerrainProductSceneConnector.WaterSortingLayerName,
@@ -2128,7 +1890,7 @@ namespace Farmware.WorldGeneration.Editor
         /// Presenterの地形・資源・追加表示Tilemapと必要なTile参照が、保存後もすべて設定されているか検証します。
         /// </summary>
         /// <param name="presenter">保存済みSampleSceneから読み込んだPresenterです。</param>
-        /// <returns>必要な地形・断面・アニメーション参照がすべて非nullならtrueです。</returns>
+        /// <returns>必要な地形・断面・液面模様の参照がすべて非nullならtrueです。</returns>
         private static bool PresenterHasAllReferences(ChunkTilemapPresenter presenter)
         {
             SerializedObject serializedPresenter = new SerializedObject(presenter);
@@ -2138,7 +1900,7 @@ namespace Farmware.WorldGeneration.Editor
                 "resourceTilemap",
                 "resourceBehindRockWallTilemap",
                 "liquidBaseTilemap",
-                "liquidAnimationTilemap",
+                "magmaSurfacePatternTilemap",
                 "liquidDepthWithFloorTilemap",
                 "liquidDepthWithoutFloorTilemap",
                 "underwaterFloorPreviewTilemap",
@@ -2163,10 +1925,7 @@ namespace Farmware.WorldGeneration.Editor
                 "rockWallTile",
                 "treeResourceTile",
                 "stoneResourceTile",
-                "sandResourceTile",
-                "freshWaterAnimationTile",
-                "saltWaterAnimationTile",
-                "magmaAnimationTile"
+                "sandResourceTile"
             };
 
             for (int index = 0; index < propertyNames.Length; index++)

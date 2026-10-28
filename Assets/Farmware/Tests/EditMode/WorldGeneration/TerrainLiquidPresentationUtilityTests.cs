@@ -360,6 +360,37 @@ namespace Farmware.WorldGeneration.Tests
             }
         }
 
+        /// <summary>全3液体で同じ奥岸Groundを選び、Wallがあっても下地の縁を欠落させないことを保証します。</summary>
+        /// <param name="kind">確認する液体種です。</param>
+        /// <param name="hasWall">岸のGround上にWallがある場合はtrueです。</param>
+        [TestCase(TerrainLiquidVisualKind.FreshWater, false)]
+        [TestCase(TerrainLiquidVisualKind.SaltWater, false)]
+        [TestCase(TerrainLiquidVisualKind.Magma, false)]
+        [TestCase(TerrainLiquidVisualKind.FreshWater, true)]
+        [TestCase(TerrainLiquidVisualKind.SaltWater, true)]
+        [TestCase(TerrainLiquidVisualKind.Magma, true)]
+        public void LiquidBank_UsesAdjacentGroundEvenBelowWall(TerrainLiquidVisualKind kind, bool hasWall)
+        {
+            CompletedChunkTerrainNeighborhood neighborhood = CreateEmptyNeighborhood(out NativeArray<GeneratedTerrainCell> center);
+            DefinitionRuntimeId liquidId = kind == TerrainLiquidVisualKind.Magma ? runtimeIds.Magma
+                : kind == TerrainLiquidVisualKind.SaltWater ? runtimeIds.SaltWater : runtimeIds.FreshWater;
+            SetCell(center, 10, 10, Liquid(liquidId));
+            GeneratedTerrainCell shore = Ground(401);
+            if (hasWall) shore.WallBlockRuntimeId = new DefinitionRuntimeId(501);
+            SetCell(center, 10, 11, shore);
+            Assert.That(TerrainLiquidPresentationUtility.TryProjectGroundFaceAtLiquidBank(
+                neighborhood, 10, 10, runtimeIds, out TerrainLiquidFaceProjection face), Is.True);
+            Assert.That(face.SourceCell.GroundBlockRuntimeId.Value, Is.EqualTo(401));
+            Assert.That(face.SourceLocalY, Is.EqualTo(11));
+            Assert.That(face.FaceDepth, Is.Zero);
+
+            // 1セル奥でもGroundが離れた場合は縁を延長せず、マグマの内部を透視させません。
+            SetCell(center, 10, 11, Liquid(liquidId));
+            SetCell(center, 10, 12, shore);
+            Assert.That(TerrainLiquidPresentationUtility.TryProjectGroundFaceAtLiquidBank(
+                neighborhood, 10, 10, runtimeIds, out _), Is.False);
+        }
+
         /// <summary>最大6段の透明水域へ通常Ground Faceを投影し、淡水・海水の境界は越え、マグマは対象外にすることを保証します。</summary>
         [Test]
         public void WaterFaceProjection_ContinuesAcrossTransparentWaterAndRejectsMagma()

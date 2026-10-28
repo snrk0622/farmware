@@ -1172,6 +1172,160 @@ namespace Farmware.WorldGeneration.Tests
             }
         }
 
+        /// <summary>不透明マグマの奥岸にはGroundの縁3pxだけが残り、内部断面が透けないことをGPUで保証します。</summary>
+        /// <param name="drawPattern">網状模様Rendererも重ねる場合はtrueです。</param>
+        [TestCase(false)]
+        [TestCase(true)]
+        public void MagmaBank_ShowsGroundLipWithoutRevealingSubmergedFace(bool drawPattern)
+        {
+            using (var cache = new TerrainLiquidRuntimeTileCache())
+            {
+                var surfaceMaterial = new Material(Shader.Find("Farmware/Terrain/Liquid Surface"));
+                var faceMaterial = new Material(Shader.Find("Farmware/Terrain/Submerged Ground Face"));
+                var patternMaterial = new Material(Shader.Find("Farmware/Terrain/Magma Surface Pattern"));
+                try
+                {
+                    var cell = new Vector3Int(1, 3, 0);
+                    Tilemap surface = CreateTilemap(surfaceMaterial);
+                    Tilemap face = CreateTilemap(faceMaterial);
+                    Tilemap pattern = CreateTilemap(patternMaterial);
+                    surfaceMaterial.SetColor("_Color", Color.red);
+                    faceMaterial.SetColor("_Color", Color.green);
+                    face.GetComponent<TilemapRenderer>().sortingOrder = 1;
+                    pattern.GetComponent<TilemapRenderer>().sortingOrder = 2;
+                    patternMaterial.SetFloat("_Animate", 0f);
+                    surface.SetTile(cell, cache.GetOrCreateDepthOverlay());
+                    surface.SetTileFlags(cell, TileFlags.None);
+                    surface.SetColor(cell, new Color(1f, 1f, 1f, 0f));
+                    if (drawPattern)
+                    {
+                        pattern.SetTile(cell, cache.GetOrCreateDepthOverlay());
+                        pattern.SetTileFlags(cell, TileFlags.None);
+                        pattern.SetColor(cell, new Color(1f, 1f, 1f, 0f));
+                    }
+                    RenderPixels();
+                    Color[] opaqueSurface = readback.GetPixels();
+
+                    // 実製品と同じデータ色を渡し、模様を非表示にしても断面そのものが液面より下を描かないことを検査します。
+                    TerrainWaterRenderUtility.ApplyTiles(face, new[] { new TileChangeData(cell,
+                        cache.GetOrCreateDepthOverlay(), TerrainWaterRenderUtility.EncodeMagmaBankFace(), Matrix4x4.identity) });
+                    RenderPixels();
+                    for (int y = 48; y < 64; y++)
+                    {
+                        for (int x = 16; x < 32; x++)
+                        {
+                            Color expected = y >= 61 ? Color.green : opaqueSurface[y * RenderWidth + x];
+                            Assert.That(readback.GetPixel(x, y), Is.EqualTo(expected),
+                                $"マグマ岸の縁または不透明面が欠落しています: ({x}, {y})");
+                        }
+                    }
+                }
+                finally
+                {
+                    Object.DestroyImmediate(surfaceMaterial);
+                    Object.DestroyImmediate(faceMaterial);
+                    Object.DestroyImmediate(patternMaterial);
+                }
+            }
+        }
+
+        /// <summary>マグマ模様が4fpsのコマを保持し、網目の特徴点移動で実際の画素を変えることを保証します。</summary>
+        [Test]
+        public void MagmaPattern_HoldsFramesAndMovesNetwork()
+        {
+            using (var cache = new TerrainLiquidRuntimeTileCache())
+            {
+                var material = new Material(Shader.Find("Farmware/Terrain/Magma Surface Pattern"));
+                try
+                {
+                    CreateSurfacePatternTestTilemap(material, cache);
+                    material.SetFloat("_AnimationTimeSeconds", 0f);
+                    RenderPixels();
+                    Color[] first = readback.GetPixels();
+                    material.SetFloat("_AnimationTimeSeconds", 0.1f);
+                    RenderPixels();
+                    Assert.That(readback.GetPixels(), Is.EqualTo(first), "4fpsの同じコマ内で模様が変わっています。");
+
+                    // 明滅を止めても出力が変われば、発光だけでなく網目の形状が動いたと判断できます。
+                    material.SetFloat("_PulseAmount", 0f);
+                    material.SetFloat("_AnimationTimeSeconds", 0f);
+                    RenderPixels();
+                    Color[] unpulsed = readback.GetPixels();
+                    material.SetFloat("_AnimationTimeSeconds", 3f);
+                    RenderPixels();
+                    Assert.That(readback.GetPixels(), Is.Not.EqualTo(unpulsed), "網目の形状が静止しています。");
+                    material.SetFloat("_Animate", 0f);
+                    RenderPixels();
+                    Assert.That(readback.GetPixels(), Is.EqualTo(unpulsed), "停止時は時刻0の形状へ固定してください。");
+                }
+                finally { Object.DestroyImmediate(material); }
+            }
+        }
+
+        /// <summary>負の原点・4096px周期と16px原点移動でも、同じ絶対画素の網目が一致することを保証します。</summary>
+        [Test]
+        public void MagmaPattern_PreservesAbsolutePixelsAcrossOriginsAndTiles()
+        {
+            using (var cache = new TerrainLiquidRuntimeTileCache())
+            {
+                var material = new Material(Shader.Find("Farmware/Terrain/Magma Surface Pattern"));
+                try
+                {
+                    CreateSurfacePatternTestTilemap(material, cache);
+                    material.SetFloat("_Animate", 0f);
+                    material.SetVector("_WorldPixelOffset", new Vector4(-16f, -16f, 0f, 0f));
+                    RenderPixels();
+                    Color[] negativeOrigin = readback.GetPixels();
+                    material.SetVector("_WorldPixelOffset", new Vector4(4080f, 4080f, 0f, 0f));
+                    RenderPixels();
+                    Assert.That(readback.GetPixels(), Is.EqualTo(negativeOrigin), "周期端または負原点で模様が変わっています。");
+
+                    // 1タイル右へずらした描画の左2タイルは、元画像の右2タイルと同じ絶対地点です。
+                    material.SetVector("_WorldPixelOffset", new Vector4(0f, -16f, 0f, 0f));
+                    RenderPixels();
+                    for (int y = 0; y < RenderHeight; y++)
+                    {
+                        for (int x = 0; x < RenderWidth - 16; x++)
+                        {
+                            Color expected = negativeOrigin[y * RenderWidth + x + 16];
+                            Assert.That(readback.GetPixel(x, y), Is.EqualTo(expected),
+                                $"タイルまたは原点境界で絶対画素がずれています: ({x}, {y})");
+                        }
+                    }
+                }
+                finally { Object.DestroyImmediate(material); }
+            }
+        }
+
+        /// <summary>製品Surfaceと同じ頂点Alpha印で、奥岸の上端3pxだけを固定して切り抜くことを保証します。</summary>
+        /// <param name="clipTop">実際の奥岸セルとして上端を切る場合はtrueです。</param>
+        [TestCase(false)]
+        [TestCase(true)]
+        public void MagmaPattern_ClipsOnlyBackShoreTop(bool clipTop)
+        {
+            using (var cache = new TerrainLiquidRuntimeTileCache())
+            {
+                var material = new Material(Shader.Find("Farmware/Terrain/Magma Surface Pattern"));
+                try
+                {
+                    renderCamera.backgroundColor = Color.white;
+                    Tilemap map = CreateTilemap(material);
+                    var cell = new Vector3Int(1, 3, 0);
+                    map.SetTile(cell, cache.GetOrCreateDepthOverlay());
+                    map.SetTileFlags(cell, TileFlags.None);
+                    map.SetColor(cell, new Color(1f, 1f, 1f, clipTop ? 0f : 1f));
+                    RenderPixels();
+                    for (int y = 0; y < 16; y++)
+                    {
+                        bool isBackground = readback.GetPixel(24, 48 + y) == Color.white;
+                        Assert.That(isBackground, Is.EqualTo(clipTop && y >= 13),
+                            $"岸側3px以外へ切抜きが及んでいます: y={y}");
+                    }
+                }
+                finally { Object.DestroyImmediate(material); }
+            }
+        }
+
         /// <summary>水面模様のGPU検証用に淡水の全面Tileを3×8セルへ配置します。</summary>
         /// <param name="material">テスト所有の模様Materialです。</param>
         /// <param name="cache">共有全面Tileの所有者です。</param>

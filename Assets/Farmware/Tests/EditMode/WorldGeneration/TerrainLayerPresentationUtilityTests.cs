@@ -156,43 +156,6 @@ namespace Farmware.WorldGeneration.Tests
         }
 
         /// <summary>
-        /// 淡水・海水・マグマが別のアニメーション種類へ分類され、通常地形には何も重ならないことを検証します。
-        /// </summary>
-        [Test]
-        public void ClassifyLiquidAnimation_DistinguishesLiquidTypes()
-        {
-            GeneratedTerrainCell freshWater = new GeneratedTerrainCell
-            {
-                LiquidRuntimeId = RuntimeIds.FreshWater
-            };
-            GeneratedTerrainCell saltWater = new GeneratedTerrainCell
-            {
-                LiquidRuntimeId = RuntimeIds.SaltWater
-            };
-            GeneratedTerrainCell magma = new GeneratedTerrainCell
-            {
-                LiquidRuntimeId = RuntimeIds.Magma
-            };
-            GeneratedTerrainCell land = new GeneratedTerrainCell
-            {
-                GroundBlockRuntimeId = GroundRuntimeId
-            };
-
-            Assert.That(
-                TerrainLayerPresentationUtility.ClassifyLiquidAnimation(freshWater, RuntimeIds),
-                Is.EqualTo(LiquidAnimationKind.FreshWater));
-            Assert.That(
-                TerrainLayerPresentationUtility.ClassifyLiquidAnimation(saltWater, RuntimeIds),
-                Is.EqualTo(LiquidAnimationKind.SaltWater));
-            Assert.That(
-                TerrainLayerPresentationUtility.ClassifyLiquidAnimation(magma, RuntimeIds),
-                Is.EqualTo(LiquidAnimationKind.Magma));
-            Assert.That(
-                TerrainLayerPresentationUtility.ClassifyLiquidAnimation(land, RuntimeIds),
-                Is.EqualTo(LiquidAnimationKind.None));
-        }
-
-        /// <summary>
         /// 通常地面の資源だけが、画面手前1〜2セルのWall根元によって背面レイヤーへ振り分けられることを検証します。
         /// </summary>
         [Test]

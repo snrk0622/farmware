@@ -59,7 +59,7 @@ namespace Farmware.WorldGeneration.Presentation
     }
 
     /// <summary>
-    /// 液体越しに続ける通常Ground断面の投影元と、水際からの段数を保持します。
+    /// 水中へ続けるGround断面、または液面より上の岸の縁について、投影元と岸からの段数を保持します。
     /// Face素材は地形材質カタログから解決し、液体専用断面Spriteを作らないために使用します。
     /// </summary>
     public readonly struct TerrainLiquidFaceProjection
@@ -368,6 +368,34 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
 
+        /// <summary>全3液体に共通する奥岸の直下へ、液面より上に露出するGround断面を投影します。</summary>
+        /// <param name="neighborhood">差分適用後の完成済み3×3チャンク近傍です。</param>
+        /// <param name="localX">表示先の中心チャンク基準Xです。</param>
+        /// <param name="localY">表示先の中心チャンク基準Yです。</param>
+        /// <param name="runtimeIds">淡水・海水・マグマを識別するRuntime IDです。</param>
+        /// <param name="projection">成功時に、直上のGround材質と段数0を受け取ります。</param>
+        /// <returns>既知液体のすぐ奥にGroundがある場合はtrueです。Wallの下地Groundも含みます。</returns>
+        public static bool TryProjectGroundFaceAtLiquidBank(
+            in CompletedChunkTerrainNeighborhood neighborhood,
+            int localX,
+            int localY,
+            in BuiltInTerrainBlockRuntimeIds runtimeIds,
+            out TerrainLiquidFaceProjection projection)
+        {
+            projection = default;
+            // 遠方の岸を透視せず、Surface上端3pxを切るセルと同じ直上の有効地形だけを読みます。
+            if (!neighborhood.TryGetTile(localX, localY, out GeneratedTerrainCell current)
+                || Classify(current, runtimeIds) == TerrainLiquidVisualKind.None
+                || !neighborhood.TryGetTile(localX, localY + 1, out GeneratedTerrainCell source)
+                || !source.GroundBlockRuntimeId.IsValid)
+            {
+                return false;
+            }
+
+            projection = new TerrainLiquidFaceProjection(source, localX, localY + 1, 0);
+            return true;
+        }
+
         /// <summary>
         /// 淡水・海水が奥側Groundまで連続する場合に、液体越しへ通常Faceを最大6段投影します。
         /// Ground上のWallは、その設置面Groundを水中断面の元にします。マグマ、未知の液体、GroundのないWall、空セルは越えません。
@@ -395,6 +423,12 @@ namespace Farmware.WorldGeneration.Presentation
             if (!IsTransparentWater(currentKind))
             {
                 return false;
+            }
+
+            // 水面より上の縁はマグマと同じ岸判定です。水だけは続いて深い断面も探索できます。
+            if (TryProjectGroundFaceAtLiquidBank(neighborhood, localX, localY, runtimeIds, out projection))
+            {
+                return true;
             }
 
             for (int distance = 1; distance <= MaximumFaceDepth; distance++)

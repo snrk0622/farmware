@@ -2233,19 +2233,19 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Is.EqualTo(0f)
                     .Within(0.0001f),
                 "製品液面はTilemapを移動せず、岸側セルだけShaderで上端3pxを隠す必要があります。");
-            GameObject liquidAnimationTilemapObject =
-                GameObject.Find("World Grid/Liquid Surface Animation Tilemap");
-            Tilemap liquidAnimationTilemap = liquidAnimationTilemapObject == null
+            GameObject magmaSurfacePatternTilemapObject =
+                GameObject.Find("World Grid/Magma Surface Pattern Tilemap");
+            Tilemap magmaSurfacePatternTilemap = magmaSurfacePatternTilemapObject == null
                 ? null
-                : liquidAnimationTilemapObject.GetComponent<Tilemap>();
+                : magmaSurfacePatternTilemapObject.GetComponent<Tilemap>();
             Assert.That(
-                liquidAnimationTilemap,
+                magmaSurfacePatternTilemap,
                 Is.Not.Null,
-                "移行元の旧全面液体アニメーションTilemap参照がありません。");
+                "製品マグマの網状模様Tilemap参照がありません。");
             Assert.That(
-                liquidAnimationTilemap.GetComponent<TilemapRenderer>().enabled,
-                Is.False,
-                "製品液体カタログ接続後は旧全面アニメーションを描画してはいけません。");
+                magmaSurfacePatternTilemap.GetComponent<TilemapRenderer>().enabled,
+                Is.True,
+                "製品マグマの網状模様Rendererを有効にしてください。");
 
             Tilemap liquidDepthWithFloor = GameObject.Find(
                 "World Grid/Liquid Depth With Floor Tilemap")?.GetComponent<Tilemap>();
@@ -2317,8 +2317,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
             TilemapRenderer resourceBehindRockWallRenderer =
                 resourceBehindRockWallTilemap.GetComponent<TilemapRenderer>();
             TilemapRenderer liquidBaseRenderer = liquidBaseTilemap.GetComponent<TilemapRenderer>();
-            TilemapRenderer liquidAnimationRenderer =
-                liquidAnimationTilemap.GetComponent<TilemapRenderer>();
+            TilemapRenderer magmaSurfacePatternRenderer =
+                magmaSurfacePatternTilemap.GetComponent<TilemapRenderer>();
             TilemapRenderer liquidDepthRenderer =
                 liquidDepthWithFloor.GetComponent<TilemapRenderer>();
             TilemapRenderer waterReflectionRenderer =
@@ -2369,9 +2369,9 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Is.Not.Null,
                 "Liquid Base TilemapにTilemapRendererがありません。");
             Assert.That(
-                liquidAnimationRenderer,
+                magmaSurfacePatternRenderer,
                 Is.Not.Null,
-                "Liquid Surface Animation TilemapにTilemapRendererがありません。");
+                "Magma Surface Pattern TilemapにTilemapRendererがありません。");
             Assert.That(
                 liquidBaseRenderer.sortingLayerName,
                 Is.EqualTo("WaterSurface"),
@@ -2685,6 +2685,10 @@ namespace Farmware.WorldGeneration.PlayModeTests
             Assert.That(surfacePattern.GetComponent<TilemapRenderer>().sortingOrder,
                 Is.LessThan(waterReflectionRenderer.sortingOrder));
             float patternTime = patternMaterial.GetFloat("_AnimationTimeSeconds");
+            // マグマを画面に表示していなくても共通時計を進め、到着時にチャンクごとの再生開始を作りません。
+            Material magmaPatternMaterial = magmaSurfacePatternRenderer.sharedMaterial;
+            Assert.That(magmaPatternMaterial.shader.name, Is.EqualTo("Farmware/Terrain/Magma Surface Pattern"));
+            float magmaPatternTime = magmaPatternMaterial.GetFloat("_AnimationTimeSeconds");
             // 実Sceneの反射Meshにも時計が届き、Tilemapの段数方式を残さないことを確認します。
             Material reflectionMaterial = waterReflectionRenderer.sharedMaterial;
             Assert.That(reflectionMaterial.shader.name, Is.EqualTo("Farmware/Terrain/Water Reflection Proxy"));
@@ -2695,6 +2699,8 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 "水際の共通表示時間が描画フレームで進んでいません。");
             Assert.That(patternMaterial.GetFloat("_AnimationTimeSeconds"), Is.GreaterThan(patternTime),
                 "水面模様の共通時計が進んでいません。");
+            Assert.That(magmaPatternMaterial.GetFloat("_AnimationTimeSeconds"), Is.GreaterThan(magmaPatternTime),
+                "マグマ模様の共通時計が進んでいません。");
             Assert.That(reflectionMaterial.GetFloat("_AnimationTimeSeconds"), Is.GreaterThan(reflectionTime));
             // 反射はDontSaveなので全Object検索では除外されます。所有Gridの子から実際のMeshを検査します。
             foreach (MeshRenderer renderer in waterReflection.transform.parent.GetComponentsInChildren<MeshRenderer>(true))
@@ -2714,6 +2720,13 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 }
 
                 // 模様も全チャンクで1件を共有し、水際Materialとは独立して調整できるようにします。
+                if (renderer.sharedMaterial != null
+                    && renderer.sharedMaterial.shader.name == "Farmware/Terrain/Magma Surface Pattern")
+                {
+                    Assert.That(renderer.sharedMaterial, Is.SameAs(magmaPatternMaterial),
+                        "マグマ模様も全チャンクで実行時Materialを1件だけ共有してください。");
+                }
+
                 if (renderer.sharedMaterial != null
                     && renderer.sharedMaterial.shader.name == "Farmware/Terrain/Water Surface Pattern")
                 {
@@ -3301,9 +3314,9 @@ namespace Farmware.WorldGeneration.PlayModeTests
                 Is.True,
                 $"水セル {liquidCell} の製品Surfaceと深度Overlayが{MaximumWaitFrames}フレーム以内に表示されませんでした。");
             Assert.That(
-                readPresentedTile(liquidAnimationTilemap, liquidDisplayCell),
+                readPresentedTile(magmaSurfacePatternTilemap, liquidDisplayCell),
                 Is.Null,
-                $"水セル {liquidCell} に旧全面液体アニメーションTileを残してはいけません。");
+                $"水セル {liquidCell} にマグマ専用の網状模様Tileを描いてはいけません。");
             Assert.That(
                 readPresentedTile(tilemap, liquidDisplayCell) != null,
                 Is.False,
