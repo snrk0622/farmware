@@ -360,9 +360,9 @@ namespace Farmware.WorldGeneration.Tests
             }
         }
 
-        /// <summary>同じ水が続く最大6段だけ通常Ground Faceを投影し、マグマや別液体を越えないことを保証します。</summary>
+        /// <summary>最大6段の透明水域へ通常Ground Faceを投影し、淡水・海水の境界は越え、マグマは対象外にすることを保証します。</summary>
         [Test]
-        public void WaterFaceProjection_ContinuesNormalFaceAndStopsAtDifferentLiquid()
+        public void WaterFaceProjection_ContinuesAcrossTransparentWaterAndRejectsMagma()
         {
             CompletedChunkTerrainNeighborhood neighborhood = CreateEmptyNeighborhood(
                 out NativeArray<GeneratedTerrainCell> center);
@@ -392,9 +392,11 @@ namespace Farmware.WorldGeneration.Tests
                     11,
                     10,
                     runtimeIds,
-                    out _),
-                Is.False,
-                "別種の水を越えて遠方材質を投影してはいけません。");
+                    out TerrainLiquidFaceProjection mixedProjection),
+                Is.True,
+                "淡水と海水の間で断面を欠落させてはいけません。");
+            Assert.That(mixedProjection.FaceDepth, Is.EqualTo(1));
+            Assert.That(mixedProjection.SourceCell.GroundBlockRuntimeId.Value, Is.EqualTo(402));
 
             SetCell(center, 12, 10, Liquid(runtimeIds.Magma));
             SetCell(center, 12, 11, Ground(403));
@@ -407,6 +409,85 @@ namespace Farmware.WorldGeneration.Tests
                     out _),
                 Is.False,
                 "不透明マグマの背後へ通常Faceを表示してはいけません。");
+        }
+
+        /// <summary>淡水と海水を交互に置いても、全6段で同じ岸と連続する距離を使い、元の水種を維持することを保証します。</summary>
+        /// <param name="freshAtBottom">最も手前のセルを淡水にする場合はtrueです。両向きの水種境界を検証します。</param>
+        [TestCase(true)]
+        [TestCase(false)]
+        public void MixedWater_UsesContinuousFaceDepthAndKeepsLiquidKinds(bool freshAtBottom)
+        {
+            CompletedChunkTerrainNeighborhood neighborhood = CreateEmptyNeighborhood(out NativeArray<GeneratedTerrainCell> center);
+            SetCell(center, 10, 16, Ground(401));
+            for (int y = 10; y < 16; y++)
+            {
+                // 水種が切り替わるたびに段数が飽和すると、実際には存在しない溝や横帯が現れます。
+                bool fresh = ((y - 10) % 2 == 0) == freshAtBottom;
+                SetCell(center, 10, y, Liquid(fresh ? runtimeIds.FreshWater : runtimeIds.SaltWater));
+            }
+
+            for (int y = 10; y < 16; y++)
+            {
+                Assert.That(TerrainLiquidPresentationUtility.TryProjectGroundFaceThroughWater(
+                    neighborhood, 10, y, runtimeIds, out TerrainLiquidFaceProjection face), Is.True);
+                Assert.That(face.SourceLocalX, Is.EqualTo(10));
+                Assert.That(face.SourceLocalY, Is.EqualTo(16));
+                Assert.That(face.FaceDepth, Is.EqualTo(15 - y));
+                Assert.That(TerrainLiquidPresentationUtility.GetClampedWaterDepth(neighborhood, 10, y, runtimeIds), Is.EqualTo(15 - y));
+                Assert.That(TerrainLiquidPresentationUtility.ShouldClipSurfaceTop(neighborhood, 10, y), Is.EqualTo(y == 15));
+                bool fresh = ((y - 10) % 2 == 0) == freshAtBottom;
+                Assert.That(TerrainLiquidPresentationUtility.Classify(center[WorldGrid.ToTileIndex(10, y)], runtimeIds),
+                    Is.EqualTo(fresh ? TerrainLiquidVisualKind.FreshWater : TerrainLiquidVisualKind.SaltWater),
+                    "探索の連続化によって水種や水色の分類を統合してはいけません。");
+            }
+        }
+
+        /// <summary>異なる水種を間に挟むWallでも反射元へ到達し、水中断面・距離と同じ岸を使うことを保証します。</summary>
+        /// <param name="freshReceiver">受け手セルが淡水ならtrue、海水ならfalseです。</param>
+        [TestCase(true)]
+        [TestCase(false)]
+        public void MixedWater_ReflectionSearchCrossesWaterKindBoundary(bool freshReceiver)
+        {
+            CompletedChunkTerrainNeighborhood neighborhood = CreateEmptyNeighborhood(out NativeArray<GeneratedTerrainCell> center);
+            SetCell(center, 10, 10, Liquid(freshReceiver ? runtimeIds.FreshWater : runtimeIds.SaltWater));
+            SetCell(center, 10, 11, Liquid(freshReceiver ? runtimeIds.SaltWater : runtimeIds.FreshWater));
+            GeneratedTerrainCell shore = Ground(401);
+            shore.WallBlockRuntimeId = new DefinitionRuntimeId(501);
+            SetCell(center, 10, 12, shore);
+
+            Assert.That(TerrainLiquidPresentationUtility.TryFindWallReflectionSource(neighborhood, 10, 10, runtimeIds,
+                freshReceiver ? TerrainLiquidVisualKind.FreshWater : TerrainLiquidVisualKind.SaltWater,
+                out TerrainMaterialFaceProjection reflection), Is.True);
+            Assert.That(reflection.SourceLocalY, Is.EqualTo(12));
+            Assert.That(TerrainLiquidPresentationUtility.TryProjectGroundFaceThroughWater(
+                neighborhood, 10, 10, runtimeIds, out TerrainLiquidFaceProjection face), Is.True);
+            Assert.That(face.SourceLocalY, Is.EqualTo(reflection.SourceLocalY));
+            Assert.That(face.FaceDepth, Is.EqualTo(1));
+            Assert.That(TerrainLiquidPresentationUtility.GetClampedWaterDepth(neighborhood, 10, 10, runtimeIds), Is.EqualTo(1));
+        }
+
+        /// <summary>透明水域を連続化しても、マグマ・未知の液体・空セルを越えて断面や反射を借りないことを保証します。</summary>
+        /// <param name="freshReceiver">受け手セルを淡水にする場合はtrueです。</param>
+        /// <param name="barrierId">探索を遮る液体IDです。0は空セル、103はマグマ、999は未知の液体です。</param>
+        [TestCase(true, 0)]
+        [TestCase(false, 0)]
+        [TestCase(true, 103)]
+        [TestCase(false, 103)]
+        [TestCase(true, 999)]
+        [TestCase(false, 999)]
+        public void MixedWater_SearchesStillStopAtNonWater(bool freshReceiver, int barrierId)
+        {
+            CompletedChunkTerrainNeighborhood neighborhood = CreateEmptyNeighborhood(out NativeArray<GeneratedTerrainCell> center);
+            SetCell(center, 10, 10, Liquid(freshReceiver ? runtimeIds.FreshWater : runtimeIds.SaltWater));
+            SetCell(center, 10, 11, Liquid(new DefinitionRuntimeId(barrierId)));
+            GeneratedTerrainCell shore = Ground(401);
+            shore.WallBlockRuntimeId = new DefinitionRuntimeId(501);
+            SetCell(center, 10, 12, shore);
+
+            Assert.That(TerrainLiquidPresentationUtility.TryProjectGroundFaceThroughWater(neighborhood, 10, 10, runtimeIds, out _), Is.False);
+            Assert.That(TerrainLiquidPresentationUtility.GetClampedWaterDepth(neighborhood, 10, 10, runtimeIds), Is.EqualTo(6));
+            Assert.That(TerrainLiquidPresentationUtility.TryFindWallReflectionSource(neighborhood, 10, 10, runtimeIds,
+                freshReceiver ? TerrainLiquidVisualKind.FreshWater : TerrainLiquidVisualKind.SaltWater, out _), Is.False);
         }
 
         /// <summary>岸にWallがあっても、その設置面Groundの断面を水中6段へ続け、濃紺の欠けた列を作らないことを保証します。</summary>

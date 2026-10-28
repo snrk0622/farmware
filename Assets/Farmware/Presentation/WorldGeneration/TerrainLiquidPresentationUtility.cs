@@ -318,7 +318,7 @@ namespace Farmware.WorldGeneration.Presentation
         }
 
         /// <summary>
-        /// 水際から現在セルまで同じ水が連続する段数を求めます。
+        /// 水際から現在セルまで淡水・海水が連続する段数を求めます。水種の境界で断面距離をリセットしません。
         /// 6段より深い水域は勾配完了段へ丸め、描画範囲外の探索や全水域走査を行いません。
         /// </summary>
         /// <param name="neighborhood">中心と周囲8チャンクの完成済み地形です。</param>
@@ -338,8 +338,7 @@ namespace Farmware.WorldGeneration.Presentation
             }
 
             TerrainLiquidVisualKind currentKind = Classify(current, runtimeIds);
-            if (currentKind != TerrainLiquidVisualKind.FreshWater
-                && currentKind != TerrainLiquidVisualKind.SaltWater)
+            if (!IsTransparentWater(currentKind))
             {
                 return -1;
             }
@@ -357,7 +356,7 @@ namespace Farmware.WorldGeneration.Presentation
                     return distance - 1;
                 }
 
-                if (Classify(candidate, runtimeIds) != currentKind)
+                if (!IsTransparentWater(Classify(candidate, runtimeIds)))
                 {
                     return SaturatedDepthStage;
                 }
@@ -370,8 +369,8 @@ namespace Farmware.WorldGeneration.Presentation
 
 
         /// <summary>
-        /// 同じ水が奥側Groundまで連続する場合に、液体越しへ通常Faceを最大6段投影します。
-        /// Ground上のWallは、その設置面Groundを水中断面の元にします。マグマ、別液体、GroundのないWall、空セルは越えません。
+        /// 淡水・海水が奥側Groundまで連続する場合に、液体越しへ通常Faceを最大6段投影します。
+        /// Ground上のWallは、その設置面Groundを水中断面の元にします。マグマ、未知の液体、GroundのないWall、空セルは越えません。
         /// </summary>
         /// <param name="neighborhood">中心と周囲8チャンクの完成済み地形です。</param>
         /// <param name="localX">中心チャンク基準の表示先Xです。</param>
@@ -393,8 +392,7 @@ namespace Farmware.WorldGeneration.Presentation
             }
 
             TerrainLiquidVisualKind currentKind = Classify(current, runtimeIds);
-            if (currentKind != TerrainLiquidVisualKind.FreshWater
-                && currentKind != TerrainLiquidVisualKind.SaltWater)
+            if (!IsTransparentWater(currentKind))
             {
                 return false;
             }
@@ -424,7 +422,7 @@ namespace Farmware.WorldGeneration.Presentation
                     return false;
                 }
 
-                if (Classify(candidate, runtimeIds) != currentKind)
+                if (!IsTransparentWater(Classify(candidate, runtimeIds)))
                 {
                     return false;
                 }
@@ -458,8 +456,7 @@ namespace Farmware.WorldGeneration.Presentation
                 return false;
             }
 
-            if (receivingWaterKind != TerrainLiquidVisualKind.FreshWater
-                && receivingWaterKind != TerrainLiquidVisualKind.SaltWater)
+            if (!IsTransparentWater(receivingWaterKind))
             {
                 return false;
             }
@@ -484,14 +481,25 @@ namespace Farmware.WorldGeneration.Presentation
                 }
 
                 // 岸から1セル離れたWallでも投影が届く可能性があります。地面は反射元にせず探索だけ通します。
-                // 別種液体や空の穴は、水面の高さ・連続性が未定義なので今回のWall投影では越えません。
-                if (!candidate.GroundBlockRuntimeId.IsValid && Classify(candidate, runtimeIds) != receivingWaterKind)
+                // 淡水と海水の境界は連続した水面です。マグマ・未知の液体・空の穴だけは越えません。
+                if (!candidate.GroundBlockRuntimeId.IsValid && !IsTransparentWater(Classify(candidate, runtimeIds)))
                 {
                     return false;
                 }
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// 断面・減衰距離・反射元の探索中に、連続した透明水域として通過できる種別かを返します。
+        /// 描画探索だけの判定であり、各セルの液体IDや水色は変更しません。淡水と海水の境目に偽の深部を作らないため共用します。
+        /// </summary>
+        /// <param name="kind">完成地形から分類した液体の表示種別です。</param>
+        /// <returns>淡水または海水の場合はtrue、マグマ・未知の液体・空セルはfalseです。</returns>
+        private static bool IsTransparentWater(TerrainLiquidVisualKind kind)
+        {
+            return kind == TerrainLiquidVisualKind.FreshWater || kind == TerrainLiquidVisualKind.SaltWater;
         }
 
         /// <summary>
