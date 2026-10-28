@@ -32,10 +32,10 @@ Material:
     - _AnchorPixels: 2
     - _AnimationStepsPerSecond: 2
     - _AnimationTimeSeconds: 0
-    - _MaximumAlpha: 1
+    - _MaximumAlpha: 0.8
     - _OscillationPeriodSeconds: 4
     - _PeriodVariation: 0.35
-    - _WaveAmplitudePixels: 2
+    - _WaveAmplitudePixels: 1
     - _WaveBandPixels: 4
     - _WaveSpacingPixels: 32
     m_Colors:

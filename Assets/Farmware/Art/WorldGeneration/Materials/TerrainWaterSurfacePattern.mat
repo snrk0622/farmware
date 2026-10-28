@@ -29,17 +29,17 @@ Material:
         m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
-    - _ActiveSeconds: 4
+    - _ActiveSeconds: 5
     - _Animate: 1
     - _AnimationStepsPerSecond: 2
     - _AnimationTimeSeconds: 0
     - _BrightnessLevels: 4
-    - _Density: 0.65
+    - _Density: 0.3
     - _MaximumLengthPixels: 8
     - _MaximumOpacity: 0.18
     - _MinimumLengthPixels: 3
     - _PeriodVariation: 0.35
-    - _RestSeconds: 3
+    - _RestSeconds: 4
     m_Colors:
     - _FreshColor: {r: 0.31999996, g: 0.58, b: 0.65, a: 1}
     - _SaltColor: {r: 0.25999996, g: 0.45, b: 0.61, a: 1}
